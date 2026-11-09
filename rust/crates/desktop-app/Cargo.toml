@@ -24,3 +24,4 @@ wry.workspace = true
 muda.workspace = true
 rfd.workspace = true
 arboard.workspace = true
+include_dir = "0.7"

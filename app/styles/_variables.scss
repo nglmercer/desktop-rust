@@ -3,7 +3,7 @@
 // This files contains CSS variables accessible to all selectors
 
 // Primer colors, see https://github.com/primer/primer-css/blob/master/modules/primer-support/lib/variables/color-system.scss
-@import '~primer-support/lib/variables/color-system.scss';
+@import 'primer-support/lib/variables/color-system.scss';
 
 // Extracted as a SCSS variable so that we can define the --overlay-background-color
 // on both the :root and the ::backdrop scope. The ::backdrop pseudo-element

@@ -3,11 +3,7 @@ import * as ReactDOM from 'react-dom'
 
 import { CrashApp } from './crash-app'
 
-if (!process.env.TEST_ENV) {
-  /* This is the magic trigger for webpack to go compile
-   * our sass into css and inject it into the DOM. */
-  require('./styles/crash.scss')
-}
+import './styles/crash.scss'
 
 document.body.classList.add(`platform-${process.platform}`)
 

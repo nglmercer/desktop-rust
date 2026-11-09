@@ -103,11 +103,7 @@ delete process.env.GIT_EXEC_PATH
 
 const startTime = performance.now()
 
-if (!process.env.TEST_ENV) {
-  /* This is the magic trigger for webpack to go compile
-   * our sass into css and inject it into the DOM. */
-  require('../../styles/desktop.scss')
-}
+import '../../styles/desktop.scss'
 
 // TODO (electron): Remove this once
 // https://bugs.chromium.org/p/chromium/issues/detail?id=1113293

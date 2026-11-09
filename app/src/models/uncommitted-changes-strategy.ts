@@ -1,2 +1,8 @@
-// Shared worktree model, migrated out of Electron.
-export * from '../../../rust/web/src/upstream/models/uncommitted-changes-strategy'
+export enum UncommittedChangesStrategy {
+  AskForConfirmation = 'AskForConfirmation',
+  StashOnCurrentBranch = 'StashOnCurrentBranch',
+  MoveToNewBranch = 'MoveToNewBranch',
+}
+
+export const defaultUncommittedChangesStrategy: UncommittedChangesStrategy =
+  UncommittedChangesStrategy.AskForConfirmation

@@ -50,7 +50,11 @@
     "draft-release": "ts-node -P script/tsconfig.json script/draft-release/index.ts",
     "draft-release:format": "prettier --check --write changelog.json app/package.json && npm run validate-changelog --",
     "draft-release:pr": "ts-node -P script/tsconfig.json script/draft-release/draft-pull-request.ts",
-    "validate-changelog": "ts-node -P script/tsconfig.json script/validate-changelog.ts"
+    "validate-changelog": "ts-node -P script/tsconfig.json script/validate-changelog.ts",
+    "vite:dev": "vite",
+    "vite:build": "vite build",
+    "vite:preview": "vite preview",
+    "pnpm:install": "pnpm install"
   },
   "author": {
     "name": "GitHub, Inc.",
@@ -75,12 +79,15 @@
     }
   },
   "dependencies": {
+    "@floating-ui/core": "^1.8.0",
+    "@floating-ui/react-dom": "^2.1.9",
     "@primer/octicons": "^19.28.1",
     "@types/which": "^3.0.4",
     "@typescript-eslint/eslint-plugin": "^8.70.0",
     "@typescript-eslint/parser": "^8.70.0",
     "@typescript-eslint/typescript-estree": "^8.70.0",
     "@typescript-eslint/utils": "^8.70.0",
+    "@vitejs/plugin-react": "^4.6.0",
     "awesome-node-loader": "^1.1.1",
     "chalk": "^5.3.0",
     "cross-env": "^7.0.3",
@@ -100,6 +107,8 @@
     "legal-eagle": "0.16.0",
     "mini-css-extract-plugin": "^2.9.1",
     "parse-dds": "^1.2.1",
+    "path-browserify": "^1.0.1",
+    "preact": "^10.0.0",
     "prettier": "^2.6.0",
     "printenvz": "file:vendor/printenvz",
     "process-proxy": "^0.6.0",
@@ -111,6 +120,7 @@
     "ts-loader": "^9",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
+    "vite": "^7.0.0",
     "webpack": "^5.111.0",
     "webpack-bundle-analyzer": "^4.5.0",
     "webpack-dev-middleware": "^7.4.5",

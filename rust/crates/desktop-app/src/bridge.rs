@@ -26,7 +26,12 @@ use desktop_core::app::DesktopApp;
 use desktop_core::ipc::channels::{event, send as tx};
 use desktop_core::ipc::protocol::{IpcMessage, RpcResult};
 
+use include_dir::{include_dir, Dir};
+
 use crate::host::{AppEvent, TaoHost};
+
+static VITE_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
+
 
 /// Injected before any page script runs. It defines `window.__desktop`,
 /// `window.desktop` and an `ipcRenderer`-shaped object so the web frontend (or
@@ -211,14 +216,20 @@ fn response(
 }
 
 fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
+    // Serve Vite dist (1:1 original UI) — hashed assets under assets/
+    // Canonical: "" or "index.html" -> index.html
+    if path.is_empty() || path == "index.html" {
+        let file = VITE_DIST.get_file("index.html")?;
+        return Some(("text/html; charset=utf-8", file.contents()));
+    }
+    if path.starts_with("assets/") {
+        let file = VITE_DIST.get_file(path)?;
+        let mime = if path.ends_with(".css") { "text/css; charset=utf-8" } else if path.ends_with(".js") || path.ends_with(".mjs") { "text/javascript; charset=utf-8" } else { "application/octet-stream" };
+        return Some((mime, file.contents()));
+    }
+    // Legacy fallbacks
     match path {
-        "" | "index.html" => Some(("text/html; charset=utf-8", include_bytes!("../web/index.html"))),
-        "styles.css" => Some(("text/css; charset=utf-8", include_bytes!("../web/styles.css"))),
-        "app.js" => Some(("text/javascript; charset=utf-8", include_bytes!("../web/app.js"))),
-        "ipc-shim.js" => Some((
-            "text/javascript; charset=utf-8",
-            include_bytes!("../web/ipc-shim.js"),
-        )),
+        "styles.css" => VITE_DIST.get_file("assets/index-CTcdtyGe.css").map(|f| ("text/css; charset=utf-8", f.contents())),
         _ => None,
     }
 }
