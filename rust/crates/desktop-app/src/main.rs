@@ -160,6 +160,29 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(url = APP_URL, "webview ready; entering tao event loop");
 
+    // Desktops expose no reliable change event everywhere, so the colour
+    // scheme is re-read every few seconds and pushed when it changes.
+    {
+        let info = info.clone();
+        let app = app.clone();
+        std::thread::Builder::new()
+            .name("desktop-theme".into())
+            .spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                let dark = desktop_core::platform::should_use_dark_colors();
+                let changed = {
+                    let mut guard = info.lock().unwrap_or_else(|e| e.into_inner());
+                    let changed = guard.dark != dark;
+                    guard.dark = dark;
+                    changed
+                };
+                if changed {
+                    app.emit(desktop_core::ipc::channels::event::NATIVE_THEME_UPDATED, vec![]);
+                }
+            })
+            .expect("failed to start the theme watcher");
+    }
+
     let app_loop = app.clone();
     let host_loop = host.clone();
     let info_loop = info.clone();

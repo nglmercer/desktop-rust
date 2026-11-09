@@ -52,7 +52,7 @@
     "draft-release:pr": "ts-node -P script/tsconfig.json script/draft-release/draft-pull-request.ts",
     "validate-changelog": "ts-node -P script/tsconfig.json script/validate-changelog.ts",
     "vite:dev": "vite",
-    "vite:build": "vite build",
+    "vite:build": "vite build && vite build -c vite.highlighter.config.ts",
     "vite:preview": "vite preview",
     "pnpm:install": "pnpm install"
   },

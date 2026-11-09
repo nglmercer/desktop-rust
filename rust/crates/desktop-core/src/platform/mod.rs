@@ -103,6 +103,9 @@ pub fn resolve_proxy(url: &str) -> String {
 
 /// `nativeTheme.shouldUseDarkColors`.
 pub fn should_use_dark_colors() -> bool {
+    if let Ok(value) = std::env::var("DESKTOP_DARK_MODE") {
+        return value == "1";
+    }
     #[cfg(target_os = "windows")]
     {
         let output = Command::new("reg")
@@ -127,7 +130,103 @@ pub fn should_use_dark_colors() -> bool {
             return String::from_utf8_lossy(&out.stdout).trim() == "Dark";
         }
     }
-    std::env::var("DESKTOP_DARK_MODE").map(|v| v == "1").unwrap_or(false)
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return linux_prefers_dark().unwrap_or(false);
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+/// The colour scheme of a Linux desktop, asked in order of reliability:
+/// the freedesktop Settings portal (GNOME, KDE Plasma and others), the
+/// window colours of a KDE colour scheme, then GNOME's `gsettings`.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn linux_prefers_dark() -> Option<bool> {
+    // org.freedesktop.appearance color-scheme: 1 = prefer dark, 2 = prefer light, 0 = no preference.
+    let portal = Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.portal.Desktop",
+            "--object-path",
+            "/org/freedesktop/portal/desktop",
+            "--method",
+            "org.freedesktop.portal.Settings.Read",
+            "org.freedesktop.appearance",
+            "color-scheme",
+        ])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+    if let Some(text) = portal {
+        if let Some(value) = text
+            .split("uint32 ")
+            .nth(1)
+            .and_then(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse::<u32>().ok())
+        {
+            match value {
+                1 => return Some(true),
+                2 => return Some(false),
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(dark) = kde_window_is_dark() {
+        return Some(dark);
+    }
+
+    let gnome = Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&gnome.stdout);
+    if text.contains("prefer-dark") {
+        Some(true)
+    } else if text.contains("default") || text.contains("prefer-light") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// KDE keeps the active colour scheme in `kdeglobals`. A scheme is dark when
+/// its window background is darker than its text.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn kde_window_is_dark() -> Option<bool> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))?;
+    let text = std::fs::read_to_string(config.join("kdeglobals")).ok()?;
+
+    let mut section = "";
+    let mut background = None;
+    let mut foreground = None;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            section = line;
+            continue;
+        }
+        let parse = |value: &str| -> Option<f64> {
+            let parts: Vec<f64> = value.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            (parts.len() >= 3).then(|| 0.299 * parts[0] + 0.587 * parts[1] + 0.114 * parts[2])
+        };
+        if section == "[Colors:Window]" {
+            if let Some(value) = line.strip_prefix("BackgroundNormal=") {
+                background = parse(value);
+            } else if let Some(value) = line.strip_prefix("ForegroundNormal=") {
+                foreground = parse(value);
+            }
+        }
+    }
+    match (background, foreground) {
+        (Some(bg), Some(fg)) => Some(bg < fg),
+        (Some(bg), None) => Some(bg < 128.0),
+        _ => None,
+    }
 }
 
 pub fn notifications_permission() -> DesktopNotificationPermission {
