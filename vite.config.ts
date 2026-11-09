@@ -2,7 +2,8 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
-import { cpSync, mkdirSync, readdirSync, readFileSync } from 'fs'
+import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import frontMatter from 'front-matter'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 
@@ -49,6 +50,39 @@ function copyStaticResources(outDir: string): Plugin {
         recursive: true,
         filter: source => path.basename(source) !== 'unicode',
       })
+
+      // The gitignore templates offered when creating a repository.
+      const gitignores = path.resolve(__dirname, 'app/static/common/gitignore')
+      mkdirSync(path.join(destination, 'gitignore'), { recursive: true })
+      for (const name of readdirSync(gitignores)) {
+        if (name.endsWith('.gitignore')) {
+          cpSync(path.join(gitignores, name), path.join(destination, 'gitignore', name))
+        }
+      }
+
+      // generateLicenseMetadata() in script/build.ts.
+      const chooseALicense = path.resolve(__dirname, 'app/static/common/choosealicense.com')
+      const licensesDir = path.join(chooseALicense, '_licenses')
+      const licenses = readdirSync(licensesDir)
+        .map(file => frontMatter<any>(readFileSync(path.join(licensesDir, file), 'utf8')))
+        .map(({ attributes, body }) => ({
+          name: attributes.nickname || attributes.title,
+          featured: attributes.featured || false,
+          hidden: attributes.hidden === undefined || attributes.hidden,
+          // A trailing newline keeps generated license files from showing
+          // "no newline at end of file" in diffs.
+          body: `${body.trim()}\n`,
+        }))
+        .filter(license => !license.hidden)
+      writeFileSync(path.join(destination, 'available-licenses.json'), JSON.stringify(licenses))
+      writeFileSync(
+        path.join(destination, 'LICENSE.choosealicense.md'),
+        'GitHub Desktop uses licensing information provided by choosealicense.com.\n\n' +
+          'The bundle in available-licenses.json has been generated from a source list provided at ' +
+          'https://github.com/github/choosealicense.com, which is made available under the below license:\n\n' +
+          '------------\n\n' +
+          readFileSync(path.join(chooseALicense, 'LICENSE.md'), 'utf8')
+      )
 
       for (const dir of ['common', staticDirName]) {
         const source = path.resolve(__dirname, 'app/static', dir)

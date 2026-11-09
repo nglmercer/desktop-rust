@@ -171,8 +171,8 @@ fn query(query: WindowQuery, info: &Arc<Mutex<WindowInfo>>) -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// Dialogs (rfd) — Electron's `dialog.showOpenDialog` / `showSaveDialog` /
-// `showMessageBox` response shapes are preserved for renderer compatibility.
+// Dialogs (rfd). Results have the shape the renderer's IPC contract expects
+// (`app/src/lib/ipc-shared.ts`), not Electron's raw `dialog` results.
 // ---------------------------------------------------------------------------
 
 fn apply_filters(mut dialog: rfd::FileDialog, filters: &[desktop_core::ipc::protocol::FileFilter]) -> rfd::FileDialog {
@@ -241,8 +241,9 @@ fn show_open_dialog(options: &OpenDialogOptions) -> Value {
             .unwrap_or_default()
     };
 
-    let canceled = paths.is_empty();
-    json!({ "canceled": canceled, "filePaths": paths })
+    // The renderer's `show-open-dialog` contract (AppWindow.showOpenDialog):
+    // the first selected path, or null when the dialog was dismissed.
+    paths.into_iter().next().map(Value::String).unwrap_or(Value::Null)
 }
 
 fn show_save_dialog(options: &SaveDialogOptions) -> Value {
@@ -266,7 +267,8 @@ fn show_save_dialog(options: &SaveDialogOptions) -> Value {
     let path = dialog
         .save_file()
         .map(|p| p.to_string_lossy().into_owned());
-    json!({ "canceled": path.is_none(), "filePath": path })
+    // `show-save-dialog` resolves with the chosen path or null.
+    path.map(Value::String).unwrap_or(Value::Null)
 }
 
 fn show_message_box(options: &MessageOptions) -> Value {
@@ -349,5 +351,40 @@ mod tests {
         assert_eq!(parse_color("#1f6feb"), Some((31, 111, 235, 255)));
         assert_eq!(parse_color("rgb(10, 20, 30)"), Some((10, 20, 30, 255)));
         assert_eq!(parse_color("nope"), None);
+    }
+}
+
+/// Run a text editing command in the web view, as Electron's Edit menu
+/// roles did.
+pub fn edit(webview: &WebView, command: desktop_core::menu::EditCommand) {
+    use desktop_core::menu::EditCommand;
+
+    // WebKitGTK only lets the embedder paste; script-initiated paste is
+    // refused without a user gesture.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        use webkit2gtk::WebViewExt;
+        use wry::WebViewExtUnix;
+
+        let name = match command {
+            EditCommand::Undo => "Undo",
+            EditCommand::Redo => "Redo",
+            EditCommand::Cut => "Cut",
+            EditCommand::Copy => "Copy",
+            EditCommand::Paste => "Paste",
+        };
+        webview.webview().execute_editing_command(name);
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        let name = match command {
+            EditCommand::Undo => "undo",
+            EditCommand::Redo => "redo",
+            EditCommand::Cut => "cut",
+            EditCommand::Copy => "copy",
+            EditCommand::Paste => "paste",
+        };
+        let _ = webview.evaluate_script(&format!("document.execCommand('{name}')"));
     }
 }

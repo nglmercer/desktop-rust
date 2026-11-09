@@ -7,8 +7,30 @@ interface ILFSTrackOutput {
   }>
 }
 
+let lfsAvailable: Promise<boolean> | undefined
+
+/**
+ * Whether the `git lfs` command exists. The bundled Git always shipped with
+ * Git LFS; a system Git may not have it installed, in which case `git lfs`
+ * is an unknown command. Checked once per run.
+ */
+export function isLFSAvailable(): Promise<boolean> {
+  lfsAvailable ??= git(['lfs', 'version'], __dirname, 'isLFSAvailable', {
+    successExitCodes: new Set([0, 1, 127]),
+  }).then(
+    result => result.exitCode === 0,
+    () => false
+  )
+  return lfsAvailable
+}
+
 /** Install the global LFS filters. */
 export async function installGlobalLFSFilters(force: boolean): Promise<void> {
+  if (!(await isLFSAvailable())) {
+    log.warn('Git LFS is not installed, skipping global LFS filter setup')
+    return
+  }
+
   const args = ['lfs', 'install', '--skip-repo']
   if (force) {
     args.push('--force')
@@ -22,6 +44,11 @@ export async function installLFSHooks(
   repository: Repository,
   force: boolean
 ): Promise<void> {
+  if (!(await isLFSAvailable())) {
+    log.warn('Git LFS is not installed, skipping LFS hook setup')
+    return
+  }
+
   const args = ['lfs', 'install']
   if (force) {
     args.push('--force')
@@ -32,6 +59,10 @@ export async function installLFSHooks(
 
 /** Is the repository configured to track any paths with LFS? */
 export async function isUsingLFS(repository: Repository): Promise<boolean> {
+  if (!(await isLFSAvailable())) {
+    return false
+  }
+
   const env = {
     GIT_LFS_TRACK_NO_INSTALL_HOOKS: '1',
   }

@@ -182,6 +182,20 @@ impl Bridge {
             return;
         }
 
+        // Metadata for the embedded renderer resources, so the `fs` shim can
+        // answer stat/readdir for paths under the renderer's virtual app
+        // directory.
+        if path == "__bundle" {
+            let target = request
+                .uri()
+                .query()
+                .and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("path=")))
+                .map(percent_decode)
+                .unwrap_or_default();
+            responder.respond(response(200, JSON, bundle_entry(&target).to_string().into_bytes()));
+            return;
+        }
+
         if path == "__invoke" {
             if request.method() != http::Method::POST {
                 responder.respond(response(
@@ -280,6 +294,34 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Describe an embedded resource: a file, a directory with its entries, or
+/// `null` when nothing is embedded at `path`.
+fn bundle_entry(path: &str) -> Value {
+    let path = path.trim_matches('/');
+    if path.contains("..") || path.contains('\\') || path.contains(':') {
+        return Value::Null;
+    }
+    if let Some(file) = VITE_DIST.get_file(path) {
+        return serde_json::json!({ "kind": "file", "size": file.contents().len() });
+    }
+    let dir = if path.is_empty() { Some(&VITE_DIST) } else { VITE_DIST.get_dir(path) };
+    match dir {
+        Some(dir) => {
+            let name = |entry: &std::path::Path| {
+                entry.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            };
+            let mut entries: Vec<Value> = dir
+                .dirs()
+                .map(|d| serde_json::json!({ "name": name(d.path()), "isDirectory": true }))
+                .chain(dir.files().map(|f| serde_json::json!({ "name": name(f.path()), "isDirectory": false })))
+                .collect();
+            entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+            serde_json::json!({ "kind": "directory", "entries": entries })
+        }
+        None => Value::Null,
+    }
+}
+
 fn mime_for(path: &str) -> &'static str {
     match path.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("") {
         "html" => "text/html; charset=utf-8",
@@ -324,6 +366,21 @@ mod tests {
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz%4"), "%zz%4");
         assert_eq!(percent_decode("%41"), "A");
+    }
+
+    #[test]
+    fn bundle_entries_describe_files_and_directories() {
+        assert_eq!(bundle_entry("index.html")["kind"], "file");
+        assert!(bundle_entry("index.html")["size"].as_u64().unwrap() > 0);
+
+        let root = bundle_entry("");
+        assert_eq!(root["kind"], "directory");
+        let names: Vec<&str> = root["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"index.html") && names.contains(&"assets"));
+        assert_eq!(bundle_entry("/assets/")["kind"], "directory");
+
+        assert_eq!(bundle_entry("missing"), Value::Null);
+        assert_eq!(bundle_entry("../Cargo.toml"), Value::Null);
     }
 
     #[test]

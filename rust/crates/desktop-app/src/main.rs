@@ -111,9 +111,11 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
 
     // -- native menu --------------------------------------------------------
-    let native_menu = menu::install(proxy.clone());
+    let menu_model = app.snapshot()?.get("appMenu").cloned().unwrap_or_default();
+    let menu_model: desktop_core::models::AppMenu = serde_json::from_value(menu_model).unwrap_or_default();
+    let mut native_menu = menu::install(proxy.clone(), &menu_model.items);
     if let Some(menu) = &native_menu {
-        menu::attach(menu, &window);
+        menu.attach(&window);
     }
 
     // -- webview + bridge ---------------------------------------------------
@@ -161,7 +163,6 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let app_loop = app.clone();
     let host_loop = host.clone();
     let info_loop = info.clone();
-    let _menu_keepalive = native_menu;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -175,6 +176,16 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     }
                     let mut failed = Vec::new();
                     for (channel, args) in pending {
+                        // The native menu mirrors the snapshot the renderer gets.
+                        if channel == event::APP_MENU {
+                            if let (Some(menu), Some(items)) =
+                                (native_menu.as_mut(), args.get(0).and_then(|menu| menu.get("items")))
+                            {
+                                if let Ok(items) = serde_json::from_value::<Vec<_>>(items.clone()) {
+                                    menu.sync(&items);
+                                }
+                            }
+                        }
                         let script = format!(
                             "window.__desktop && window.__desktop.emit({},{})",
                             js_literal(&json!(channel)),
@@ -210,11 +221,43 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 AppEvent::NativeMenu(id) => {
-                    if id == "quit-app" {
-                        host_loop.shutdown();
-                        *control_flow = ControlFlow::Exit;
-                    } else {
-                        app_loop.emit(event::MENU_EVENT, vec![json!(id)]);
+                    use desktop_core::ipc::protocol::WindowAction;
+                    use desktop_core::menu::MenuAction;
+
+                    let run = |action| actions::apply(action, &window, &webview, &info_loop, &app_loop);
+                    match app_loop.menu_action(&id) {
+                        Some(MenuAction::Emit(name)) => app_loop.emit(event::MENU_EVENT, vec![json!(name)]),
+                        Some(MenuAction::Quit) => {
+                            app_loop.emit("will-quit", vec![]);
+                            host_loop.shutdown();
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        Some(MenuAction::Edit(command)) => actions::edit(&webview, command),
+                        Some(MenuAction::Zoom(direction)) => {
+                            let current = info_loop.lock().unwrap_or_else(|e| e.into_inner()).zoom_factor;
+                            let next = desktop_core::menu::next_zoom(current, direction);
+                            run(WindowAction::SetZoomFactor(next));
+                            app_loop.emit(event::ZOOM_FACTOR_CHANGED, vec![json!(next)]);
+                        }
+                        Some(MenuAction::ToggleFullScreen) => {
+                            let fullscreen = window.fullscreen().is_none();
+                            window.set_fullscreen(fullscreen.then_some(tao::window::Fullscreen::Borderless(None)));
+                        }
+                        Some(MenuAction::Reload) => {
+                            run(WindowAction::Reload);
+                        }
+                        Some(MenuAction::ToggleDevTools) => {
+                            run(WindowAction::DevTools);
+                        }
+                        Some(MenuAction::OpenUrl(url)) => {
+                            run(WindowAction::OpenExternal(url));
+                        }
+                        Some(MenuAction::ShowLogs) => {
+                            let logs = app_loop.paths.log_dir();
+                            let _ = std::fs::create_dir_all(&logs);
+                            run(WindowAction::UnsafeOpenDirectory(logs.to_string_lossy().into_owned()));
+                        }
+                        None => tracing::warn!(%id, "click on an unknown menu item"),
                     }
                 }
             },

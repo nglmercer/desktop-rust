@@ -6,7 +6,12 @@
 // them, so a handle does not pin an inode the way Node's does: code that
 // relies on that for locking gets best-effort behaviour here.
 
-import { bundleUrl } from './bundle'
+import {
+  bundleUrl,
+  bundleEntry,
+  bundleEntrySync,
+  IBundleEntry,
+} from './bundle'
 
 type Encoding = BufferEncoding | null | undefined
 type ReadOptions = Encoding | { encoding?: Encoding; flag?: string }
@@ -51,10 +56,39 @@ function bridge(): IBridge {
   return b
 }
 
+// The system call Node names in the error for each operation.
+const syscalls: Record<string, string> = {
+  'read-file': 'open',
+  'write-file': 'open',
+  readdir: 'scandir',
+  'copy-file': 'copyfile',
+  copy: 'cp',
+}
+
+/**
+ * Give a bridge failure the fields of a Node system error. Callers tell
+ * those apart from other exceptions by `code` and `syscall` together.
+ */
+function nodeError(error: any, op: string, options: any): never {
+  if (error && typeof error.code === 'string') {
+    error.syscall ??= syscalls[op] ?? op
+    error.path ??= options?.path
+    error.errno ??= -1
+  }
+  throw error
+}
+
 const call = (op: string, options: object) =>
-  bridge().invoke(`desktop.io.fs-${op}`, options)
-const callSync = (op: string, options: object) =>
-  bridge().invokeSync(`desktop.io.fs-${op}`, options)
+  bridge()
+    .invoke(`desktop.io.fs-${op}`, options)
+    .catch(error => nodeError(error, op, options))
+function callSync(op: string, options: object) {
+  try {
+    return bridge().invokeSync(`desktop.io.fs-${op}`, options)
+  } catch (error) {
+    return nodeError(error, op, options)
+  }
+}
 
 function toPath(path: PathLike): string {
   if (typeof path === 'string') {
@@ -245,8 +279,44 @@ function readBundledSync(url: string, path: string): Buffer {
 const missing = (path: string) =>
   Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
     code: 'ENOENT',
+    syscall: 'open',
+    errno: -2,
     path,
   })
+
+const isBundled = (path: PathLike) => bundleUrl(toPath(path)) !== null
+
+function bundledStats(entry: IBundleEntry | null, path: string, options: any) {
+  if (entry === null) {
+    throw missing(path)
+  }
+  const raw: IRawStats = {
+    isFile: entry.kind === 'file',
+    isDirectory: entry.kind === 'directory',
+    isSymbolicLink: false,
+    size: entry.size ?? 0,
+    mode: entry.kind === 'file' ? 0o100444 : 0o40555,
+    dev: 0,
+    ino: '0',
+    mtimeMs: 0,
+    atimeMs: 0,
+    birthtimeMs: 0,
+    ctimeMs: 0,
+  }
+  return new Stats(raw, statOptions(options))
+}
+
+function bundledListing(entry: IBundleEntry | null, path: string): IRawDirent[] {
+  if (entry === null || entry.entries === undefined) {
+    throw missing(path)
+  }
+  return entry.entries.map(e => ({
+    name: e.name,
+    isFile: !e.isDirectory,
+    isDirectory: e.isDirectory,
+    isSymbolicLink: false,
+  }))
+}
 
 const withEncoding = (buffer: Buffer, options: ReadOptions) => {
   const encoding = encodingOf(options)
@@ -382,14 +452,28 @@ export const promises = {
     await call('write-file', writeArgs(path, data, options, true))
   },
   stat: async (path: PathLike, options?: any) =>
-    new Stats(await call('stat', { path: toPath(path) }), statOptions(options)),
+    isBundled(path)
+      ? bundledStats(await bundleEntry(toPath(path)), toPath(path), options)
+      : new Stats(await call('stat', { path: toPath(path) }), statOptions(options)),
   lstat: async (path: PathLike, options?: any) =>
-    new Stats(await call('lstat', { path: toPath(path) }), statOptions(options)),
+    isBundled(path)
+      ? bundledStats(await bundleEntry(toPath(path)), toPath(path), options)
+      : new Stats(await call('lstat', { path: toPath(path) }), statOptions(options)),
   access: async (path: PathLike, mode?: number) => {
+    if (isBundled(path)) {
+      bundledStats(await bundleEntry(toPath(path)), toPath(path), undefined)
+      return
+    }
     await call('access', { path: toPath(path), mode: mode ?? 0 })
   },
   readdir: async (path: PathLike, options?: any) =>
-    direntResult(path, options, await call('readdir', { path: toPath(path) })),
+    direntResult(
+      path,
+      options,
+      isBundled(path)
+        ? bundledListing(await bundleEntry(toPath(path)), toPath(path))
+        : await call('readdir', { path: toPath(path) })
+    ),
   mkdir: async (path: PathLike, options?: any) => {
     await call('mkdir', mkdirArgs(path, options))
   },
@@ -415,8 +499,14 @@ export const promises = {
       to: toPath(to),
     })
   },
-  realpath: (path: PathLike): Promise<string> =>
-    call('realpath', { path: toPath(path) }),
+  realpath: async (path: PathLike): Promise<string> => {
+    if (isBundled(path)) {
+      // Bundled resources have no symlinks: a path that exists is canonical.
+      bundledStats(await bundleEntry(toPath(path)), toPath(path), undefined)
+      return toPath(path)
+    }
+    return call('realpath', { path: toPath(path) })
+  },
   readlink: (path: PathLike): Promise<string> =>
     call('readlink', { path: toPath(path) }),
   symlink: async (target: PathLike, path: PathLike) => {
@@ -473,20 +563,37 @@ export const appendFileSync = (path: PathLike, data: unknown, options?: any) => 
 }
 export const existsSync = (path: PathLike): boolean => {
   try {
+    if (isBundled(path)) {
+      return bundleEntrySync(toPath(path)) !== null
+    }
     return callSync('exists', { path: toPath(path) }) === true
   } catch {
     return false
   }
 }
 export const statSync = (path: PathLike, options?: any) =>
-  new Stats(callSync('stat', { path: toPath(path) }), statOptions(options))
+  isBundled(path)
+    ? bundledStats(bundleEntrySync(toPath(path)), toPath(path), options)
+    : new Stats(callSync('stat', { path: toPath(path) }), statOptions(options))
 export const lstatSync = (path: PathLike, options?: any) =>
-  new Stats(callSync('lstat', { path: toPath(path) }), statOptions(options))
+  isBundled(path)
+    ? bundledStats(bundleEntrySync(toPath(path)), toPath(path), options)
+    : new Stats(callSync('lstat', { path: toPath(path) }), statOptions(options))
 export const accessSync = (path: PathLike, mode?: number) => {
+  if (isBundled(path)) {
+    bundledStats(bundleEntrySync(toPath(path)), toPath(path), undefined)
+    return
+  }
   callSync('access', { path: toPath(path), mode: mode ?? 0 })
 }
 export const readdirSync = (path: PathLike, options?: any): any =>
-  direntResult(path, options, callSync('readdir', { path: toPath(path) }))
+  direntResult(
+    path,
+    options,
+    isBundled(path)
+      ? bundledListing(bundleEntrySync(toPath(path)), toPath(path))
+      : callSync('readdir', { path: toPath(path) })
+  )
 export const mkdirSync = (path: PathLike, options?: any) => {
   callSync('mkdir', mkdirArgs(path, options))
 }
@@ -515,10 +622,16 @@ export const readlinkSync = (path: PathLike): string =>
 export const symlinkSync = (target: PathLike, path: PathLike) => {
   callSync('symlink', { path: toPath(path), target: toPath(target) })
 }
-export const realpathSync = Object.assign(
-  (path: PathLike): string => callSync('realpath', { path: toPath(path) }),
-  { native: (path: PathLike): string => callSync('realpath', { path: toPath(path) }) }
-)
+function realpathSyncImpl(path: PathLike): string {
+  if (isBundled(path)) {
+    bundledStats(bundleEntrySync(toPath(path)), toPath(path), undefined)
+    return toPath(path)
+  }
+  return callSync('realpath', { path: toPath(path) })
+}
+export const realpathSync = Object.assign(realpathSyncImpl, {
+  native: realpathSyncImpl,
+})
 
 export class Dir {
   private index = 0

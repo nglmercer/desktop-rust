@@ -208,22 +208,18 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
             return Ok(true);
         }
         tx::UPDATE_PREFERRED_APP_MENU_ITEM_LABELS => {
-            // `MenuLabelsEvent` maps ids to preferred labels (e.g. "Pull" vs
-            // "Pull with Rebase"). Applied to the same serialized menu model.
-            let mut changed = false;
-            if let Some(labels) = msg.arg(0).ok().and_then(Value::as_object) {
-                for item in &mut state.app_menu.items {
-                    if let Some(new_label) = labels.get(&item.id).and_then(Value::as_str) {
-                        if item.label.as_deref() != Some(new_label) {
-                            item.label = Some(new_label.to_string());
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            if !changed {
+            // `MenuLabelsEvent`: renderer state (selected editor, force-push,
+            // ...) that changes the wording of some items. Rebuild the menu
+            // and keep which items the renderer had disabled.
+            let labels: crate::menu::MenuLabels =
+                serde_json::from_value(msg.arg(0).cloned().unwrap_or(json!({})))?;
+            if labels == app.menu_labels() {
                 return Ok(false);
             }
+            let mut rebuilt = crate::menu::build(&labels);
+            crate::menu::merge_state(&mut rebuilt, &state.app_menu.items);
+            state.app_menu.items = rebuilt;
+            app.set_menu_labels(labels);
             app.emit(event::APP_MENU, vec![serde_json::to_value(&state.app_menu)?]);
             return Ok(true);
         }
@@ -303,7 +299,7 @@ fn apply_menu_state(items: &mut [SerializableMenuItem], updates: &[MenuStateUpda
                     changed |= set(&mut item.visible, visible);
                 }
                 if let Some(label) = &update.state.label {
-                    changed |= set(&mut item.label, Some(label.clone()));
+                    changed |= set(&mut item.label, label.clone());
                 }
             }
         }
@@ -325,7 +321,7 @@ mod tests {
             "id": id,
             "enabled": enabled,
             "visible": true,
-            "submenu": serde_json::to_value(submenu).unwrap(),
+            "menu": { "items": submenu },
         }))
         .unwrap()
     }

@@ -26,6 +26,7 @@ pub struct DesktopApp {
     pub git: GitEngine,
     pub api: ApiClient,
     state: Mutex<AppState>,
+    menu_labels: Mutex<crate::menu::MenuLabels>,
     host: Arc<dyn Host>,
     started: Instant,
 }
@@ -46,6 +47,8 @@ impl DesktopApp {
         }
         state.accounts = state.accounts.iter().map(|a| a.without_token()).collect();
         state.endpoint_tokens.clear();
+        // The menu is rebuilt on every start; a persisted copy may predate it.
+        state.app_menu.items = crate::menu::build(&crate::menu::MenuLabels::default());
 
         tracing::info!(
             git = %git.binary.to_string_lossy(),
@@ -61,12 +64,27 @@ impl DesktopApp {
             git,
             api,
             state: Mutex::new(state),
+            menu_labels: Mutex::new(crate::menu::MenuLabels::default()),
             host,
             started: Instant::now(),
         }))
     }
 
     pub fn started(&self) -> Instant { self.started }
+
+    /// The renderer state the menu wording currently reflects.
+    pub fn menu_labels(&self) -> crate::menu::MenuLabels {
+        self.menu_labels.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set_menu_labels(&self, labels: crate::menu::MenuLabels) {
+        *self.menu_labels.lock().unwrap_or_else(|e| e.into_inner()) = labels;
+    }
+
+    /// What clicking the menu item `id` does.
+    pub fn menu_action(&self, id: &str) -> Option<crate::menu::MenuAction> {
+        crate::menu::action(id, &self.menu_labels())
+    }
 
     /// Duplex IPC (`ipcRenderer.invoke`). Returns the value that resolves the
     /// JS promise, or a flattened error.

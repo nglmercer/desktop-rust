@@ -31,6 +31,7 @@ pub mod error;
 pub mod git;
 pub mod io;
 pub mod ipc;
+pub mod menu;
 pub mod models;
 pub mod platform;
 pub mod state;

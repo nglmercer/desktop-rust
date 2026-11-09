@@ -103,7 +103,12 @@ fn git_exec(binary: &Path, o: &Value) -> Result<Value> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Never let git wait on a terminal the user cannot see.
-        .env("GIT_TERMINAL_PROMPT", "0");
+        .env("GIT_TERMINAL_PROMPT", "0")
+        // The renderer parses git's messages, which Desktop's bundled git
+        // only ever printed in English. A system git is localized; this
+        // selects the untranslated messages without changing the character
+        // encoding the way LC_ALL=C would.
+        .env("LANGUAGE", "en");
     if !cwd.is_empty() {
         command.current_dir(&cwd);
     }
@@ -616,6 +621,17 @@ mod tests {
         let stdout = base64_decode(out["stdout"].as_str().unwrap()).unwrap();
         assert_eq!(String::from_utf8(stdout).unwrap().trim(), "ce013625030ba8dba906f756967f9e9ca394464a");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn git_exec_output_is_english_whatever_the_user_locale() {
+        // Fails only if a translation would otherwise apply; harmless elsewhere.
+        let out = git_exec(
+            Path::new("git"),
+            &json!({ "args": ["definitely-not-a-command"], "env": { "LANG": "es_ES.UTF-8", "LC_ALL": null } }),
+        )
+        .unwrap();
+        assert!(out["stderr"].as_str().unwrap().contains("is not a git command"));
     }
 
     #[test]

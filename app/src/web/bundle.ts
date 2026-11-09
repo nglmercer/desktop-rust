@@ -15,3 +15,29 @@ export function bundleUrl(path: string): string | null {
     document.baseURI
   ).toString()
 }
+
+export interface IBundleEntry {
+  readonly kind: 'file' | 'directory'
+  readonly size?: number
+  readonly entries?: ReadonlyArray<{ name: string; isDirectory: boolean }>
+}
+
+const entryUrl = (path: string) => {
+  const relative = path.replace(/\\/g, '/').slice(BundleRoot.length + 1)
+  return new URL(
+    `__bundle?path=${encodeURIComponent(relative)}`,
+    document.baseURI
+  ).toString()
+}
+
+/** Describe a bundled resource, or null when there is none at `path`. */
+export async function bundleEntry(path: string): Promise<IBundleEntry | null> {
+  return (await fetch(entryUrl(path))).json()
+}
+
+export function bundleEntrySync(path: string): IBundleEntry | null {
+  const request = new XMLHttpRequest()
+  request.open('GET', entryUrl(path), false)
+  request.send()
+  return JSON.parse(request.responseText)
+}

@@ -116,26 +116,60 @@ pub struct SaveDialogOptions {
     pub filters: Vec<FileFilter>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One entry of the application menu, shaped like the renderer's `IMenuItem`
+/// (`app/src/models/app-menu.ts`): `type` selects the variant, and a submenu
+/// carries its children as `menu.items`, as Electron's serialized menu does.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializableMenuItem {
     pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub label: String,
+    // Electron sends `null`, not an absent key, when there is no shortcut.
+    #[serde(default)]
     pub accelerator: Option<String>,
     #[serde(default)]
+    pub access_key: Option<String>,
+    #[serde(default = "yes")]
     pub enabled: bool,
-    #[serde(default)]
-    pub checked: bool,
-    #[serde(default)]
+    #[serde(default = "yes")]
     pub visible: bool,
     #[serde(default)]
+    pub checked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(default)]
+    /// `menuItem`, `separator`, `submenuItem` or `checkbox`.
+    #[serde(rename = "type", default = "normal_kind")]
+    pub kind: String,
+    #[serde(rename = "menu", default, with = "menu_items")]
     pub submenu: Vec<SerializableMenuItem>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn normal_kind() -> String {
+    "menuItem".into()
+}
+
+/// A submenu's children travel as `{ "items": [...] }`, the renderer's `IMenu`.
+mod menu_items {
+    use super::SerializableMenuItem;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    struct Menu {
+        items: Vec<SerializableMenuItem>,
+    }
+
+    pub fn serialize<S: Serializer>(items: &[SerializableMenuItem], s: S) -> Result<S::Ok, S::Error> {
+        Menu { items: items.to_vec() }.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SerializableMenuItem>, D::Error> {
+        Ok(Menu::deserialize(d)?.items)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

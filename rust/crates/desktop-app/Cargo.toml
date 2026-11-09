@@ -25,3 +25,7 @@ muda.workspace = true
 rfd.workspace = true
 arboard.workspace = true
 include_dir = "0.7"
+
+[target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]
+# Same version wry links; used for the Edit menu's editing commands.
+webkit2gtk = "2.0"
