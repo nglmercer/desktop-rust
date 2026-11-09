@@ -63,6 +63,7 @@ pub struct Bridge {
     /// webview callback thread means `Host::window` can safely block on the
     /// tao event loop when a modal dialog needs an answer.
     incoming: Mutex<mpsc::Sender<Incoming>>,
+    proxy: Mutex<EventLoopProxy<AppEvent>>,
 }
 
 impl Bridge {
@@ -119,12 +120,38 @@ impl Bridge {
         Arc::new(Self {
             app,
             incoming: Mutex::new(sender),
+            proxy: Mutex::new(proxy),
         })
+    }
+
+    fn proxy_handle(&self) -> EventLoopProxy<AppEvent> {
+        self.proxy.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// `window.ipc.postMessage` entry point.
     pub fn handle_ipc(&self, body: &str) {
         match serde_json::from_str::<Incoming>(body) {
+            // Host services (git, filesystem, HTTP) can run for a long time
+            // and share no state, so each gets its own thread instead of
+            // queueing behind the single IPC worker.
+            Ok(Incoming::Rpc { id, channel, args }) if desktop_core::io::handles(&channel) => {
+                let app = self.app.clone();
+                let proxy = self.proxy_handle();
+                let spawned = std::thread::Builder::new().name("desktop-io".into()).spawn(move || {
+                    let result = match desktop_core::io::invoke(&app, &channel, &args) {
+                        Ok(value) => RpcResult::ok(value),
+                        Err(error) => RpcResult::err(error),
+                    };
+                    let _ = proxy.send_event(AppEvent::RpcResult { id, result });
+                });
+                if let Err(error) = spawned {
+                    tracing::error!(%error, "could not start a host-service thread");
+                    let result = RpcResult::err(desktop_core::error::AppError::msg(
+                        "the system could not start another thread",
+                    ));
+                    let _ = self.proxy_handle().send_event(AppEvent::RpcResult { id, result });
+                }
+            }
             Ok(message) => {
                 let _ = self
                     .incoming
@@ -167,7 +194,16 @@ impl Bridge {
                 ));
                 return;
             }
+            // A body when the webview delivers one, otherwise the `payload`
+            // query parameter (WebKitGTK drops custom-protocol bodies).
+            let query_payload = request.uri().query().and_then(|query| {
+                query
+                    .split('&')
+                    .find_map(|pair| pair.strip_prefix("payload="))
+                    .map(|value| percent_decode(value).into_bytes())
+            });
             let body = request.into_body();
+            let body = if body.is_empty() { query_payload.unwrap_or_default() } else { body };
             let app = self.app.clone();
             std::thread::Builder::new()
                 .name("desktop-invoke".into())

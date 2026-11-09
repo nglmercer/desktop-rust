@@ -41,6 +41,15 @@ function copyStaticResources(outDir: string): Plugin {
     closeBundle() {
       const destination = path.join(outDir, 'static')
       mkdirSync(destination, { recursive: true })
+      // copyEmoji() in script/build.ts: the database plus the images of
+      // GitHub's custom emoji (unicode ones render as text).
+      const gemoji = path.resolve(__dirname, 'gemoji')
+      cpSync(path.join(gemoji, 'db/emoji.json'), path.join(outDir, 'emoji.json'))
+      cpSync(path.join(gemoji, 'images/emoji'), path.join(outDir, 'emoji'), {
+        recursive: true,
+        filter: source => path.basename(source) !== 'unicode',
+      })
+
       for (const dir of ['common', staticDirName]) {
         const source = path.resolve(__dirname, 'app/static', dir)
         for (const entry of readdirSync(source, { withFileTypes: true })) {
@@ -108,12 +117,13 @@ export default defineConfig({
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
       { find: /^(node:)?url$/, replacement: path.resolve(__dirname, 'app/src/web/url.ts') },
       { find: /^keytar$/, replacement: path.resolve(__dirname, 'app/src/web/keytar.ts') },
+      { find: /^desktop-dugite\/(.+)$/, replacement: path.resolve(__dirname, 'app/node_modules/dugite/build/lib') + '/$1.js' },
       { find: /^dugite$/, replacement: path.resolve(__dirname, 'app/src/web/dugite.ts') },
       { find: /^desktop-notifications$/, replacement: path.resolve(__dirname, 'app/src/web/desktop-notifications.ts') },
       { find: /^desktop-trampoline$/, replacement: path.resolve(__dirname, 'app/src/web/desktop-trampoline.ts') },
       { find: /^windows-argv-parser$/, replacement: path.resolve(__dirname, 'app/src/web/windows-argv-parser.ts') },
       { find: /^fs-admin$/, replacement: path.resolve(__dirname, 'app/src/web/fs-admin.ts') },
-      { find: /^app_path$/, replacement: path.resolve(__dirname, 'app/src/web/app-path.ts') },
+      { find: /^app-path$/, replacement: path.resolve(__dirname, 'app/src/web/app-path.ts') },
       { find: /^registry-js$/, replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts') },
       { find: /^electron-window-state$/, replacement: path.resolve(__dirname, 'app/src/web/electron-window-state.ts') },
       { find: /^web-utils$/, replacement: path.resolve(__dirname, 'app/src/web/web-utils.ts') },
@@ -133,13 +143,7 @@ export default defineConfig({
       { find: 'node:net', replacement: path.resolve(__dirname, 'app/src/web/net.ts') },
       { find: 'node:stream', replacement: path.resolve(__dirname, 'app/src/web/stream.ts') },
       { find: 'node:stream/promises', replacement: path.resolve(__dirname, 'app/src/web/stream-promises.ts') },
-      { find: 'node:crypto', replacement: path.resolve(__dirname, 'app/src/web/crypto.ts') },
-      { find: 'node:util', replacement: path.resolve(__dirname, 'app/src/web/util.ts') },
-      { find: 'node:buffer', replacement: path.resolve(__dirname, 'app/src/web/buffer.ts') },
-      { find: 'node:assert', replacement: path.resolve(__dirname, 'app/src/web/assert.ts') },
-      { find: 'node:querystring', replacement: path.resolve(__dirname, 'app/src/web/querystring.ts') },
       { find: 'node:child_process', replacement: path.resolve(__dirname, 'app/src/web/child_process.ts') },
-      { find: 'node:timers', replacement: path.resolve(__dirname, 'app/src/web/timers.ts') },
 
       { find: /^fs$/u, replacement: path.resolve(__dirname, 'app/src/web/fs.ts') },
       { find: /^fs\/promises$/, replacement: path.resolve(__dirname, 'app/src/web/fs-promises.ts') },

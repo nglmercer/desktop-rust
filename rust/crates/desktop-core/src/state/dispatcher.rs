@@ -35,7 +35,10 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
     let value = match channel {
         ch::GET_PATH => json!(app.paths.get_path_by_name(&msg.string(0)?)),
         ch::GET_APP_ARCHITECTURE => serde_json::to_value(Architecture::current())?,
-        ch::GET_APP_PATH => json!(app.paths.app_path.to_string_lossy()),
+        // Electron's `app.getAppPath()` was the directory the renderer loaded
+        // its resources from, i.e. its `__dirname`. The web build's resources
+        // are served from the page origin under this virtual root instead.
+        ch::GET_APP_PATH => json!(crate::io::BUNDLE_ROOT),
         ch::GET_EXEC_PATH => json!(app.paths.exec_path.to_string_lossy()),
         ch::IS_RUNNING_UNDER_ARM64_TRANSLATION => {
             json!(platform::is_running_under_arm64_translation())

@@ -1,5 +1,5 @@
-// `net` for the webview build. A webview cannot open sockets, so the
-// trampoline server never listens; address helpers are real implementations.
+// `net` for the webview build. A webview cannot open sockets; the address
+// helpers are real implementations.
 type Handler = (...args: any[]) => void
 
 export type AddressInfo = { port: number; address: string; family: string }
@@ -60,15 +60,21 @@ export class Socket extends Emitter {
 }
 
 export class Server extends Emitter {
-  public listen(..._args: any[]) {
-    // Report the failure the way Node does, asynchronously through 'error',
-    // so callers that await a listening promise reject instead of hanging.
-    queueMicrotask(() =>
-      this.emit(
-        'error',
-        new Error('net.Server.listen is not available in the webview')
-      )
-    )
+  /**
+   * Never accepts a connection. The renderer starts a credential trampoline
+   * server before every git command; in the webview that server cannot
+   * exist, and the Rust shell strips the settings that would point git at
+   * it (see `git_environment` in desktop-core/src/io.rs). Reporting
+   * "listening" keeps that startup path working.
+   */
+  public listen(...args: any[]) {
+    const callback = args[args.length - 1]
+    queueMicrotask(() => {
+      if (typeof callback === 'function') {
+        callback()
+      }
+      this.emit('listening')
+    })
     return this
   }
   public close(callback?: (error?: Error) => void) {
@@ -76,7 +82,7 @@ export class Server extends Emitter {
     return this
   }
   public address(): AddressInfo | null {
-    return null
+    return { port: 0, address: '127.0.0.1', family: 'IPv4' }
   }
   public unref() {
     return this

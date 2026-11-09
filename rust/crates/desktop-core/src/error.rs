@@ -28,6 +28,10 @@ pub enum AppError {
     NotImplemented(String),
     #[error("{0}")]
     Message(String),
+    /// A failure carrying the `code` Node would attach (`ENOENT`, ...), for
+    /// renderer code that branches on it.
+    #[error("{message}")]
+    Coded { code: String, message: String },
 }
 
 impl AppError {
@@ -46,7 +50,7 @@ impl AppError {
             Self::UnknownChannel(_) => "UnknownChannelError",
             Self::NotAuthenticated => "AuthenticationError",
             Self::NotImplemented(_) => "NotImplementedError",
-            Self::Message(_) => "Error",
+            Self::Message(_) | Self::Coded { .. } => "Error",
         };
         RpcError {
             message: self.to_string(),
@@ -54,6 +58,7 @@ impl AppError {
             stack: None,
             code: match self {
                 Self::Git(e) => Some(format!("{:?}", e.kind)),
+                Self::Coded { code, .. } => Some(code.clone()),
                 _ => None,
             },
         }

@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use crate::models::misc::PathType;
 
+/// Deliberately not Electron's "GitHub Desktop": an installed GitHub Desktop
+/// keeps its own state there, and the two must not write over each other.
+const APP_DATA_DIR: &str = "GitHub Desktop Rust";
+
 #[derive(Debug, Clone)]
 pub struct AppPaths {
     pub user_data: PathBuf,
@@ -21,19 +25,19 @@ impl AppPaths {
             #[cfg(target_os = "windows")]
             {
                 std::env::var("APPDATA")
-                    .map(|p| PathBuf::from(p).join("GitHub Desktop"))
+                    .map(|p| PathBuf::from(p).join(APP_DATA_DIR))
                     .unwrap_or_else(|_| PathBuf::from(".").join(".desktop-data"))
             }
             #[cfg(target_os = "macos")]
             {
-                home().join("Library").join("Application Support").join("GitHub Desktop")
+                home().join("Library").join("Application Support").join(APP_DATA_DIR)
             }
             #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
             {
                 std::env::var("XDG_CONFIG_HOME")
                     .map(PathBuf::from)
                     .unwrap_or_else(|_| home().join(".config"))
-                    .join("GitHub Desktop")
+                    .join(APP_DATA_DIR)
             }
         };
 

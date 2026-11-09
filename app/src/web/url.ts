@@ -2,12 +2,7 @@
 // package, plus the file-URL helpers that package does not provide.
 // @ts-ignore -- aliased to the `url` npm package in vite.config.ts
 import legacy from 'desktop-url-impl'
-
-/**
- * Where the renderer believes its bundled resources live (`__dirname` in the
- * web build). The Rust shell serves them from the page's own origin.
- */
-const BundleRoot = '/__desktop_app__'
+import { bundleUrl } from './bundle'
 
 export const parse: (url: string, parseQuery?: boolean, slashes?: boolean) => any =
   legacy.parse
@@ -19,14 +14,11 @@ export const URL = globalThis.URL
 export const URLSearchParams = globalThis.URLSearchParams
 
 export function pathToFileURL(path: string): URL {
-  const normalized = path.replace(/\\/g, '/')
-  if (normalized === BundleRoot || normalized.startsWith(`${BundleRoot}/`)) {
-    const relative = normalized.slice(BundleRoot.length + 1)
-    return new globalThis.URL(
-      relative.split('/').map(encodeURIComponent).join('/'),
-      document.baseURI
-    )
+  const bundled = bundleUrl(path)
+  if (bundled !== null) {
+    return new globalThis.URL(bundled)
   }
+  const normalized = path.replace(/\\/g, '/')
   const absolute = normalized.startsWith('/') ? normalized : `/${normalized}`
   return new globalThis.URL(
     'file://' + absolute.split('/').map(encodeURIComponent).join('/')

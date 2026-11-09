@@ -29,6 +29,7 @@ pub mod api;
 pub mod app;
 pub mod error;
 pub mod git;
+pub mod io;
 pub mod ipc;
 pub mod models;
 pub mod platform;

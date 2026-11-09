@@ -87,6 +87,28 @@
     });
   }
 
+  // Node's synchronous `fs` calls have no asynchronous equivalent the
+  // renderer could await, so they go through a blocking request to the
+  // desktop:// protocol. Only the stateless desktop.io.* services use this.
+  function invokeSync(channel, ...args) {
+    var request = new XMLHttpRequest();
+    // The payload travels in the URL: WebKitGTK does not hand the body of a
+    // custom-protocol request to the application.
+    var payload = encodeURIComponent(JSON.stringify({ channel: channel, args: args }));
+    // WebKit rejects URLs past roughly 64 KB with an opaque network error.
+    if (payload.length > 60000) {
+      throw Object.assign(new Error('synchronous IPC payload too large: ' + channel), { code: 'E2BIG' });
+    }
+    request.open('POST', '/__invoke?payload=' + payload, false);
+    request.send();
+    var reply = JSON.parse(request.responseText);
+    if (reply && reply.ok) {
+      return reply.value === undefined ? null : reply.value;
+    }
+    var detail = (reply && reply.error) || { message: 'IPC call failed' };
+    throw Object.assign(new Error(detail.message || 'IPC call failed'), detail);
+  }
+
   function send(channel, ...args) {
     if (!post({ channel: channel, args: args })) {
       console.warn('[desktop] dropping simplex message (no transport):', channel);
@@ -129,6 +151,7 @@
   var bridge = {
     // renderer -> Rust
     invoke: invoke,
+    invokeSync: invokeSync,
     send: send,
     // Electron's three synchronous channels have no wry equivalent. They now
     // return a promise and callers must await them explicitly.
@@ -196,6 +219,93 @@
     };
   }
 
+  // --- fetch ---------------------------------------------------------------
+  // Electron's renderer was exempt from CORS; a page served from desktop://
+  // is not, and GitHub's OAuth token endpoint sends no CORS headers at all.
+  // Requests to other origins are performed by Rust instead.
+  function toBase64(bytes) {
+    var binary = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+  }
+  function fromBase64(text) {
+    var binary = atob(text);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+    return bytes;
+  }
+  bridge.encodeBase64 = toBase64;
+  bridge.decodeBase64 = fromBase64;
+
+  var nativeFetch = window.fetch.bind(window);
+  function abortError(signal) {
+    return signal.reason !== undefined
+      ? signal.reason
+      : new DOMException('The operation was aborted.', 'AbortError');
+  }
+  window.fetch = function (input, init) {
+    var request;
+    try { request = new Request(input, init); }
+    catch (error) { return Promise.reject(error); }
+
+    var target = new URL(request.url, document.baseURI);
+    if ((target.protocol !== 'http:' && target.protocol !== 'https:') || target.origin === location.origin) {
+      return nativeFetch(input, init);
+    }
+
+    var signal = request.signal;
+    if (signal && signal.aborted) { return Promise.reject(abortError(signal)); }
+
+    var headers = [];
+    request.headers.forEach(function (value, name) { headers.push([name, value]); });
+    // `new Request` silently drops headers a browser forbids (User-Agent, ...).
+    // The caller asked for them and Rust can send them.
+    var requested = init && init.headers;
+    if (requested && !(requested instanceof Headers)) {
+      var pairs = Array.isArray(requested) ? requested : Object.entries(requested);
+      pairs.forEach(function (pair) {
+        var name = String(pair[0]).toLowerCase();
+        if (!headers.some(function (existing) { return existing[0].toLowerCase() === name; })) {
+          headers.push([String(pair[0]), String(pair[1])]);
+        }
+      });
+    }
+
+    var hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+    var proxied = (hasBody ? request.arrayBuffer() : Promise.resolve(null)).then(function (body) {
+      return invoke('desktop.io.http-fetch', {
+        url: target.href,
+        method: request.method,
+        headers: headers,
+        redirect: request.redirect,
+        body: body && body.byteLength > 0 ? toBase64(new Uint8Array(body)) : undefined
+      });
+    }).then(function (result) {
+      var empty = result.status === 204 || result.status === 205 || result.status === 304 || request.method === 'HEAD';
+      var response = new Response(empty ? null : fromBase64(result.body), {
+        status: result.status,
+        statusText: result.statusText,
+        headers: result.headers
+      });
+      Object.defineProperty(response, 'url', { value: result.url });
+      return response;
+    }, function (error) {
+      // fetch reports every network-level failure as a TypeError.
+      throw new TypeError(error && error.message ? error.message : 'Failed to fetch');
+    });
+
+    if (!signal) { return proxied; }
+    return new Promise(function (resolve, reject) {
+      var onAbort = function () { reject(abortError(signal)); };
+      signal.addEventListener('abort', onAbort, { once: true });
+      proxied.then(resolve, reject).finally(function () {
+        signal.removeEventListener('abort', onAbort);
+      });
+    });
+  };
+
   // The renderer was written for Chromium. WebKit (WKWebView / WebKitGTK)
   // has no requestIdleCallback.
   if (typeof window.requestIdleCallback !== 'function') {
@@ -219,9 +329,18 @@
     catch (_) { /* never let reporting throw */ }
   }
   function describe(value) {
-    if (value && value.stack) { return String(value.message || value) + '\n' + value.stack; }
-    try { return typeof value === 'string' ? value : JSON.stringify(value); }
-    catch (_) { return String(value); }
+    if (value instanceof Error || (value && value.stack)) {
+      return (value.name || 'Error') + ': ' + String(value.message || value) + '\n' + (value.stack || '');
+    }
+    if (typeof value === 'string') { return value; }
+    var text;
+    try { text = JSON.stringify(value); } catch (_) { text = undefined; }
+    // An object with no enumerable fields says nothing as JSON.
+    if (text === undefined || text === '{}') {
+      var kind = value && value.constructor ? value.constructor.name : typeof value;
+      return '[' + kind + '] ' + String(value);
+    }
+    return text;
   }
   window.addEventListener('error', function (event) {
     if (event.target && event.target !== window && (event.target.src || event.target.href)) {

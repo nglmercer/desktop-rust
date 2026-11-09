@@ -20,7 +20,9 @@
 mod actions;
 mod bridge;
 mod host;
+mod instance;
 mod menu;
+mod protocol;
 
 use std::sync::{Arc, Mutex};
 
@@ -71,6 +73,13 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return self_test();
     }
 
+    // A launch that only carries a URL or CLI action belongs to the window
+    // that is already open: hand it over and exit.
+    let instance_socket = desktop_core::AppPaths::detect()?.user_data.join("instance.sock");
+    if args.iter().any(|arg| instance::is_forwardable(arg)) && instance::forward(&instance_socket, &args) {
+        return Ok(());
+    }
+
     // -- tao event loop -----------------------------------------------------
     let event_loop = EventLoopBuilder::<AppEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
@@ -87,6 +96,19 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_min_inner_size(tao::dpi::LogicalSize::new(880.0, 600.0))
         .with_visible(true)
         .build(&event_loop)?;
+
+    protocol::register();
+    if let Err(error) = instance::listen(&instance_socket, {
+        let app = app.clone();
+        let host = host.clone();
+        move |args| {
+            app.handle_launch_args(&args);
+            // Bring the window forward: the user is coming back from a browser.
+            let _ = desktop_core::Host::window(&*host, desktop_core::ipc::protocol::WindowAction::Focus);
+        }
+    }) {
+        tracing::warn!(%error, "single-instance handoff is unavailable; sign-in callbacks will open a second window");
+    }
 
     // -- native menu --------------------------------------------------------
     let native_menu = menu::install(proxy.clone());
@@ -278,8 +300,8 @@ fn print_help() {
          --self-test          run headless IPC/domain smoke tests and exit\n  \
          --cli-open=<path>    open a local repository on launch\n  \
          --cli-clone=<url>    clone a URL on launch\n\n\
-         Any x-github-client:// or github-mac:// argument is forwarded as a\n\
-         url-action event to the web layer.",
+         An x-github-client:// link or OAuth callback URL is forwarded to the\n\
+         running window as a url-action event.",
         env!("CARGO_PKG_VERSION")
     );
 }

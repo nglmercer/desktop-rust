@@ -1,1 +1,0 @@
-export class Buffer extends Uint8Array { static alloc(n:number){ return new Buffer(n) } static from(s:any){ return Buffer.from(String(s||'')) } toString(e?:string){ return new TextDecoder().decode(this) } }

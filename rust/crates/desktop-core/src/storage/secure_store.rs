@@ -3,13 +3,16 @@
 //! On Windows the token is encrypted with DPAPI (`CurrentUser`) before it is
 //! written to disk, so the ciphertext is bound to the logged-in Windows
 //! account. The plaintext is passed over stdin, never on a command line where
-//! it would be visible to other processes. On other platforms a 0600 file is
-//! used until the native keychain backends are wired up (see MIGRATION.md).
+//! it would be visible to other processes. On other platforms the secret is
+//! stored unencrypted in a file only its owner can read (0600, in a 0700
+//! directory) until the native keychain backends are wired up.
 //!
 //! No token ever appears in `AppState` snapshots sent to the webview.
 
+#[cfg(target_os = "windows")]
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
 use std::process::{Command, Stdio};
 
 use crate::error::{AppError, Result};
@@ -22,13 +25,25 @@ pub struct SecureStore {
 impl SecureStore {
     pub fn new(dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&dir)?;
+        // Only the owner may list or read credentials. Also tightens files
+        // written by earlier builds that left them world-readable.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+            for entry in std::fs::read_dir(&dir)?.flatten() {
+                if entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                    std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o600))?;
+                }
+            }
+        }
         Ok(Self { dir })
     }
 
     pub fn set_item(&self, key: &str, login: &str, value: &str) -> Result<()> {
         let protected = protect(value)?;
         let record = serde_json::json!({ "login": login, "secret": protected });
-        super::json_store::atomic_write(&self.path_for(key), &serde_json::to_vec(&record)?)
+        write_private(&self.path_for(key), &serde_json::to_vec(&record)?)
     }
 
     pub fn get_item(&self, key: &str, _login: &str) -> Result<Option<String>> {
@@ -58,6 +73,32 @@ impl SecureStore {
         let hashed = crate::models::repository::simple_hash(key);
         self.dir.join(format!("{hashed:016x}.cred"))
     }
+}
+
+/// Atomically replace `path` with `bytes`, never exposing the content to
+/// other users: the temporary file is created owner-only before any data is
+/// written to it.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| {
+        let mut file = options.open(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    Ok(result?)
 }
 
 #[cfg(target_os = "windows")]
@@ -110,7 +151,6 @@ fn powershell(script: &str, input: &str) -> Result<String> {
 
 #[cfg(not(target_os = "windows"))]
 fn protect(plaintext: &str) -> Result<String> {
-    tracing::warn!("native keychain not wired for this platform; using 0600 file fallback");
     Ok(base64_encode(plaintext.as_bytes()))
 }
 
@@ -161,4 +201,40 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>> {
         if padding < 1 { out.push(n as u8); }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secrets_round_trip_and_are_private_to_the_owner() {
+        let dir = std::env::temp_dir().join(format!("desktop-secure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = SecureStore::new(dir.clone()).unwrap();
+
+        assert_eq!(store.get_item("service\nlogin", "login").unwrap(), None);
+        store.set_item("service\nlogin", "login", "s3cret").unwrap();
+        store.set_item("service\nlogin", "login", "rotated").unwrap();
+        assert_eq!(store.get_item("service\nlogin", "login").unwrap().as_deref(), Some("rotated"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&dir), 0o700);
+            let files: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+            assert_eq!(files.len(), 1, "no temporary file is left behind");
+            assert_eq!(mode(&files[0].path()), 0o600);
+
+            // A file left world-readable by an older build is tightened on open.
+            std::fs::set_permissions(files[0].path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+            SecureStore::new(dir.clone()).unwrap();
+            assert_eq!(mode(&files[0].path()), 0o600);
+        }
+
+        store.delete_item("service\nlogin", "login").unwrap();
+        assert_eq!(store.get_item("service\nlogin", "login").unwrap(), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

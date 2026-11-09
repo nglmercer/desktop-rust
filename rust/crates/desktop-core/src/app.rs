@@ -71,6 +71,11 @@ impl DesktopApp {
     /// Duplex IPC (`ipcRenderer.invoke`). Returns the value that resolves the
     /// JS promise, or a flattened error.
     pub fn invoke(&self, channel: &str, args: Vec<Value>) -> Result<Value> {
+        // Host services are stateless; keep them off the state lock so a
+        // long git or HTTP call cannot stall every other command.
+        if crate::io::handles(channel) {
+            return crate::io::invoke(self, channel, &args);
+        }
         let message = IpcMessage { channel: channel.to_string(), args };
         let outcome = {
             let mut state = self.lock_state()?;
@@ -164,23 +169,177 @@ impl DesktopApp {
                     crate::ipc::channels::event::CLI_ACTION,
                     vec![json!({ "kind": "clone-url", "url": url })],
                 );
-            } else if arg.starts_with("x-github-client://") || arg.starts_with("github-mac://") {
-                let action = parse_app_url(arg);
-                self.emit(crate::ipc::channels::event::URL_ACTION, vec![action]);
+            } else if is_app_url(arg) {
+                self.emit(crate::ipc::channels::event::URL_ACTION, vec![parse_app_url(arg)]);
             }
         }
     }
 }
 
-/// Port of `app/src/lib/parse-app-url.ts`.
+/// URL schemes that launch the app. `x-github-client` carries "open in
+/// Desktop" links; the `*-auth` schemes carry the OAuth callback. Which auth
+/// scheme GitHub redirects to is fixed by the OAuth app's registration, not
+/// by this code: the development client id used by default redirects to
+/// `x-github-desktop-dev-auth`.
+pub const URL_SCHEMES: &[&str] = &[
+    "x-github-client",
+    "x-github-desktop-auth",
+    "x-github-desktop-dev-auth",
+    "github-mac",
+    "github-windows",
+];
+
+pub fn is_app_url(arg: &str) -> bool {
+    arg.split_once("://")
+        .is_some_and(|(scheme, _)| URL_SCHEMES.contains(&scheme.to_ascii_lowercase().as_str()))
+}
+
+/// Port of `app/src/lib/parse-app-url.ts`. Produces a `URLActionType`.
 pub fn parse_app_url(url: &str) -> Value {
-    let raw = url.split("://").nth(1).unwrap_or("");
-    let (kind, rest) = raw.split_once('/').unwrap_or((raw, ""));
-    let mut action = serde_json::Map::new();
-    action.insert("kind".into(), json!(kind));
-    action.insert("raw".into(), json!(url));
-    for (key, value) in rest.split('&').filter_map(|pair| pair.split_once('=')) {
-        action.insert(key.to_string(), json!(value));
+    let unknown = || json!({ "name": "unknown", "url": url });
+
+    let Some((_, rest)) = url.split_once("://") else {
+        return unknown();
+    };
+    let rest = rest.split('#').next().unwrap_or("");
+    let (location, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let (host, path) = match location.find('/') {
+        Some(index) => (&location[..index], &location[index..]),
+        None => (location, ""),
+    };
+    if host.is_empty() {
+        return unknown();
     }
-    Value::Object(action)
+
+    // First occurrence wins, like `getQueryStringValue`.
+    let param = |name: &str| {
+        query
+            .split('&')
+            .filter_map(|pair| pair.split_once('=').or(Some((pair, ""))))
+            .find(|(key, _)| percent_decode(key) == name)
+            .map(|(_, value)| percent_decode(&value.replace('+', " ")))
+    };
+
+    match host.to_ascii_lowercase().as_str() {
+        "oauth" => match (param("code"), param("state")) {
+            (Some(code), Some(state)) => json!({ "name": "oauth", "code": code, "state": state }),
+            _ => unknown(),
+        },
+        "openrepo" => {
+            if path.len() <= 1 {
+                return unknown();
+            }
+            let (pr, branch, filepath) = (param("pr"), param("branch"), param("filepath"));
+            if let Some(pr) = &pr {
+                if pr.is_empty() || !pr.bytes().all(|b| b.is_ascii_digit()) {
+                    return unknown();
+                }
+                // A forked PR's branch must use the `pr/<number>` ref format.
+                if let Some(branch) = &branch {
+                    let valid = branch
+                        .strip_prefix("pr/")
+                        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+                    if !valid {
+                        return unknown();
+                    }
+                }
+            }
+            if branch.as_deref().is_some_and(has_invalid_ref_chars) {
+                return unknown();
+            }
+            json!({
+                "name": "open-repository-from-url",
+                // The legacy parser leaves the path as written.
+                "url": &path[1..],
+                "branch": branch,
+                "pr": pr,
+                "filepath": filepath,
+            })
+        }
+        _ => unknown(),
+    }
+}
+
+/// `testForInvalidChars` in `sanitize-ref-name.ts`: what git forbids in a
+/// ref name, see https://git-scm.com/docs/git-check-ref-format
+fn has_invalid_ref_chars(value: &str) -> bool {
+    value.chars().any(|c| {
+        (c as u32) <= 0x20
+            || matches!(c, '\x7f' | '~' | '^' | ':' | '?' | '*' | '[' | '\\' | '|' | '"' | '<' | '>')
+    }) || value.contains("@{")
+        || value.contains("..")
+        || value.starts_with('.')
+        || value.ends_with('.')
+        || value.ends_with(".lock")
+        || value.ends_with('/')
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(hi << 4 | lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oauth_callback_is_parsed_for_every_auth_scheme() {
+        for scheme in ["x-github-desktop-dev-auth", "x-github-desktop-auth", "x-github-client"] {
+            let url = format!("{scheme}://oauth?code=abc%2F1&state=2f6c-uuid");
+            assert!(is_app_url(&url));
+            assert_eq!(
+                parse_app_url(&url),
+                json!({ "name": "oauth", "code": "abc/1", "state": "2f6c-uuid" })
+            );
+        }
+        assert_eq!(parse_app_url("x-github-client://oauth?code=abc")["name"], "unknown");
+    }
+
+    #[test]
+    fn open_repository_urls_are_validated() {
+        let action = parse_app_url(
+            "x-github-client://openRepo/https://github.com/desktop/desktop?branch=pr%2F12&pr=12",
+        );
+        assert_eq!(action["name"], "open-repository-from-url");
+        assert_eq!(action["url"], "https://github.com/desktop/desktop");
+        assert_eq!(action["branch"], "pr/12");
+        assert_eq!(action["pr"], "12");
+        assert_eq!(action["filepath"], Value::Null);
+
+        for bad in [
+            "x-github-client://openRepo/",
+            "x-github-client://openRepo/https://github.com/a/b?pr=abc",
+            "x-github-client://openRepo/https://github.com/a/b?pr=1&branch=main",
+            "x-github-client://openRepo/https://github.com/a/b?branch=a..b",
+            "x-github-client://openRepo/https://github.com/a/b?branch=a%20b",
+            "x-github-client://openRepo/https://github.com/a/b?branch=x.lock",
+            "x-github-client://openRepo/https://github.com/a/b?branch=a@{b",
+            "x-github-client://somethingelse/x",
+        ] {
+            assert_eq!(parse_app_url(bad)["name"], "unknown", "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_registered_schemes_are_app_urls() {
+        assert!(!is_app_url("https://github.com/desktop/desktop"));
+        assert!(!is_app_url("--cli-open=/tmp"));
+        assert!(!is_app_url("/home/user/x-github-client://oauth"));
+        assert!(is_app_url("X-GitHub-Client://openRepo/x"));
+    }
 }
