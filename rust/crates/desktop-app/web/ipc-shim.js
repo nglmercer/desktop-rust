@@ -196,6 +196,50 @@
     };
   }
 
+  // The renderer was written for Chromium. WebKit (WKWebView / WebKitGTK)
+  // has no requestIdleCallback.
+  if (typeof window.requestIdleCallback !== 'function') {
+    window.requestIdleCallback = function (callback, options) {
+      var start = Date.now();
+      return setTimeout(function () {
+        callback({
+          didTimeout: false,
+          timeRemaining: function () { return Math.max(0, 50 - (Date.now() - start)); }
+        });
+      }, options && options.timeout ? Math.min(options.timeout, 1) : 1);
+    };
+    window.cancelIdleCallback = function (id) { clearTimeout(id); };
+  }
+
+  // Electron showed renderer failures in DevTools and the main-process log.
+  // A wry window has neither by default, so a failed boot is a silent blank
+  // page. Forward uncaught errors to the Rust log.
+  function report(kind, detail) {
+    try { post({ channel: 'log', args: ['error', '[renderer ' + kind + '] ' + detail] }); }
+    catch (_) { /* never let reporting throw */ }
+  }
+  function describe(value) {
+    if (value && value.stack) { return String(value.message || value) + '\n' + value.stack; }
+    try { return typeof value === 'string' ? value : JSON.stringify(value); }
+    catch (_) { return String(value); }
+  }
+  window.addEventListener('error', function (event) {
+    if (event.target && event.target !== window && (event.target.src || event.target.href)) {
+      report('resource', 'failed to load ' + (event.target.src || event.target.href));
+      return;
+    }
+    report('error', (event.message || 'unknown') + ' at ' + event.filename + ':' + event.lineno + ':' + event.colno +
+      (event.error && event.error.stack ? '\n' + event.error.stack : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (event) {
+    report('unhandledrejection', describe(event.reason));
+  });
+  var consoleError = console.error.bind(console);
+  console.error = function () {
+    consoleError.apply(null, arguments);
+    report('console.error', Array.prototype.map.call(arguments, describe).join(' '));
+  };
+
   // Safety net: if the UI never calls ready(), flush queued events anyway.
   window.addEventListener('DOMContentLoaded', function () {
     setTimeout(markReady, 0);

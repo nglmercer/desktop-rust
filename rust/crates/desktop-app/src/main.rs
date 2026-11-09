@@ -105,6 +105,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let bridge = bridge.clone();
             move |request| bridge.handle_ipc(request.body())
         })
+        .with_initialization_script(&host_env_script())
         .with_initialization_script(INIT_SCRIPT)
         .with_navigation_handler(|url| {
             url.starts_with("desktop://")
@@ -240,6 +241,32 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
     });
+}
+
+/// Host facts the renderer used to read from Node's `os` and `process`.
+/// Injected before any page script so the `os` shim answers synchronously.
+fn host_env_script() -> String {
+    let platform = match std::env::consts::OS {
+        "windows" => "win32",
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        "x86" => "ia32",
+        other => other,
+    };
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let env = json!({
+        "platform": platform,
+        "arch": arch,
+        "homedir": home,
+        "tmpdir": std::env::temp_dir().to_string_lossy(),
+    });
+    format!("window.__desktopEnv = Object.freeze({});", js_literal(&env))
 }
 
 fn print_help() {

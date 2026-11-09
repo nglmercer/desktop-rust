@@ -142,4 +142,4 @@ export const BrowserWindowShim = {
 // re-export for compat
 export { BrowserWindowShim as BrowserWindow }
 
-export default { ipcRenderer, shell, webUtils, remote, app, dialog, BrowserWindow }
+export default { ipcRenderer, shell, webUtils, remote, app, dialog, BrowserWindow: BrowserWindowShim }

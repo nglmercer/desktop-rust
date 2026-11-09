@@ -194,19 +194,32 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
         tx::UPDATE_MENU_STATE => {
             let updates: Vec<MenuStateUpdate> =
                 serde_json::from_value(msg.arg(0).cloned().unwrap_or(json!([])))?;
-            apply_menu_state(&mut state.app_menu.items, &updates);
+            // Only send the menu back when something actually changed. The
+            // renderer re-sends its menu state on every store update, so an
+            // unconditional reply is a never-ending loop between the two
+            // (the Electron main process guarded against the same thing).
+            if !apply_menu_state(&mut state.app_menu.items, &updates) {
+                return Ok(false);
+            }
             app.emit(event::APP_MENU, vec![serde_json::to_value(&state.app_menu)?]);
             return Ok(true);
         }
         tx::UPDATE_PREFERRED_APP_MENU_ITEM_LABELS => {
             // `MenuLabelsEvent` maps ids to preferred labels (e.g. "Pull" vs
             // "Pull with Rebase"). Applied to the same serialized menu model.
+            let mut changed = false;
             if let Some(labels) = msg.arg(0).ok().and_then(Value::as_object) {
                 for item in &mut state.app_menu.items {
                     if let Some(new_label) = labels.get(&item.id).and_then(Value::as_str) {
-                        item.label = Some(new_label.to_string());
+                        if item.label.as_deref() != Some(new_label) {
+                            item.label = Some(new_label.to_string());
+                            changed = true;
+                        }
                     }
                 }
+            }
+            if !changed {
+                return Ok(false);
             }
             app.emit(event::APP_MENU, vec![serde_json::to_value(&state.app_menu)?]);
             return Ok(true);
@@ -264,20 +277,71 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
     Ok(false)
 }
 
-fn apply_menu_state(items: &mut [SerializableMenuItem], updates: &[MenuStateUpdate]) {
+fn apply_menu_state(items: &mut [SerializableMenuItem], updates: &[MenuStateUpdate]) -> bool {
+    fn set<T: PartialEq>(slot: &mut T, value: T) -> bool {
+        if *slot == value {
+            return false;
+        }
+        *slot = value;
+        true
+    }
+
+    let mut changed = false;
     for item in items {
         for update in updates {
             if item.id == update.id {
-                if let Some(enabled) = update.state.enabled { item.enabled = enabled; }
-                if let Some(checked) = update.state.checked { item.checked = checked; }
-                if let Some(visible) = update.state.visible { item.visible = visible; }
-                if let Some(label) = &update.state.label { item.label = Some(label.clone()); }
+                if let Some(enabled) = update.state.enabled {
+                    changed |= set(&mut item.enabled, enabled);
+                }
+                if let Some(checked) = update.state.checked {
+                    changed |= set(&mut item.checked, checked);
+                }
+                if let Some(visible) = update.state.visible {
+                    changed |= set(&mut item.visible, visible);
+                }
+                if let Some(label) = &update.state.label {
+                    changed |= set(&mut item.label, Some(label.clone()));
+                }
             }
         }
-        apply_menu_state(&mut item.submenu, updates);
+        changed |= apply_menu_state(&mut item.submenu, updates);
     }
+    changed
 }
 
 pub fn notification_permission_default() -> DesktopNotificationPermission {
     DesktopNotificationPermission::Default
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str, enabled: bool, submenu: Vec<SerializableMenuItem>) -> SerializableMenuItem {
+        serde_json::from_value(json!({
+            "id": id,
+            "enabled": enabled,
+            "visible": true,
+            "submenu": serde_json::to_value(submenu).unwrap(),
+        }))
+        .unwrap()
+    }
+
+    fn update(id: &str, enabled: bool) -> MenuStateUpdate {
+        serde_json::from_value(json!({ "id": id, "state": { "enabled": enabled } })).unwrap()
+    }
+
+    /// The renderer re-sends its menu state after every store update. Replying
+    /// to an update that changes nothing would ping-pong forever.
+    #[test]
+    fn menu_state_reports_a_change_only_when_something_changed() {
+        let mut menu = vec![item("repository", true, vec![item("push", false, vec![])])];
+
+        assert!(apply_menu_state(&mut menu, &[update("push", true)]));
+        assert!(menu[0].submenu[0].enabled);
+
+        assert!(!apply_menu_state(&mut menu, &[update("push", true)]));
+        assert!(!apply_menu_state(&mut menu, &[update("unknown", false)]));
+        assert!(!apply_menu_state(&mut menu, &[]));
+    }
 }

@@ -144,7 +144,7 @@ impl Bridge {
         request: http::Request<Vec<u8>>,
         responder: RequestAsyncResponder,
     ) {
-        let path = request.uri().path().trim_start_matches('/').to_string();
+        let path = percent_decode(request.uri().path().trim_start_matches('/'));
 
         if path == "__health" {
             let info = match self.app.invoke("desktop.get-app-info", vec![]) {
@@ -216,21 +216,49 @@ fn response(
 }
 
 fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
-    // Serve Vite dist (1:1 original UI) — hashed assets under assets/
-    // Canonical: "" or "index.html" -> index.html
-    if path.is_empty() || path == "index.html" {
-        let file = VITE_DIST.get_file("index.html")?;
-        return Some(("text/html; charset=utf-8", file.contents()));
+    // The Vite build of the renderer: index.html, hashed bundles under
+    // assets/ and the static resources the UI loads by URL.
+    let path = if path.is_empty() { "index.html" } else { path };
+    let file = VITE_DIST.get_file(path)?;
+    Some((mime_for(path), file.contents()))
+}
+
+/// Decode `%XX` escapes in a request path. Invalid escapes are kept verbatim;
+/// the traversal checks run on the decoded result.
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(hi << 4 | lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
     }
-    if path.starts_with("assets/") {
-        let file = VITE_DIST.get_file(path)?;
-        let mime = if path.ends_with(".css") { "text/css; charset=utf-8" } else if path.ends_with(".js") || path.ends_with(".mjs") { "text/javascript; charset=utf-8" } else { "application/octet-stream" };
-        return Some((mime, file.contents()));
-    }
-    // Legacy fallbacks
-    match path {
-        "styles.css" => VITE_DIST.get_file("assets/index-CTcdtyGe.css").map(|f| ("text/css; charset=utf-8", f.contents())),
-        _ => None,
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn mime_for(path: &str) -> &'static str {
+    match path.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" | "map" => JSON,
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "ico" => "image/x-icon",
+        "woff2" => "font/woff2",
+        "woff" => "font/woff",
+        "md" | "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
     }
 }
 
@@ -247,4 +275,27 @@ pub fn js_literal(value: &Value) -> String {
         .unwrap_or_else(|_| "null".to_string())
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percent_decoding_handles_escapes_and_malformed_input() {
+        assert_eq!(percent_decode("static/logo-64x64%402x.png"), "static/logo-64x64@2x.png");
+        assert_eq!(percent_decode("a%2e%2E/b"), "a../b");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz%4"), "%zz%4");
+        assert_eq!(percent_decode("%41"), "A");
+    }
+
+    #[test]
+    fn assets_resolve_with_a_content_type() {
+        let (mime, bytes) = asset("").expect("index.html is embedded");
+        assert_eq!(mime, "text/html; charset=utf-8");
+        assert!(!bytes.is_empty());
+        assert!(asset("does/not/exist.js").is_none());
+        assert_eq!(mime_for("static/x.svg"), "image/svg+xml");
+    }
 }
