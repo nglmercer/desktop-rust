@@ -1,13 +1,19 @@
 // Used only by --smoke-test; the normal host exposes no native IPC commands.
 ;(() => {
+  // The initialization script also runs for the initial about:blank document
+  // before wry navigates to the session URL. Ignore it until we are on http.
+  if (location.protocol !== 'http:') return
   const token = new URLSearchParams(location.hash.slice(1)).get('token')
+  if (!token) return
   window.addEventListener(
     'DOMContentLoaded',
     async () => {
       let bridge
       try {
-        const { connect } = await import('/transport.js')
-        await import('/panels.js')
+        // Resolve against the live URL so '/transport.js' works even when the
+        // script was injected before navigation and the base is about:blank.
+        const { connect } = await import(new URL('/transport.js', location.href).href)
+        await import(new URL('/panels.js', location.href).href)
         bridge = connect(token)
         await bridge.ready
         const preferences = await bridge.request('get_preferences')
