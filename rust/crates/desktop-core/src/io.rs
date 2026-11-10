@@ -25,18 +25,61 @@ use crate::storage::{base64_decode, base64_encode};
 
 pub const PREFIX: &str = "desktop.io.";
 
+pub mod executor;
+pub mod limits;
 mod process;
 
-pub use process::{EVENT as PROCESS_EVENT, PROCESS_OPERATIONS};
+pub use process::EVENT as PROCESS_EVENT;
 
 /// The renderer's `__dirname` in the web build (`BundleRoot` in
 /// `app/src/web/bundle.ts`). Not a real directory: the shims map paths under
 /// it onto resources served from the page origin.
 pub const BUNDLE_ROOT: &str = "/__desktop_app__";
 
+/// Which executor serves a host operation. The lanes are separate so that a
+/// slow operation in one cannot starve the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane {
+    /// Process stdin, output acknowledgements and kill. Each request is tiny
+    /// and never waits for the child, so this lane always makes progress.
+    Control,
+    /// Operations that may run for a long time: git, HTTP, process spawn,
+    /// hashing and recursive file work.
+    Long,
+    /// Everything else: metadata, ranges, small file operations, keychain.
+    Short,
+}
+
 /// Whether `channel` is served by this module.
 pub fn handles(channel: &str) -> bool {
     channel.starts_with(PREFIX)
+}
+
+/// The lane for a `desktop.io.*` channel. Unknown channels are `Short`, so
+/// they fail quickly with `UnknownChannel`.
+pub fn lane(channel: &str) -> Lane {
+    match channel.strip_prefix(PREFIX).unwrap_or("") {
+        "process-write" | "process-end" | "process-kill" | "process-ack" => Lane::Control,
+        "git-exec" | "http-fetch" | "process-spawn" | "fs-copy" | "fs-copy-file" | "fs-hash" => Lane::Long,
+        "fs-rm" => Lane::Long,
+        _ => Lane::Short,
+    }
+}
+
+/// Synchronous (`invokeSync`) calls may use only short work. A recursive
+/// removal is long work here: it keeps the renderer blocked, so the caller
+/// must use the asynchronous API.
+pub fn allowed_synchronously(channel: &str, args: &[Value]) -> bool {
+    if !handles(channel) {
+        // Renderer state commands are asynchronous only.
+        return false;
+    }
+    let recursive = args.first().and_then(|o| o.get("recursive")).and_then(Value::as_bool).unwrap_or(false);
+    match lane(channel) {
+        Lane::Short => true,
+        Lane::Control => false,
+        Lane::Long => channel == "desktop.io.fs-rm" && !recursive,
+    }
 }
 
 pub fn invoke(app: &DesktopApp, channel: &str, args: &[Value]) -> Result<Value> {
@@ -62,12 +105,24 @@ pub fn invoke(app: &DesktopApp, channel: &str, args: &[Value]) -> Result<Value> 
         "process-spawn" => process::spawn(app, o),
         "process-write" => process::write(o),
         "process-end" => process::end_input(o),
-        "process-kill" => process::kill(o),
+        "process-ack" => process::ack(o),
+        "process-kill" => process::kill(app, o),
         other => match other.strip_prefix("fs-") {
             Some(operation) => fs_invoke(operation, o),
             None => Err(AppError::UnknownChannel(channel.to_string())),
         },
     }
+}
+
+/// Renderer shutdown: stop children and release every stream waiting for
+/// credit. See [`process::shutdown`].
+pub fn shutdown(app: &DesktopApp) {
+    process::shutdown(app);
+}
+
+/// Live counters for development tooling. Holds no stream content.
+pub fn diagnostics(app: &DesktopApp) -> Value {
+    json!({ "processes": process::diagnostics(app) })
 }
 
 fn string(o: &Value, key: &str) -> Result<String> {

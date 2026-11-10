@@ -69,11 +69,20 @@ impl Default for WindowInfo {
     }
 }
 
+/// Events delivered to the webview per `Flush`. A larger backlog is split
+/// across flushes, so the UI thread can handle other user events in between.
+const BATCH_EVENTS: usize = 64;
+/// Serialized payload delivered per `Flush`.
+const BATCH_BYTES: usize = 256 * 1024;
+
 pub struct TaoHost {
     proxy: EventLoopProxy<AppEvent>,
     info: Arc<Mutex<WindowInfo>>,
     outbox: Mutex<Vec<(String, Value)>>,
     running: AtomicBool,
+    /// At most one `Flush` is queued at a time. Cleared when a flush starts,
+    /// so an event published during the flush queues the next one.
+    flush_scheduled: AtomicBool,
 }
 
 impl TaoHost {
@@ -83,15 +92,53 @@ impl TaoHost {
             info,
             outbox: Mutex::new(Vec::new()),
             running: AtomicBool::new(true),
+            flush_scheduled: AtomicBool::new(false),
         })
     }
 
-    /// Take every pending main-process event, preserving insertion order.
-    pub fn drain(&self) -> Vec<(String, Value)> {
-        std::mem::take(&mut *self.outbox.lock().unwrap_or_else(|e| e.into_inner()))
+    /// Post a `Flush` unless one is already queued.
+    pub fn schedule_flush(&self) {
+        if !self.flush_scheduled.swap(true, Ordering::AcqRel) {
+            // A failed Flush means the loop is gone; there is nothing left to do.
+            let _ = self.proxy.send_event(AppEvent::Flush);
+        }
+    }
+
+    /// Called when a `Flush` starts. Events published from now on schedule
+    /// their own flush instead of relying on the one that is running.
+    pub fn flush_started(&self) {
+        self.flush_scheduled.store(false, Ordering::Release);
+    }
+
+    /// Take the next batch, in insertion order, bounded by events and bytes.
+    /// The outbox lock is released before the caller runs any JavaScript.
+    pub fn take_batch(&self) -> Vec<(String, Value)> {
+        let mut outbox = self.outbox.lock().unwrap_or_else(|e| e.into_inner());
+        let mut taken = 0usize;
+        let mut bytes = 0usize;
+        let mut count = 0usize;
+        for (_, args) in outbox.iter() {
+            if count == BATCH_EVENTS {
+                break;
+            }
+            let size = args.to_string().len();
+            // Always take at least one event, even an oversized one.
+            if count > 0 && bytes + size > BATCH_BYTES {
+                break;
+            }
+            bytes += size;
+            count += 1;
+            taken = count;
+        }
+        outbox.drain(..taken).collect()
+    }
+
+    pub fn has_pending(&self) -> bool {
+        !self.outbox.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
     /// Re-queue events whose script evaluation failed (webview still loading).
+    /// They go back to the front, so the order is kept.
     pub fn requeue(&self, mut events: Vec<(String, Value)>) {
         if events.is_empty() {
             return;
@@ -136,12 +183,22 @@ impl TaoHost {
 
 impl Host for TaoHost {
     fn emit(&self, channel: &str, args: Value) {
-        self.outbox
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((channel.to_string(), args));
-        // A failed Flush means the loop is gone; there is nothing left to do.
-        let _ = self.proxy.send_event(AppEvent::Flush);
+        {
+            let mut outbox = self.outbox.lock().unwrap_or_else(|e| e.into_inner());
+            // Snapshots replace the one before them when nothing sits between
+            // the two, so the renderer applies the latest state without
+            // reordering any other event.
+            let replaceable = channel == desktop_core::app::STATE_CHANGED
+                && outbox.last().is_some_and(|(last, _)| last == channel);
+            if replaceable {
+                if let Some(last) = outbox.last_mut() {
+                    last.1 = args;
+                }
+            } else {
+                outbox.push((channel.to_string(), args));
+            }
+        }
+        self.schedule_flush();
     }
 
     fn window(&self, action: WindowAction) -> Result<Value> {

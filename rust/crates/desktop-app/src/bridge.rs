@@ -15,20 +15,24 @@
 //! tests and non-webview clients.
 
 use std::borrow::Cow;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tao::event_loop::EventLoopProxy;
 use wry::RequestAsyncResponder;
 
 use desktop_core::app::DesktopApp;
+use desktop_core::io::executor::{Executor, ExecutorStats, Outcome, Task};
+use desktop_core::io::limits::MIB;
+use desktop_core::io::Lane;
 use desktop_core::ipc::channels::{event, send as tx};
 use desktop_core::ipc::protocol::{IpcMessage, RpcResult};
 
 use include_dir::{include_dir, Dir};
 
-use crate::host::{AppEvent, TaoHost};
+use crate::host::AppEvent;
 
 static VITE_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
 const DEV_VITE_DIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../out/vite-dist");
@@ -40,6 +44,21 @@ const DEV_VITE_DIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../out/v
 pub const INIT_SCRIPT: &str = include_str!("../web/ipc-shim.js");
 
 const JSON: &str = "application/json; charset=utf-8";
+
+/// How long a normal request may wait for a worker before nobody is left to
+/// answer it. The renderer gives up after 180 s, so this is shorter.
+const RPC_DEADLINE: Duration = Duration::from_secs(170);
+
+/// Simplex messages have no caller waiting for them.
+const SEND_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Queued control requests: small messages, so the count is the real limit.
+const CONTROL_CAPACITY: usize = 256;
+
+/// `invokeSync` is served from a lane of its own. Only a few synchronous
+/// requests are in flight at once, since the renderer blocks on each.
+const SYNC_CAPACITY: usize = 8;
+const SYNC_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -58,114 +77,157 @@ enum Incoming {
     },
 }
 
+/// The admission lanes. Each has a fixed number of workers and a bounded
+/// queue; nothing here creates a thread per request.
+///
+/// * `state` runs renderer commands in arrival order, through one worker.
+/// * `control` takes stdin writes, stream acknowledgements and kills. Its
+///   requests return at once, so it keeps moving while the others are busy.
+/// * `short` and `long` take host IO, split by how long the work can take.
+/// * `sync` serves `invokeSync` only.
 pub struct Bridge {
-    app: Arc<DesktopApp>,
-    /// A single worker consumes all renderer messages. Keeping it off the
-    /// webview callback thread means `Host::window` can safely block on the
-    /// tao event loop when a modal dialog needs an answer.
-    incoming: Mutex<mpsc::Sender<Incoming>>,
+    app: std::sync::Arc<DesktopApp>,
+    /// Redirects worker results back to the event loop. Behind a mutex only
+    /// because `EventLoopProxy` is cloned out for each request.
     proxy: Mutex<EventLoopProxy<AppEvent>>,
+    state: Executor,
+    control: Executor,
+    short: Executor,
+    long: Executor,
+    sync: Executor,
 }
 
 impl Bridge {
     pub fn new(
-        app: Arc<DesktopApp>,
+        app: std::sync::Arc<DesktopApp>,
         proxy: EventLoopProxy<AppEvent>,
-        host: Arc<TaoHost>,
-    ) -> Arc<Self> {
-        let (sender, receiver) = mpsc::channel::<Incoming>();
-        let worker_app = app.clone();
-        let worker_proxy = proxy.clone();
-
-        std::thread::Builder::new()
-            .name("desktop-ipc".into())
-            .spawn(move || {
-                while let Ok(message) = receiver.recv() {
-                    match message {
-                        Incoming::Send { channel, args } => {
-                            if let Err(error) = worker_app.send(&channel, args) {
-                                tracing::warn!(%channel, %error, "simplex IPC failed");
-                                worker_app.emit(
-                                    event::ERROR,
-                                    vec![serde_json::json!({
-                                        "type": "ipc",
-                                        "channel": channel,
-                                        "message": error.to_string(),
-                                    })],
-                                );
-                            }
-                            if channel == tx::RENDERER_READY {
-                                // The renderer now has listeners registered;
-                                // flush anything emitted during startup.
-                                let _ = worker_proxy.send_event(AppEvent::Flush);
-                            }
-                        }
-                        Incoming::Rpc { id, channel, args } => {
-                            let result = match worker_app.invoke(&channel, args) {
-                                Ok(value) => RpcResult::ok(value),
-                                Err(error) => RpcResult::err(error),
-                            };
-                            if worker_proxy
-                                .send_event(AppEvent::RpcResult { id, result })
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                    }
-                }
-                host.shutdown();
-            })
-            .expect("failed to start the desktop IPC worker");
-
-        Arc::new(Self {
+    ) -> std::io::Result<std::sync::Arc<Self>> {
+        let limits = app.resources.limits;
+        let state = Executor::new("desktop-state", 1, limits.queued_requests, limits.queued_bytes)?;
+        let control = Executor::new("desktop-control", 1, CONTROL_CAPACITY, MIB)?;
+        let short = Executor::new("desktop-io-short", limits.short_workers, limits.queued_requests, limits.queued_bytes)?;
+        let long = Executor::new("desktop-io-long", limits.long_workers, limits.queued_requests, limits.queued_bytes)?;
+        let sync = Executor::new("desktop-io-sync", 1, SYNC_CAPACITY, SYNC_BYTES)?;
+        Ok(std::sync::Arc::new(Self {
             app,
-            incoming: Mutex::new(sender),
             proxy: Mutex::new(proxy),
-        })
+            state,
+            control,
+            short,
+            long,
+            sync,
+        }))
     }
 
     fn proxy_handle(&self) -> EventLoopProxy<AppEvent> {
         self.proxy.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// `window.ipc.postMessage` entry point.
+    /// The executor that serves `channel`.
+    fn executor_for(&self, channel: &str) -> &Executor {
+        if !desktop_core::io::handles(channel) {
+            return &self.state;
+        }
+        match desktop_core::io::lane(channel) {
+            Lane::Control => &self.control,
+            Lane::Short => &self.short,
+            Lane::Long => &self.long,
+        }
+    }
+
+    /// Stop admitting work and finish what is queued as `Shutdown`. Running
+    /// tasks are not interrupted; the process stop handles them.
+    pub fn shutdown(&self) {
+        for executor in [&self.state, &self.control, &self.short, &self.long, &self.sync] {
+            executor.close();
+        }
+    }
+
+    /// `window.ipc.postMessage` entry point. Runs on the webview callback
+    /// thread, so it only admits work and never waits.
     pub fn handle_ipc(&self, body: &str) {
         match serde_json::from_str::<Incoming>(body) {
-            // Host services (git, filesystem, HTTP) can run for a long time
-            // and share no state, so each gets its own thread instead of
-            // queueing behind the single IPC worker.
-            // Process stdin writes and kills must keep the renderer's order, so
-            // they go through the queue; everything else gets its own thread.
-            Ok(Incoming::Rpc { id, channel, args })
-                if desktop_core::io::handles(&channel) && !is_ordered_io(&channel) =>
-            {
-                let app = self.app.clone();
-                let proxy = self.proxy_handle();
-                let spawned = std::thread::Builder::new().name("desktop-io".into()).spawn(move || {
-                    let result = match desktop_core::io::invoke(&app, &channel, &args) {
-                        Ok(value) => RpcResult::ok(value),
-                        Err(error) => RpcResult::err(error),
-                    };
-                    let _ = proxy.send_event(AppEvent::RpcResult { id, result });
-                });
-                if let Err(error) = spawned {
-                    tracing::error!(%error, "could not start a host-service thread");
-                    let result = RpcResult::err(desktop_core::error::AppError::msg(
-                        "the system could not start another thread",
-                    ));
-                    let _ = self.proxy_handle().send_event(AppEvent::RpcResult { id, result });
-                }
-            }
-            Ok(message) => {
-                let _ = self
-                    .incoming
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .send(message);
-            }
+            Ok(Incoming::Rpc { id, channel, args }) => self.admit_rpc(id, channel, args, body.len()),
+            Ok(Incoming::Send { channel, args }) => self.admit_send(channel, args, body.len()),
             Err(error) => tracing::warn!(%error, body = %truncate(body), "malformed IPC frame"),
         }
+    }
+
+    fn admit_rpc(&self, id: u64, channel: String, args: Vec<Value>, bytes: usize) {
+        let lane = self.executor_for(&channel);
+        let proxy = self.proxy_handle();
+        let app = self.app.clone();
+        let task = Task::new(bytes, Instant::now() + RPC_DEADLINE, move |outcome| {
+            let result = match outcome {
+                Outcome::Run => run_channel(&app, &channel, args),
+                other => refused(&channel, other),
+            };
+            let _ = proxy.send_event(AppEvent::RpcResult { id, result });
+        });
+        if let Err(task) = lane.submit(task) {
+            task.finish(Outcome::Rejected);
+        }
+    }
+
+    fn admit_send(&self, channel: String, args: Vec<Value>, bytes: usize) {
+        let lane = self.executor_for(&channel);
+        let proxy = self.proxy_handle();
+        let app = self.app.clone();
+        let outcome_channel = channel.clone();
+        let task = Task::new(bytes, Instant::now() + SEND_DEADLINE, move |outcome| match outcome {
+            Outcome::Run => {
+                let sent = if desktop_core::io::handles(&channel) {
+                    desktop_core::io::invoke(&app, &channel, &args).map(|_| ())
+                } else {
+                    app.send(&channel, args)
+                };
+                if let Err(error) = sent {
+                    tracing::warn!(%channel, %error, "simplex IPC failed");
+                    app.emit(
+                        event::ERROR,
+                        vec![json!({
+                            "type": "ipc",
+                            "channel": channel,
+                            "message": error.to_string(),
+                        })],
+                    );
+                }
+                if channel == tx::RENDERER_READY {
+                    // The renderer now has listeners registered; flush anything
+                    // emitted during startup.
+                    let _ = proxy.send_event(AppEvent::Flush);
+                }
+            }
+            Outcome::Rejected | Outcome::Expired => {
+                tracing::warn!(channel = %outcome_channel, ?outcome, "simplex IPC was not run");
+                app.emit(
+                    event::ERROR,
+                    vec![json!({
+                        "type": "ipc",
+                        "channel": outcome_channel,
+                        "message": "EBUSY: QUEUE_FULL, the message was not admitted",
+                    })],
+                );
+            }
+            Outcome::Shutdown => {}
+        });
+        if let Err(task) = lane.submit(task) {
+            task.finish(Outcome::Rejected);
+        }
+    }
+
+    /// Admission counters for `__health`. Development tooling only.
+    fn diagnostics(&self) -> Value {
+        json!({
+            "lanes": {
+                "state": lane_json(self.state.stats()),
+                "control": lane_json(self.control.stats()),
+                "short": lane_json(self.short.stats()),
+                "long": lane_json(self.long.stats()),
+                "sync": lane_json(self.sync.stats()),
+            },
+            "io": desktop_core::io::diagnostics(&self.app),
+        })
     }
 
     /// `desktop://` custom protocol handler. Static assets answer inline;
@@ -179,8 +241,14 @@ impl Bridge {
         let path = percent_decode(request.uri().path().trim_start_matches('/'));
 
         if path == "__health" {
+            // Development counters ride along with the existing health probe.
             let info = match self.app.invoke("desktop.get-app-info", vec![]) {
-                Ok(value) => RpcResult::ok(value),
+                Ok(mut value) => {
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("resources".into(), self.diagnostics());
+                    }
+                    RpcResult::ok(value)
+                }
                 Err(error) => RpcResult::err(error),
             };
             responder.respond(response(200, JSON, info.to_bytes()));
@@ -222,22 +290,46 @@ impl Bridge {
                     .find_map(|pair| pair.strip_prefix("payload="))
                     .map(|value| percent_decode(value).into_bytes())
             });
+            // `invokeSync` marks its requests with `sync=1`. The renderer is
+            // blocked on those, so they take the reserved lane and only short
+            // host IO; anything else must use the asynchronous API.
+            let sync = request
+                .uri()
+                .query()
+                .is_some_and(|query| query.split('&').any(|pair| pair == "sync=1"));
             let body = request.into_body();
             let body = if body.is_empty() { query_payload.unwrap_or_default() } else { body };
+            let bytes = body.len();
+
+            let message = match IpcMessage::parse(&body) {
+                Ok(message) => message,
+                Err(error) => {
+                    responder.respond(response(200, JSON, RpcResult::err(error).to_bytes()));
+                    return;
+                }
+            };
+            let channel = message.channel.clone();
+            if sync && !desktop_core::io::allowed_synchronously(&channel, &message.args) {
+                let error = desktop_core::error::AppError::Coded {
+                    code: "EINVAL".into(),
+                    message: format!("EINVAL: {channel} is long work; use the asynchronous API"),
+                };
+                responder.respond(response(200, JSON, RpcResult::err(error).to_bytes()));
+                return;
+            }
+            let lane = if sync { &self.sync } else { self.executor_for(&channel) };
             let app = self.app.clone();
-            std::thread::Builder::new()
-                .name("desktop-invoke".into())
-                .spawn(move || {
-                    let result = match IpcMessage::parse(&body) {
-                        Ok(message) => match app.invoke(&message.channel, message.args) {
-                            Ok(value) => RpcResult::ok(value),
-                            Err(error) => RpcResult::err(error),
-                        },
-                        Err(error) => RpcResult::err(error),
-                    };
-                    responder.respond(response(200, JSON, result.to_bytes()));
-                })
-                .expect("failed to start an invoke worker");
+            let outcome_channel = channel.clone();
+            let task = Task::new(bytes, Instant::now() + RPC_DEADLINE, move |outcome| {
+                let result = match outcome {
+                    Outcome::Run => run_channel(&app, &channel, message.args),
+                    other => refused(&outcome_channel, other),
+                };
+                responder.respond(response(200, JSON, result.to_bytes()));
+            });
+            if let Err(task) = lane.submit(task) {
+                task.finish(Outcome::Rejected);
+            }
             return;
         }
 
@@ -255,6 +347,46 @@ impl Bridge {
             )),
         }
     }
+}
+
+/// Run a request on the current (worker) thread. Host IO and state commands
+/// share this path because `DesktopApp::invoke` routes by channel.
+fn run_channel(app: &DesktopApp, channel: &str, args: Vec<Value>) -> RpcResult {
+    match app.invoke(channel, args) {
+        Ok(value) => RpcResult::ok(value),
+        Err(error) => RpcResult::err(error),
+    }
+}
+
+/// The answer for a request that never ran.
+fn refused(channel: &str, outcome: Outcome) -> RpcResult {
+    let error = match outcome {
+        Outcome::Expired => desktop_core::error::AppError::Coded {
+            code: "ETIMEDOUT".into(),
+            message: format!("ETIMEDOUT: {channel} was still queued when its deadline passed"),
+        },
+        Outcome::Rejected => desktop_core::error::AppError::Coded {
+            code: "EBUSY".into(),
+            message: format!("EBUSY: QUEUE_FULL, {channel} was not admitted"),
+        },
+        Outcome::Shutdown => desktop_core::error::AppError::msg(format!(
+            "{channel} was cancelled: the application is closing"
+        )),
+        Outcome::Run => desktop_core::error::AppError::msg("internal: a run outcome was refused"),
+    };
+    RpcResult::err(error)
+}
+
+fn lane_json(stats: ExecutorStats) -> Value {
+    json!({
+        "workers": stats.workers,
+        "queued": stats.queued,
+        "queuedBytes": stats.queued_bytes,
+        "active": stats.active,
+        "rejected": stats.rejected,
+        "expired": stats.expired,
+        "completed": stats.completed,
+    })
 }
 
 fn response(
@@ -337,12 +469,6 @@ fn percent_decode(input: &str) -> String {
 /// `null` when nothing is present at `path`. In debug builds this
 /// consults the on-disk `out/vite-dist` first, so a new hashed file
 /// (`assets/index-[hash].js`) is discovered without a rebuild.
-/// Whether an io operation must run on the IPC worker, in arrival order.
-fn is_ordered_io(channel: &str) -> bool {
-    channel
-        .strip_prefix(desktop_core::io::PREFIX)
-        .is_some_and(|op| desktop_core::io::PROCESS_OPERATIONS.contains(&op))
-}
 
 /// Describe a file under the Copilot SDK package. The renderer reads that
 /// folder through the same bundle endpoint as the web build, but the files

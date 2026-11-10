@@ -50,6 +50,15 @@ fn main() {
     }
 }
 
+/// Everything that must stop when the window is going away, in order: refuse
+/// new host work, end child processes and release waiting streams, then close
+/// the admission lanes so queued requests get their `Shutdown` answer.
+fn stop_services(app: &DesktopApp, host: &TaoHost, bridge: &Bridge) {
+    host.shutdown();
+    app.shutdown_io();
+    bridge.shutdown();
+}
+
 fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -119,7 +128,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
 
     // -- webview + bridge ---------------------------------------------------
-    let bridge = Bridge::new(app.clone(), proxy.clone(), host.clone());
+    let bridge = Bridge::new(app.clone(), proxy.clone())?;
     let builder = WebViewBuilder::new()
         .with_asynchronous_custom_protocol("desktop".into(), {
             let bridge = bridge.clone();
@@ -185,6 +194,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let app_loop = app.clone();
     let host_loop = host.clone();
+    let bridge_loop = bridge.clone();
     let info_loop = info.clone();
 
     event_loop.run(move |event, _, control_flow| {
@@ -193,7 +203,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::UserEvent(user) => match user {
                 AppEvent::Flush => {
-                    let pending = host_loop.drain();
+                    // Clear the scheduled flag first: anything published while
+                    // this batch is delivered queues its own flush.
+                    host_loop.flush_started();
+                    let pending = host_loop.take_batch();
                     if pending.is_empty() {
                         return;
                     }
@@ -218,7 +231,14 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                             failed.push((channel, args));
                         }
                     }
+                    // Keep draining a backlog, but never spin while the webview
+                    // refuses scripts: a failed batch waits for the next event
+                    // or for the renderer's ready signal.
+                    let retry = failed.is_empty() && host_loop.has_pending();
                     host_loop.requeue(failed);
+                    if retry {
+                        host_loop.schedule_flush();
+                    }
                 }
                 AppEvent::RpcResult { id, result } => {
                     let payload = serde_json::to_value(&result)
@@ -239,7 +259,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         let _ = reply.send(Ok(value));
                     }
                     if matches!(effect, ActionEffect::Exit) {
-                        host_loop.shutdown();
+                        stop_services(&app_loop, &host_loop, &bridge_loop);
                         *control_flow = ControlFlow::Exit;
                     }
                 }
@@ -252,7 +272,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         Some(MenuAction::Emit(name)) => app_loop.emit(event::MENU_EVENT, vec![json!(name)]),
                         Some(MenuAction::Quit) => {
                             app_loop.emit("will-quit", vec![]);
-                            host_loop.shutdown();
+                            stop_services(&app_loop, &host_loop, &bridge_loop);
                             *control_flow = ControlFlow::Exit;
                         }
                         Some(MenuAction::Edit(command)) => actions::edit(&webview, command),
@@ -294,7 +314,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     // Electron's AppWindow emitted `will-quit` first. Keep that
                     // contract so a renderer can veto / persist on shutdown.
                     app_loop.emit("will-quit", vec![]);
-                    host_loop.shutdown();
+                    stop_services(&app_loop, &host_loop, &bridge_loop);
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Focused(focused) => {

@@ -25,6 +25,8 @@ pub struct DesktopApp {
     pub secure: SecureStore,
     pub git: GitEngine,
     pub api: ApiClient,
+    /// Finite budgets for processes, stream data and git/HTTP results.
+    pub resources: crate::io::limits::Resources,
     state: Mutex<AppState>,
     menu_labels: Mutex<crate::menu::MenuLabels>,
     host: Arc<dyn Host>,
@@ -63,6 +65,7 @@ impl DesktopApp {
             secure,
             git,
             api,
+            resources: crate::io::limits::Resources::from_env(),
             state: Mutex::new(state),
             menu_labels: Mutex::new(crate::menu::MenuLabels::default()),
             host,
@@ -71,6 +74,12 @@ impl DesktopApp {
     }
 
     pub fn started(&self) -> Instant { self.started }
+
+    /// Stop admitting host-service data and end every child process. Called
+    /// once when the window is going away.
+    pub fn shutdown_io(&self) {
+        crate::io::shutdown(self);
+    }
 
     /// The host, for services that emit events from their own threads.
     pub fn host(&self) -> Arc<dyn Host> {

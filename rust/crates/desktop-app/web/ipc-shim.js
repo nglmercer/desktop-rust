@@ -58,11 +58,22 @@
     }
   }
 
+  // Normal IPC promises the renderer may keep open. Past this, a request is
+  // refused at once rather than queued without bound (Rust applies the same
+  // kind of limit on its side; see `resources` in __health).
+  var PENDING_LIMIT = 128;
+
   function invoke(channel, ...args) {
     // Electron drew a native popup for this request. The page draws the same
     // menu instead; see showContextMenu below.
     if (channel === 'show-contextual-menu') {
       return showContextMenu(args[0] || []);
+    }
+    if (pending.size >= PENDING_LIMIT) {
+      return Promise.reject(Object.assign(
+        new Error('EBUSY: QUEUE_FULL, ' + pending.size + ' IPC calls are already waiting'),
+        { code: 'EBUSY' }
+      ));
     }
     return new Promise(function (resolvePromise, reject) {
       var id = nextId++;
@@ -104,7 +115,9 @@
     if (payload.length > 60000) {
       throw Object.assign(new Error('synchronous IPC payload too large: ' + channel), { code: 'E2BIG' });
     }
-    request.open('POST', '/__invoke?payload=' + payload, false);
+    // `sync=1` selects Rust's reserved synchronous lane, which accepts only
+    // short host IO. Long work is refused there, not queued behind others.
+    request.open('POST', '/__invoke?sync=1&payload=' + payload, false);
     request.send();
     var reply = JSON.parse(request.responseText);
     if (reply && reply.ok) {
