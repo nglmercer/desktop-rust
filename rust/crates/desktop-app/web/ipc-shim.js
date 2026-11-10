@@ -60,8 +60,33 @@
 
   // Normal IPC promises the renderer may keep open. Past this, a request is
   // refused at once rather than queued without bound (Rust applies the same
-  // kind of limit on its side; see `resources` in __health).
+  // kind of limit on its side; see `resources` in __health, published by
+  // `desktop.get-app-info`. Mutated once after the first health read so the
+  // low-memory profile (64) also reaches the frontend without a rebuild.
   var PENDING_LIMIT = 128;
+  var healthRead = false;
+  function refreshPendingLimit() {
+    if (healthRead) { return; }
+    healthRead = true;
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'desktop://localhost/__health', true);
+      xhr.onload = function () {
+        try {
+          var payload = JSON.parse(xhr.responseText);
+          var limits = payload?.limit?.resources || payload?.resources;
+          // `__health` nests under invoke result; `get-app-info` below carries the same.
+          var pending = (payload?.pendingPromises ?? payload?.pending_promises);
+          if (typeof pending === 'number' && pending > 0) {
+            PENDING_LIMIT = pending;
+            bridge.pendingPromises = pending;
+          }
+        } catch (e) {}
+      };
+      xhr.send();
+    } catch (e) {}
+  }
+  setTimeout(refreshPendingLimit, 0);
 
   function invoke(channel, ...args) {
     // Electron drew a native popup for this request. The page draws the same
@@ -171,6 +196,7 @@
     invoke: invoke,
     invokeSync: invokeSync,
     send: send,
+    pendingPromises: PENDING_LIMIT,
     // Electron's three synchronous channels have no wry equivalent. They now
     // return a promise and callers must await them explicitly.
     sendSync: function (channel, ...args) {

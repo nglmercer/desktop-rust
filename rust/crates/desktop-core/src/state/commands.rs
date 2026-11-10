@@ -117,6 +117,8 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             "runtime": "tao + wry",
             "git": app.git.version().unwrap_or_else(|_| "unavailable".into()),
             "userData": app.paths.user_data.to_string_lossy(),
+            "pendingPromises": app.resources.limits.pending_promises,
+            "profile": app.resources.limits.profile.name(),
         }),
 
         // -- repositories --------------------------------------------------

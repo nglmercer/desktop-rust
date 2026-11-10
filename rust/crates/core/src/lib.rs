@@ -1,4 +1,8 @@
 //! Repository workflows shared by the CLI and browser/native transports.
+pub mod application;
+pub use application::{
+    ApplicationService, BACKEND_VERSION, Capabilities, IBackendError, IRequest, JobState,
+};
 mod accounts;
 pub use accounts::{
     AccountAssignment, AccountTarget, RepositoryAccount, ScopedAssociation, StoredAccount,

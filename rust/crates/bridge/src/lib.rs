@@ -14,6 +14,7 @@ use axum::{
 };
 use desktop_core::{
     Operation, Registry, Repository,
+    application::{ApplicationService, BACKEND_VERSION},
     cancellation::{self, Cancellation},
 };
 use serde::Deserialize;
@@ -177,7 +178,7 @@ pub async fn start(
             get(|| async {
                 let content = VITE_DIST
                     .get_file("index.html")
-                    .map(|f| String::from_utf8_lossy(f.contents()).to_owned())
+                    .map(|f| String::from_utf8_lossy(f.contents()).into_owned())
                     .unwrap_or_default();
                 Html(content)
             }),
@@ -190,7 +191,7 @@ pub async fn start(
                     .strip_prefix("/assets/")
                     .unwrap_or("")
                     .to_string();
-                if let Some(file) = VITE_DIST.get_file(&format!("assets/{path}")) {
+                if let Some(file) = VITE_DIST.get_file(format!("assets/{path}")) {
                     let content = file.contents().to_vec();
                     let content_type = if path.ends_with(".css") {
                         "text/css"
@@ -555,9 +556,13 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
             .await;
         return;
     }
+    // Capabilities come from the common application service so the bridge
+    // and GUI never drift (still version 3, still `{cancel,max_pending}`).
+    let svc = ApplicationService::new();
+    let caps = svc.capabilities();
     if socket
         .send(Message::Text(
-            json!({"ready":true,"version":3,"capabilities":{"cancel":true,"max_pending":32}})
+            json!({"ready":true,"version":BACKEND_VERSION,"capabilities":{"cancel":caps.cancel,"max_pending":caps.max_pending}})
                 .to_string()
                 .into(),
         ))
