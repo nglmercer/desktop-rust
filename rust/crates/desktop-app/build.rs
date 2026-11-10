@@ -56,11 +56,7 @@ fn bundle_is_stale(repo: &Path, dist: &Path) -> bool {
 }
 
 fn pnpm() -> &'static str {
-    if cfg!(windows) {
-        "pnpm.cmd"
-    } else {
-        "pnpm"
-    }
+    if cfg!(windows) { "pnpm.cmd" } else { "pnpm" }
 }
 
 fn build_bundle(repo: &Path, dist: &Path) -> Result<(), String> {
@@ -106,7 +102,10 @@ fn main() {
     for input in INPUTS {
         println!("cargo:rerun-if-changed={}", repo.join(input).display());
     }
-    println!("cargo:rerun-if-changed={}", dist.join("index.html").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        dist.join("index.html").display()
+    );
     println!("cargo:rerun-if-env-changed=DESKTOP_VITE_FORCE");
     println!("cargo:rerun-if-env-changed=DESKTOP_SERVE_FROM_DISK");
 
