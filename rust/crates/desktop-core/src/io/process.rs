@@ -377,4 +377,55 @@ mod tests {
         assert!(resolve_command(&app, "/__desktop_app__/index.html").is_err());
         assert!(resolve_command(&app, "/__desktop_app__/copilot/../../etc/passwd").is_err());
     }
+
+    /// The Copilot runtime, spoken to exactly as the SDK does over stdio:
+    /// framed JSON-RPC on the child's pipes, through the bridge.
+    #[test]
+    fn copilot_runtime_answers_a_framed_ping_through_the_bridge() {
+        let recorder = Arc::new(Recorder::default());
+        let app = crate::app::DesktopApp::new(recorder.clone()).unwrap();
+        let runtime = resolve_command(&app, "/__desktop_app__/copilot/prebuilds/linux-x64/copilot-runtime")
+            .expect("the Copilot SDK platform package must be installed for this test");
+        assert!(runtime.is_file(), "missing runtime at {}", runtime.display());
+
+        let spawned = spawn(
+            &app,
+            &json!({
+                "command": "/__desktop_app__/copilot/prebuilds/linux-x64/copilot-runtime",
+                "args": ["--headless", "--no-auto-update", "--stdio", "--no-auto-login"],
+                "stdio": ["pipe", "pipe", "pipe"],
+            }),
+        )
+        .unwrap();
+        let id = spawned["id"].as_u64().unwrap();
+
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"ping","params":{"message":"probe"}}"#;
+        let frame = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
+        write(&json!({ "id": id, "data": base64_encode(frame.as_bytes()) })).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let mut output = Vec::new();
+            for event in recorder.0.lock().unwrap().iter() {
+                if event["event"] == "data" && event["stream"] == "stdout" {
+                    output.extend(base64_decode(event["data"].as_str().unwrap()).unwrap());
+                }
+            }
+            let text = String::from_utf8_lossy(&output).into_owned();
+            if text.contains("\"result\"") {
+                assert!(text.contains("pong: probe"), "unexpected reply: {text}");
+                break;
+            }
+            let stderr: Vec<String> = recorder.0.lock().unwrap().iter()
+                .filter(|e| e["event"] == "data" && e["stream"] == "stderr")
+                .map(|e| String::from_utf8_lossy(&base64_decode(e["data"].as_str().unwrap()).unwrap()).into_owned())
+                .collect();
+            let exited = recorder.0.lock().unwrap().iter().any(|e| e["event"] == "exit");
+            if exited || Instant::now() > deadline {
+                panic!("no ping reply; exited={exited}; stdout={text:?}; stderr={stderr:?}");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        kill(&json!({ "id": id, "signal": "SIGKILL" })).unwrap();
+    }
 }

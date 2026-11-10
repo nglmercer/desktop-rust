@@ -79,9 +79,25 @@ class OutputStream extends EventEmitter {
 class InputStream extends EventEmitter {
   public readonly writable = true
   private finished = false
+  // The SDK writes as soon as it has the stream, which is before `spawn`
+  // resolves with the id. Those writes wait here and go out in order.
+  private id: number | null = null
+  private queued: Array<() => void> = []
 
-  public constructor(private readonly id: number) {
-    super()
+  public attach(id: number) {
+    this.id = id
+    const queued = this.queued.splice(0)
+    for (const run of queued) {
+      run()
+    }
+  }
+
+  private whenAttached(run: () => void) {
+    if (this.id === null) {
+      this.queued.push(run)
+    } else {
+      run()
+    }
   }
 
   public write(chunk: unknown, encodingOrCallback?: any, callback?: any): boolean {
@@ -101,15 +117,17 @@ class InputStream extends EventEmitter {
         : chunk instanceof Uint8Array
         ? chunk
         : Buffer.from(String(chunk))
-    bridge()
-      .invoke('desktop.io.process-write', {
-        id: this.id,
-        data: bridge().encodeBase64(bytes),
-      })
-      .then(() => done?.(null), (error: Error) => {
-        this.emit('error', error)
-        done?.(error)
-      })
+    this.whenAttached(() => {
+      bridge()
+        .invoke('desktop.io.process-write', {
+          id: this.id,
+          data: bridge().encodeBase64(bytes),
+        })
+        .then(() => done?.(null), (error: Error) => {
+          this.emit('error', error)
+          done?.(error)
+        })
+    })
     return true
   }
 
@@ -119,12 +137,14 @@ class InputStream extends EventEmitter {
     }
     if (!this.finished) {
       this.finished = true
-      bridge()
-        .invoke('desktop.io.process-end', { id: this.id })
-        .then(() => {
-          this.emit('finish')
-          if (typeof callback === 'function') callback()
-        })
+      this.whenAttached(() => {
+        bridge()
+          .invoke('desktop.io.process-end', { id: this.id })
+          .then(() => {
+            this.emit('finish')
+            if (typeof callback === 'function') callback()
+          })
+      })
     }
     return this
   }
@@ -159,9 +179,7 @@ export class ChildProcess extends EventEmitter {
   public attach(id: number, pid: number | undefined) {
     this.id = id
     this.pid = pid
-    if (this.stdin !== null) {
-      ;(this.stdin as any).id = id
-    }
+    this.stdin?.attach(id)
     children.set(id, this)
     for (const message of early.get(id) ?? []) {
       this.receive(message)
@@ -193,6 +211,19 @@ export class ChildProcess extends EventEmitter {
     if (this.exited && this.openStreams <= 0) {
       this.emit('close', this.exitCode, this.signalCode)
     }
+  }
+
+  /**
+   * Node's detach knob. The child is already independent of the app's event
+   * loop, so there is nothing to change; the methods exist because callers
+   * (the external editor launcher) call them.
+   */
+  public unref() {
+    return this
+  }
+
+  public ref() {
+    return this
   }
 
   public kill(signal: string = 'SIGTERM') {
@@ -321,5 +352,22 @@ export function exec(
   const flags = shell === 'cmd.exe' ? ['/d', '/s', '/c'] : ['-c']
   return execFile(shell, [...flags, command], options, callback)
 }
+
+// `util.promisify(execFile)` resolves with `{ stdout, stderr }` in Node, which
+// callers such as `which git` rely on. A plain promisify would resolve with
+// stdout alone, so the custom promisified form is provided here.
+const promisifyCustom = Symbol.for('nodejs.util.promisify.custom')
+;(execFile as any)[promisifyCustom] = (file: string, args?: any, options?: any) =>
+  new Promise((resolve, reject) => {
+    const callback = (error: any, stdout: string, stderr: string) =>
+      error ? reject(Object.assign(error, { stdout, stderr })) : resolve({ stdout, stderr })
+    if (args === undefined) {
+      execFile(file, callback)
+    } else if (options === undefined) {
+      execFile(file, args, callback)
+    } else {
+      execFile(file, args, options, callback)
+    }
+  })
 
 export default { spawn, exec, execFile, ChildProcess }
