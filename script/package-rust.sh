@@ -62,10 +62,11 @@ check() {
 cargo build --locked -p desktop-core -p desktop-bridge -p desktop-cli -p desktop-native 2>&1 | tail -n 5
 cargo build --locked --manifest-path "$ROOT/rust/Cargo.toml" -p desktop-app 2>&1 | tail -n 5 || true
 
-BIN_RS="$ROOT/target/debug/desktop-rs"
+BIN_RS="$ROOT/rust/target/debug/desktop-rs"
 BIN_APP="$ROOT/rust/target/debug/github-desktop-rs"
-[ -f "$BIN_RS" ] || BIN_RS="$(find "$ROOT/target" -name desktop-rs -type f | head -n1)"
-[ -f "$BIN_APP" ] || BIN_APP="$(find "$ROOT/rust/target" -name github-desktop-rs -type f | head -n1)"
+[ -f "$BIN_RS" ] || BIN_RS="$(find "$ROOT" -path '*/target/debug/desktop-rs' -type f | head -n1)"
+[ -f "$BIN_APP" ] || BIN_APP="$(find "$ROOT" -path '*/target/debug/github-desktop-rs' -type f | head -n1)"
+[ -d "$BIN_RS" ] && BIN_RS="$(find "$ROOT" -name desktop-rs -type f | head -n1)"
 check "$BIN_RS"
 
 # 2. Renderer — ensure Vite was built (it embeds out/vite-dist).
@@ -74,24 +75,30 @@ check "$ROOT/out/vite-dist/highlighter.js"
 if [ ! -f "$ROOT/gemoji/db/emoji.json" ]; then echo "ERR: gemoji submodule missing — git submodule update --init --recursive"; exit 1; fi
 
 # 3. Copilot runtime — copy whole platform package, fail if incomplete.
+# locate the optional platform package via pnpm's store (pnpm installs it under .pnpm).
 COPILOT_SRC="$ROOT/app/node_modules/@github/copilot-sdk-${PLATFORM}-${ARCH}"
+if [ ! -d "$COPILOT_SRC" ]; then
+  # fallback to pnpm store path
+  FOUND="$(find "$ROOT/node_modules/.pnpm" -type d -path "*@github+copilot-sdk-${PLATFORM}-${ARCH}*/node_modules/@github/copilot-sdk-${PLATFORM}-${ARCH}" 2>/dev/null | head -n1)"
+  if [ -n "$FOUND" ] && [ -d "$FOUND" ]; then COPILOT_SRC="$FOUND"; fi
+fi
+# 4. Stage installable tree (exe, UI, highlighter, assets, metadata, licences, tools).
+rm -rf "$OUT"
+mkdir -p "$OUT/bin" "$OUT/ui" "$OUT/assets" "$OUT/licenses" "$OUT/meta" "$OUT/copilot-sdk"
+
 COPILOT_DST="$OUT/copilot-sdk"
 if [ -d "$COPILOT_SRC" ]; then
   RT="$COPILOT_SRC/prebuilds/${PLATFORM}-${ARCH}/copilot-runtime${EXE_SUFFIX}"
   # Also handle win32 naming (copilot-runtime.exe vs .exe difference)
   if [ ! -f "$RT" ] && [ "$PLATFORM" = "windows" ]; then RT="$COPILOT_SRC/prebuilds/${PLATFORM}-${ARCH}/copilot-runtime"; fi
+  # Path for pnpm store may be pnpm's hardlinked copy — same check
   check "$RT"
   check "$COPILOT_SRC/prebuilds/${PLATFORM}-${ARCH}/runtime.node"
   echo "copying Copilot SDK package $(basename "$COPILOT_SRC") → $COPILOT_DST"
-  rm -rf "$COPILOT_DST"
-  cp -R "$COPILOT_SRC" "$COPILOT_DST"
+  cp -R "$COPILOT_SRC"/. "$COPILOT_DST"/
 else
   echo "warn: Copilot SDK package not found at $COPILOT_SRC — runtime omitted; install one platform package to enable Copilot"
 fi
-
-# 4. Stage installable tree (exe, UI, highlighter, assets, metadata, licences, tools).
-rm -rf "$OUT"
-mkdir -p "$OUT/bin" "$OUT/ui" "$OUT/assets" "$OUT/licenses" "$OUT/meta"
 
 install -m755 "$BIN_RS" "$OUT/bin/desktop-rs"
 if [ -n "$BIN_APP" ] && [ -f "$BIN_APP" ] && [ "$PLATFORM" != "linux" ] || command -v cargo >/dev/null; then
