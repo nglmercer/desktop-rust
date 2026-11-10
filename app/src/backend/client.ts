@@ -440,6 +440,28 @@ export class BackendClient {
     }
     throw new BackendError({ code: 'no_transport', message: 'no backend transport attached', retryable: false })
   }
+
+  // ---------------------------------------------------------------------------
+  // Copilot — the store's assistant flows go through the Rust service.
+  // These helpers keep the SDK surface behind the backend: the renderer
+  // never spawns `copilot-runtime` directly when a transport is present.
+  // ---------------------------------------------------------------------------
+
+  copilotProbe(runtimeRoot?: string): Promise<{ available: boolean; reason: string; sdk_version: string }> {
+    return this.request('copilot_probe', runtimeRoot ? { runtime_root: runtimeRoot } : {})
+  }
+
+  copilotCreateSession(opts: { model?: string; reasoning_effort?: string } = {}): Promise<{ id: string; connection_id: string; model: string }> {
+    return this.request('copilot_create_session', { model: opts.model, reasoning_effort: opts.reasoning_effort })
+  }
+
+  copilotSendMessage(sessionId: string, message: string, opts: BackendRequestOptions = {}): Promise<{ content: string; session_id: string }> {
+    return this.request('copilot_send_message', { session_id: sessionId, message }, opts)
+  }
+
+  copilotGenerateCommitMessage(opts: { paths?: string[]; system_prompt?: string } = {}, backendOpts: BackendRequestOptions = {}): Promise<{ summary: string; description: string; basis: string }> {
+    return this.request('copilot_generate_commit_message', { paths: opts.paths ?? [], system_prompt: opts.system_prompt }, backendOpts)
+  }
 }
 
 // Singleton — shared by all stores; renderer subscribes/proxies once.

@@ -442,6 +442,28 @@ pub enum Operation {
     RemoveRemote {
         name: String,
     },
+    CopilotProbe {
+        #[serde(default)]
+        runtime_root: Option<String>,
+    },
+    CopilotCreateSession {
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        reasoning_effort: Option<String>,
+    },
+    CopilotSendMessage {
+        session_id: String,
+        message: String,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+    CopilotGenerateCommitMessage {
+        #[serde(default)]
+        paths: Vec<GitPath>,
+        #[serde(default)]
+        system_prompt: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize)]

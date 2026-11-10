@@ -61,7 +61,7 @@
 
 | Capacidad | Consumidor | Backend actual | Destino | Contrato | Estado | Evidencia | Pendiente |
 |---|---|---|---|---|---|---|---|
-| Runtime/sesiones fuera del renderer | `copilot-store.ts`, SDK `@github/copilot-sdk@1.0.27-preview.1` | puente de procesos + `ping` + `randomUUID` fix; `core/src/process.rs` runner | cliente acotado en `core` con protocolo fijado por SDK | descubrimiento SO/arch, auth/BYOK/cuota, sesiones, streaming, cancelación, recuperación sin duplicar mutación | **bloqueado** | `git log 7610f397c4`/`886076532b`/`ca6acec28f` — corrección UUID, puente no verificado E2E | Implementar cliente Rust, conectar `copilot-store.ts`, paridad con `assisted-commit/*`, `copilot-operation.ts`, transacciones y recuperación; probar crear sesión + commit desde UI |
+| Runtime/sesiones fuera del renderer | `copilot-store.ts` ↔ `backend/client.ts` | `rust/crates/core/src/copilot.rs` + `copilot_bridge.rs` (delegan `Operation::Copilot*`) | cliente acotado en `core` con protocolo fijado por SDK | `copilot_probe`/`copilot_create_session`/`copilot_send_message`/`copilot_generate_commit_message` (`IRequest`/`IBackendError`), descubrimiento SO/arch, cancelación/recovery sin duplicar mutación, push-fence (`PushPhase`, `RetrySurface`) | **implementado** · **integrado** · **probado** | `python3 rust/tests/copilot_backend.py` PASS (probe → session → sendMessage → generateCommitMessage + cancel de un vuelo, política `unavailable` sin ejecutar binario foreign-arch); `cargo test -p desktop-core copilot` PASS; `copilot-store.ts` delega a `backend().copilot*` con `awaitCancellableCopilotOperation` cuando el transport está vivo (fallback SDK preservado offline) | Turno live contra runtime hospedado (requiere credencial Copilot y el paquete `copilot-sdk-<plat-arch>`); Git остаётся operativo cuando `available=false` (actual en este entorno sin SDK empaquetado) |
 
 ## Plataformas, navegador, Termux (Fase 6)
 
@@ -88,15 +88,17 @@
 ```
 cargo fmt --all
 cargo clippy --workspace --all-targets --locked -D warnings   # vía CI; local PASS tras fmt
-cargo test --workspace --locked                                # raíz (headless)
+cargo test --workspace --locked                                # raíz (headless) — 133 tests core + shell
 cargo test --manifest-path rust/Cargo.toml --workspace --locked   # shell
+pnpm vite:build                                                # 2083 módulos OK (vite + highlighter)
 
-python3 rust/tests/lifecycle.py    PASS
-python3 rust/tests/cancellation.py PASS
-python3 rust/tests/signals.py      PASS
-python3 rust/tests/management.py   PASS
-python3 rust/tests/github.py       PASS
+python3 rust/tests/lifecycle.py       PASS
+python3 rust/tests/cancellation.py    PASS
+python3 rust/tests/signals.py         PASS
+python3 rust/tests/management.py      PASS
+python3 rust/tests/github.py          PASS
 python3 rust/tests/editor_conflicts.py PASS
+python3 rust/tests/copilot_backend.py PASS  (Fase 5 — probe/session/message/commit + cancel)
 python3 rust/tests/lfs_operations.py — bloqueado sin git-lfs local (CI lo instala)
 ```
 

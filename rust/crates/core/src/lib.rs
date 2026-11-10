@@ -1,6 +1,7 @@
 //! Repository workflows shared by the CLI and browser/native transports.
 pub mod application;
 pub mod copilot;
+mod copilot_bridge;
 pub mod migration;
 pub mod secret_store;
 pub mod updater;
@@ -565,6 +566,28 @@ impl Repository {
                 basis,
                 lines,
             } => return self.select_diff(path, staged, &basis, lines).await,
+            Operation::CopilotProbe { runtime_root } => {
+                return self.copilot_probe(runtime_root.as_deref()).await;
+            }
+            Operation::CopilotCreateSession {
+                model,
+                reasoning_effort,
+            } => {
+                return self.copilot_create_session(model, reasoning_effort).await;
+            }
+            Operation::CopilotSendMessage {
+                session_id,
+                message,
+                ..
+            } => {
+                return self.copilot_send_message(&session_id, &message).await;
+            }
+            Operation::CopilotGenerateCommitMessage {
+                paths,
+                system_prompt,
+            } => {
+                return self.copilot_generate_commit(paths, system_prompt).await;
+            }
             _ => {}
         }
         let command = self.command(operation).await?;
@@ -824,6 +847,12 @@ impl Repository {
             RemoveRemote { name } => {
                 validate_remote(&name)?;
                 args(&["remote", "remove", "--", &name])
+            }
+            CopilotProbe { .. }
+            | CopilotCreateSession { .. }
+            | CopilotSendMessage { .. }
+            | CopilotGenerateCommitMessage { .. } => {
+                unreachable!("handled by execute")
             }
         };
         Ok(command)
