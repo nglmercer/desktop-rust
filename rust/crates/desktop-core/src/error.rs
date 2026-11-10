@@ -35,7 +35,11 @@ pub enum AppError {
     /// A coded failure that also carries typed data for the caller, such as
     /// the output a git command produced before it was stopped.
     #[error("{message}")]
-    Detailed { code: String, message: String, details: serde_json::Value },
+    Detailed {
+        code: String,
+        message: String,
+        details: serde_json::Value,
+    },
 }
 
 impl AppError {
@@ -183,7 +187,11 @@ pub fn parse_git_error(stdout: &str, stderr: &str) -> GitErrorKind {
         GitErrorKind::SshAuthenticationFailed
     } else if has(&["authentication failed", "invalid username or password"]) {
         GitErrorKind::HttpsAuthenticationFailed
-    } else if has(&["could not resolve host", "network is unreachable", "timed out"]) {
+    } else if has(&[
+        "could not resolve host",
+        "network is unreachable",
+        "timed out",
+    ]) {
         GitErrorKind::HostDown
     } else if has(&["the remote end hung up", "early eof", "rpc failed"]) {
         GitErrorKind::RemoteDisconnection
@@ -195,7 +203,10 @@ pub fn parse_git_error(stdout: &str, stderr: &str) -> GitErrorKind {
         GitErrorKind::NothingToCommit
     } else if has(&["non-fast-forward", "fetch first", "rejected"]) {
         GitErrorKind::PushNotFastForward
-    } else if has(&["repository not found", "could not read from remote repository"]) {
+    } else if has(&[
+        "repository not found",
+        "could not read from remote repository",
+    ]) {
         GitErrorKind::HttpsRepositoryNotFound
     } else if has(&["could not lock config file", "index.lock"]) {
         GitErrorKind::ConfigLockFileAlreadyExists
@@ -239,7 +250,14 @@ impl GitError {
         } else {
             stderr.trim().lines().last().unwrap_or_default().to_string()
         };
-        Self { kind, message, args, stdout, stderr, exit_code }
+        Self {
+            kind,
+            message,
+            args,
+            stdout,
+            stderr,
+            exit_code,
+        }
     }
 
     pub fn is_auth_failure(&self) -> bool {

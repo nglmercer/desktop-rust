@@ -2,7 +2,7 @@
 //! handlers plus `AppWindow`. Every channel from `ipc-shared.ts` is routed
 //! here; domain commands added by the port live in [`super::commands`].
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::DesktopApp;
 use crate::error::{AppError, Result};
@@ -12,7 +12,9 @@ use crate::ipc::protocol::{
     SerializableMenuItem, WindowAction, WindowQuery,
 };
 use crate::models::app_state::AppState;
-use crate::models::misc::{AppleActionOnDoubleClick, Architecture, DesktopNotificationPermission, ThemeSource};
+use crate::models::misc::{
+    AppleActionOnDoubleClick, Architecture, DesktopNotificationPermission, ThemeSource,
+};
 use crate::platform;
 
 use super::commands;
@@ -56,7 +58,9 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
                 app,
                 WindowAction::ShowMessageBox(MessageOptions {
                     message: "Reveal Repository in Finder?".into(),
-                    detail: Some("This will open the repository folder in your file manager.".into()),
+                    detail: Some(
+                        "This will open the repository folder in your file manager.".into(),
+                    ),
                     buttons: vec!["Reveal".into(), "Cancel".into()],
                     default_id: 0,
                     cancel_id: 1,
@@ -120,7 +124,10 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             let body = msg.optional_string(1).unwrap_or_default();
             let user_info = msg.arg(2).cloned().unwrap_or(json!({}));
             let id = platform::show_notification(&title, &body, &user_info);
-            app.emit(event::NOTIFICATION_EVENT, vec![json!("click"), json!(id), user_info]);
+            app.emit(
+                event::NOTIFICATION_EVENT,
+                vec![json!("click"), json!(id), user_info],
+            );
             json!(id)
         }
         ch::GET_NOTIFICATIONS_PERMISSION => {
@@ -145,14 +152,30 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
     }
 
     match channel {
-        tx::MINIMIZE_WINDOW => { win(app, WindowAction::Minimize)?; }
-        tx::MAXIMIZE_WINDOW => { win(app, WindowAction::Maximize)?; }
-        tx::UNMAXIMIZE_WINDOW => { win(app, WindowAction::Unmaximize)?; }
-        tx::CLOSE_WINDOW => { win(app, WindowAction::Close)?; }
-        tx::FOCUS_WINDOW => { win(app, WindowAction::Focus)?; }
-        tx::QUIT_APP => { win(app, WindowAction::Quit)?; }
-        tx::QUIT_AND_INSTALL_UPDATES => { win(app, WindowAction::QuitAndInstallUpdate)?; }
-        tx::SELECT_ALL_WINDOW_CONTENTS => { win(app, WindowAction::SelectAll)?; }
+        tx::MINIMIZE_WINDOW => {
+            win(app, WindowAction::Minimize)?;
+        }
+        tx::MAXIMIZE_WINDOW => {
+            win(app, WindowAction::Maximize)?;
+        }
+        tx::UNMAXIMIZE_WINDOW => {
+            win(app, WindowAction::Unmaximize)?;
+        }
+        tx::CLOSE_WINDOW => {
+            win(app, WindowAction::Close)?;
+        }
+        tx::FOCUS_WINDOW => {
+            win(app, WindowAction::Focus)?;
+        }
+        tx::QUIT_APP => {
+            win(app, WindowAction::Quit)?;
+        }
+        tx::QUIT_AND_INSTALL_UPDATES => {
+            win(app, WindowAction::QuitAndInstallUpdate)?;
+        }
+        tx::SELECT_ALL_WINDOW_CONTENTS => {
+            win(app, WindowAction::SelectAll)?;
+        }
         tx::SET_WINDOW_ZOOM_FACTOR => {
             let factor = msg.arg(0)?.as_f64().unwrap_or(1.0);
             state.window_zoom_factor = factor;
@@ -174,8 +197,12 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
             app.emit(event::NATIVE_THEME_UPDATED, vec![]);
             return Ok(true);
         }
-        tx::INSTALL_WINDOWS_CLI => { win(app, WindowAction::InstallCli(true))?; }
-        tx::UNINSTALL_WINDOWS_CLI => { win(app, WindowAction::InstallCli(false))?; }
+        tx::INSTALL_WINDOWS_CLI => {
+            win(app, WindowAction::InstallCli(true))?;
+        }
+        tx::UNINSTALL_WINDOWS_CLI => {
+            win(app, WindowAction::InstallCli(false))?;
+        }
         tx::UNSAFE_OPEN_DIRECTORY => {
             win(app, WindowAction::UnsafeOpenDirectory(msg.string(0)?))?;
         }
@@ -192,7 +219,10 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
             return Ok(true);
         }
         tx::GET_APP_MENU => {
-            app.emit(event::APP_MENU, vec![serde_json::to_value(&state.app_menu)?]);
+            app.emit(
+                event::APP_MENU,
+                vec![serde_json::to_value(&state.app_menu)?],
+            );
         }
         tx::UPDATE_MENU_STATE => {
             let updates: Vec<MenuStateUpdate> =
@@ -204,7 +234,10 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
             if !apply_menu_state(&mut state.app_menu.items, &updates) {
                 return Ok(false);
             }
-            app.emit(event::APP_MENU, vec![serde_json::to_value(&state.app_menu)?]);
+            app.emit(
+                event::APP_MENU,
+                vec![serde_json::to_value(&state.app_menu)?],
+            );
             return Ok(true);
         }
         tx::UPDATE_PREFERRED_APP_MENU_ITEM_LABELS => {
@@ -220,7 +253,10 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
             crate::menu::merge_state(&mut rebuilt, &state.app_menu.items);
             state.app_menu.items = rebuilt;
             app.set_menu_labels(labels);
-            app.emit(event::APP_MENU, vec![serde_json::to_value(&state.app_menu)?]);
+            app.emit(
+                event::APP_MENU,
+                vec![serde_json::to_value(&state.app_menu)?],
+            );
             return Ok(true);
         }
         tx::EXECUTE_MENU_ITEM_BY_ID => {
@@ -231,7 +267,10 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
             let message = msg.optional_string(1).unwrap_or_default();
             crate::log_renderer(&level, &message);
         }
-        tx::WILL_QUIT => { state.quit_flags.quitting = true; return Ok(true); }
+        tx::WILL_QUIT => {
+            state.quit_flags.quitting = true;
+            return Ok(true);
+        }
         tx::WILL_QUIT_EVEN_IF_UPDATING => {
             state.quit_flags.quitting = true;
             state.quit_flags.quitting_even_if_updating = true;
@@ -264,7 +303,9 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
                 "error": { "message": "The renderer process crashed", "name": "Error", "stack": null }
             })]);
         }
-        tx::CRASH_QUIT => { win(app, WindowAction::Quit)?; }
+        tx::CRASH_QUIT => {
+            win(app, WindowAction::Quit)?;
+        }
         // Push-only channels should never be sent by the renderer. Accept them
         // as no-ops so a stale renderer cannot break startup.
         other if event::ALL.contains(&other) => {}

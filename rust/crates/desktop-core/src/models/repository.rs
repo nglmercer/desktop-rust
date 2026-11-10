@@ -18,7 +18,9 @@ pub struct Owner {
     pub kind: String,
 }
 
-fn default_owner_type() -> String { "user".to_string() }
+fn default_owner_type() -> String {
+    "user".to_string()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

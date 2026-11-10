@@ -11,8 +11,7 @@ pub mod invoke {
     pub const GET_APP_ARCHITECTURE: &str = "get-app-architecture";
     pub const GET_APP_PATH: &str = "get-app-path";
     pub const GET_EXEC_PATH: &str = "get-exec-path";
-    pub const IS_RUNNING_UNDER_ARM64_TRANSLATION: &str =
-        "is-running-under-arm64-translation";
+    pub const IS_RUNNING_UNDER_ARM64_TRANSLATION: &str = "is-running-under-arm64-translation";
     pub const MOVE_TO_TRASH: &str = "move-to-trash";
     pub const SHOW_ITEM_IN_FOLDER: &str = "show-item-in-folder";
     pub const WRITE_CLIPBOARD_TEXT: &str = "write-clipboard-text";
@@ -29,15 +28,13 @@ pub mod invoke {
     pub const SHOW_SAVE_DIALOG: &str = "show-save-dialog";
     pub const SHOW_OPEN_DIALOG: &str = "show-open-dialog";
     pub const IS_WINDOW_MAXIMIZED: &str = "is-window-maximized";
-    pub const GET_APPLE_ACTION_ON_DOUBLE_CLICK: &str =
-        "get-apple-action-on-double-click";
+    pub const GET_APPLE_ACTION_ON_DOUBLE_CLICK: &str = "get-apple-action-on-double-click";
     pub const SHOULD_USE_DARK_COLORS: &str = "should-use-dark-colors";
     pub const SAVE_GUID: &str = "save-guid";
     pub const GET_GUID: &str = "get-guid";
     pub const SHOW_NOTIFICATION: &str = "show-notification";
     pub const GET_NOTIFICATIONS_PERMISSION: &str = "get-notifications-permission";
-    pub const REQUEST_NOTIFICATIONS_PERMISSION: &str =
-        "request-notifications-permission";
+    pub const REQUEST_NOTIFICATIONS_PERMISSION: &str = "request-notifications-permission";
 
     pub const ALL: &[&str] = &[
         GET_PATH,
@@ -81,8 +78,7 @@ pub mod send {
     pub const EXECUTE_MENU_ITEM_BY_ID: &str = "execute-menu-item-by-id";
     pub const SHOW_CERTIFICATE_TRUST_DIALOG: &str = "show-certificate-trust-dialog";
     pub const GET_APP_MENU: &str = "get-app-menu";
-    pub const UPDATE_PREFERRED_APP_MENU_ITEM_LABELS: &str =
-        "update-preferred-app-menu-item-labels";
+    pub const UPDATE_PREFERRED_APP_MENU_ITEM_LABELS: &str = "update-preferred-app-menu-item-labels";
     pub const UNCAUGHT_EXCEPTION: &str = "uncaught-exception";
     pub const SEND_ERROR_REPORT: &str = "send-error-report";
     pub const UNSAFE_OPEN_DIRECTORY: &str = "unsafe-open-directory";
@@ -103,8 +99,7 @@ pub mod send {
     pub const SET_WINDOW_ZOOM_FACTOR: &str = "set-window-zoom-factor";
     pub const INSTALL_WINDOWS_CLI: &str = "install-windows-cli";
     pub const UNINSTALL_WINDOWS_CLI: &str = "uninstall-windows-cli";
-    pub const SHOW_CERTIFICATE_TRUST_DIALOG_ALIAS: &str =
-        "show-certificate-trust-dialog";
+    pub const SHOW_CERTIFICATE_TRUST_DIALOG_ALIAS: &str = "show-certificate-trust-dialog";
     pub const LOG_ALIAS: &str = "log";
     pub const FOCUS_WINDOW: &str = "focus-window";
     pub const SET_NATIVE_THEME_SOURCE: &str = "set-native-theme-source";
@@ -161,11 +156,9 @@ pub mod event {
     pub const ZOOM_FACTOR_CHANGED: &str = "zoom-factor-changed";
     pub const ERROR: &str = "error";
     pub const AUTO_UPDATER_ERROR: &str = "auto-updater-error";
-    pub const AUTO_UPDATER_CHECKING_FOR_UPDATE: &str =
-        "auto-updater-checking-for-update";
+    pub const AUTO_UPDATER_CHECKING_FOR_UPDATE: &str = "auto-updater-checking-for-update";
     pub const AUTO_UPDATER_UPDATE_AVAILABLE: &str = "auto-updater-update-available";
-    pub const AUTO_UPDATER_UPDATE_NOT_AVAILABLE: &str =
-        "auto-updater-update-not-available";
+    pub const AUTO_UPDATER_UPDATE_NOT_AVAILABLE: &str = "auto-updater-update-not-available";
     pub const AUTO_UPDATER_UPDATE_DOWNLOADED: &str = "auto-updater-update-downloaded";
     pub const SHOW_INSTALLING_UPDATE: &str = "show-installing-update";
     pub const NOTIFICATION_EVENT: &str = "notification-event";
@@ -207,21 +200,55 @@ pub const SYNCHRONOUS_CHANNELS: &[&str] = &[
 /// only; the `test-*` union members are intentionally omitted from the compiled
 /// list but accepted at runtime by [`is_menu_event`].
 pub const MENU_EVENTS: &[&str] = &[
-    "push", "force-push", "pull", "fetch", "show-changes", "show-history",
-    "add-local-repository", "create-branch", "show-branches", "show-worktrees",
-    "create-worktree", "remove-repository", "create-repository", "rename-branch",
-    "delete-branch", "discard-all-changes", "stash-all-changes", "show-preferences",
-    "choose-repository", "open-working-directory",
-    "update-branch-with-contribution-target-branch", "compare-to-branch",
-    "merge-branch", "squash-and-merge-branch", "rebase-branch",
-    "show-repository-settings", "open-in-shell", "compare-on-github",
-    "branch-on-github", "view-repository-on-github", "clone-repository",
-    "show-about", "go-to-commit-message", "open-pull-request", "install-darwin-cli",
-    "install-windows-cli", "uninstall-windows-cli", "open-external-editor",
-    "open-in-copilot-app", "open-with-external-editor", "select-all",
-    "show-stashed-changes", "hide-stashed-changes", "find-text",
-    "create-issue-in-repository-on-github", "preview-pull-request", "test-app-error",
-    "decrease-active-resizable-width", "increase-active-resizable-width",
+    "push",
+    "force-push",
+    "pull",
+    "fetch",
+    "show-changes",
+    "show-history",
+    "add-local-repository",
+    "create-branch",
+    "show-branches",
+    "show-worktrees",
+    "create-worktree",
+    "remove-repository",
+    "create-repository",
+    "rename-branch",
+    "delete-branch",
+    "discard-all-changes",
+    "stash-all-changes",
+    "show-preferences",
+    "choose-repository",
+    "open-working-directory",
+    "update-branch-with-contribution-target-branch",
+    "compare-to-branch",
+    "merge-branch",
+    "squash-and-merge-branch",
+    "rebase-branch",
+    "show-repository-settings",
+    "open-in-shell",
+    "compare-on-github",
+    "branch-on-github",
+    "view-repository-on-github",
+    "clone-repository",
+    "show-about",
+    "go-to-commit-message",
+    "open-pull-request",
+    "install-darwin-cli",
+    "install-windows-cli",
+    "uninstall-windows-cli",
+    "open-external-editor",
+    "open-in-copilot-app",
+    "open-with-external-editor",
+    "select-all",
+    "show-stashed-changes",
+    "hide-stashed-changes",
+    "find-text",
+    "create-issue-in-repository-on-github",
+    "preview-pull-request",
+    "test-app-error",
+    "decrease-active-resizable-width",
+    "increase-active-resizable-width",
     "toggle-changes-filter",
 ];
 

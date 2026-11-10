@@ -33,7 +33,10 @@ impl AppPaths {
             }
             #[cfg(target_os = "macos")]
             {
-                home().join("Library").join("Application Support").join(APP_DATA_DIR)
+                home()
+                    .join("Library")
+                    .join("Application Support")
+                    .join(APP_DATA_DIR)
             }
             #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
             {
@@ -48,7 +51,8 @@ impl AppPaths {
         std::fs::create_dir_all(user_data.join("logs"))?;
         std::fs::create_dir_all(user_data.join("credentials"))?;
 
-        let exec_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("github-desktop-rs"));
+        let exec_path =
+            std::env::current_exe().unwrap_or_else(|_| PathBuf::from("github-desktop-rs"));
         let app_path = exec_path
             .parent()
             .map(Path::to_path_buf)
@@ -56,16 +60,35 @@ impl AppPaths {
 
         let copilot_dir = find_copilot_dir(&exec_path);
 
-        Ok(Self { user_data, app_path, exec_path, copilot_dir })
+        Ok(Self {
+            user_data,
+            app_path,
+            exec_path,
+            copilot_dir,
+        })
     }
 
-    pub fn state_file(&self) -> PathBuf { self.user_data.join("state.json") }
-    pub fn preferences_file(&self) -> PathBuf { self.user_data.join("preferences.json") }
-    pub fn key_value_file(&self) -> PathBuf { self.user_data.join("local-storage.json") }
-    pub fn guid_file(&self) -> PathBuf { self.user_data.join("guid") }
-    pub fn log_dir(&self) -> PathBuf { self.user_data.join("logs") }
-    pub fn credential_dir(&self) -> PathBuf { self.user_data.join("credentials") }
-    pub fn crash_dumps(&self) -> PathBuf { self.user_data.join("Crashpad").join("reports") }
+    pub fn state_file(&self) -> PathBuf {
+        self.user_data.join("state.json")
+    }
+    pub fn preferences_file(&self) -> PathBuf {
+        self.user_data.join("preferences.json")
+    }
+    pub fn key_value_file(&self) -> PathBuf {
+        self.user_data.join("local-storage.json")
+    }
+    pub fn guid_file(&self) -> PathBuf {
+        self.user_data.join("guid")
+    }
+    pub fn log_dir(&self) -> PathBuf {
+        self.user_data.join("logs")
+    }
+    pub fn credential_dir(&self) -> PathBuf {
+        self.user_data.join("credentials")
+    }
+    pub fn crash_dumps(&self) -> PathBuf {
+        self.user_data.join("Crashpad").join("reports")
+    }
 
     pub fn get_path(&self, kind: PathType) -> String {
         let home = home();
@@ -105,12 +128,16 @@ impl AppPaths {
 
 #[cfg(target_os = "windows")]
 fn home() -> PathBuf {
-    std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."))
+    std::env::var("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
 }
 
 #[cfg(not(target_os = "windows"))]
 fn home() -> PathBuf {
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."))
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
 }
 
 /// Node's name for this OS and CPU, as used by the Copilot SDK packages.
@@ -149,8 +176,15 @@ fn find_copilot_dir(exec_path: &Path) -> Option<PathBuf> {
         }
     }
 
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..");
-    let hoisted = repo.join("app").join("node_modules").join("@github").join(&package);
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..");
+    let hoisted = repo
+        .join("app")
+        .join("node_modules")
+        .join("@github")
+        .join(&package);
     if hoisted.join("prebuilds").is_dir() {
         return Some(hoisted);
     }
@@ -161,7 +195,11 @@ fn find_copilot_dir(exec_path: &Path) -> Option<PathBuf> {
         if !name.to_string_lossy().starts_with(&prefix) {
             return None;
         }
-        let dir = entry.path().join("node_modules").join("@github").join(&package);
+        let dir = entry
+            .path()
+            .join("node_modules")
+            .join("@github")
+            .join(&package);
         dir.join("prebuilds").is_dir().then_some(dir)
     })
 }

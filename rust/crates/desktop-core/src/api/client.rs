@@ -8,13 +8,13 @@
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::{AppError, Result};
 use crate::models::account::{Account, ApiIdentity, ApiRepository};
 use crate::storage::SecureStore;
 
-use super::endpoints::{get_absolute_url, get_dot_com_api_endpoint, USER_AGENT};
+use super::endpoints::{USER_AGENT, get_absolute_url, get_dot_com_api_endpoint};
 
 #[derive(Debug, Clone)]
 pub struct ApiClient {
@@ -32,7 +32,10 @@ impl ApiClient {
     }
 
     pub fn token_for(&self, account: &Account) -> Option<String> {
-        self.secure.get_item(&account.key(), &account.login).ok().flatten()
+        self.secure
+            .get_item(&account.key(), &account.login)
+            .ok()
+            .flatten()
     }
 
     /// `request()` in `http.ts`: bearer auth, JSON accept headers, error text.
@@ -98,22 +101,27 @@ impl ApiClient {
 
     /// `/user/emails`.
     pub fn fetch_emails(&self, endpoint: &str, token: &str) -> Result<Value> {
-        self.request_value(reqwest::Method::GET, endpoint, "/user/emails", Some(token), None)
+        self.request_value(
+            reqwest::Method::GET,
+            endpoint,
+            "/user/emails",
+            Some(token),
+            None,
+        )
     }
 
     /// `/user/repos?affiliation=owner,collaborator` (Desktop's
     /// `streamUserRepositories`), with `Link:` pagination.
-    pub fn fetch_user_repositories(&self, endpoint: &str, token: &str) -> Result<Vec<ApiRepository>> {
+    pub fn fetch_user_repositories(
+        &self,
+        endpoint: &str,
+        token: &str,
+    ) -> Result<Vec<ApiRepository>> {
         let mut all = Vec::new();
         let mut path = "/user/repos?per_page=100&affiliation=owner,collaborator".to_string();
         for _ in 0..20 {
-            let response = self.request_raw(
-                reqwest::Method::GET,
-                endpoint,
-                &path,
-                Some(token),
-                None,
-            )?;
+            let response =
+                self.request_raw(reqwest::Method::GET, endpoint, &path, Some(token), None)?;
             let next = response
                 .headers()
                 .get("link")
@@ -129,7 +137,13 @@ impl ApiClient {
         Ok(all)
     }
 
-    pub fn fetch_repository(&self, endpoint: &str, token: &str, owner: &str, name: &str) -> Result<ApiRepository> {
+    pub fn fetch_repository(
+        &self,
+        endpoint: &str,
+        token: &str,
+        owner: &str,
+        name: &str,
+    ) -> Result<ApiRepository> {
         self.request(
             reqwest::Method::GET,
             endpoint,
@@ -139,7 +153,13 @@ impl ApiClient {
         )
     }
 
-    pub fn fetch_pull_requests(&self, endpoint: &str, token: &str, owner: &str, name: &str) -> Result<Value> {
+    pub fn fetch_pull_requests(
+        &self,
+        endpoint: &str,
+        token: &str,
+        owner: &str,
+        name: &str,
+    ) -> Result<Value> {
         self.request_value(
             reqwest::Method::GET,
             endpoint,
@@ -169,7 +189,13 @@ impl ApiClient {
         )
     }
 
-    pub fn fetch_issues(&self, endpoint: &str, token: &str, owner: &str, name: &str) -> Result<Value> {
+    pub fn fetch_issues(
+        &self,
+        endpoint: &str,
+        token: &str,
+        owner: &str,
+        name: &str,
+    ) -> Result<Value> {
         self.request_value(
             reqwest::Method::GET,
             endpoint,
@@ -179,7 +205,14 @@ impl ApiClient {
         )
     }
 
-    pub fn fetch_check_runs(&self, endpoint: &str, token: &str, owner: &str, name: &str, sha: &str) -> Result<Value> {
+    pub fn fetch_check_runs(
+        &self,
+        endpoint: &str,
+        token: &str,
+        owner: &str,
+        name: &str,
+        sha: &str,
+    ) -> Result<Value> {
         self.request_value(
             reqwest::Method::GET,
             endpoint,
@@ -189,7 +222,13 @@ impl ApiClient {
         )
     }
 
-    pub fn graphql(&self, endpoint: &str, token: &str, query: &str, variables: Value) -> Result<Value> {
+    pub fn graphql(
+        &self,
+        endpoint: &str,
+        token: &str,
+        query: &str,
+        variables: Value,
+    ) -> Result<Value> {
         self.request_value(
             reqwest::Method::POST,
             endpoint,
@@ -201,13 +240,27 @@ impl ApiClient {
 
     /// `/desktop/avatar-token` — used by the authenticated-image filter.
     pub fn fetch_avatar_token(&self, endpoint: &str, token: &str) -> Result<Value> {
-        self.request_value(reqwest::Method::GET, endpoint, "/desktop/avatar-token", Some(token), None)
+        self.request_value(
+            reqwest::Method::GET,
+            endpoint,
+            "/desktop/avatar-token",
+            Some(token),
+            None,
+        )
     }
 
     pub fn delete_token(&self, endpoint: &str, token: &str) -> Result<()> {
-        self.request_value(reqwest::Method::DELETE, endpoint, "/desktop/token", Some(token), None)?;
+        self.request_value(
+            reqwest::Method::DELETE,
+            endpoint,
+            "/desktop/token",
+            Some(token),
+            None,
+        )?;
         Ok(())
     }
 
-    pub fn default_endpoint() -> String { get_dot_com_api_endpoint() }
+    pub fn default_endpoint() -> String {
+        get_dot_com_api_endpoint()
+    }
 }

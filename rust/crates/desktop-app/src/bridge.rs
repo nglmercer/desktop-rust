@@ -19,24 +19,23 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tao::event_loop::EventLoopProxy;
 use wry::RequestAsyncResponder;
 
 use desktop_core::app::DesktopApp;
+use desktop_core::io::Lane;
 use desktop_core::io::executor::{Executor, ExecutorStats, Outcome, Task};
 use desktop_core::io::limits::MIB;
-use desktop_core::io::Lane;
 use desktop_core::ipc::channels::{event, send as tx};
 use desktop_core::ipc::protocol::{IpcMessage, RpcResult};
 
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 
 use crate::host::AppEvent;
 
 static VITE_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
 const DEV_VITE_DIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../out/vite-dist");
-
 
 /// Injected before any page script runs. It defines `window.__desktop`,
 /// `window.desktop` and an `ipcRenderer`-shaped object so the web frontend (or
@@ -103,10 +102,25 @@ impl Bridge {
         proxy: EventLoopProxy<AppEvent>,
     ) -> std::io::Result<std::sync::Arc<Self>> {
         let limits = app.resources.limits;
-        let state = Executor::new("desktop-state", 1, limits.queued_requests, limits.queued_bytes)?;
+        let state = Executor::new(
+            "desktop-state",
+            1,
+            limits.queued_requests,
+            limits.queued_bytes,
+        )?;
         let control = Executor::new("desktop-control", 1, CONTROL_CAPACITY, MIB)?;
-        let short = Executor::new("desktop-io-short", limits.short_workers, limits.queued_requests, limits.queued_bytes)?;
-        let long = Executor::new("desktop-io-long", limits.long_workers, limits.queued_requests, limits.queued_bytes)?;
+        let short = Executor::new(
+            "desktop-io-short",
+            limits.short_workers,
+            limits.queued_requests,
+            limits.queued_bytes,
+        )?;
+        let long = Executor::new(
+            "desktop-io-long",
+            limits.long_workers,
+            limits.queued_requests,
+            limits.queued_bytes,
+        )?;
         let sync = Executor::new("desktop-io-sync", 1, SYNC_CAPACITY, SYNC_BYTES)?;
         Ok(std::sync::Arc::new(Self {
             app,
@@ -138,7 +152,13 @@ impl Bridge {
     /// Stop admitting work and finish what is queued as `Shutdown`. Running
     /// tasks are not interrupted; the process stop handles them.
     pub fn shutdown(&self) {
-        for executor in [&self.state, &self.control, &self.short, &self.long, &self.sync] {
+        for executor in [
+            &self.state,
+            &self.control,
+            &self.short,
+            &self.long,
+            &self.sync,
+        ] {
             executor.close();
         }
     }
@@ -147,7 +167,9 @@ impl Bridge {
     /// thread, so it only admits work and never waits.
     pub fn handle_ipc(&self, body: &str) {
         match serde_json::from_str::<Incoming>(body) {
-            Ok(Incoming::Rpc { id, channel, args }) => self.admit_rpc(id, channel, args, body.len()),
+            Ok(Incoming::Rpc { id, channel, args }) => {
+                self.admit_rpc(id, channel, args, body.len())
+            }
             Ok(Incoming::Send { channel, args }) => self.admit_send(channel, args, body.len()),
             Err(error) => tracing::warn!(%error, body = %truncate(body), "malformed IPC frame"),
         }
@@ -174,43 +196,47 @@ impl Bridge {
         let proxy = self.proxy_handle();
         let app = self.app.clone();
         let outcome_channel = channel.clone();
-        let task = Task::new(bytes, Instant::now() + SEND_DEADLINE, move |outcome| match outcome {
-            Outcome::Run => {
-                let sent = if desktop_core::io::handles(&channel) {
-                    desktop_core::io::invoke(&app, &channel, &args).map(|_| ())
-                } else {
-                    app.send(&channel, args)
-                };
-                if let Err(error) = sent {
-                    tracing::warn!(%channel, %error, "simplex IPC failed");
+        let task = Task::new(
+            bytes,
+            Instant::now() + SEND_DEADLINE,
+            move |outcome| match outcome {
+                Outcome::Run => {
+                    let sent = if desktop_core::io::handles(&channel) {
+                        desktop_core::io::invoke(&app, &channel, &args).map(|_| ())
+                    } else {
+                        app.send(&channel, args)
+                    };
+                    if let Err(error) = sent {
+                        tracing::warn!(%channel, %error, "simplex IPC failed");
+                        app.emit(
+                            event::ERROR,
+                            vec![json!({
+                                "type": "ipc",
+                                "channel": channel,
+                                "message": error.to_string(),
+                            })],
+                        );
+                    }
+                    if channel == tx::RENDERER_READY {
+                        // The renderer now has listeners registered; flush anything
+                        // emitted during startup.
+                        let _ = proxy.send_event(AppEvent::Flush);
+                    }
+                }
+                Outcome::Rejected | Outcome::Expired => {
+                    tracing::warn!(channel = %outcome_channel, ?outcome, "simplex IPC was not run");
                     app.emit(
                         event::ERROR,
                         vec![json!({
                             "type": "ipc",
-                            "channel": channel,
-                            "message": error.to_string(),
+                            "channel": outcome_channel,
+                            "message": "EBUSY: QUEUE_FULL, the message was not admitted",
                         })],
                     );
                 }
-                if channel == tx::RENDERER_READY {
-                    // The renderer now has listeners registered; flush anything
-                    // emitted during startup.
-                    let _ = proxy.send_event(AppEvent::Flush);
-                }
-            }
-            Outcome::Rejected | Outcome::Expired => {
-                tracing::warn!(channel = %outcome_channel, ?outcome, "simplex IPC was not run");
-                app.emit(
-                    event::ERROR,
-                    vec![json!({
-                        "type": "ipc",
-                        "channel": outcome_channel,
-                        "message": "EBUSY: QUEUE_FULL, the message was not admitted",
-                    })],
-                );
-            }
-            Outcome::Shutdown => {}
-        });
+                Outcome::Shutdown => {}
+            },
+        );
         if let Err(task) = lane.submit(task) {
             task.finish(Outcome::Rejected);
         }
@@ -275,10 +301,8 @@ impl Bridge {
                 responder.respond(response(
                     405,
                     JSON,
-                    RpcResult::err(desktop_core::error::AppError::msg(
-                        "__invoke requires POST",
-                    ))
-                    .to_bytes(),
+                    RpcResult::err(desktop_core::error::AppError::msg("__invoke requires POST"))
+                        .to_bytes(),
                 ));
                 return;
             }
@@ -298,7 +322,11 @@ impl Bridge {
                 .query()
                 .is_some_and(|query| query.split('&').any(|pair| pair == "sync=1"));
             let body = request.into_body();
-            let body = if body.is_empty() { query_payload.unwrap_or_default() } else { body };
+            let body = if body.is_empty() {
+                query_payload.unwrap_or_default()
+            } else {
+                body
+            };
             let bytes = body.len();
 
             let message = match IpcMessage::parse(&body) {
@@ -317,7 +345,11 @@ impl Bridge {
                 responder.respond(response(200, JSON, RpcResult::err(error).to_bytes()));
                 return;
             }
-            let lane = if sync { &self.sync } else { self.executor_for(&channel) };
+            let lane = if sync {
+                &self.sync
+            } else {
+                self.executor_for(&channel)
+            };
             let app = self.app.clone();
             let outcome_channel = channel.clone();
             let task = Task::new(bytes, Instant::now() + RPC_DEADLINE, move |outcome| {
@@ -339,9 +371,12 @@ impl Bridge {
         }
 
         match asset(&path) {
-            Some((mime, bytes)) => {
-                responder.respond(response_cached(200, &mime, bytes, asset_cache_control(&path)))
-            }
+            Some((mime, bytes)) => responder.respond(response_cached(
+                200,
+                &mime,
+                bytes,
+                asset_cache_control(&path),
+            )),
             None => responder.respond(response(
                 404,
                 "text/plain; charset=utf-8",
@@ -499,7 +534,11 @@ fn copilot_entry(root: &std::path::Path, rest: &str) -> Value {
     if rest.split('/').any(|part| part == "..") {
         return Value::Null;
     }
-    let target = if rest.is_empty() { root.to_path_buf() } else { root.join(rest) };
+    let target = if rest.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(rest)
+    };
     match std::fs::metadata(&target) {
         Ok(meta) if meta.is_file() => serde_json::json!({ "kind": "file", "size": meta.len() }),
         Ok(meta) if meta.is_dir() => {
@@ -529,7 +568,12 @@ fn bundle_entry(path: &str, copilot_dir: Option<&std::path::Path>) -> Value {
     }
     if path == "copilot" || path.starts_with("copilot/") {
         return match copilot_dir {
-            Some(root) => copilot_entry(root, path.strip_prefix("copilot").unwrap_or("").trim_start_matches('/')),
+            Some(root) => copilot_entry(
+                root,
+                path.strip_prefix("copilot")
+                    .unwrap_or("")
+                    .trim_start_matches('/'),
+            ),
             None => Value::Null,
         };
     }
@@ -561,17 +605,26 @@ fn bundle_entry(path: &str, copilot_dir: Option<&std::path::Path>) -> Value {
     if let Some(file) = VITE_DIST.get_file(path) {
         return serde_json::json!({ "kind": "file", "size": file.contents().len() });
     }
-    let dir = if path.is_empty() { Some(&VITE_DIST) } else { VITE_DIST.get_dir(path) };
+    let dir = if path.is_empty() {
+        Some(&VITE_DIST)
+    } else {
+        VITE_DIST.get_dir(path)
+    };
     match dir {
         Some(dir) => {
             let name = |entry: &std::path::Path| {
-                entry.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                entry
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
             };
-            let mut entries: Vec<Value> = dir
-                .dirs()
-                .map(|d| serde_json::json!({ "name": name(d.path()), "isDirectory": true }))
-                .chain(dir.files().map(|f| serde_json::json!({ "name": name(f.path()), "isDirectory": false })))
-                .collect();
+            let mut entries: Vec<Value> =
+                dir.dirs()
+                    .map(|d| serde_json::json!({ "name": name(d.path()), "isDirectory": true }))
+                    .chain(dir.files().map(
+                        |f| serde_json::json!({ "name": name(f.path()), "isDirectory": false }),
+                    ))
+                    .collect();
             entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
             serde_json::json!({ "kind": "directory", "entries": entries })
         }
@@ -598,7 +651,11 @@ fn mime_for(path: &str) -> &'static str {
 }
 
 fn truncate(value: &str) -> &str {
-    let end = value.char_indices().nth(200).map(|(i, _)| i).unwrap_or(value.len());
+    let end = value
+        .char_indices()
+        .nth(200)
+        .map(|(i, _)| i)
+        .unwrap_or(value.len());
     &value[..end]
 }
 
@@ -618,7 +675,10 @@ mod tests {
 
     #[test]
     fn percent_decoding_handles_escapes_and_malformed_input() {
-        assert_eq!(percent_decode("static/logo-64x64%402x.png"), "static/logo-64x64@2x.png");
+        assert_eq!(
+            percent_decode("static/logo-64x64%402x.png"),
+            "static/logo-64x64@2x.png"
+        );
         assert_eq!(percent_decode("a%2e%2E/b"), "a../b");
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz%4"), "%zz%4");
@@ -632,7 +692,12 @@ mod tests {
 
         let root = bundle_entry("", None);
         assert_eq!(root["kind"], "directory");
-        let names: Vec<&str> = root["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = root["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
         assert!(names.contains(&"index.html") && names.contains(&"assets"));
         assert_eq!(bundle_entry("/assets/", None)["kind"], "directory");
 
@@ -642,14 +707,27 @@ mod tests {
 
     #[test]
     fn copilot_paths_are_described_from_the_sdk_directory() {
-        let root = std::env::temp_dir().join(format!("desktop-copilot-entry-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-copilot-entry-{}", std::process::id()));
         std::fs::create_dir_all(root.join("prebuilds/linux-x64")).unwrap();
         std::fs::write(root.join("prebuilds/linux-x64/copilot-runtime"), b"runtime").unwrap();
 
-        assert_eq!(bundle_entry("copilot/prebuilds/linux-x64/copilot-runtime", Some(&root))["kind"], "file");
-        assert_eq!(bundle_entry("copilot/prebuilds", Some(&root))["kind"], "directory");
-        assert_eq!(bundle_entry("copilot/prebuilds/linux-x64/missing", Some(&root)), Value::Null);
-        assert_eq!(bundle_entry("copilot/../bridge.rs", Some(&root)), Value::Null);
+        assert_eq!(
+            bundle_entry("copilot/prebuilds/linux-x64/copilot-runtime", Some(&root))["kind"],
+            "file"
+        );
+        assert_eq!(
+            bundle_entry("copilot/prebuilds", Some(&root))["kind"],
+            "directory"
+        );
+        assert_eq!(
+            bundle_entry("copilot/prebuilds/linux-x64/missing", Some(&root)),
+            Value::Null
+        );
+        assert_eq!(
+            bundle_entry("copilot/../bridge.rs", Some(&root)),
+            Value::Null
+        );
         // Without an SDK install nothing under copilot/ exists.
         assert_eq!(bundle_entry("copilot/prebuilds", None), Value::Null);
         std::fs::remove_dir_all(&root).unwrap();
@@ -678,10 +756,12 @@ mod tests {
             assert_eq!(got.1.as_ref(), b"// fresh hash\n".as_slice());
             assert_eq!(got.0.as_ref(), "text/javascript; charset=utf-8");
             std::fs::remove_file(&tmp).ok();
-            assert!(asset("assets/stale-check-0a1b2c.js").is_none() || {
-                // Embedded fallback would not have this file, disk was cleaned
-                asset("assets/stale-check-0a1b2c.js").is_none()
-            });
+            assert!(
+                asset("assets/stale-check-0a1b2c.js").is_none() || {
+                    // Embedded fallback would not have this file, disk was cleaned
+                    asset("assets/stale-check-0a1b2c.js").is_none()
+                }
+            );
         }
     }
     #[test]
@@ -692,7 +772,10 @@ mod tests {
             assert_eq!(asset_cache_control("index.html"), "no-store");
         } else {
             // Hashed names are immutable; HTML and other files revalidate.
-            assert_eq!(asset_cache_control("assets/index-0a1b2c.js"), "public, max-age=31536000, immutable");
+            assert_eq!(
+                asset_cache_control("assets/index-0a1b2c.js"),
+                "public, max-age=31536000, immutable"
+            );
             assert_eq!(asset_cache_control("index.html"), "no-cache");
             assert_eq!(asset_cache_control("emoji.json"), "no-cache");
         }

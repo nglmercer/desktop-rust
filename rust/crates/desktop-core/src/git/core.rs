@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::error::{parse_git_error, AppError, GitError, GitErrorKind, Result};
+use crate::error::{AppError, GitError, GitErrorKind, Result, parse_git_error};
 
 /// Dugite caps captured git output at 256 KB; keep the same bound so a runaway
 /// command cannot balloon the IPC payload.
@@ -24,7 +24,10 @@ pub struct GitOutput {
 
 impl GitOutput {
     pub fn stdout_lines(&self) -> impl Iterator<Item = &str> {
-        self.stdout.lines().map(str::trim_end).filter(|l| !l.is_empty())
+        self.stdout
+            .lines()
+            .map(str::trim_end)
+            .filter(|l| !l.is_empty())
     }
 }
 
@@ -40,7 +43,10 @@ pub struct GitOptions {
 
 impl GitOptions {
     pub fn new() -> Self {
-        Self { success_exit_codes: vec![0], ..Self::default() }
+        Self {
+            success_exit_codes: vec![0],
+            ..Self::default()
+        }
     }
     pub fn expect(mut self, kind: GitErrorKind) -> Self {
         self.expected_errors.push(kind);
@@ -102,7 +108,11 @@ impl GitEngine {
         let mut command = Command::new(&self.binary);
         command
             .args(args)
-            .current_dir(if path.as_os_str().is_empty() { Path::new(".") } else { path })
+            .current_dir(if path.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                path
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .envs(&self.base_env)
@@ -160,7 +170,11 @@ impl GitEngine {
             }
         }
 
-        Ok(GitOutput { stdout, stderr, exit_code })
+        Ok(GitOutput {
+            stdout,
+            stderr,
+            exit_code,
+        })
     }
 
     /// Convenience for commands whose stdout is the result and whose failure

@@ -1,12 +1,21 @@
 [workspace]
-members = ["rust/crates/core", "rust/crates/cli", "rust/crates/bridge", "rust/crates/native"]
+members = [
+    "rust/crates/core",
+    "rust/crates/cli",
+    "rust/crates/bridge",
+    "rust/crates/native",
+    "rust/crates/desktop-core",
+    "rust/crates/desktop-app",
+]
 default-members = ["rust/crates/core", "rust/crates/cli", "rust/crates/bridge"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
+repository = "https://github.com/desktop/desktop"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -14,7 +23,28 @@ axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+http = "1"
+tao = "0.37"
+wry = { version = "0.57", features = ["devtools"] }
+muda = "0.21"
+rfd = "0.17"
+arboard = "3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "io-std", "net", "signal", "time", "sync", "fs"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10.9"
 base64 = "0.22.1"
+include_dir = "0.7"
+desktop-core = { path = "rust/crates/core" }
+desktop-bridge = { path = "rust/crates/bridge" }
+desktop-shell-core-legacy = { package = "desktop-shell-core-legacy", path = "rust/crates/desktop-core" }
+desktop_core = { package = "desktop-shell-core-legacy", path = "rust/crates/desktop-core" }
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 4
+strip = true

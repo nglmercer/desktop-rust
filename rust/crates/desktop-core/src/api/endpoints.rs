@@ -51,8 +51,12 @@ pub fn is_github_dot_com(url: &str) -> bool {
     url.contains("github.com") && !url.contains("api.github.com")
 }
 
-pub fn is_ghe(host: &str) -> bool { host.ends_with(".ghe.com") }
-pub fn is_ghes(host: &str) -> bool { !is_ghe(host) && !host.contains("github.com") }
+pub fn is_ghe(host: &str) -> bool {
+    host.ends_with(".ghe.com")
+}
+pub fn is_ghes(host: &str) -> bool {
+    !is_ghe(host) && !host.contains("github.com")
+}
 
 pub fn get_oauth_authorization_url(endpoint: &str, state: &str, login: Option<&str>) -> String {
     let html = get_html_url(endpoint);
@@ -90,6 +94,8 @@ pub fn get_next_page_path_from_link(link: &str) -> Option<String> {
 }
 
 trait Pipe: Sized {
-    fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R { f(self) }
+    fn pipe<R>(self, f: impl FnOnce(Self) -> R) -> R {
+        f(self)
+    }
 }
 impl<T> Pipe for T {}

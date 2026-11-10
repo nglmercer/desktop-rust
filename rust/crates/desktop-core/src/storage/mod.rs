@@ -6,4 +6,4 @@ pub mod secure_store;
 
 pub use json_store::Storage;
 pub use paths::AppPaths;
-pub use secure_store::{base64_decode, base64_encode, SecureStore};
+pub use secure_store::{SecureStore, base64_decode, base64_encode};

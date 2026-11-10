@@ -97,7 +97,9 @@ pub fn action(id: &str, labels: &MenuLabels) -> Option<MenuAction> {
         "about" => Emit("show-about"),
         "create-pull-request" => Emit("open-pull-request"),
         "push" if labels.is_force_push_for_current_repository => Emit("force-push"),
-        "toggle-stashed-changes" if labels.is_stashed_changes_visible => Emit("hide-stashed-changes"),
+        "toggle-stashed-changes" if labels.is_stashed_changes_visible => {
+            Emit("hide-stashed-changes")
+        }
         "toggle-stashed-changes" => Emit("show-stashed-changes"),
 
         "edit-undo" => Edit(EditCommand::Undo),
@@ -122,7 +124,12 @@ pub fn action(id: &str, labels: &MenuLabels) -> Option<MenuAction> {
         "help-show-logs" => ShowLogs,
 
         // Everything else emits an event named like its id.
-        other => Emit(SAME_NAME_EVENTS.iter().copied().find(|event| *event == other)?),
+        other => Emit(
+            SAME_NAME_EVENTS
+                .iter()
+                .copied()
+                .find(|event| *event == other)?,
+        ),
     })
 }
 
@@ -175,8 +182,17 @@ pub fn next_zoom(current: f64, direction: Zoom) -> f64 {
         .unwrap_or(1.0);
     match direction {
         Zoom::Reset => 1.0,
-        Zoom::In => ZOOM_FACTORS.iter().copied().find(|f| *f > closest).unwrap_or(closest),
-        Zoom::Out => ZOOM_FACTORS.iter().rev().copied().find(|f| *f < closest).unwrap_or(closest),
+        Zoom::In => ZOOM_FACTORS
+            .iter()
+            .copied()
+            .find(|f| *f > closest)
+            .unwrap_or(closest),
+        Zoom::Out => ZOOM_FACTORS
+            .iter()
+            .rev()
+            .copied()
+            .find(|f| *f < closest)
+            .unwrap_or(closest),
     }
 }
 
@@ -214,7 +230,10 @@ fn truncate_with_ellipsis(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()
     } else {
-        format!("{}…", text.chars().take(max.saturating_sub(1)).collect::<String>())
+        format!(
+            "{}…",
+            text.chars().take(max.saturating_sub(1)).collect::<String>()
+        )
     }
 }
 
@@ -227,12 +246,28 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
         vec![
             item("new-repository", "New &repository…", Some("CmdOrCtrl+N")),
             separator("file-separator-1"),
-            item("add-local-repository", "Add &local repository…", Some("CmdOrCtrl+O")),
-            item("clone-repository", "Clo&ne repository…", Some("CmdOrCtrl+Shift+O")),
+            item(
+                "add-local-repository",
+                "Add &local repository…",
+                Some("CmdOrCtrl+O"),
+            ),
+            item(
+                "clone-repository",
+                "Clo&ne repository…",
+                Some("CmdOrCtrl+Shift+O"),
+            ),
             separator("file-separator-2"),
             item("preferences", "&Options…", Some("CmdOrCtrl+,")),
             separator("file-separator-3"),
-            item("quit", "E&xit", Some(if cfg!(windows) { "Alt+F4" } else { "CmdOrCtrl+Q" })),
+            item(
+                "quit",
+                "E&xit",
+                Some(if cfg!(windows) {
+                    "Alt+F4"
+                } else {
+                    "CmdOrCtrl+Q"
+                }),
+            ),
         ],
     );
 
@@ -257,21 +292,41 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
     let mut view = vec![
         item("show-changes", "&Changes", Some("CmdOrCtrl+1")),
         item("show-history", "&History", Some("CmdOrCtrl+2")),
-        item("show-repository-list", "Repository &list", Some("CmdOrCtrl+T")),
+        item(
+            "show-repository-list",
+            "Repository &list",
+            Some("CmdOrCtrl+T"),
+        ),
         item("show-branches-list", "&Branches list", Some("CmdOrCtrl+B")),
-        item("show-worktrees-list", "Wor&ktrees list", Some("CmdOrCtrl+Alt+W")),
+        item(
+            "show-worktrees-list",
+            "Wor&ktrees list",
+            Some("CmdOrCtrl+Alt+W"),
+        ),
         separator("view-separator-1"),
-        item("go-to-commit-message", "Go to &Summary", Some("CmdOrCtrl+G")),
+        item(
+            "go-to-commit-message",
+            "Go to &Summary",
+            Some("CmdOrCtrl+G"),
+        ),
         item(
             "toggle-stashed-changes",
-            if labels.is_stashed_changes_visible { "H&ide stashed changes" } else { "Sho&w stashed changes" },
+            if labels.is_stashed_changes_visible {
+                "H&ide stashed changes"
+            } else {
+                "Sho&w stashed changes"
+            },
             Some("Ctrl+H"),
         ),
         item(
             "toggle-changes-filter",
             format!(
                 "{} Toggle Chan&ges Filter",
-                if labels.is_changes_filter_visible { "Hide" } else { "Show" }
+                if labels.is_changes_filter_visible {
+                    "Hide"
+                } else {
+                    "Show"
+                }
             ),
             Some("CmdOrCtrl+L"),
         ),
@@ -280,15 +335,27 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
         item("zoom-reset", "Reset zoom", Some("CmdOrCtrl+0")),
         item("zoom-in", "Zoom in", Some("CmdOrCtrl+=")),
         item("zoom-out", "Zoom out", Some("CmdOrCtrl+-")),
-        item("increase-active-resizable-width", "Expand active resizable", Some("CmdOrCtrl+9")),
-        item("decrease-active-resizable-width", "Contract active resizable", Some("CmdOrCtrl+8")),
+        item(
+            "increase-active-resizable-width",
+            "Expand active resizable",
+            Some("CmdOrCtrl+9"),
+        ),
+        item(
+            "decrease-active-resizable-width",
+            "Contract active resizable",
+            Some("CmdOrCtrl+8"),
+        ),
         separator("view-separator-3"),
     ];
     // Electron showed Reload only on the development channel.
     if cfg!(debug_assertions) {
         view.push(item("reload-window", "&Reload", Some("CmdOrCtrl+Alt+R")));
     }
-    view.push(item("show-devtools", "&Toggle developer tools", Some("Ctrl+Shift+I")));
+    view.push(item(
+        "show-devtools",
+        "&Toggle developer tools",
+        Some("Ctrl+Shift+I"),
+    ));
     let view = submenu("view", "&View", view);
 
     let push_label = match (
@@ -299,7 +366,11 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
         (true, true) => "Force P&ush…",
         (true, false) => "Force P&ush",
     };
-    let file_manager = if cfg!(windows) { "Show in E&xplorer" } else { "Show in your File Manager" };
+    let file_manager = if cfg!(windows) {
+        "Show in E&xplorer"
+    } else {
+        "Show in your File Manager"
+    };
 
     let repository = submenu(
         "repository",
@@ -310,26 +381,48 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
             item("fetch", "&Fetch", Some("CmdOrCtrl+Shift+T")),
             item(
                 "remove-repository",
-                if labels.ask_for_confirmation_on_repository_removal { "&Remove…" } else { "&Remove" },
+                if labels.ask_for_confirmation_on_repository_removal {
+                    "&Remove…"
+                } else {
+                    "&Remove"
+                },
                 Some("CmdOrCtrl+Backspace"),
             ),
             separator("repository-separator-1"),
-            item("view-repository-on-github", "&View on GitHub", Some("CmdOrCtrl+Shift+G")),
+            item(
+                "view-repository-on-github",
+                "&View on GitHub",
+                Some("CmdOrCtrl+Shift+G"),
+            ),
             item(
                 "open-in-shell",
-                format!("O&pen in {}", labels.selected_shell.as_deref().unwrap_or("shell")),
+                format!(
+                    "O&pen in {}",
+                    labels.selected_shell.as_deref().unwrap_or("shell")
+                ),
                 Some("Ctrl+`"),
             ),
-            item("open-working-directory", file_manager, Some("CmdOrCtrl+Shift+F")),
+            item(
+                "open-working-directory",
+                file_manager,
+                Some("CmdOrCtrl+Shift+F"),
+            ),
             item(
                 "open-external-editor",
                 format!(
                     "&Open in {}",
-                    labels.selected_external_editor.as_deref().unwrap_or("external editor")
+                    labels
+                        .selected_external_editor
+                        .as_deref()
+                        .unwrap_or("external editor")
                 ),
                 Some("CmdOrCtrl+Shift+A"),
             ),
-            item("open-with-external-editor", "Open &with…", Some("CmdOrCtrl+Shift+Alt+A")),
+            item(
+                "open-with-external-editor",
+                "Open &with…",
+                Some("CmdOrCtrl+Shift+Alt+A"),
+            ),
             separator("repository-separator-2"),
             item(
                 "create-issue-in-repository-on-github",
@@ -337,14 +430,21 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
                 Some("CmdOrCtrl+I"),
             ),
             separator("repository-separator-3"),
-            item("create-worktree", "New work&tree…", Some("CmdOrCtrl+Shift+W")),
+            item(
+                "create-worktree",
+                "New work&tree…",
+                Some("CmdOrCtrl+Shift+W"),
+            ),
             separator("repository-separator-4"),
             item("show-repository-settings", "Repository &settings…", None),
         ],
     );
 
     let default_branch = truncate_with_ellipsis(
-        labels.contribution_target_default_branch.as_deref().unwrap_or("default branch"),
+        labels
+            .contribution_target_default_branch
+            .as_deref()
+            .unwrap_or("default branch"),
         25,
     );
     let branch = submenu(
@@ -355,7 +455,11 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
             item("rename-branch", "&Rename…", Some("CmdOrCtrl+Shift+R")),
             item("delete-branch", "&Delete…", Some("CmdOrCtrl+Shift+D")),
             separator("branch-separator-1"),
-            item("discard-all-changes", "Discard all changes…", Some("CmdOrCtrl+Shift+Backspace")),
+            item(
+                "discard-all-changes",
+                "Discard all changes…",
+                Some("CmdOrCtrl+Shift+Backspace"),
+            ),
             item(
                 "stash-all-changes",
                 if labels.ask_for_confirmation_when_stashing_all_changes {
@@ -371,18 +475,42 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
                 format!("&Update from {default_branch}"),
                 Some("CmdOrCtrl+Shift+U"),
             ),
-            item("compare-to-branch", "&Compare to branch", Some("CmdOrCtrl+Shift+B")),
-            item("merge-branch", "&Merge into current branch…", Some("CmdOrCtrl+Shift+M")),
+            item(
+                "compare-to-branch",
+                "&Compare to branch",
+                Some("CmdOrCtrl+Shift+B"),
+            ),
+            item(
+                "merge-branch",
+                "&Merge into current branch…",
+                Some("CmdOrCtrl+Shift+M"),
+            ),
             item(
                 "squash-and-merge-branch",
                 "Squas&h and merge into current branch…",
                 Some("CmdOrCtrl+Shift+H"),
             ),
-            item("rebase-branch", "R&ebase current branch…", Some("CmdOrCtrl+Shift+E")),
+            item(
+                "rebase-branch",
+                "R&ebase current branch…",
+                Some("CmdOrCtrl+Shift+E"),
+            ),
             separator("branch-separator-3"),
-            item("compare-on-github", "Compare on &GitHub", Some("CmdOrCtrl+Shift+C")),
-            item("branch-on-github", "View branch on GitHub", Some("CmdOrCtrl+Alt+B")),
-            item("preview-pull-request", "Preview pull request", Some("CmdOrCtrl+Alt+P")),
+            item(
+                "compare-on-github",
+                "Compare on &GitHub",
+                Some("CmdOrCtrl+Shift+C"),
+            ),
+            item(
+                "branch-on-github",
+                "View branch on GitHub",
+                Some("CmdOrCtrl+Alt+B"),
+            ),
+            item(
+                "preview-pull-request",
+                "Preview pull request",
+                Some("CmdOrCtrl+Alt+P"),
+            ),
             item(
                 "create-pull-request",
                 if labels.has_current_pull_request {
@@ -486,11 +614,27 @@ mod tests {
         leaves(&menu, &mut items);
         let ids: HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
         for id in [
-            "push", "pull", "fetch", "create-branch", "rename-branch", "delete-branch",
-            "show-changes", "show-history", "show-repository-list", "show-branches-list",
-            "open-working-directory", "show-repository-settings", "go-to-commit-message",
-            "create-pull-request", "compare-to-branch", "toggle-stashed-changes",
-            "clone-repository", "new-repository", "add-local-repository", "preferences", "about",
+            "push",
+            "pull",
+            "fetch",
+            "create-branch",
+            "rename-branch",
+            "delete-branch",
+            "show-changes",
+            "show-history",
+            "show-repository-list",
+            "show-branches-list",
+            "open-working-directory",
+            "show-repository-settings",
+            "go-to-commit-message",
+            "create-pull-request",
+            "compare-to-branch",
+            "toggle-stashed-changes",
+            "clone-repository",
+            "new-repository",
+            "add-local-repository",
+            "preferences",
+            "about",
         ] {
             assert!(ids.contains(id), "missing {id}");
         }
@@ -526,8 +670,14 @@ mod tests {
         // Unspecified fields keep their defaults.
         assert_eq!(label("stash-all-changes"), "&Stash all changes…");
 
-        assert_eq!(action("push", &labels), Some(MenuAction::Emit("force-push")));
-        assert_eq!(action("push", &MenuLabels::default()), Some(MenuAction::Emit("push")));
+        assert_eq!(
+            action("push", &labels),
+            Some(MenuAction::Emit("force-push"))
+        );
+        assert_eq!(
+            action("push", &MenuLabels::default()),
+            Some(MenuAction::Emit("push"))
+        );
         assert_eq!(
             action("toggle-stashed-changes", &labels),
             Some(MenuAction::Emit("hide-stashed-changes"))

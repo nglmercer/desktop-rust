@@ -12,7 +12,7 @@
 //! can release its own bookkeeping in each case.
 
 use std::collections::VecDeque;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
@@ -240,9 +240,11 @@ mod tests {
         let (tx, rx) = mpsc::channel::<Outcome>();
         for _ in 0..2 {
             let tx = tx.clone();
-            assert!(executor
-                .submit(Task::new(0, far(), move |o| tx.send(o).unwrap()))
-                .is_ok());
+            assert!(
+                executor
+                    .submit(Task::new(0, far(), move |o| tx.send(o).unwrap()))
+                    .is_ok()
+            );
         }
         let refused = executor.submit(Task::new(0, far(), move |o| tx.send(o).unwrap()));
         let refused = refused.expect_err("the third queued task exceeds the count limit");

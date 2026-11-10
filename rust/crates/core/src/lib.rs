@@ -1,8 +1,13 @@
 //! Repository workflows shared by the CLI and browser/native transports.
 pub mod application;
+pub mod copilot;
+pub mod migration;
+pub mod secret_store;
+pub mod updater;
 pub use application::{
     ApplicationService, BACKEND_VERSION, Capabilities, IBackendError, IRequest, JobState,
 };
+pub use secret_store::{SecretStore, StoreInfo, StoreKind};
 mod accounts;
 pub use accounts::{
     AccountAssignment, AccountTarget, RepositoryAccount, ScopedAssociation, StoredAccount,

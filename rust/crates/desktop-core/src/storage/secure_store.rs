@@ -172,8 +172,16 @@ pub fn base64_encode(input: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(B64[((n >> 18) & 63) as usize] as char);
         out.push(B64[((n >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { B64[((n >> 6) & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { B64[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            B64[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            B64[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -192,13 +200,20 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>> {
                 padding += 1;
                 0
             } else {
-                B64.iter().position(|c| c == b).ok_or_else(|| AppError::msg("invalid base64 character"))? as u32
+                B64.iter()
+                    .position(|c| c == b)
+                    .ok_or_else(|| AppError::msg("invalid base64 character"))?
+                    as u32
             };
             n |= value << (18 - i * 6);
         }
         out.push((n >> 16) as u8);
-        if padding < 2 { out.push((n >> 8) as u8); }
-        if padding < 1 { out.push(n as u8); }
+        if padding < 2 {
+            out.push((n >> 8) as u8);
+        }
+        if padding < 1 {
+            out.push(n as u8);
+        }
     }
     Ok(out)
 }
@@ -215,20 +230,31 @@ mod tests {
 
         assert_eq!(store.get_item("service\nlogin", "login").unwrap(), None);
         store.set_item("service\nlogin", "login", "s3cret").unwrap();
-        store.set_item("service\nlogin", "login", "rotated").unwrap();
-        assert_eq!(store.get_item("service\nlogin", "login").unwrap().as_deref(), Some("rotated"));
+        store
+            .set_item("service\nlogin", "login", "rotated")
+            .unwrap();
+        assert_eq!(
+            store
+                .get_item("service\nlogin", "login")
+                .unwrap()
+                .as_deref(),
+            Some("rotated")
+        );
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+            };
             assert_eq!(mode(&dir), 0o700);
             let files: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
             assert_eq!(files.len(), 1, "no temporary file is left behind");
             assert_eq!(mode(&files[0].path()), 0o600);
 
             // A file left world-readable by an older build is tightened on open.
-            std::fs::set_permissions(files[0].path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+            std::fs::set_permissions(files[0].path(), std::fs::Permissions::from_mode(0o644))
+                .unwrap();
             SecureStore::new(dir.clone()).unwrap();
             assert_eq!(mode(&files[0].path()), 0o600);
         }

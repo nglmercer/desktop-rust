@@ -77,7 +77,11 @@ fn parse_log(raw: &str) -> Vec<Commit> {
                 .collect::<Vec<_>>();
 
             Some(Commit {
-                short_sha: if field(1).is_empty() { Commit::short(&sha) } else { field(1) },
+                short_sha: if field(1).is_empty() {
+                    Commit::short(&sha)
+                } else {
+                    field(1)
+                },
                 sha,
                 summary: field(2),
                 body: field(3).trim().to_string(),
@@ -118,7 +122,14 @@ pub fn get_changed_files(git: &GitEngine, repo: &Path, sha: &str) -> Result<Vec<
             let path = parts.next()?.to_string();
             Some(ChangedFile {
                 path,
-                status: if additions > 0 && deletions == 0 { "added" } else if deletions > 0 && additions == 0 { "deleted" } else { "modified" }.to_string(),
+                status: if additions > 0 && deletions == 0 {
+                    "added"
+                } else if deletions > 0 && additions == 0 {
+                    "deleted"
+                } else {
+                    "modified"
+                }
+                .to_string(),
                 old_path: None,
                 additions,
                 deletions,

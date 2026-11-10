@@ -23,12 +23,16 @@ pub struct Storage {
 
 impl Storage {
     pub fn open(paths: AppPaths) -> Result<Self> {
-        let kv = read_json(&paths.key_value_file())
-            .unwrap_or_else(|_| HashMap::new());
-        Ok(Self { paths, kv: std::sync::Mutex::new(kv) })
+        let kv = read_json(&paths.key_value_file()).unwrap_or_else(|_| HashMap::new());
+        Ok(Self {
+            paths,
+            kv: std::sync::Mutex::new(kv),
+        })
     }
 
-    pub fn paths(&self) -> &AppPaths { &self.paths }
+    pub fn paths(&self) -> &AppPaths {
+        &self.paths
+    }
 
     pub fn load_state(&self) -> Result<AppState> {
         match read_json::<AppState>(&self.paths.state_file()) {
@@ -73,22 +77,30 @@ impl Storage {
 
     pub fn set_item(&self, key: &str, value: Value) -> Result<()> {
         {
-            let mut guard = self.kv.lock().map_err(|_| AppError::msg("local-storage lock poisoned"))?;
+            let mut guard = self
+                .kv
+                .lock()
+                .map_err(|_| AppError::msg("local-storage lock poisoned"))?;
             guard.insert(key.to_string(), value);
         }
         self.flush_kv()
     }
 
     pub fn get_boolean(&self, key: &str, default: bool) -> bool {
-        self.get_item(key).and_then(|v| v.as_bool()).unwrap_or(default)
+        self.get_item(key)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(default)
     }
 
     pub fn get_number(&self, key: &str, default: f64) -> f64 {
-        self.get_item(key).and_then(|v| v.as_f64()).unwrap_or(default)
+        self.get_item(key)
+            .and_then(|v| v.as_f64())
+            .unwrap_or(default)
     }
 
     pub fn get_string(&self, key: &str) -> Option<String> {
-        self.get_item(key).and_then(|v| v.as_str().map(str::to_string))
+        self.get_item(key)
+            .and_then(|v| v.as_str().map(str::to_string))
     }
 
     pub fn get_string_array(&self, key: &str) -> Vec<String> {

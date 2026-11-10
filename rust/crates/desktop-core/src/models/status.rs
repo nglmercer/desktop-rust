@@ -100,7 +100,11 @@ impl StatusResult {
 
 /// Map a porcelain `XY` status pair onto the app's coarse status kind.
 pub fn status_kind(index: char, worktree: char) -> AppFileStatusKind {
-    if index == 'U' || worktree == 'U' || (index == 'A' && worktree == 'A') || (index == 'D' && worktree == 'D') {
+    if index == 'U'
+        || worktree == 'U'
+        || (index == 'A' && worktree == 'A')
+        || (index == 'D' && worktree == 'D')
+    {
         return AppFileStatusKind::Conflicted;
     }
     match (index, worktree) {

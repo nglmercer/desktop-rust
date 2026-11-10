@@ -42,7 +42,10 @@ mod imp {
     }
 
     /// Become the primary instance and call `on_args` for each handoff.
-    pub fn listen(socket: &Path, on_args: impl Fn(Vec<String>) + Send + 'static) -> std::io::Result<()> {
+    pub fn listen(
+        socket: &Path,
+        on_args: impl Fn(Vec<String>) + Send + 'static,
+    ) -> std::io::Result<()> {
         // `forward` failed, so any existing socket file is a stale leftover.
         let _ = std::fs::remove_file(socket);
         let listener = UnixListener::bind(socket)?;
@@ -79,7 +82,10 @@ mod imp {
     pub fn forward(_socket: &Path, _args: &[String]) -> bool {
         false
     }
-    pub fn listen(_socket: &Path, _on_args: impl Fn(Vec<String>) + Send + 'static) -> std::io::Result<()> {
+    pub fn listen(
+        _socket: &Path,
+        _on_args: impl Fn(Vec<String>) + Send + 'static,
+    ) -> std::io::Result<()> {
         Ok(())
     }
 }
@@ -88,7 +94,10 @@ pub fn forward(socket: &Path, args: &[String]) -> bool {
     imp::forward(socket, args)
 }
 
-pub fn listen(socket: &Path, on_args: impl Fn(Vec<String>) + Send + 'static) -> std::io::Result<()> {
+pub fn listen(
+    socket: &Path,
+    on_args: impl Fn(Vec<String>) + Send + 'static,
+) -> std::io::Result<()> {
     imp::listen(socket, on_args)
 }
 
@@ -100,7 +109,8 @@ mod tests {
 
     #[test]
     fn a_second_launch_hands_its_arguments_to_the_first() {
-        let socket = std::env::temp_dir().join(format!("desktop-instance-test-{}.sock", std::process::id()));
+        let socket =
+            std::env::temp_dir().join(format!("desktop-instance-test-{}.sock", std::process::id()));
         let args = vec!["x-github-desktop-dev-auth://oauth?code=c&state=s".to_string()];
 
         assert!(!forward(&socket, &args), "nothing is listening yet");
@@ -115,7 +125,9 @@ mod tests {
 
     #[test]
     fn only_urls_and_cli_actions_are_forwarded() {
-        assert!(is_forwardable("x-github-desktop-dev-auth://oauth?code=c&state=s"));
+        assert!(is_forwardable(
+            "x-github-desktop-dev-auth://oauth?code=c&state=s"
+        ));
         assert!(is_forwardable("--cli-open=/tmp/repo"));
         assert!(!is_forwardable("--self-test"));
         assert!(!is_forwardable("https://example.com"));

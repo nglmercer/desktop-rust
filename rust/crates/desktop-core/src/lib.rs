@@ -82,7 +82,14 @@ mod tests {
     fn state_snapshot_never_contains_tokens() {
         let app = DesktopApp::new(Arc::new(ipc::protocol::NullHost)).unwrap();
         let snapshot = app.snapshot().unwrap();
-        assert!(snapshot.get("endpointTokens").unwrap().as_array().unwrap().is_empty());
+        assert!(
+            snapshot
+                .get("endpointTokens")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -97,7 +104,10 @@ mod tests {
     #[test]
     fn base64_roundtrip() {
         let encoded = storage::base64_encode(b"token:abc/123+=");
-        assert_eq!(storage::base64_decode(&encoded).unwrap(), b"token:abc/123+=");
+        assert_eq!(
+            storage::base64_decode(&encoded).unwrap(),
+            b"token:abc/123+="
+        );
     }
 
     #[test]
@@ -110,7 +120,10 @@ mod tests {
             api::endpoints::get_enterprise_api_url("github.acme.com"),
             "https://github.acme.com/api/v3"
         );
-        assert_eq!(api::endpoints::get_html_url(api::endpoints::DOTCOM_API_ENDPOINT), "https://github.com");
+        assert_eq!(
+            api::endpoints::get_html_url(api::endpoints::DOTCOM_API_ENDPOINT),
+            "https://github.com"
+        );
     }
 
     #[test]

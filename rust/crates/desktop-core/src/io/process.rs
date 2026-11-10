@@ -34,7 +34,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::DesktopApp;
 use crate::error::{AppError, Result};
@@ -659,7 +659,7 @@ pub fn ack(o: &Value) -> Result<Value> {
         _ => {
             return Err(AppError::BadArgs(
                 "`stream` must be stdout or stderr".into(),
-            ))
+            ));
         }
     };
     if let Some((_, _, outputs)) = lookup(id) {

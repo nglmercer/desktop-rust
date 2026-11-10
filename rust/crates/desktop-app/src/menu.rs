@@ -25,7 +25,10 @@ pub struct NativeMenu {
 }
 
 /// Build the menu and route clicks into the tao event loop.
-pub fn install(proxy: EventLoopProxy<AppEvent>, model: &[SerializableMenuItem]) -> Option<NativeMenu> {
+pub fn install(
+    proxy: EventLoopProxy<AppEvent>,
+    model: &[SerializableMenuItem],
+) -> Option<NativeMenu> {
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let _ = proxy.send_event(AppEvent::NativeMenu(event.id.0.clone()));
     }));
@@ -61,7 +64,8 @@ impl NativeMenu {
             match child.kind.as_str() {
                 "separator" => parent.append(&PredefinedMenuItem::separator())?,
                 "submenuItem" => {
-                    let submenu = Submenu::with_id(MenuId::new(&child.id), label(child), child.enabled);
+                    let submenu =
+                        Submenu::with_id(MenuId::new(&child.id), label(child), child.enabled);
                     self.fill(&submenu, &child.submenu)?;
                     parent.append(&submenu)?;
                 }
@@ -73,9 +77,15 @@ impl NativeMenu {
                             })
                             .ok()
                     });
-                    let item = MenuItem::with_id(MenuId::new(&child.id), label(child), child.enabled, accelerator);
+                    let item = MenuItem::with_id(
+                        MenuId::new(&child.id),
+                        label(child),
+                        child.enabled,
+                        accelerator,
+                    );
                     parent.append(&item as &dyn IsMenuItem)?;
-                    self.shown.insert(child.id.clone(), (label(child).to_string(), child.enabled));
+                    self.shown
+                        .insert(child.id.clone(), (label(child).to_string(), child.enabled));
                     self.items.insert(child.id.clone(), item);
                 }
             }
@@ -121,7 +131,10 @@ impl NativeMenu {
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         {
             use tao::platform::unix::WindowExtUnix;
-            if let Err(error) = self.menu.init_for_gtk_window(window.gtk_window(), window.default_vbox()) {
+            if let Err(error) = self
+                .menu
+                .init_for_gtk_window(window.gtk_window(), window.default_vbox())
+            {
                 tracing::warn!(%error, "could not attach the native menu");
             }
         }

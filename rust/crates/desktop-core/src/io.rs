@@ -20,13 +20,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::DesktopApp;
 use crate::error::{AppError, Result};
 use crate::io::limits::{ByteBudget, Permit, Resources, STREAM_BLOCK};
-use sha2::Digest;
 use crate::storage::{base64_decode, base64_encode};
+use sha2::Digest;
 
 pub const PREFIX: &str = "desktop.io.";
 
@@ -64,8 +64,12 @@ pub fn handles(channel: &str) -> bool {
 /// they fail quickly with `UnknownChannel`.
 pub fn lane(channel: &str) -> Lane {
     match channel.strip_prefix(PREFIX).unwrap_or("") {
-        "process-write" | "process-end" | "process-kill" | "process-ack" | "cancel" => Lane::Control,
-        "git-exec" | "http-fetch" | "process-spawn" | "fs-copy" | "fs-copy-file" | "fs-hash" => Lane::Long,
+        "process-write" | "process-end" | "process-kill" | "process-ack" | "cancel" => {
+            Lane::Control
+        }
+        "git-exec" | "http-fetch" | "process-spawn" | "fs-copy" | "fs-copy-file" | "fs-hash" => {
+            Lane::Long
+        }
         "fs-rm" => Lane::Long,
         _ => Lane::Short,
     }
@@ -79,7 +83,11 @@ pub fn allowed_synchronously(channel: &str, args: &[Value]) -> bool {
         // Renderer state commands are asynchronous only.
         return false;
     }
-    let recursive = args.first().and_then(|o| o.get("recursive")).and_then(Value::as_bool).unwrap_or(false);
+    let recursive = args
+        .first()
+        .and_then(|o| o.get("recursive"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     match lane(channel) {
         Lane::Short => true,
         Lane::Control => false,
@@ -102,12 +110,16 @@ pub fn invoke(app: &DesktopApp, channel: &str, args: &[Value]) -> Result<Value> 
             .map(Value::String)
             .unwrap_or(Value::Null)),
         "keychain-set" => {
-            app.secure
-                .set_item(&keychain_key(o)?, &string(o, "account")?, &string(o, "password")?)?;
+            app.secure.set_item(
+                &keychain_key(o)?,
+                &string(o, "account")?,
+                &string(o, "password")?,
+            )?;
             Ok(Value::Null)
         }
         "keychain-delete" => {
-            app.secure.delete_item(&keychain_key(o)?, &string(o, "account")?)?;
+            app.secure
+                .delete_item(&keychain_key(o)?, &string(o, "account")?)?;
             Ok(json!(true))
         }
         "process-spawn" => process::spawn(app, o),
@@ -146,7 +158,11 @@ fn flag(o: &Value, key: &str) -> bool {
 
 /// keytar addresses a secret by (service, account). The store hashes one key.
 fn keychain_key(o: &Value) -> Result<String> {
-    Ok(format!("{}\n{}", string(o, "service")?, string(o, "account")?))
+    Ok(format!(
+        "{}\n{}",
+        string(o, "service")?,
+        string(o, "account")?
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +186,9 @@ enum Stop {
 type StopCell = Arc<Mutex<Option<Stop>>>;
 
 fn stop_with(cell: &StopCell, reason: Stop) {
-    cell.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(reason);
+    cell.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert(reason);
 }
 
 fn stopped(cell: &StopCell) -> Option<Stop> {
@@ -231,7 +249,9 @@ fn terminate(child: &mut Child, grace: bool) {
     #[cfg(unix)]
     {
         fn signal_group(flag: &str, pid: u32) {
-            let _ = Command::new("kill").args([flag, "--", &format!("-{pid}")]).status();
+            let _ = Command::new("kill")
+                .args([flag, "--", &format!("-{pid}")])
+                .status();
         }
         if grace {
             signal_group("-TERM", child.id());
@@ -256,7 +276,13 @@ fn terminate(child: &mut Child, grace: bool) {
 /// The reason-carrying error for a stopped command. `partial` keeps the output
 /// each stream produced, so callers can use what arrived (for example a
 /// preview cut at `maxBuffer`).
-fn stopped_error(stop: Stop, out: &Captured, err: &Captured, binary: bool, ceiling: usize) -> AppError {
+fn stopped_error(
+    stop: Stop,
+    out: &Captured,
+    err: &Captured,
+    binary: bool,
+    ceiling: usize,
+) -> AppError {
     let encode = |bytes: &[u8]| {
         if binary {
             base64_encode(bytes)
@@ -319,7 +345,10 @@ fn cancel_flag(id: u64) -> Arc<AtomicBool> {
     if flags.len() >= CANCEL_FLAG_LIMIT {
         flags.retain(|_, flag| Arc::strong_count(flag) > 1 || flag.load(Ordering::SeqCst));
     }
-    flags.entry(id).or_insert_with(|| Arc::new(AtomicBool::new(false))).clone()
+    flags
+        .entry(id)
+        .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone()
 }
 
 /// Holds a request's flag for the life of the request and removes it on drop.
@@ -331,18 +360,26 @@ struct CancelGuard {
 impl CancelGuard {
     fn new(o: &Value) -> Self {
         let id = o.get("cancelId").and_then(Value::as_u64);
-        Self { id, flag: id.map(cancel_flag) }
+        Self {
+            id,
+            flag: id.map(cancel_flag),
+        }
     }
 
     fn raised(&self) -> bool {
-        self.flag.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))
+        self.flag
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::SeqCst))
     }
 }
 
 impl Drop for CancelGuard {
     fn drop(&mut self) {
         if let Some(id) = self.id {
-            cancel_flags().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+            cancel_flags()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id);
         }
     }
 }
@@ -380,7 +417,11 @@ fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
     let args: Vec<String> = o
         .get("args")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .ok_or_else(|| AppError::BadArgs("missing `args`".into()))?;
     let cwd = string(o, "cwd").unwrap_or_default();
     let cancel = CancelGuard::new(o);
@@ -416,7 +457,11 @@ fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
         Some(encoded) => Some(base64_decode(encoded)?),
         None => None,
     };
-    command.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
+    command.stdin(if stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
 
     #[cfg(unix)]
     {
@@ -446,7 +491,10 @@ fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
         });
     }
 
-    let requested = o.get("maxBuffer").and_then(Value::as_u64).map(|limit| limit as usize);
+    let requested = o
+        .get("maxBuffer")
+        .and_then(Value::as_u64)
+        .map(|limit| limit as usize);
     let ceiling = resources.limits.git_output;
     let keep = requested.unwrap_or(usize::MAX).min(ceiling);
     let stop: StopCell = Arc::new(Mutex::new(None));
@@ -457,8 +505,18 @@ fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
             std::thread::spawn(move || capture(pipe, keep, requested, ceiling, results, stop))
         })
     };
-    let stdout_reader = spawn_capture(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let stderr_reader = spawn_capture(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let stdout_reader = spawn_capture(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let stderr_reader = spawn_capture(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
 
     // Poll with a bounded, growing delay. Output is read on its own threads,
     // so this loop only decides when to stop the command.
@@ -482,8 +540,12 @@ fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
     }
     let status = child.wait();
 
-    let out = stdout_reader.and_then(|h| h.join().ok()).unwrap_or_default();
-    let err = stderr_reader.and_then(|h| h.join().ok()).unwrap_or_default();
+    let out = stdout_reader
+        .and_then(|h| h.join().ok())
+        .unwrap_or_default();
+    let err = stderr_reader
+        .and_then(|h| h.join().ok())
+        .unwrap_or_default();
     let binary_output = o.get("encoding").and_then(Value::as_str) == Some("buffer");
     if let Some(reason) = stopped(&stop) {
         return Err(stopped_error(reason, &out, &err, binary_output, ceiling));
@@ -570,10 +632,17 @@ fn http_fetch(resources: &Resources, o: &Value) -> Result<Value> {
         return Err(AppError::BadArgs("only http(s) URLs can be fetched".into()));
     }
     let method = reqwest::Method::from_bytes(
-        o.get("method").and_then(Value::as_str).unwrap_or("GET").to_ascii_uppercase().as_bytes(),
+        o.get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("GET")
+            .to_ascii_uppercase()
+            .as_bytes(),
     )
     .map_err(|_| AppError::BadArgs("invalid HTTP method".into()))?;
-    let redirect = o.get("redirect").and_then(Value::as_str).unwrap_or("follow");
+    let redirect = o
+        .get("redirect")
+        .and_then(Value::as_str)
+        .unwrap_or("follow");
 
     let mut request = http_client(redirect == "follow").request(method, &url);
     if let Some(headers) = o.get("headers").and_then(Value::as_array) {
@@ -593,7 +662,9 @@ fn http_fetch(resources: &Resources, o: &Value) -> Result<Value> {
     let response = request.send()?;
     let status = response.status();
     if redirect == "error" && status.is_redirection() {
-        return Err(AppError::msg("the request was redirected, which it does not allow"));
+        return Err(AppError::msg(
+            "the request was redirected, which it does not allow",
+        ));
     }
 
     let headers: Vec<Value> = response
@@ -673,7 +744,15 @@ fn metadata_json(meta: &std::fs::Metadata) -> Value {
         (meta.mode(), meta.dev(), meta.ino())
     };
     #[cfg(not(unix))]
-    let (mode, dev, ino) = (if meta.permissions().readonly() { 0o444u32 } else { 0o666u32 }, 0u64, 0u64);
+    let (mode, dev, ino) = (
+        if meta.permissions().readonly() {
+            0o444u32
+        } else {
+            0o666u32
+        },
+        0u64,
+        0u64,
+    );
 
     let file_type = meta.file_type();
     json!({
@@ -695,11 +774,19 @@ fn metadata_json(meta: &std::fs::Metadata) -> Value {
 fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
     let path = || string(o, "path").map(PathBuf::from);
     let wrap = |result: std::io::Result<Value>, what: &str| {
-        result.map_err(|e| io_error(&e, &format!("{what} '{}'", string(o, "path").unwrap_or_default())))
+        result.map_err(|e| {
+            io_error(
+                &e,
+                &format!("{what} '{}'", string(o, "path").unwrap_or_default()),
+            )
+        })
     };
 
     match operation {
-        "read-file" => wrap(std::fs::read(path()?).map(|b| json!(base64_encode(&b))), "open"),
+        "read-file" => wrap(
+            std::fs::read(path()?).map(|b| json!(base64_encode(&b))),
+            "open",
+        ),
         "write-file" => {
             let data = base64_decode(&string(o, "data")?)?;
             let target = path()?;
@@ -730,15 +817,23 @@ fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
                 "open",
             )
         }
-        "stat" => wrap(std::fs::metadata(path()?).map(|m| metadata_json(&m)), "stat"),
-        "lstat" => wrap(std::fs::symlink_metadata(path()?).map(|m| metadata_json(&m)), "lstat"),
+        "stat" => wrap(
+            std::fs::metadata(path()?).map(|m| metadata_json(&m)),
+            "stat",
+        ),
+        "lstat" => wrap(
+            std::fs::symlink_metadata(path()?).map(|m| metadata_json(&m)),
+            "lstat",
+        ),
         "exists" => Ok(json!(path()?.exists())),
         "access" => {
             let target = path()?;
             let meta = wrap(std::fs::metadata(&target).map(|_| Value::Null), "access")?;
             // W_OK = 2. A read-only file fails a write check.
             if o.get("mode").and_then(Value::as_u64).unwrap_or(0) & 2 != 0
-                && std::fs::metadata(&target).map(|m| m.permissions().readonly()).unwrap_or(false)
+                && std::fs::metadata(&target)
+                    .map(|m| m.permissions().readonly())
+                    .unwrap_or(false)
             {
                 return Err(AppError::Coded {
                     code: "EACCES".into(),
@@ -787,14 +882,18 @@ fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
                     Err(e) => return Err(io_error(&e, &format!("mkdtemp '{prefix}XXXXXX'"))),
                 }
             }
-            Err(AppError::msg("unable to create a unique temporary directory"))
+            Err(AppError::msg(
+                "unable to create a unique temporary directory",
+            ))
         }
         "rm" => {
             let target = path()?;
             let result = match std::fs::symlink_metadata(&target) {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound && flag(o, "force") => Ok(()),
                 Err(e) => Err(e),
-                Ok(meta) if meta.is_dir() && flag(o, "recursive") => std::fs::remove_dir_all(&target),
+                Ok(meta) if meta.is_dir() && flag(o, "recursive") => {
+                    std::fs::remove_dir_all(&target)
+                }
                 Ok(meta) if meta.is_dir() => std::fs::remove_dir(&target),
                 Ok(_) => std::fs::remove_file(&target),
             };
@@ -810,7 +909,10 @@ fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
             std::fs::copy(path()?, string(o, "to")?).map(|_| Value::Null),
             "copyfile",
         ),
-        "copy" => wrap(copy_recursive(&path()?, Path::new(&string(o, "to")?)).map(|_| Value::Null), "cp"),
+        "copy" => wrap(
+            copy_recursive(&path()?, Path::new(&string(o, "to")?)).map(|_| Value::Null),
+            "cp",
+        ),
         "realpath" => wrap(
             std::fs::canonicalize(path()?).map(|p| json!(p.to_string_lossy())),
             "realpath",
@@ -859,18 +961,26 @@ fn read_range(o: &Value) -> Result<Value> {
     let offset = unsigned(o, "offset")?;
     let length = unsigned(o, "length")?;
     if length > RANGE_LIMIT as u64 {
-        return Err(AppError::BadArgs(format!("`length` may not exceed {RANGE_LIMIT} bytes")));
+        return Err(AppError::BadArgs(format!(
+            "`length` may not exceed {RANGE_LIMIT} bytes"
+        )));
     }
     offset
         .checked_add(length)
         .ok_or_else(|| AppError::BadArgs("`offset` + `length` overflows".into()))?;
 
-    let mut file = File::open(&path).map_err(|e| io_error(&e, &format!("open '{}'", path.display())))?;
-    let meta = file.metadata().map_err(|e| io_error(&e, &format!("stat '{}'", path.display())))?;
+    let mut file =
+        File::open(&path).map_err(|e| io_error(&e, &format!("open '{}'", path.display())))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| io_error(&e, &format!("stat '{}'", path.display())))?;
     if meta.is_dir() {
         return Err(AppError::Coded {
             code: "EISDIR".into(),
-            message: format!("EISDIR: illegal operation on a directory, read '{}'", path.display()),
+            message: format!(
+                "EISDIR: illegal operation on a directory, read '{}'",
+                path.display()
+            ),
         });
     }
     file.seek(SeekFrom::Start(offset))?;
@@ -901,11 +1011,15 @@ fn file_hash(o: &Value) -> Result<Value> {
     if cancel.raised() {
         return Err(aborted());
     }
-    let mut file = File::open(&path).map_err(|e| io_error(&e, &format!("open '{}'", path.display())))?;
+    let mut file =
+        File::open(&path).map_err(|e| io_error(&e, &format!("open '{}'", path.display())))?;
     if file.metadata().map(|m| m.is_dir()).unwrap_or(false) {
         return Err(AppError::Coded {
             code: "EISDIR".into(),
-            message: format!("EISDIR: illegal operation on a directory, read '{}'", path.display()),
+            message: format!(
+                "EISDIR: illegal operation on a directory, read '{}'",
+                path.display()
+            ),
         });
     }
     let digest = match algorithm.as_str() {
@@ -916,7 +1030,11 @@ fn file_hash(o: &Value) -> Result<Value> {
     Ok(json!(digest))
 }
 
-fn hash_blocks<D: sha2::Digest>(file: &mut File, mut hasher: D, cancel: &CancelGuard) -> Result<String> {
+fn hash_blocks<D: sha2::Digest>(
+    file: &mut File,
+    mut hasher: D,
+    cancel: &CancelGuard,
+) -> Result<String> {
     let mut chunk = vec![0u8; STREAM_BLOCK];
     loop {
         if cancel.raised() {
@@ -928,7 +1046,11 @@ fn hash_blocks<D: sha2::Digest>(file: &mut File, mut hasher: D, cancel: &CancelG
         }
         hasher.update(&chunk[..read]);
     }
-    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 fn copy_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -957,11 +1079,15 @@ fn unique_suffix(attempt: u32) -> String {
         .unwrap_or(0);
     let mut seed = nanos
         ^ (std::process::id() as u64).rotate_left(32)
-        ^ COUNTER.fetch_add(1, Ordering::Relaxed).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ attempt as u64;
     (0..6)
         .map(|_| {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ALPHABET[((seed >> 33) % ALPHABET.len() as u64) as usize] as char
         })
         .collect()
@@ -993,7 +1119,10 @@ mod tests {
         let path = json!({ "path": file, "data": base64_encode(&[0, 159, 255, 10]) });
 
         fs_invoke("write-file", &path).unwrap();
-        assert_eq!(fs_invoke("read-file", &path).unwrap(), json!(base64_encode(&[0, 159, 255, 10])));
+        assert_eq!(
+            fs_invoke("read-file", &path).unwrap(),
+            json!(base64_encode(&[0, 159, 255, 10]))
+        );
 
         let stat = fs_invoke("stat", &path).unwrap();
         assert_eq!(stat["isFile"], true);
@@ -1004,12 +1133,24 @@ mod tests {
 
         let missing = json!({ "path": dir.join("missing") });
         assert_eq!(code(fs_invoke("stat", &missing).unwrap_err()), "ENOENT");
-        assert_eq!(code(fs_invoke("read-file", &missing).unwrap_err()), "ENOENT");
+        assert_eq!(
+            code(fs_invoke("read-file", &missing).unwrap_err()),
+            "ENOENT"
+        );
         assert_eq!(fs_invoke("exists", &missing).unwrap(), json!(false));
-        assert_eq!(code(fs_invoke("mkdir", &json!({ "path": dir })).unwrap_err()), "EEXIST");
+        assert_eq!(
+            code(fs_invoke("mkdir", &json!({ "path": dir })).unwrap_err()),
+            "EEXIST"
+        );
         let exclusive = json!({ "path": file, "data": "", "exclusive": true });
-        assert_eq!(code(fs_invoke("write-file", &exclusive).unwrap_err()), "EEXIST");
-        assert_eq!(code(fs_invoke("rm", &json!({ "path": dir })).unwrap_err()), "ENOTEMPTY");
+        assert_eq!(
+            code(fs_invoke("write-file", &exclusive).unwrap_err()),
+            "EEXIST"
+        );
+        assert_eq!(
+            code(fs_invoke("rm", &json!({ "path": dir })).unwrap_err()),
+            "ENOTEMPTY"
+        );
         fs_invoke("rm", &json!({ "path": dir.join("missing"), "force": true })).unwrap();
 
         fs_invoke("rm", &json!({ "path": dir, "recursive": true })).unwrap();
@@ -1032,12 +1173,22 @@ mod tests {
 
     #[test]
     fn git_exec_reports_output_and_exit_code_without_failing() {
-        let ok = git_exec(Path::new("git"), &test_resources(), &json!({ "args": ["--version"] })).unwrap();
+        let ok = git_exec(
+            Path::new("git"),
+            &test_resources(),
+            &json!({ "args": ["--version"] }),
+        )
+        .unwrap();
         assert_eq!(ok["exitCode"], 0);
         assert!(ok["stdout"].as_str().unwrap().starts_with("git version"));
 
         // A failing command resolves; the renderer decides what is an error.
-        let failed = git_exec(Path::new("git"), &test_resources(), &json!({ "args": ["not-a-command"] })).unwrap();
+        let failed = git_exec(
+            Path::new("git"),
+            &test_resources(),
+            &json!({ "args": ["not-a-command"] }),
+        )
+        .unwrap();
         assert_ne!(failed["exitCode"], 0);
         assert!(!failed["stderr"].as_str().unwrap().is_empty());
     }
@@ -1053,7 +1204,10 @@ mod tests {
         });
         let out = git_exec(Path::new("git"), &test_resources(), &o).unwrap();
         let stdout = base64_decode(out["stdout"].as_str().unwrap()).unwrap();
-        assert_eq!(String::from_utf8(stdout).unwrap().trim(), "ce013625030ba8dba906f756967f9e9ca394464a");
+        assert_eq!(
+            String::from_utf8(stdout).unwrap().trim(),
+            "ce013625030ba8dba906f756967f9e9ca394464a"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1066,13 +1220,21 @@ mod tests {
             &json!({ "args": ["definitely-not-a-command"], "env": { "LANG": "es_ES.UTF-8", "LC_ALL": null } }),
         )
         .unwrap();
-        assert!(out["stderr"].as_str().unwrap().contains("is not a git command"));
+        assert!(
+            out["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("is not a git command")
+        );
     }
 
     #[test]
     fn git_exec_missing_directory_is_enoent() {
         let o = json!({ "args": ["status"], "cwd": "/definitely/not/a/real/directory" });
-        assert_eq!(code(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err()), "ENOENT");
+        assert_eq!(
+            code(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err()),
+            "ENOENT"
+        );
     }
 
     #[test]
@@ -1100,7 +1262,10 @@ mod tests {
         assert_eq!(
             out,
             vec![
-                ("GIT_CONFIG_PARAMETERS".to_string(), Some("'a.b=c'".to_string())),
+                (
+                    "GIT_CONFIG_PARAMETERS".to_string(),
+                    Some("'a.b=c'".to_string())
+                ),
                 ("GIT_EDITOR".to_string(), None),
                 ("TERM".to_string(), Some("dumb".to_string())),
             ]
@@ -1122,7 +1287,8 @@ mod tests {
     fn max_buffer_error_keeps_the_prefix_that_was_produced() {
         // `git --version` prints one line; a 5-byte limit must keep exactly 5 bytes.
         let o = json!({ "args": ["--version"], "maxBuffer": 5 });
-        let (code, details) = code_and_details(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err());
+        let (code, details) =
+            code_and_details(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err());
         assert_eq!(code, "ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
         let details = details.expect("the error carries the captured output");
         assert_eq!(details["stdout"], "git v");
@@ -1135,9 +1301,14 @@ mod tests {
         limits.git_output = 8;
         let resources = Resources::new(limits);
         let o = json!({ "args": ["--version"] });
-        let (code, details) = code_and_details(git_exec(Path::new("git"), &resources, &o).unwrap_err());
+        let (code, details) =
+            code_and_details(git_exec(Path::new("git"), &resources, &o).unwrap_err());
         assert_eq!(code, "DESKTOP_GIT_OUTPUT_LIMIT");
-        assert_eq!(details.unwrap()["stdout"], "", "output past the ceiling is not sent");
+        assert_eq!(
+            details.unwrap()["stdout"],
+            "",
+            "output past the ceiling is not sent"
+        );
     }
 
     #[test]
@@ -1145,7 +1316,11 @@ mod tests {
         let mut limits = Limits::for_profile(Profile::Default);
         limits.git_output = 8;
         let resources = Resources::new(limits);
-        let _ = git_exec(Path::new("git"), &resources, &json!({ "args": ["--version"] }));
+        let _ = git_exec(
+            Path::new("git"),
+            &resources,
+            &json!({ "args": ["--version"] }),
+        );
         assert_eq!(resources.results.used(), 0);
     }
 
@@ -1153,9 +1328,13 @@ mod tests {
     fn a_cancel_raised_before_the_request_starts_prevents_it() {
         cancel(&json!({ "cancelId": 4_000_001u64 })).unwrap();
         let o = json!({ "args": ["--version"], "cancelId": 4_000_001u64 });
-        let (code, _) = code_and_details(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err());
+        let (code, _) =
+            code_and_details(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err());
         assert_eq!(code, "ABORT_ERR");
-        assert!(cancel_flags().lock().unwrap().get(&4_000_001).is_none(), "the flag is released");
+        assert!(
+            cancel_flags().lock().unwrap().get(&4_000_001).is_none(),
+            "the flag is released"
+        );
     }
 
     #[test]
@@ -1166,40 +1345,63 @@ mod tests {
             cancel(&json!({ "cancelId": 4_000_002u64 })).unwrap();
         });
         let o = json!({ "args": ["-c", "sleep 30"], "cancelId": 4_000_002u64 });
-        let (code, _) = code_and_details(git_exec(Path::new("sh"), &test_resources(), &o).unwrap_err());
+        let (code, _) =
+            code_and_details(git_exec(Path::new("sh"), &test_resources(), &o).unwrap_err());
         canceller.join().unwrap();
         assert_eq!(code, "ABORT_ERR");
-        assert!(started.elapsed() < Duration::from_secs(10), "the sleeping child was stopped");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the sleeping child was stopped"
+        );
     }
 
     #[test]
     fn exceeding_maxbuffer_stops_a_child_that_keeps_writing() {
         let started = std::time::Instant::now();
         let o = json!({ "args": ["-c", "head -c 50000000 /dev/zero"], "maxBuffer": 1000, "encoding": "buffer" });
-        let (code, details) = code_and_details(git_exec(Path::new("sh"), &test_resources(), &o).unwrap_err());
+        let (code, details) =
+            code_and_details(git_exec(Path::new("sh"), &test_resources(), &o).unwrap_err());
         assert_eq!(code, "ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
         let details = details.unwrap();
-        assert_eq!(base64_decode(details["stdout"].as_str().unwrap()).unwrap().len(), 1000);
-        assert!(started.elapsed() < Duration::from_secs(20), "the writer was stopped, not waited for");
+        assert_eq!(
+            base64_decode(details["stdout"].as_str().unwrap())
+                .unwrap()
+                .len(),
+            1000
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "the writer was stopped, not waited for"
+        );
     }
 
     #[test]
     fn range_reads_return_exact_bytes_and_report_eof() {
         let dir = temp_dir("range");
         let file = dir.join("big.bin");
-        let content: Vec<u8> = (0..(3 * 1024 * 1024 + 17)).map(|i| (i % 253) as u8).collect();
+        let content: Vec<u8> = (0..(3 * 1024 * 1024 + 17))
+            .map(|i| (i % 253) as u8)
+            .collect();
         std::fs::write(&file, &content).unwrap();
 
-        let block = read_range(&json!({ "path": file, "offset": 1024 * 1024u64, "length": 65536u64 })).unwrap();
+        let block =
+            read_range(&json!({ "path": file, "offset": 1024 * 1024u64, "length": 65536u64 }))
+                .unwrap();
         let bytes = base64_decode(block["data"].as_str().unwrap()).unwrap();
         assert_eq!(block["bytesRead"], 65536);
         assert_eq!(block["eof"], false);
         assert_eq!(bytes, content[1024 * 1024..1024 * 1024 + 65536]);
 
-        let tail = read_range(&json!({ "path": file, "offset": content.len() as u64 - 5, "length": 65536u64 })).unwrap();
+        let tail = read_range(
+            &json!({ "path": file, "offset": content.len() as u64 - 5, "length": 65536u64 }),
+        )
+        .unwrap();
         assert_eq!(tail["bytesRead"], 5);
         assert_eq!(tail["eof"], true);
-        let past = read_range(&json!({ "path": file, "offset": content.len() as u64 + 10, "length": 8u64 })).unwrap();
+        let past = read_range(
+            &json!({ "path": file, "offset": content.len() as u64 + 10, "length": 8u64 }),
+        )
+        .unwrap();
         assert_eq!(past["bytesRead"], 0);
         assert_eq!(past["eof"], true);
 
@@ -1240,7 +1442,8 @@ mod tests {
 
     #[test]
     fn http_fetch_rejects_non_http_urls() {
-        let error = http_fetch(&test_resources(), &json!({ "url": "file:///etc/passwd" })).unwrap_err();
+        let error =
+            http_fetch(&test_resources(), &json!({ "url": "file:///etc/passwd" })).unwrap_err();
         assert!(matches!(error, AppError::BadArgs(_)));
     }
 }

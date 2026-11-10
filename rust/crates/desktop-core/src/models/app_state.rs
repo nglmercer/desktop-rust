@@ -11,13 +11,16 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::account::Account;
 use super::branch::{Branch, PullRequest};
 use super::commit::Commit;
 use super::diff::{Diff, ImageDiffType};
-use super::misc::{AppMenu, Banner, FoldoutType, Popup, RepositorySectionTab, SelectionType, ThemeSource, WindowState};
+use super::misc::{
+    AppMenu, Banner, FoldoutType, Popup, RepositorySectionTab, SelectionType, ThemeSource,
+    WindowState,
+};
 use super::repository::{AheadBehind, LocalRepositoryState, Repository};
 use super::status::{StatusResult, WorkingDirectoryFileChange};
-use super::account::Account;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,12 +231,24 @@ impl Default for Preferences {
     }
 }
 
-fn default_true() -> bool { true }
-fn default_sidebar_width() -> u32 { 250 }
-fn default_commit_list_width() -> u32 { 300 }
-fn default_tab_size() -> u32 { 4 }
-fn default_zoom() -> f64 { 1.0 }
-fn default_image_diff_type() -> ImageDiffType { ImageDiffType::TwoUp }
+fn default_true() -> bool {
+    true
+}
+fn default_sidebar_width() -> u32 {
+    250
+}
+fn default_commit_list_width() -> u32 {
+    300
+}
+fn default_tab_size() -> u32 {
+    4
+}
+fn default_zoom() -> f64 {
+    1.0
+}
+fn default_image_diff_type() -> ImageDiffType {
+    ImageDiffType::TwoUp
+}
 
 /// The full snapshot sent to the webview. Tokens are deliberately absent.
 #[derive(Debug, Clone, Serialize, Deserialize)]

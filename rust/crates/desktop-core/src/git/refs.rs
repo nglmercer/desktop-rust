@@ -12,7 +12,8 @@ use super::core::{GitEngine, GitOptions};
 /// `getBranches` — local + remote refs in one `for-each-ref` call, matching
 /// the delimiter format Desktop uses.
 pub fn get_branches(git: &GitEngine, repo: &Path) -> Result<Vec<Branch>> {
-    let format = "--format=%(refname)%1f%(objectname)%1f%(upstream:short)%1f%(HEAD)%1f%(refname:short)";
+    let format =
+        "--format=%(refname)%1f%(objectname)%1f%(upstream:short)%1f%(HEAD)%1f%(refname:short)";
     let out = git.run(
         &["for-each-ref", format, "refs/heads", "refs/remotes"],
         repo,
@@ -37,8 +38,14 @@ pub fn get_branches(git: &GitEngine, repo: &Path) -> Result<Vec<Branch>> {
             Some(Branch {
                 is_head: fields[3].trim() == "*" || name == current,
                 name,
-                upstream: if upstream.is_empty() { None } else { Some(upstream.to_string()) },
-                tip: BranchTip { sha: fields[1].trim().to_string() },
+                upstream: if upstream.is_empty() {
+                    None
+                } else {
+                    Some(upstream.to_string())
+                },
+                tip: BranchTip {
+                    sha: fields[1].trim().to_string(),
+                },
                 kind,
                 ref_name: fields[0].trim().to_string(),
             })
@@ -48,7 +55,11 @@ pub fn get_branches(git: &GitEngine, repo: &Path) -> Result<Vec<Branch>> {
 
 pub fn get_current_branch(git: &GitEngine, repo: &Path) -> Option<String> {
     let out = git
-        .run(&["symbolic-ref", "--short", "HEAD"], repo, GitOptions::new().success(1).success(128))
+        .run(
+            &["symbolic-ref", "--short", "HEAD"],
+            repo,
+            GitOptions::new().success(1).success(128),
+        )
         .ok()?;
     if out.exit_code != 0 {
         return None;
@@ -59,7 +70,11 @@ pub fn get_current_branch(git: &GitEngine, repo: &Path) -> Option<String> {
 pub fn get_branch_names(git: &GitEngine, repo: &Path, remote: bool) -> Result<Vec<String>> {
     let reference = if remote { "refs/remotes" } else { "refs/heads" };
     let format = "--format=%(refname:short)";
-    let out = git.run(&["for-each-ref", format, reference], repo, GitOptions::new().success(128))?;
+    let out = git.run(
+        &["for-each-ref", format, reference],
+        repo,
+        GitOptions::new().success(128),
+    )?;
     Ok(out.stdout_lines().map(str::to_string).collect())
 }
 
@@ -69,7 +84,8 @@ pub fn get_remotes(git: &GitEngine, repo: &Path) -> Result<Vec<Remote>> {
     for line in out.stdout_lines() {
         let mut parts = line.split_whitespace();
         if let (Some(name), Some(url)) = (parts.next(), parts.next()) {
-            seen.entry(name.to_string()).or_insert_with(|| url.to_string());
+            seen.entry(name.to_string())
+                .or_insert_with(|| url.to_string());
         }
     }
     Ok(seen
@@ -84,7 +100,11 @@ pub fn get_tags(git: &GitEngine, repo: &Path) -> Result<Vec<String>> {
 }
 
 pub fn get_merge_base(git: &GitEngine, repo: &Path, a: &str, b: &str) -> Result<Option<String>> {
-    let out = git.run(&["merge-base", a, b], repo, GitOptions::new().success(1).success(128))?;
+    let out = git.run(
+        &["merge-base", a, b],
+        repo,
+        GitOptions::new().success(1).success(128),
+    )?;
     if out.exit_code != 0 {
         return Ok(None);
     }
@@ -99,12 +119,18 @@ pub fn get_worktrees(git: &GitEngine, repo: &Path) -> Result<Vec<WorktreeEntry>>
     )?;
     let mut result = Vec::new();
     let mut current = WorktreeEntry {
-        path: String::new(), head: String::new(), branch: None,
-        is_bare: false, is_locked: false, is_prunable: false,
+        path: String::new(),
+        head: String::new(),
+        branch: None,
+        is_bare: false,
+        is_locked: false,
+        is_prunable: false,
     };
     for record in out.stdout.split('\0') {
         let record = record.trim();
-        if record.is_empty() { continue; }
+        if record.is_empty() {
+            continue;
+        }
         if let Some(path) = record.strip_prefix("worktree ") {
             if !current.path.is_empty() {
                 result.push(std::mem::take(&mut current));

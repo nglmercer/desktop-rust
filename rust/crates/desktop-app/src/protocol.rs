@@ -65,7 +65,10 @@ pub fn register() {
     // Desktop environments answer "who handles this scheme" from caches of
     // the installed desktop entries; a new entry is invisible until they are
     // rebuilt. Each tool is optional and specific to one environment.
-    quiet("update-desktop-database", &[&applications.to_string_lossy()]);
+    quiet(
+        "update-desktop-database",
+        &[&applications.to_string_lossy()],
+    );
     quiet("xdg-mime", &["default", DESKTOP_FILE, &mime]);
     if current() != DESKTOP_FILE {
         quiet("gio", &["mime", &mime, DESKTOP_FILE]);

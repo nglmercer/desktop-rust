@@ -26,7 +26,7 @@ mod protocol;
 
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tao::{
     event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder},
@@ -38,7 +38,7 @@ use desktop_core::app::DesktopApp;
 use desktop_core::ipc::channels::event;
 
 use crate::actions::ActionEffect;
-use crate::bridge::{js_literal, Bridge, INIT_SCRIPT};
+use crate::bridge::{Bridge, INIT_SCRIPT, js_literal};
 use crate::host::{AppEvent, TaoHost, WindowInfo};
 
 const APP_URL: &str = "desktop://localhost/index.html";
@@ -101,21 +101,31 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if args.iter().any(|a| a == "--version" || a == "-v") {
-        println!("github-desktop-rs {} (tao + wry, no Tauri)", env!("CARGO_PKG_VERSION"));
+        println!(
+            "github-desktop-rs {} (tao + wry, no Tauri)",
+            env!("CARGO_PKG_VERSION")
+        );
         return Ok(());
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
         return Ok(());
     }
-    if args.iter().any(|a| a == "--self-test" || a == "--no-window") {
+    if args
+        .iter()
+        .any(|a| a == "--self-test" || a == "--no-window")
+    {
         return self_test();
     }
 
     // A launch that only carries a URL or CLI action belongs to the window
     // that is already open: hand it over and exit.
-    let instance_socket = desktop_core::AppPaths::detect()?.user_data.join("instance.sock");
-    if args.iter().any(|arg| instance::is_forwardable(arg)) && instance::forward(&instance_socket, &args) {
+    let instance_socket = desktop_core::AppPaths::detect()?
+        .user_data
+        .join("instance.sock");
+    if args.iter().any(|arg| instance::is_forwardable(arg))
+        && instance::forward(&instance_socket, &args)
+    {
         return Ok(());
     }
 
@@ -143,7 +153,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         move |args| {
             app.handle_launch_args(&args);
             // Bring the window forward: the user is coming back from a browser.
-            let _ = desktop_core::Host::window(&*host, desktop_core::ipc::protocol::WindowAction::Focus);
+            let _ = desktop_core::Host::window(
+                &*host,
+                desktop_core::ipc::protocol::WindowAction::Focus,
+            );
         }
     }) {
         tracing::warn!(%error, "single-instance handoff is unavailable; sign-in callbacks will open a second window");
@@ -151,7 +164,8 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     // -- native menu --------------------------------------------------------
     let menu_model = app.snapshot()?.get("appMenu").cloned().unwrap_or_default();
-    let menu_model: desktop_core::models::AppMenu = serde_json::from_value(menu_model).unwrap_or_default();
+    let menu_model: desktop_core::models::AppMenu =
+        serde_json::from_value(menu_model).unwrap_or_default();
     let mut native_menu = menu::install(proxy.clone(), &menu_model.items);
     if let Some(menu) = &native_menu {
         menu.attach(&window);
@@ -179,10 +193,20 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_devtools(true)
         .with_url(APP_URL);
 
-    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "ios", target_os = "android"))]
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "android"
+    ))]
     let webview = builder.build(&window)?;
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios", target_os = "android")))]
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "android"
+    )))]
     let webview = {
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewBuilderExtUnix;
@@ -208,17 +232,22 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let nudge = theme_nudge.clone();
         std::thread::Builder::new()
             .name("desktop-theme".into())
-            .spawn(move || loop {
-                nudge.wait(THEME_POLL_INTERVAL);
-                let dark = desktop_core::platform::should_use_dark_colors();
-                let changed = {
-                    let mut guard = info.lock().unwrap_or_else(|e| e.into_inner());
-                    let changed = guard.dark != dark;
-                    guard.dark = dark;
-                    changed
-                };
-                if changed {
-                    app.emit(desktop_core::ipc::channels::event::NATIVE_THEME_UPDATED, vec![]);
+            .spawn(move || {
+                loop {
+                    nudge.wait(THEME_POLL_INTERVAL);
+                    let dark = desktop_core::platform::should_use_dark_colors();
+                    let changed = {
+                        let mut guard = info.lock().unwrap_or_else(|e| e.into_inner());
+                        let changed = guard.dark != dark;
+                        guard.dark = dark;
+                        changed
+                    };
+                    if changed {
+                        app.emit(
+                            desktop_core::ipc::channels::event::NATIVE_THEME_UPDATED,
+                            vec![],
+                        );
+                    }
                 }
             })
             .expect("failed to start the theme watcher");
@@ -247,9 +276,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     for (channel, args) in pending {
                         // The native menu mirrors the snapshot the renderer gets.
                         if channel == event::APP_MENU {
-                            if let (Some(menu), Some(items)) =
-                                (native_menu.as_mut(), args.get(0).and_then(|menu| menu.get("items")))
-                            {
+                            if let (Some(menu), Some(items)) = (
+                                native_menu.as_mut(),
+                                args.get(0).and_then(|menu| menu.get("items")),
+                            ) {
                                 if let Ok(items) = serde_json::from_value::<Vec<_>>(items.clone()) {
                                     menu.sync(&items);
                                 }
@@ -274,8 +304,8 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 AppEvent::RpcResult { id, result } => {
-                    let payload = serde_json::to_value(&result)
-                        .unwrap_or_else(|_| json!({ "ok": false }));
+                    let payload =
+                        serde_json::to_value(&result).unwrap_or_else(|_| json!({ "ok": false }));
                     let script = format!(
                         "window.__desktop && window.__desktop.resolve({},{})",
                         id,
@@ -300,9 +330,12 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     use desktop_core::ipc::protocol::WindowAction;
                     use desktop_core::menu::MenuAction;
 
-                    let run = |action| actions::apply(action, &window, &webview, &info_loop, &app_loop);
+                    let run =
+                        |action| actions::apply(action, &window, &webview, &info_loop, &app_loop);
                     match app_loop.menu_action(&id) {
-                        Some(MenuAction::Emit(name)) => app_loop.emit(event::MENU_EVENT, vec![json!(name)]),
+                        Some(MenuAction::Emit(name)) => {
+                            app_loop.emit(event::MENU_EVENT, vec![json!(name)])
+                        }
                         Some(MenuAction::Quit) => {
                             app_loop.emit("will-quit", vec![]);
                             stop_services(&app_loop, &host_loop, &bridge_loop);
@@ -310,14 +343,19 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         }
                         Some(MenuAction::Edit(command)) => actions::edit(&webview, command),
                         Some(MenuAction::Zoom(direction)) => {
-                            let current = info_loop.lock().unwrap_or_else(|e| e.into_inner()).zoom_factor;
+                            let current = info_loop
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .zoom_factor;
                             let next = desktop_core::menu::next_zoom(current, direction);
                             run(WindowAction::SetZoomFactor(next));
                             app_loop.emit(event::ZOOM_FACTOR_CHANGED, vec![json!(next)]);
                         }
                         Some(MenuAction::ToggleFullScreen) => {
                             let fullscreen = window.fullscreen().is_none();
-                            window.set_fullscreen(fullscreen.then_some(tao::window::Fullscreen::Borderless(None)));
+                            window.set_fullscreen(
+                                fullscreen.then_some(tao::window::Fullscreen::Borderless(None)),
+                            );
                         }
                         Some(MenuAction::Reload) => {
                             run(WindowAction::Reload);
@@ -331,7 +369,9 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         Some(MenuAction::ShowLogs) => {
                             let logs = app_loop.paths.log_dir();
                             let _ = std::fs::create_dir_all(&logs);
-                            run(WindowAction::UnsafeOpenDirectory(logs.to_string_lossy().into_owned()));
+                            run(WindowAction::UnsafeOpenDirectory(
+                                logs.to_string_lossy().into_owned(),
+                            ));
                         }
                         None => tracing::warn!(%id, "click on an unknown menu item"),
                     }
@@ -342,7 +382,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 window.set_focus();
             }
 
-            Event::WindowEvent { event: window_event, .. } => match window_event {
+            Event::WindowEvent {
+                event: window_event,
+                ..
+            } => match window_event {
                 WindowEvent::CloseRequested => {
                     // Electron's AppWindow emitted `will-quit` first. Keep that
                     // contract so a renderer can veto / persist on shutdown.

@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::api::ApiClient;
 use crate::error::{AppError, Result};
@@ -73,7 +73,9 @@ impl DesktopApp {
         }))
     }
 
-    pub fn started(&self) -> Instant { self.started }
+    pub fn started(&self) -> Instant {
+        self.started
+    }
 
     /// Stop admitting host-service data and end every child process. Called
     /// once when the window is going away.
@@ -88,7 +90,10 @@ impl DesktopApp {
 
     /// The renderer state the menu wording currently reflects.
     pub fn menu_labels(&self) -> crate::menu::MenuLabels {
-        self.menu_labels.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.menu_labels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn set_menu_labels(&self, labels: crate::menu::MenuLabels) {
@@ -108,7 +113,10 @@ impl DesktopApp {
         if crate::io::handles(channel) {
             return crate::io::invoke(self, channel, &args);
         }
-        let message = IpcMessage { channel: channel.to_string(), args };
+        let message = IpcMessage {
+            channel: channel.to_string(),
+            args,
+        };
         let outcome = {
             let mut state = self.lock_state()?;
             dispatcher::invoke(self, &mut state, &message)
@@ -122,7 +130,10 @@ impl DesktopApp {
 
     /// Simplex IPC (`ipcRenderer.send`). Fire-and-forget, but may mutate state.
     pub fn send(&self, channel: &str, args: Vec<Value>) -> Result<()> {
-        let message = IpcMessage { channel: channel.to_string(), args };
+        let message = IpcMessage {
+            channel: channel.to_string(),
+            args,
+        };
         let changed = {
             let mut state = self.lock_state()?;
             dispatcher::send(self, &mut state, &message)
@@ -153,7 +164,9 @@ impl DesktopApp {
     }
 
     fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, AppState>> {
-        self.state.lock().map_err(|_| AppError::msg("app state lock poisoned"))
+        self.state
+            .lock()
+            .map_err(|_| AppError::msg("app state lock poisoned"))
     }
 
     fn persist_and_broadcast(&self) -> Result<()> {
@@ -202,7 +215,10 @@ impl DesktopApp {
                     vec![json!({ "kind": "clone-url", "url": url })],
                 );
             } else if is_app_url(arg) {
-                self.emit(crate::ipc::channels::event::URL_ACTION, vec![parse_app_url(arg)]);
+                self.emit(
+                    crate::ipc::channels::event::URL_ACTION,
+                    vec![parse_app_url(arg)],
+                );
             }
         }
     }
@@ -297,7 +313,10 @@ pub fn parse_app_url(url: &str) -> Value {
 fn has_invalid_ref_chars(value: &str) -> bool {
     value.chars().any(|c| {
         (c as u32) <= 0x20
-            || matches!(c, '\x7f' | '~' | '^' | ':' | '?' | '*' | '[' | '\\' | '|' | '"' | '<' | '>')
+            || matches!(
+                c,
+                '\x7f' | '~' | '^' | ':' | '?' | '*' | '[' | '\\' | '|' | '"' | '<' | '>'
+            )
     }) || value.contains("@{")
         || value.contains("..")
         || value.starts_with('.')
@@ -331,7 +350,11 @@ mod tests {
 
     #[test]
     fn oauth_callback_is_parsed_for_every_auth_scheme() {
-        for scheme in ["x-github-desktop-dev-auth", "x-github-desktop-auth", "x-github-client"] {
+        for scheme in [
+            "x-github-desktop-dev-auth",
+            "x-github-desktop-auth",
+            "x-github-client",
+        ] {
             let url = format!("{scheme}://oauth?code=abc%2F1&state=2f6c-uuid");
             assert!(is_app_url(&url));
             assert_eq!(
@@ -339,7 +362,10 @@ mod tests {
                 json!({ "name": "oauth", "code": "abc/1", "state": "2f6c-uuid" })
             );
         }
-        assert_eq!(parse_app_url("x-github-client://oauth?code=abc")["name"], "unknown");
+        assert_eq!(
+            parse_app_url("x-github-client://oauth?code=abc")["name"],
+            "unknown"
+        );
     }
 
     #[test]

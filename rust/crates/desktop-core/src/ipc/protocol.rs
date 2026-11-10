@@ -36,20 +36,28 @@ impl IpcMessage {
     }
 
     pub fn arg(&self, index: usize) -> Result<&Value> {
-        self.args
-            .get(index)
-            .ok_or_else(|| AppError::BadArgs(format!("{} requires argument #{index}", self.channel)))
+        self.args.get(index).ok_or_else(|| {
+            AppError::BadArgs(format!("{} requires argument #{index}", self.channel))
+        })
     }
 
     pub fn string(&self, index: usize) -> Result<String> {
         self.arg(index)?
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| AppError::BadArgs(format!("{}: argument #{index} must be a string", self.channel)))
+            .ok_or_else(|| {
+                AppError::BadArgs(format!(
+                    "{}: argument #{index} must be a string",
+                    self.channel
+                ))
+            })
     }
 
     pub fn optional_string(&self, index: usize) -> Option<String> {
-        self.args.get(index).and_then(Value::as_str).map(str::to_string)
+        self.args
+            .get(index)
+            .and_then(Value::as_str)
+            .map(str::to_string)
     }
 }
 
@@ -65,10 +73,18 @@ pub struct RpcResult {
 
 impl RpcResult {
     pub fn ok(value: Value) -> Self {
-        Self { ok: true, value: Some(value), error: None }
+        Self {
+            ok: true,
+            value: Some(value),
+            error: None,
+        }
     }
     pub fn err(error: AppError) -> Self {
-        Self { ok: false, value: None, error: Some(error.to_rpc_error()) }
+        Self {
+            ok: false,
+            value: None,
+            error: Some(error.to_rpc_error()),
+        }
     }
     pub fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_else(|_| b"{\"ok\":false}".to_vec())
@@ -163,11 +179,19 @@ mod menu_items {
         items: Vec<SerializableMenuItem>,
     }
 
-    pub fn serialize<S: Serializer>(items: &[SerializableMenuItem], s: S) -> Result<S::Ok, S::Error> {
-        Menu { items: items.to_vec() }.serialize(s)
+    pub fn serialize<S: Serializer>(
+        items: &[SerializableMenuItem],
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        Menu {
+            items: items.to_vec(),
+        }
+        .serialize(s)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SerializableMenuItem>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Vec<SerializableMenuItem>, D::Error> {
         Ok(Menu::deserialize(d)?.items)
     }
 }
@@ -207,8 +231,12 @@ pub struct MessageOptions {
     pub cancel_id: usize,
 }
 
-fn default_ok() -> usize { 0 }
-fn default_cancel() -> usize { 1 }
+fn default_ok() -> usize {
+    0
+}
+fn default_cancel() -> usize {
+    1
+}
 
 // ---------------------------------------------------------------------------
 // Window actions

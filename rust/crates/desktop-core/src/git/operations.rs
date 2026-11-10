@@ -61,11 +61,7 @@ pub fn stage_paths(git: &GitEngine, repo: &Path, paths: &[String]) -> Result<Git
 }
 
 pub fn unstage_all(git: &GitEngine, repo: &Path) -> Result<GitOutput> {
-    exec(
-        git,
-        repo,
-        vec!["reset", "--mixed", "HEAD", "--"],
-    )
+    exec(git, repo, vec!["reset", "--mixed", "HEAD", "--"])
 }
 
 pub fn create_commit(git: &GitEngine, repo: &Path, summary: &str, body: &str) -> Result<GitOutput> {
@@ -94,7 +90,12 @@ pub fn reset_to_commit(git: &GitEngine, repo: &Path, sha: &str, mode: &str) -> R
 
 // -- branches / tags / remotes ----------------------------------------------
 
-pub fn create_branch(git: &GitEngine, repo: &Path, name: &str, start_point: &str) -> Result<GitOutput> {
+pub fn create_branch(
+    git: &GitEngine,
+    repo: &Path,
+    name: &str,
+    start_point: &str,
+) -> Result<GitOutput> {
     exec(git, repo, vec!["branch", name, start_point])
 }
 
@@ -106,7 +107,12 @@ pub fn delete_local_branch(git: &GitEngine, repo: &Path, name: &str) -> Result<G
     exec(git, repo, vec!["branch", "-D", name])
 }
 
-pub fn delete_remote_branch(git: &GitEngine, repo: &Path, remote: &str, name: &str) -> Result<GitOutput> {
+pub fn delete_remote_branch(
+    git: &GitEngine,
+    repo: &Path,
+    remote: &str,
+    name: &str,
+) -> Result<GitOutput> {
     let refspec = format!(":{name}");
     exec(git, repo, vec!["push", remote, &refspec])
 }
@@ -139,11 +145,22 @@ pub fn fetch(git: &GitEngine, repo: &Path, remote: &str, prune: bool) -> Result<
     exec_owned(git, repo, args)
 }
 
-pub fn fetch_refspec(git: &GitEngine, repo: &Path, remote: &str, refspec: &str) -> Result<GitOutput> {
+pub fn fetch_refspec(
+    git: &GitEngine,
+    repo: &Path,
+    remote: &str,
+    refspec: &str,
+) -> Result<GitOutput> {
     exec(git, repo, vec!["fetch", remote, refspec])
 }
 
-pub fn pull(git: &GitEngine, repo: &Path, remote: &str, branch: Option<&str>, rebase: bool) -> Result<GitOutput> {
+pub fn pull(
+    git: &GitEngine,
+    repo: &Path,
+    remote: &str,
+    branch: Option<&str>,
+    rebase: bool,
+) -> Result<GitOutput> {
     let mut owned = vec!["pull".to_string(), "--progress".to_string()];
     if rebase {
         owned.push("--rebase".to_string());
@@ -175,7 +192,13 @@ pub fn push(
     exec_owned(git, repo, owned)
 }
 
-pub fn clone(git: &GitEngine, parent: &Path, url: &str, target: &str, branch: Option<&str>) -> Result<GitOutput> {
+pub fn clone(
+    git: &GitEngine,
+    parent: &Path,
+    url: &str,
+    target: &str,
+    branch: Option<&str>,
+) -> Result<GitOutput> {
     let mut owned = vec!["clone".to_string(), "--progress".to_string()];
     if let Some(b) = branch {
         owned.push("--branch".to_string());
@@ -232,7 +255,11 @@ const DESKTOP_STASH_PREFIX: &str = "!!GitHub_Desktop<";
 
 pub fn create_desktop_stash(git: &GitEngine, repo: &Path, branch: &str) -> Result<GitOutput> {
     let message = format!("{DESKTOP_STASH_PREFIX}{branch}>");
-    exec(git, repo, vec!["stash", "push", "--include-untracked", "-m", &message])
+    exec(
+        git,
+        repo,
+        vec!["stash", "push", "--include-untracked", "-m", &message],
+    )
 }
 
 pub fn get_stashes(git: &GitEngine, repo: &Path) -> Result<Vec<StashEntry>> {
@@ -282,12 +309,13 @@ pub fn remove_worktree(git: &GitEngine, repo: &Path, path: &str) -> Result<GitOu
     exec(git, repo, vec!["worktree", "remove", path])
 }
 
-pub fn format_patch(git: &GitEngine, repo: &Path, range: &str, output_dir: &str) -> Result<GitOutput> {
-    exec(
-        git,
-        repo,
-        vec!["format-patch", range, "-o", output_dir],
-    )
+pub fn format_patch(
+    git: &GitEngine,
+    repo: &Path,
+    range: &str,
+    output_dir: &str,
+) -> Result<GitOutput> {
+    exec(git, repo, vec!["format-patch", range, "-o", output_dir])
 }
 
 pub fn apply_patch(git: &GitEngine, repo: &Path, patch: &str) -> Result<GitOutput> {

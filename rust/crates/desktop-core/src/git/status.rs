@@ -9,18 +9,27 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use crate::models::repository::AheadBehind;
 use crate::models::status::{
-    git_status_entry, status_kind, AppFileStatusKind, StatusResult, WorkingDirectoryFileChange,
+    AppFileStatusKind, StatusResult, WorkingDirectoryFileChange, git_status_entry, status_kind,
 };
 
 use super::core::{GitEngine, GitOptions};
 
 /// `getStatus` — the primary repository refresh call.
 pub fn get_status(git: &GitEngine, repo: &Path) -> Result<StatusResult> {
-    let mut result = StatusResult { exists: true, ..Default::default() };
+    let mut result = StatusResult {
+        exists: true,
+        ..Default::default()
+    };
 
     let raw = git
         .run(
-            &["status", "--porcelain=v1", "-z", "--branch", "--untracked-files=all"],
+            &[
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--branch",
+                "--untracked-files=all",
+            ],
             repo,
             GitOptions::new().success(128),
         )
@@ -44,7 +53,10 @@ pub fn get_status(git: &GitEngine, repo: &Path) -> Result<StatusResult> {
     while index < records.len() {
         let record = records[index];
         index += 1;
-        if record.len() < 4 || !record.starts_with(|c: char| c == ' ' || c.is_ascii_alphabetic() || c == '?' || c == '!') {
+        if record.len() < 4
+            || !record
+                .starts_with(|c: char| c == ' ' || c.is_ascii_alphabetic() || c == '?' || c == '!')
+        {
             continue;
         }
         let bytes = record.as_bytes();
@@ -76,12 +88,18 @@ pub fn get_status(git: &GitEngine, repo: &Path) -> Result<StatusResult> {
             result.do_conflicted_files_exist = true;
         }
 
-        result.working_directory_files.push(WorkingDirectoryFileChange {
-            change: crate::models::status::FileChange { path, status: kind, old_path },
-            index_status: git_status_entry(x),
-            working_tree_status: git_status_entry(y),
-            selected: false,
-        });
+        result
+            .working_directory_files
+            .push(WorkingDirectoryFileChange {
+                change: crate::models::status::FileChange {
+                    path,
+                    status: kind,
+                    old_path,
+                },
+                index_status: git_status_entry(x),
+                working_tree_status: git_status_entry(y),
+                selected: false,
+            });
     }
 
     result.current_tip = git
@@ -92,17 +110,26 @@ pub fn get_status(git: &GitEngine, repo: &Path) -> Result<StatusResult> {
 
     result.merge_head_found = git_dir(repo).join("MERGE_HEAD").exists();
     result.squash_msg_found = git_dir(repo).join("SQUASH_MSG").exists();
-    result.is_detached_head = result.current_branch.is_none() || result.current_tip.is_some() && {
-        git.run(&["symbolic-ref", "-q", "HEAD"], repo, GitOptions::new().success(1))
+    result.is_detached_head = result.current_branch.is_none()
+        || result.current_tip.is_some() && {
+            git.run(
+                &["symbolic-ref", "-q", "HEAD"],
+                repo,
+                GitOptions::new().success(1),
+            )
             .map(|o| o.exit_code != 0)
             .unwrap_or(true)
-    };
+        };
 
     if let (Some(branch), Some(upstream)) = (
         result.current_branch.clone(),
         result.current_upstream_branch.clone(),
     ) {
-        result.branch_ahead_behind = Some(get_ahead_behind(git, repo, &format!("{branch}...{upstream}")));
+        result.branch_ahead_behind = Some(get_ahead_behind(
+            git,
+            repo,
+            &format!("{branch}...{upstream}"),
+        ));
     }
 
     Ok(result)

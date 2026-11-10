@@ -19,9 +19,9 @@
 //!    deadlocks when Rust is calling into `Host` from a worker thread.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tao::event_loop::EventLoopProxy;
 
 use desktop_core::error::{AppError, Result};
@@ -134,7 +134,11 @@ impl TaoHost {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.outbox.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+        !self
+            .outbox
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Re-queue events whose script evaluation failed (webview still loading).
@@ -163,11 +167,7 @@ impl TaoHost {
     }
 
     fn query(&self, query: WindowQuery) -> Value {
-        let info = self
-            .info
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let info = self.info.lock().unwrap_or_else(|e| e.into_inner()).clone();
         match query {
             WindowQuery::IsMaximized => json!(info.maximized),
             WindowQuery::IsFocused => json!(info.focused),
@@ -235,7 +235,10 @@ impl Host for TaoHost {
                 .unwrap_or_else(|_| Err(AppError::msg("host did not answer the window action")));
         }
 
-        self.post(AppEvent::WindowAction { action, reply: None })?;
+        self.post(AppEvent::WindowAction {
+            action,
+            reply: None,
+        })?;
         Ok(Value::Null)
     }
 }

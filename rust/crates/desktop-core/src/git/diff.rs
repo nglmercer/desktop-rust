@@ -13,7 +13,14 @@ fn exec(git: &GitEngine, repo: &Path, args: Vec<&str>) -> Result<String> {
 }
 
 pub fn get_working_directory_diff(git: &GitEngine, repo: &Path, path: &str) -> Result<Diff> {
-    let mut args = vec!["diff", "--no-color", "--no-ext-diff", "--unified=3", "HEAD", "--"];
+    let mut args = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--unified=3",
+        "HEAD",
+        "--",
+    ];
     if !path.is_empty() {
         args.push(path);
     }
@@ -24,7 +31,11 @@ pub fn get_working_directory_diff(git: &GitEngine, repo: &Path, path: &str) -> R
 pub fn get_commit_diff(git: &GitEngine, repo: &Path, sha: &str, path: &str) -> Result<Diff> {
     let parent = format!("{sha}^");
     let mut args = vec![
-        "diff", "--no-color", "--no-ext-diff", "--unified=3", "--find-renames",
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--unified=3",
+        "--find-renames",
     ];
     args.push(&parent);
     args.push(sha);
@@ -37,7 +48,11 @@ pub fn get_commit_diff(git: &GitEngine, repo: &Path, sha: &str, path: &str) -> R
 }
 
 pub fn get_commit_range_diff(git: &GitEngine, repo: &Path, from: &str, to: &str) -> Result<String> {
-    exec(git, repo, vec!["diff", "--no-color", "--no-ext-diff", from, to])
+    exec(
+        git,
+        repo,
+        vec!["diff", "--no-color", "--no-ext-diff", from, to],
+    )
 }
 
 pub fn get_blob_contents(git: &GitEngine, repo: &Path, sha: &str, path: &str) -> Result<String> {
@@ -102,8 +117,14 @@ pub fn parse_unified_diff(raw: &str) -> Vec<DiffHunk> {
             });
             continue;
         }
-        let Some(hunk) = current.as_mut() else { continue };
-        if line.starts_with("diff --git") || line.starts_with("index ") || line.starts_with("--- ") || line.starts_with("+++ ") {
+        let Some(hunk) = current.as_mut() else {
+            continue;
+        };
+        if line.starts_with("diff --git")
+            || line.starts_with("index ")
+            || line.starts_with("--- ")
+            || line.starts_with("+++ ")
+        {
             continue;
         }
         let (kind, text, old_no, new_no) = if let Some(t) = line.strip_prefix('+') {

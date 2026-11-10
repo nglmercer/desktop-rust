@@ -8,7 +8,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tao::window::{Theme, Window};
 use wry::WebView;
 
@@ -175,7 +175,10 @@ fn query(query: WindowQuery, info: &Arc<Mutex<WindowInfo>>) -> Value {
 // (`app/src/lib/ipc-shared.ts`), not Electron's raw `dialog` results.
 // ---------------------------------------------------------------------------
 
-fn apply_filters(mut dialog: rfd::FileDialog, filters: &[desktop_core::ipc::protocol::FileFilter]) -> rfd::FileDialog {
+fn apply_filters(
+    mut dialog: rfd::FileDialog,
+    filters: &[desktop_core::ipc::protocol::FileFilter],
+) -> rfd::FileDialog {
     for filter in filters {
         let extensions: Vec<&str> = filter.extensions.iter().map(String::as_str).collect();
         dialog = dialog.add_filter(filter.name.as_str(), &extensions);
@@ -243,7 +246,11 @@ fn show_open_dialog(options: &OpenDialogOptions) -> Value {
 
     // The renderer's `show-open-dialog` contract (AppWindow.showOpenDialog):
     // the first selected path, or null when the dialog was dismissed.
-    paths.into_iter().next().map(Value::String).unwrap_or(Value::Null)
+    paths
+        .into_iter()
+        .next()
+        .map(Value::String)
+        .unwrap_or(Value::Null)
 }
 
 fn show_save_dialog(options: &SaveDialogOptions) -> Value {
@@ -264,9 +271,7 @@ fn show_save_dialog(options: &SaveDialogOptions) -> Value {
     }
     dialog = apply_filters(dialog, &options.filters);
 
-    let path = dialog
-        .save_file()
-        .map(|p| p.to_string_lossy().into_owned());
+    let path = dialog.save_file().map(|p| p.to_string_lossy().into_owned());
     // `show-save-dialog` resolves with the chosen path or null.
     path.map(Value::String).unwrap_or(Value::Null)
 }
@@ -322,19 +327,17 @@ fn show_context_menu(items: &[SerializableMenuItem], app: &Arc<DesktopApp>) -> V
 /// `app/src/ui/lib/globals.ts` for window background updates.
 fn parse_color(value: &str) -> Option<(u8, u8, u8, u8)> {
     let trimmed = value.trim();
-    if let Some(inner) = trimmed.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
+    if let Some(inner) = trimmed
+        .strip_prefix("rgb(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
         let mut parts = inner.split(',').map(|p| p.trim().parse::<u8>().ok());
         return Some((parts.next()??, parts.next()??, parts.next()??, 255));
     }
     let hex = trimmed.trim_start_matches('#');
     let parse = |range: std::ops::Range<usize>| u8::from_str_radix(hex.get(range)?, 16).ok();
     match hex.len() {
-        3 => Some((
-            parse(0..1)? * 17,
-            parse(1..2)? * 17,
-            parse(2..3)? * 17,
-            255,
-        )),
+        3 => Some((parse(0..1)? * 17, parse(1..2)? * 17, parse(2..3)? * 17, 255)),
         6 => Some((parse(0..2)?, parse(2..4)?, parse(4..6)?, 255)),
         8 => Some((parse(0..2)?, parse(2..4)?, parse(4..6)?, parse(6..8)?)),
         _ => None,

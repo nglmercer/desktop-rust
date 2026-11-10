@@ -27,12 +27,20 @@ pub fn open_external(target: &str) -> bool {
 
 pub fn show_item_in_folder(path: &str) -> bool {
     #[cfg(target_os = "windows")]
-    let result = Command::new("explorer.exe").arg(format!("/select,{}", path.replace('/', "\\"))).spawn();
+    let result = Command::new("explorer.exe")
+        .arg(format!("/select,{}", path.replace('/', "\\")))
+        .spawn();
     #[cfg(target_os = "macos")]
     let result = Command::new("open").args(["-R", path]).spawn();
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     let result = Command::new("xdg-open")
-        .arg(Path::new(path).parent().unwrap_or(Path::new(".")).to_string_lossy().into_owned())
+        .arg(
+            Path::new(path)
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_string_lossy()
+                .into_owned(),
+        )
         .spawn();
     result.is_ok()
 }
@@ -62,14 +70,29 @@ pub fn move_to_trash(path: &str) -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        let script = format!("tell application \"Finder\" to delete POSIX file \"{}\"", path.replace('"', "\\\""));
-        let status = Command::new("osascript").args(["-e", &script]).status().map_err(AppError::Io)?;
-        status.success().then_some(()).ok_or_else(|| AppError::msg("Finder refused to trash the item"))
+        let script = format!(
+            "tell application \"Finder\" to delete POSIX file \"{}\"",
+            path.replace('"', "\\\"")
+        );
+        let status = Command::new("osascript")
+            .args(["-e", &script])
+            .status()
+            .map_err(AppError::Io)?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| AppError::msg("Finder refused to trash the item"))
     }
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        let status = Command::new("gio").args(["trash", path]).status().map_err(AppError::Io)?;
-        status.success().then_some(()).ok_or_else(|| AppError::msg("gio trash failed"))
+        let status = Command::new("gio")
+            .args(["trash", path])
+            .status()
+            .map_err(AppError::Io)?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| AppError::msg("gio trash failed"))
     }
 }
 
@@ -96,7 +119,12 @@ pub fn resolve_proxy(url: &str) -> String {
         std::env::var("HTTP_PROXY").or_else(|_| std::env::var("http_proxy"))
     };
     match proxy {
-        Ok(value) => format!("PROXY {}", value.trim_start_matches("http://").trim_start_matches("https://")),
+        Ok(value) => format!(
+            "PROXY {}",
+            value
+                .trim_start_matches("http://")
+                .trim_start_matches("https://")
+        ),
         Err(_) => "DIRECT".to_string(),
     }
 }
@@ -247,7 +275,9 @@ fn gnome_prefers_dark() -> Option<bool> {
 fn kde_window_is_dark() -> Option<bool> {
     let config = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))?;
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config"))
+        })?;
     let text = std::fs::read_to_string(config.join("kdeglobals")).ok()?;
 
     let mut section = "";
@@ -259,7 +289,10 @@ fn kde_window_is_dark() -> Option<bool> {
             continue;
         }
         let parse = |value: &str| -> Option<f64> {
-            let parts: Vec<f64> = value.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            let parts: Vec<f64> = value
+                .split(',')
+                .filter_map(|p| p.trim().parse().ok())
+                .collect();
             (parts.len() >= 3).then(|| 0.299 * parts[0] + 0.587 * parts[1] + 0.114 * parts[2])
         };
         if section == "[Colors:Window]" {
@@ -293,7 +326,10 @@ pub fn request_notifications_permission() -> bool {
 /// `showNotification` — the notification is delivered as an in-app event;
 /// the OS toast is best-effort and platform-specific.
 pub fn show_notification(title: &str, body: &str, user_info: &serde_json::Value) -> Option<String> {
-    let id = format!("{:016x}", crate::models::repository::simple_hash(&format!("{title}{body}{user_info}")));
+    let id = format!(
+        "{:016x}",
+        crate::models::repository::simple_hash(&format!("{title}{body}{user_info}"))
+    );
     tracing::info!(id = %id, title = %title, "notification");
     Some(id)
 }
@@ -308,7 +344,9 @@ pub fn is_running_under_arm64_translation() -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn is_running_under_arm64_translation() -> bool { false }
+pub fn is_running_under_arm64_translation() -> bool {
+    false
+}
 
 pub fn is_in_application_folder() -> Option<bool> {
     #[cfg(target_os = "macos")]
@@ -321,7 +359,9 @@ pub fn is_in_application_folder() -> Option<bool> {
 }
 
 pub fn move_to_applications_folder() -> Result<()> {
-    Err(AppError::NotImplemented("macOS move-to-Applications-Folder".into()))
+    Err(AppError::NotImplemented(
+        "macOS move-to-Applications-Folder".into(),
+    ))
 }
 
 /// `installWindowsCLI` / `uninstallWindowsCLI` — Squirrel trampoline scripts.
@@ -353,4 +393,6 @@ pub fn install_cli(install: bool, user_data: &Path, exe: &Path) -> Result<()> {
 /// `check-for-updates`: the Squirrel/updates mechanism is intentionally out of
 /// scope for this migration. Return the same "no update available" outcome the
 /// UI already handles instead of throwing.
-pub fn check_for_updates(_url: &str) -> Result<()> { Ok(()) }
+pub fn check_for_updates(_url: &str) -> Result<()> {
+    Ok(())
+}

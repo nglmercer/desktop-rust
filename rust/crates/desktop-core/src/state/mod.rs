@@ -4,4 +4,4 @@
 pub mod commands;
 pub mod dispatcher;
 
-pub use dispatcher::{invoke, send, Outcome};
+pub use dispatcher::{Outcome, invoke, send};

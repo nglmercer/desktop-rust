@@ -16,18 +16,18 @@ pub mod status;
 pub use account::{Account, ApiRepository, Email, EndpointToken, GitAccount, OAuthToken};
 pub use app_state::{
     AppState, BranchesState, ChangesState, CommitSelection, HistoryState, Preferences,
-    RepositoryState, SelectedState, SignInState, STATE_VERSION,
+    RepositoryState, STATE_VERSION, SelectedState, SignInState,
 };
 pub use branch::{Branch, BranchType, PullRequest, StashEntry, Tip};
 pub use commit::{Commit, CommitIdentity, CommitMessage, GitAuthor, Trailer};
 pub use diff::{Diff, DiffHunk, DiffLine, DiffSelection, DiffType, ImageDiffType};
 pub use misc::{
-    AppMenu, AppleActionOnDoubleClick, Architecture, Banner, CrashDetails, DesktopNotificationPermission,
-    FoldoutType, LaunchStats, PathType, Popup, PopupType, Progress, SelectionType,
-    RepositorySectionTab, ThemeSource, WindowState,
+    AppMenu, AppleActionOnDoubleClick, Architecture, Banner, CrashDetails,
+    DesktopNotificationPermission, FoldoutType, LaunchStats, PathType, Popup, PopupType, Progress,
+    RepositorySectionTab, SelectionType, ThemeSource, WindowState,
 };
 pub use repository::{
-    AheadBehind, CloningRepository, CloneOptions, GitHubRepository, LocalRepositoryState, Owner,
-    Remote, Repository, WorktreeEntry, WorkflowPreferences,
+    AheadBehind, CloneOptions, CloningRepository, GitHubRepository, LocalRepositoryState, Owner,
+    Remote, Repository, WorkflowPreferences, WorktreeEntry,
 };
 pub use status::{AppFileStatusKind, GitStatusEntry, StatusResult, WorkingDirectoryFileChange};

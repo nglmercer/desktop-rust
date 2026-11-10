@@ -11,11 +11,13 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::app::DesktopApp;
 use crate::error::{AppError, Result};
-use crate::git::{diff as git_diff, log as git_log, operations as ops, refs as git_refs, status as git_status};
+use crate::git::{
+    diff as git_diff, log as git_log, operations as ops, refs as git_refs, status as git_status,
+};
 use crate::ipc::protocol::IpcMessage;
 use crate::models::account::Account;
 use crate::models::app_state::{AppState, RepositoryState};
@@ -37,13 +39,20 @@ fn get_bool(o: &Value, key: &str, default: bool) -> bool {
 }
 
 fn get_u32(o: &Value, key: &str, default: u32) -> u32 {
-    o.get(key).and_then(Value::as_u64).map(|v| v as u32).unwrap_or(default)
+    o.get(key)
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
+        .unwrap_or(default)
 }
 
 fn get_strings(o: &Value, key: &str) -> Vec<String> {
     o.get(key)
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -210,7 +219,13 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             let revision = get_str(&o, "revision");
             let limit = get_u32(&o, "limit", 100);
             let skip = get_u32(&o, "skip", 0);
-            serde_json::to_value(git_log::get_commits(&app.git, &path, revision.as_deref(), limit, skip)?)?
+            serde_json::to_value(git_log::get_commits(
+                &app.git,
+                &path,
+                revision.as_deref(),
+                limit,
+                skip,
+            )?)?
         }
         "desktop.get-commit" => {
             let path = repo_path(state, &o)?;
@@ -253,7 +268,12 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.get-merge-base" => {
             let path = repo_path(state, &o)?;
-            serde_json::to_value(git_refs::get_merge_base(&app.git, &path, &required(&o, "a")?, &required(&o, "b")?)?)?
+            serde_json::to_value(git_refs::get_merge_base(
+                &app.git,
+                &path,
+                &required(&o, "a")?,
+                &required(&o, "b")?,
+            )?)?
         }
         "desktop.get-config" => {
             let path = repo_path(state, &o)?;
@@ -261,13 +281,16 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.set-config" => {
             let path = repo_path(state, &o)?;
-            app.git.set_config(&required(&o, "key")?, &required(&o, "value")?, &path)?;
+            app.git
+                .set_config(&required(&o, "key")?, &required(&o, "value")?, &path)?;
             Value::Null
         }
         "desktop.get-diff" => {
             let path = repo_path(state, &o)?;
             let file = get_str(&o, "path").unwrap_or_default();
-            serde_json::to_value(git_diff::get_working_directory_diff(&app.git, &path, &file)?)?
+            serde_json::to_value(git_diff::get_working_directory_diff(
+                &app.git, &path, &file,
+            )?)?
         }
         "desktop.get-commit-diff" => {
             let path = repo_path(state, &o)?;
@@ -297,7 +320,12 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.rename-branch" => {
             let path = repo_path(state, &o)?;
-            let out = ops::rename_branch(&app.git, &path, &required(&o, "oldName")?, &required(&o, "newName")?)?;
+            let out = ops::rename_branch(
+                &app.git,
+                &path,
+                &required(&o, "oldName")?,
+                &required(&o, "newName")?,
+            )?;
             refresh(app, state, &path)?;
             git_value(&out)
         }
@@ -305,7 +333,12 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             let path = repo_path(state, &o)?;
             let name = required(&o, "name")?;
             let out = if get_bool(&o, "remote", false) {
-                ops::delete_remote_branch(&app.git, &path, &get_str(&o, "remote").unwrap_or_else(|| "origin".into()), &name)?
+                ops::delete_remote_branch(
+                    &app.git,
+                    &path,
+                    &get_str(&o, "remote").unwrap_or_else(|| "origin".into()),
+                    &name,
+                )?
             } else {
                 ops::delete_local_branch(&app.git, &path, &name)?
             };
@@ -338,7 +371,12 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.commit" => {
             let path = repo_path(state, &o)?;
-            let out = ops::create_commit(&app.git, &path, &required(&o, "summary")?, &get_str(&o, "body").unwrap_or_default())?;
+            let out = ops::create_commit(
+                &app.git,
+                &path,
+                &required(&o, "summary")?,
+                &get_str(&o, "body").unwrap_or_default(),
+            )?;
             refresh(app, state, &path)?;
             git_value(&out)
         }
@@ -359,7 +397,13 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         "desktop.pull" => {
             let path = repo_path(state, &o)?;
             let remote = get_str(&o, "remote").unwrap_or_else(|| "origin".into());
-            let out = ops::pull(&app.git, &path, &remote, get_str(&o, "branch").as_deref(), get_bool(&o, "rebase", false))?;
+            let out = ops::pull(
+                &app.git,
+                &path,
+                &remote,
+                get_str(&o, "branch").as_deref(),
+                get_bool(&o, "rebase", false),
+            )?;
             refresh(app, state, &path)?;
             git_value(&out)
         }
@@ -367,9 +411,20 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             let path = repo_path(state, &o)?;
             let remote = get_str(&o, "remote").unwrap_or_else(|| "origin".into());
             let branch = get_str(&o, "branch")
-                .or_else(|| git_status::get_status(&app.git, &path).ok().and_then(|s| s.current_branch))
+                .or_else(|| {
+                    git_status::get_status(&app.git, &path)
+                        .ok()
+                        .and_then(|s| s.current_branch)
+                })
                 .ok_or_else(|| AppError::msg("unable to determine the branch to push"))?;
-            let out = ops::push(&app.git, &path, &remote, &branch, get_bool(&o, "setUpstream", false), get_bool(&o, "forceWithLease", false))?;
+            let out = ops::push(
+                &app.git,
+                &path,
+                &remote,
+                &branch,
+                get_bool(&o, "setUpstream", false),
+                get_bool(&o, "forceWithLease", false),
+            )?;
             refresh(app, state, &path)?;
             git_value(&out)
         }
@@ -377,8 +432,17 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             let url = required(&o, "url")?;
             let target = required(&o, "path")?;
             let parent = Path::new(&target).parent().unwrap_or(Path::new("."));
-            let name = Path::new(&target).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| target.clone());
-            let out = ops::clone(&app.git, parent, &url, &name, get_str(&o, "branch").as_deref())?;
+            let name = Path::new(&target)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| target.clone());
+            let out = ops::clone(
+                &app.git,
+                parent,
+                &url,
+                &name,
+                get_str(&o, "branch").as_deref(),
+            )?;
             if app.git.is_repository(Path::new(&target)) {
                 let id = state.next_repository_id();
                 state.repositories.push(Repository::local(target, id));
@@ -387,13 +451,23 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.merge" => {
             let path = repo_path(state, &o)?;
-            let out = ops::merge(&app.git, &path, &required(&o, "branch")?, get_bool(&o, "squash", false))?;
+            let out = ops::merge(
+                &app.git,
+                &path,
+                &required(&o, "branch")?,
+                get_bool(&o, "squash", false),
+            )?;
             refresh(app, state, &path)?;
             git_value(&out)
         }
         "desktop.rebase" => {
             let path = repo_path(state, &o)?;
-            let out = ops::rebase(&app.git, &path, &required(&o, "branch")?, get_bool(&o, "interactive", false))?;
+            let out = ops::rebase(
+                &app.git,
+                &path,
+                &required(&o, "branch")?,
+                get_bool(&o, "interactive", false),
+            )?;
             refresh(app, state, &path)?;
             git_value(&out)
         }
@@ -430,7 +504,12 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.create-tag" => {
             let path = repo_path(state, &o)?;
-            git_value(&ops::create_tag(&app.git, &path, &required(&o, "name")?, &get_str(&o, "target").unwrap_or_else(|| "HEAD".into()))?)
+            git_value(&ops::create_tag(
+                &app.git,
+                &path,
+                &required(&o, "name")?,
+                &get_str(&o, "target").unwrap_or_else(|| "HEAD".into()),
+            )?)
         }
         "desktop.delete-tag" => {
             let path = repo_path(state, &o)?;
@@ -438,24 +517,36 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.add-remote" => {
             let path = repo_path(state, &o)?;
-            git_value(&ops::add_remote(&app.git, &path, &get_str(&o, "name").unwrap_or_else(|| "origin".into()), &required(&o, "url")?)?)
+            git_value(&ops::add_remote(
+                &app.git,
+                &path,
+                &get_str(&o, "name").unwrap_or_else(|| "origin".into()),
+                &required(&o, "url")?,
+            )?)
         }
         "desktop.set-remote-url" => {
             let path = repo_path(state, &o)?;
-            git_value(&ops::set_remote_url(&app.git, &path, &get_str(&o, "name").unwrap_or_else(|| "origin".into()), &required(&o, "url")?)?)
+            git_value(&ops::set_remote_url(
+                &app.git,
+                &path,
+                &get_str(&o, "name").unwrap_or_else(|| "origin".into()),
+                &required(&o, "url")?,
+            )?)
         }
 
         // -- UI state -------------------------------------------------------
         // A web-rendered menu/panel still needs a native confirmation dialog.
         // Routing it through `WindowAction` keeps rfd on the tao UI thread.
         "desktop.show-message-box" => {
-            let options: crate::ipc::protocol::MessageOptions = serde_json::from_value(o.clone())
-                .map_err(|e| AppError::BadArgs(format!("invalid message box options: {e}")))?;
+            let options: crate::ipc::protocol::MessageOptions =
+                serde_json::from_value(o.clone())
+                    .map_err(|e| AppError::BadArgs(format!("invalid message box options: {e}")))?;
             app.window(crate::ipc::protocol::WindowAction::ShowMessageBox(options))?
         }
         "desktop.show-popup" => {
-            let kind: PopupType = serde_json::from_value(o.get("type").cloned().unwrap_or(json!("unknown")))
-                .unwrap_or(PopupType::Unknown);
+            let kind: PopupType =
+                serde_json::from_value(o.get("type").cloned().unwrap_or(json!("unknown")))
+                    .unwrap_or(PopupType::Unknown);
             state.current_popup = Some(crate::models::misc::Popup {
                 kind,
                 repository: state.selected_repository().cloned(),
@@ -470,22 +561,27 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         "desktop.set-preference" => {
             let key = required(&o, "key")?;
             let value = o.get("value").cloned().unwrap_or(Value::Null);
-            app.storage.set_item(&format!("pref:{key}"), value.clone())?;
+            app.storage
+                .set_item(&format!("pref:{key}"), value.clone())?;
             apply_preference(state, &key, &value);
             return Ok((value, true));
         }
         "desktop.get-preference" => {
             let key = required(&o, "key")?;
-            app.storage.get_item(&format!("pref:{key}")).unwrap_or(Value::Null)
+            app.storage
+                .get_item(&format!("pref:{key}"))
+                .unwrap_or(Value::Null)
         }
 
         // -- accounts / API -------------------------------------------------
         "desktop.sign-in" => {
-            let endpoint = get_str(&o, "endpoint").unwrap_or_else(crate::api::ApiClient::default_endpoint);
+            let endpoint =
+                get_str(&o, "endpoint").unwrap_or_else(crate::api::ApiClient::default_endpoint);
             let token = required(&o, "token")?;
             let user = app.api.fetch_user(&endpoint, &token)?;
             let login = get_str(&o, "login").unwrap_or_else(|| user.login.clone());
-            app.secure.set_item(&format!("{login}@{endpoint}"), &login, &token)?;
+            app.secure
+                .set_item(&format!("{login}@{endpoint}"), &login, &token)?;
             let account = Account {
                 login: login.clone(),
                 endpoint: endpoint.clone(),
@@ -497,7 +593,9 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
                 plan: None,
                 copilot_endpoint: None,
             };
-            state.accounts.retain(|a| !(a.login == login && a.endpoint == endpoint));
+            state
+                .accounts
+                .retain(|a| !(a.login == login && a.endpoint == endpoint));
             state.accounts.push(account.clone());
             return Ok((serde_json::to_value(account)?, true));
         }
@@ -519,26 +617,42 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
         }
         "desktop.fetch-pull-requests" => {
             let (endpoint, token, _) = account_context(app, state, &o)?;
-            serde_json::to_value(app.api.fetch_pull_requests(&endpoint, &token, &required(&o, "owner")?, &required(&o, "name")?)?)?
+            serde_json::to_value(app.api.fetch_pull_requests(
+                &endpoint,
+                &token,
+                &required(&o, "owner")?,
+                &required(&o, "name")?,
+            )?)?
         }
         "desktop.create-pull-request" => {
             let (endpoint, token, _) = account_context(app, state, &o)?;
             serde_json::to_value(app.api.create_pull_request(
-                &endpoint, &token,
-                &required(&o, "owner")?, &required(&o, "name")?,
-                &required(&o, "title")?, &required(&o, "head")?,
-                &required(&o, "base")?, &get_str(&o, "body").unwrap_or_default(),
+                &endpoint,
+                &token,
+                &required(&o, "owner")?,
+                &required(&o, "name")?,
+                &required(&o, "title")?,
+                &required(&o, "head")?,
+                &required(&o, "base")?,
+                &get_str(&o, "body").unwrap_or_default(),
             )?)?
         }
         "desktop.fetch-issues" => {
             let (endpoint, token, _) = account_context(app, state, &o)?;
-            serde_json::to_value(app.api.fetch_issues(&endpoint, &token, &required(&o, "owner")?, &required(&o, "name")?)?)?
+            serde_json::to_value(app.api.fetch_issues(
+                &endpoint,
+                &token,
+                &required(&o, "owner")?,
+                &required(&o, "name")?,
+            )?)?
         }
 
         // -- misc -----------------------------------------------------------
         "desktop.open-in-shell" => {
             let path = repo_path(state, &o)?;
-            let _ = app.window(crate::ipc::protocol::WindowAction::OpenExternal(path.to_string_lossy().into_owned()));
+            let _ = app.window(crate::ipc::protocol::WindowAction::OpenExternal(
+                path.to_string_lossy().into_owned(),
+            ));
             Value::Null
         }
         other => return Err(AppError::UnknownChannel(other.to_string())),
@@ -548,21 +662,40 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
     let changed = channel.starts_with("desktop.")
         && !matches!(
             channel,
-            "desktop.get-state" | "desktop.get-app-info" | "desktop.get-status"
-                | "desktop.get-commits" | "desktop.get-commit" | "desktop.get-changed-files"
-                | "desktop.get-authors" | "desktop.get-branches" | "desktop.get-remotes"
-                | "desktop.get-tags" | "desktop.get-worktrees" | "desktop.get-stashes"
-                | "desktop.get-ahead-behind" | "desktop.get-merge-base" | "desktop.get-config"
-                | "desktop.get-diff" | "desktop.get-commit-diff" | "desktop.get-preference"
-                | "desktop.fetch-user" | "desktop.fetch-repositories"
-                | "desktop.fetch-pull-requests" | "desktop.create-pull-request"
-                | "desktop.fetch-issues" | "desktop.open-in-shell"
+            "desktop.get-state"
+                | "desktop.get-app-info"
+                | "desktop.get-status"
+                | "desktop.get-commits"
+                | "desktop.get-commit"
+                | "desktop.get-changed-files"
+                | "desktop.get-authors"
+                | "desktop.get-branches"
+                | "desktop.get-remotes"
+                | "desktop.get-tags"
+                | "desktop.get-worktrees"
+                | "desktop.get-stashes"
+                | "desktop.get-ahead-behind"
+                | "desktop.get-merge-base"
+                | "desktop.get-config"
+                | "desktop.get-diff"
+                | "desktop.get-commit-diff"
+                | "desktop.get-preference"
+                | "desktop.fetch-user"
+                | "desktop.fetch-repositories"
+                | "desktop.fetch-pull-requests"
+                | "desktop.create-pull-request"
+                | "desktop.fetch-issues"
+                | "desktop.open-in-shell"
                 | "desktop.show-message-box"
         );
     Ok((value, changed))
 }
 
-fn account_context(app: &DesktopApp, state: &AppState, o: &Value) -> Result<(String, String, String)> {
+fn account_context(
+    app: &DesktopApp,
+    state: &AppState,
+    o: &Value,
+) -> Result<(String, String, String)> {
     let login = get_str(o, "login");
     let account = state
         .accounts
@@ -590,7 +723,9 @@ fn apply_preference(state: &mut AppState, key: &str, value: &Value) {
         "statsOptOut" => p.stats_opt_out = value.as_bool().unwrap_or(false),
         "zoomFactor" => p.zoom_factor = value.as_f64().unwrap_or(1.0),
         "showStashedChanges" => p.show_stashed_changes = value.as_bool().unwrap_or(false),
-        "repositoryIndicatorsEnabled" => p.repository_indicators_enabled = value.as_bool().unwrap_or(true),
+        "repositoryIndicatorsEnabled" => {
+            p.repository_indicators_enabled = value.as_bool().unwrap_or(true)
+        }
         _ => {}
     }
 }
@@ -599,7 +734,14 @@ fn apply_preference(state: &mut AppState, key: &str, value: &Value) {
 fn parse_remote_repo(url: &str) -> (String, String) {
     let clean = url.trim_end_matches(".git");
     let tail = if clean.contains("://") {
-        clean.split("://").nth(1).unwrap_or(clean).split('/').skip(1).collect::<Vec<_>>().join("/")
+        clean
+            .split("://")
+            .nth(1)
+            .unwrap_or(clean)
+            .split('/')
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("/")
     } else if let Some((_, path)) = clean.split_once(':') {
         path.to_string()
     } else {

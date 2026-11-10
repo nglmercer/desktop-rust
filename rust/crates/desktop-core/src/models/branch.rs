@@ -33,7 +33,10 @@ pub struct Branch {
 
 impl Branch {
     pub fn name_without_remote(&self) -> &str {
-        self.name.split_once('/').map(|(_, rest)| rest).unwrap_or(&self.name)
+        self.name
+            .split_once('/')
+            .map(|(_, rest)| rest)
+            .unwrap_or(&self.name)
     }
 }
 
