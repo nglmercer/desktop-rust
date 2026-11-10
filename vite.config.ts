@@ -5,6 +5,7 @@ import path from 'path'
 import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import frontMatter from 'front-matter'
 import { createRequire } from 'module'
+import { realpathSync } from 'fs'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -138,6 +139,7 @@ export default defineConfig({
     __ERROR_REPORTING_ENDPOINT__: 'undefined',
     __NON_FATAL_ERROR_REPORTING_ENDPOINT__: 'undefined',
     'process.platform': JSON.stringify(process.platform),
+    'process.arch': JSON.stringify(process.arch),
     // The renderer resolved bundled resources next to its script. Under the
     // desktop:// protocol those live at the origin root.
     __dirname: JSON.stringify('/__desktop_app__'),
@@ -147,7 +149,11 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^electron$/, replacement: path.resolve(__dirname, 'app/src/web/electron.ts') },
-      { find: /^@github\/copilot-sdk$/, replacement: path.resolve(__dirname, 'app/src/web/copilot-sdk.ts') },
+      // The SDK speaks JSON-RPC over the Node stream classes. Vite would pick
+      // the package's browser build (no stream classes) through its `browser`
+      // field, so the Node entry is named directly.
+      { find: /^vscode-jsonrpc\/node(\.js)?$/, replacement: path.resolve(realpathSync(path.resolve(__dirname, 'app/node_modules/@github/copilot-sdk')), '../../vscode-jsonrpc/lib/node/main.js') },
+      { find: /^koffi$/, replacement: path.resolve(__dirname, 'app/src/web/koffi.ts') },
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
       { find: /^(node:)?url$/, replacement: path.resolve(__dirname, 'app/src/web/url.ts') },
       { find: /^keytar$/, replacement: path.resolve(__dirname, 'app/src/web/keytar.ts') },

@@ -15,6 +15,9 @@ pub struct AppPaths {
     pub user_data: PathBuf,
     pub app_path: PathBuf,
     pub exec_path: PathBuf,
+    /// The Copilot SDK platform package (`copilot-sdk-<os>-<arch>`), which holds
+    /// the standalone runtime under `prebuilds/`. `None` when it is not installed.
+    pub copilot_dir: Option<PathBuf>,
 }
 
 impl AppPaths {
@@ -51,7 +54,9 @@ impl AppPaths {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
 
-        Ok(Self { user_data, app_path, exec_path })
+        let copilot_dir = find_copilot_dir(&exec_path);
+
+        Ok(Self { user_data, app_path, exec_path, copilot_dir })
     }
 
     pub fn state_file(&self) -> PathBuf { self.user_data.join("state.json") }
@@ -106,4 +111,57 @@ fn home() -> PathBuf {
 #[cfg(not(target_os = "windows"))]
 fn home() -> PathBuf {
     std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Node's name for this OS and CPU, as used by the Copilot SDK packages.
+fn node_platform_and_arch() -> (&'static str, &'static str) {
+    let platform = match std::env::consts::OS {
+        "windows" => "win32",
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    (platform, arch)
+}
+
+/// Locate `copilot-sdk-<platform>-<arch>`:
+///
+/// 1. `DESKTOP_COPILOT_DIR`, for an explicit install;
+/// 2. `copilot/` next to the executable, where a packaged build places it;
+/// 3. the development tree, where pnpm keeps the optional package under
+///    `node_modules/.pnpm` (or `app/node_modules` for a hoisted install).
+fn find_copilot_dir(exec_path: &Path) -> Option<PathBuf> {
+    let (platform, arch) = node_platform_and_arch();
+    let package = format!("copilot-sdk-{platform}-{arch}");
+
+    if let Some(dir) = std::env::var_os("DESKTOP_COPILOT_DIR").map(PathBuf::from) {
+        if dir.join("prebuilds").is_dir() {
+            return Some(dir);
+        }
+    }
+    if let Some(dir) = exec_path.parent().map(|parent| parent.join("copilot")) {
+        if dir.join("prebuilds").is_dir() {
+            return Some(dir);
+        }
+    }
+
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..");
+    let hoisted = repo.join("app").join("node_modules").join("@github").join(&package);
+    if hoisted.join("prebuilds").is_dir() {
+        return Some(hoisted);
+    }
+    let store = repo.join("node_modules").join(".pnpm");
+    let prefix = format!("@github+{package}@");
+    std::fs::read_dir(store).ok()?.flatten().find_map(|entry| {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with(&prefix) {
+            return None;
+        }
+        let dir = entry.path().join("node_modules").join("@github").join(&package);
+        dir.join("prebuilds").is_dir().then_some(dir)
+    })
 }

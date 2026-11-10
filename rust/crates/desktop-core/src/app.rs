@@ -72,6 +72,11 @@ impl DesktopApp {
 
     pub fn started(&self) -> Instant { self.started }
 
+    /// The host, for services that emit events from their own threads.
+    pub fn host(&self) -> Arc<dyn Host> {
+        self.host.clone()
+    }
+
     /// The renderer state the menu wording currently reflects.
     pub fn menu_labels(&self) -> crate::menu::MenuLabels {
         self.menu_labels.lock().unwrap_or_else(|e| e.into_inner()).clone()

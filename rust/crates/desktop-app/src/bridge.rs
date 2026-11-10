@@ -135,7 +135,11 @@ impl Bridge {
             // Host services (git, filesystem, HTTP) can run for a long time
             // and share no state, so each gets its own thread instead of
             // queueing behind the single IPC worker.
-            Ok(Incoming::Rpc { id, channel, args }) if desktop_core::io::handles(&channel) => {
+            // Process stdin writes and kills must keep the renderer's order, so
+            // they go through the queue; everything else gets its own thread.
+            Ok(Incoming::Rpc { id, channel, args })
+                if desktop_core::io::handles(&channel) && !is_ordered_io(&channel) =>
+            {
                 let app = self.app.clone();
                 let proxy = self.proxy_handle();
                 let spawned = std::thread::Builder::new().name("desktop-io".into()).spawn(move || {
@@ -193,7 +197,8 @@ impl Bridge {
                 .and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("path=")))
                 .map(percent_decode)
                 .unwrap_or_default();
-            responder.respond(response(200, JSON, bundle_entry(&target).to_string().into_bytes()));
+            let entry = bundle_entry(&target, self.app.paths.copilot_dir.as_deref());
+            responder.respond(response(200, JSON, entry.to_string().into_bytes()));
             return;
         }
 
@@ -332,10 +337,53 @@ fn percent_decode(input: &str) -> String {
 /// `null` when nothing is present at `path`. In debug builds this
 /// consults the on-disk `out/vite-dist` first, so a new hashed file
 /// (`assets/index-[hash].js`) is discovered without a rebuild.
-fn bundle_entry(path: &str) -> Value {
+/// Whether an io operation must run on the IPC worker, in arrival order.
+fn is_ordered_io(channel: &str) -> bool {
+    channel
+        .strip_prefix(desktop_core::io::PREFIX)
+        .is_some_and(|op| desktop_core::io::PROCESS_OPERATIONS.contains(&op))
+}
+
+/// Describe a file under the Copilot SDK package. The renderer reads that
+/// folder through the same bundle endpoint as the web build, but the files
+/// live on disk next to the app, not in the embedded bundle.
+fn copilot_entry(root: &std::path::Path, rest: &str) -> Value {
+    if rest.split('/').any(|part| part == "..") {
+        return Value::Null;
+    }
+    let target = if rest.is_empty() { root.to_path_buf() } else { root.join(rest) };
+    match std::fs::metadata(&target) {
+        Ok(meta) if meta.is_file() => serde_json::json!({ "kind": "file", "size": meta.len() }),
+        Ok(meta) if meta.is_dir() => {
+            let mut entries: Vec<Value> = std::fs::read_dir(&target)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|entry| {
+                    let kind = entry.file_type().ok()?;
+                    Some(serde_json::json!({
+                        "name": entry.file_name().to_string_lossy(),
+                        "isDirectory": kind.is_dir(),
+                    }))
+                })
+                .collect();
+            entries.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+            serde_json::json!({ "kind": "directory", "entries": entries })
+        }
+        _ => Value::Null,
+    }
+}
+
+fn bundle_entry(path: &str, copilot_dir: Option<&std::path::Path>) -> Value {
     let path = path.trim_matches('/');
     if path.contains("..") || path.contains('\\') || path.contains(':') {
         return Value::Null;
+    }
+    if path == "copilot" || path.starts_with("copilot/") {
+        return match copilot_dir {
+            Some(root) => copilot_entry(root, path.strip_prefix("copilot").unwrap_or("").trim_start_matches('/')),
+            None => Value::Null,
+        };
     }
     // Debug: disk is authoritative for the current hash.
     #[cfg(debug_assertions)]
@@ -431,17 +479,32 @@ mod tests {
 
     #[test]
     fn bundle_entries_describe_files_and_directories() {
-        assert_eq!(bundle_entry("index.html")["kind"], "file");
-        assert!(bundle_entry("index.html")["size"].as_u64().unwrap() > 0);
+        assert_eq!(bundle_entry("index.html", None)["kind"], "file");
+        assert!(bundle_entry("index.html", None)["size"].as_u64().unwrap() > 0);
 
-        let root = bundle_entry("");
+        let root = bundle_entry("", None);
         assert_eq!(root["kind"], "directory");
         let names: Vec<&str> = root["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"index.html") && names.contains(&"assets"));
-        assert_eq!(bundle_entry("/assets/")["kind"], "directory");
+        assert_eq!(bundle_entry("/assets/", None)["kind"], "directory");
 
-        assert_eq!(bundle_entry("missing"), Value::Null);
-        assert_eq!(bundle_entry("../Cargo.toml"), Value::Null);
+        assert_eq!(bundle_entry("missing", None), Value::Null);
+        assert_eq!(bundle_entry("../Cargo.toml", None), Value::Null);
+    }
+
+    #[test]
+    fn copilot_paths_are_described_from_the_sdk_directory() {
+        let root = std::env::temp_dir().join(format!("desktop-copilot-entry-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("prebuilds/linux-x64")).unwrap();
+        std::fs::write(root.join("prebuilds/linux-x64/copilot-runtime"), b"runtime").unwrap();
+
+        assert_eq!(bundle_entry("copilot/prebuilds/linux-x64/copilot-runtime", Some(&root))["kind"], "file");
+        assert_eq!(bundle_entry("copilot/prebuilds", Some(&root))["kind"], "directory");
+        assert_eq!(bundle_entry("copilot/prebuilds/linux-x64/missing", Some(&root)), Value::Null);
+        assert_eq!(bundle_entry("copilot/../bridge.rs", Some(&root)), Value::Null);
+        // Without an SDK install nothing under copilot/ exists.
+        assert_eq!(bundle_entry("copilot/prebuilds", None), Value::Null);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

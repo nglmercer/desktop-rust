@@ -25,6 +25,10 @@ use crate::storage::{base64_decode, base64_encode};
 
 pub const PREFIX: &str = "desktop.io.";
 
+mod process;
+
+pub use process::{EVENT as PROCESS_EVENT, PROCESS_OPERATIONS};
+
 /// The renderer's `__dirname` in the web build (`BundleRoot` in
 /// `app/src/web/bundle.ts`). Not a real directory: the shims map paths under
 /// it onto resources served from the page origin.
@@ -55,6 +59,10 @@ pub fn invoke(app: &DesktopApp, channel: &str, args: &[Value]) -> Result<Value> 
             app.secure.delete_item(&keychain_key(o)?, &string(o, "account")?)?;
             Ok(json!(true))
         }
+        "process-spawn" => process::spawn(app, o),
+        "process-write" => process::write(o),
+        "process-end" => process::end_input(o),
+        "process-kill" => process::kill(o),
         other => match other.strip_prefix("fs-") {
             Some(operation) => fs_invoke(operation, o),
             None => Err(AppError::UnknownChannel(channel.to_string())),

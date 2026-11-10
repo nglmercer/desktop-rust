@@ -1942,19 +1942,7 @@ export class CopilotStore extends BaseStore {
         return models
       })
       .catch(e => {
-        // In the Rust (wry) shell the Copilot runtime is not packaged yet, so
-        // `createClient` throws "Runtime entry point not found" or "GitHub
-        // Copilot is not available in the Rust shell yet" on every launch.
-        // That is an expected unavailable-feature signal, not a warning.
-        const message = e instanceof Error ? e.message : String(e)
-        if (
-          message.includes('Runtime entry point not found') ||
-          message.includes('not available in the Rust shell')
-        ) {
-          log.debug('CopilotStore: Copilot unavailable in this shell; models not cached', e)
-        } else {
-          log.warn('CopilotStore: Failed to fetch and cache models', e)
-        }
+        log.warn('CopilotStore: Failed to fetch and cache models', e)
         return this.modelCaches.get(key)?.models ?? null
       })
     this.modelsInFlight.set(key, fetchPromise)
@@ -1994,19 +1982,7 @@ export class CopilotStore extends BaseStore {
         return quotaSnapshots
       })
       .catch(e => {
-        // In the Rust (wry) shell the Copilot runtime is not packaged yet, so
-        // `createClient` throws "Runtime entry point not found" or "GitHub
-        // Copilot is not available in the Rust shell yet" on every launch.
-        // That is an expected unavailable-feature signal, not a warning.
-        const message = e instanceof Error ? e.message : String(e)
-        if (
-          message.includes('Runtime entry point not found') ||
-          message.includes('not available in the Rust shell')
-        ) {
-          log.debug('CopilotStore: Copilot unavailable in this shell; quota not cached', e)
-        } else {
-          log.warn('CopilotStore: Failed to fetch and cache quota snapshots', e)
-        }
+        log.warn('CopilotStore: Failed to fetch and cache quota snapshots', e)
         return this.quotaCaches.get(key)?.quotaSnapshots ?? null
       })
     this.quotasInFlight.set(key, fetchPromise)
