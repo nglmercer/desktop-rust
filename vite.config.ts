@@ -23,6 +23,10 @@ const polyfillRequire = createRequire(
 const legacyUrlPackage = createRequire(
   polyfillRequire.resolve('node-stdlib-browser')
 ).resolve('url/')
+// The crypto implementation behind app/src/web/crypto.ts (randomUUID is added there).
+const legacyCryptoPackage = createRequire(
+  polyfillRequire.resolve('node-stdlib-browser')
+).resolve('crypto-browserify')
 
 const staticDirName =
   process.platform === 'darwin'
@@ -167,6 +171,9 @@ export default defineConfig({
       exclude: ['fs/promises','stream/promises','stream/consumers','fs','stream'],
       globals: { Buffer: true, global: true, process: true },
       protocolImports: true,
+      // `crypto` is replaced for both import and require paths (the Copilot
+      // SDK's CommonJS build reads it with require); see app/src/web/crypto.ts.
+      overrides: { crypto: path.resolve(__dirname, 'app/src/web/crypto.ts') },
     }),
   ],
   define: {
@@ -212,6 +219,7 @@ export default defineConfig({
       { find: /^vscode-jsonrpc\/node(\.js)?$/, replacement: path.resolve(realpathSync(path.resolve(__dirname, 'app/node_modules/@github/copilot-sdk')), '../../vscode-jsonrpc/lib/node/main.js') },
       { find: /^koffi$/, replacement: path.resolve(__dirname, 'app/src/web/koffi.ts') },
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
+      { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
       { find: /^(node:)?url$/, replacement: path.resolve(__dirname, 'app/src/web/url.ts') },
       { find: /^keytar$/, replacement: path.resolve(__dirname, 'app/src/web/keytar.ts') },
       { find: /^desktop-dugite\/(.+)$/, replacement: path.resolve(__dirname, 'app/node_modules/dugite/build/lib') + '/$1.js' },

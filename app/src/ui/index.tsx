@@ -1,3 +1,4 @@
+import '../web/crypto'
 import '../lib/logging/renderer/install'
 
 import * as React from 'react'
