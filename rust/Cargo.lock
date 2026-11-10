@@ -420,7 +420,7 @@ name = "desktop-app"
 version = "0.1.0"
 dependencies = [
  "arboard",
- "desktop-core",
+ "desktop-shell-core-legacy",
  "http",
  "include_dir",
  "muda",
@@ -436,7 +436,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "desktop-core"
+name = "desktop-shell-core-legacy"
 version = "0.1.0"
 dependencies = [
  "http",

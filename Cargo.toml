@@ -1,5 +1,6 @@
 [workspace]
 members = ["rust/crates/core", "rust/crates/cli", "rust/crates/bridge", "rust/crates/native"]
+default-members = ["rust/crates/core", "rust/crates/cli", "rust/crates/bridge"]
 resolver = "2"
 
 [workspace.package]

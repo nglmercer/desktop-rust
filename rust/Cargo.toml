@@ -26,7 +26,8 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "rustls-tls",
 ] }
-desktop-core = { path = "crates/desktop-core" }
+desktop-shell-core-legacy = { package = "desktop-shell-core-legacy", path = "crates/desktop-core" }
+desktop_core = { package = "desktop-shell-core-legacy", path = "crates/desktop-core" }
 
 [profile.release]
 opt-level = 2
