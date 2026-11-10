@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from smoke import BINARY, WebSocket
+from support.bridge import BINARY, WebSocket
 
 
 def alive(pid):

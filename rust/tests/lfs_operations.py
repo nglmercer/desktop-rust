@@ -13,7 +13,7 @@ import tempfile
 import threading
 from discard_advanced import Fixture, BINARY
 from lfs_diffs import cached, pointer
-from smoke import WebSocket
+from support.bridge import WebSocket
 
 
 def cli(path, *args, fail=False):

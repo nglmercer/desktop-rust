@@ -1,5 +1,6 @@
 //! Loopback HTTP/WebSocket transport for the browser and native shells.
-static VITE_DIST: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
+static VITE_DIST: include_dir::Dir =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
 use axum::{
     Router,
     extract::{
@@ -174,20 +175,39 @@ pub async fn start(
         .route(
             "/",
             get(|| async {
-                let content = VITE_DIST.get_file("index.html").map(|f| String::from_utf8_lossy(f.contents()).to_owned()).unwrap_or_default();
+                let content = VITE_DIST
+                    .get_file("index.html")
+                    .map(|f| String::from_utf8_lossy(f.contents()).to_owned())
+                    .unwrap_or_default();
                 Html(content)
             }),
         )
-        .route("/assets/{*path}", get(|uri: axum::http::Uri| async move {
-            let path = uri.path().strip_prefix("/assets/").unwrap_or("").to_string();
-            if let Some(file) = VITE_DIST.get_file(&format!("assets/{path}")) {
-                let content = file.contents().to_vec();
-                let content_type = if path.ends_with(".css") { "text/css" } else if path.ends_with(".js") || path.ends_with(".mjs") { "text/javascript" } else { "application/octet-stream" };
-                Response::builder().header(header::CONTENT_TYPE, content_type).body(axum::body::Body::from(content)).unwrap()
-            } else {
-                StatusCode::NOT_FOUND.into_response()
-            }
-        }))
+        .route(
+            "/assets/{*path}",
+            get(|uri: axum::http::Uri| async move {
+                let path = uri
+                    .path()
+                    .strip_prefix("/assets/")
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(file) = VITE_DIST.get_file(&format!("assets/{path}")) {
+                    let content = file.contents().to_vec();
+                    let content_type = if path.ends_with(".css") {
+                        "text/css"
+                    } else if path.ends_with(".js") || path.ends_with(".mjs") {
+                        "text/javascript"
+                    } else {
+                        "application/octet-stream"
+                    };
+                    Response::builder()
+                        .header(header::CONTENT_TYPE, content_type)
+                        .body(axum::body::Body::from(content))
+                        .unwrap()
+                } else {
+                    StatusCode::NOT_FOUND.into_response()
+                }
+            }),
+        )
         .route("/ws", get(upgrade))
         .layer(middleware::from_fn_with_state(state.clone(), check_host))
         .with_state(state.clone());

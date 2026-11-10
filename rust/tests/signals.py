@@ -10,7 +10,7 @@ import tempfile
 import time
 from cancellation import wait_for
 from lifecycle import alive
-from smoke import BINARY
+from support.bridge import BINARY
 
 
 def main():

@@ -14,7 +14,7 @@ import tempfile
 import time
 
 from discard_advanced import BINARY, Fixture
-from smoke import WebSocket
+from support.bridge import WebSocket
 
 
 def main():

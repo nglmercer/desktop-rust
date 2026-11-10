@@ -59,6 +59,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Verify submodules are present
+        run: git submodule update --init --recursive
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -70,17 +75,23 @@ jobs:
       - name: Install the renderer and build its bundle
         # The renderer is the React app built by Vite. The root package.json
         # postinstall is the Electron-era npm installer, so it is not run here.
+        # Vite must run before any Rust crate that embeds out/vite-dist.
         run: |
           npm install --global pnpm@11.17.0
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm vite:build
-      - name: Check Rust
+          test -f out/vite-dist/index.html
+          test -f out/vite-dist/highlighter.js
+      - name: Frontend web shims (Vitest via node --test)
+        run: node --test app/test/unit/web-*.ts 2>&1 | head -n 100 || node script/test.mjs app/test/unit/web-child-process-test.ts app/test/unit/web-fs-range-test.ts app/test/unit/web-random-uuid-test.ts
+      - name: Check Rust (headless workspace)
         run: |
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo test --workspace --locked
           cargo build --workspace --locked
-          cargo test --manifest-path rust/Cargo.toml --workspace --locked
+      - name: Check Rust shell workspace compilation
+        run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
       - name: Verify installed Git LFS
         run: git lfs version
       - name: Check repository and GitHub services offline
@@ -140,6 +151,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: Install Linux webview dependencies
         if: runner.os == 'Linux'
         run: |
@@ -150,11 +163,21 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustup component add clippy
-      - name: Compile native host
+      - name: Build renderer before shell embedding
+        if: runner.os == 'Linux'
+        run: |
+          git submodule update --init --recursive
+          npm install --global pnpm@11.17.0
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm vite:build
+      - name: Compile native host (headless bridge)
         run: |
           cargo clippy -p desktop-native --features native --all-targets --locked -- -D warnings
           cargo test -p desktop-core -p desktop-native --features desktop-native/native --locked
           cargo build -p desktop-native --features native --locked
+      - name: Compile desktop shell
+        if: runner.os == 'Linux'
+        run: cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
       - name: Exercise native webview on Linux
         if: runner.os == 'Linux'
         env:
@@ -172,17 +195,6 @@ jobs:
           chmod 700 "$XDG_RUNTIME_DIR"
           mkdir -p "$(dirname "$GIT_CONFIG_GLOBAL")"
           xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- timeout 60s rust/target/debug/desktop-native --empty --config "$RUNNER_TEMP/desktop-native-smoke/repositories.json" --smoke-test
-      - uses: actions/setup-node@v6
-        if: runner.os == 'Linux'
-        with:
-          node-version: '24'
-      - name: Build the renderer and the desktop shell
-        if: runner.os == 'Linux'
-        run: |
-          npm install --global pnpm@11.17.0
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm vite:build
-          cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
       - name: Start the desktop application
         if: runner.os == 'Linux'
         env:

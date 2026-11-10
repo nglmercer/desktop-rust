@@ -8,7 +8,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from smoke import WebSocket
+from support.bridge import WebSocket
 
 BINARY = Path(__file__).resolve().parents[1] / 'target/debug/desktop-rs'
 

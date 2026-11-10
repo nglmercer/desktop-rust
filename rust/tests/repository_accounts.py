@@ -12,7 +12,7 @@ import tempfile
 from contextlib import contextmanager
 from discard_advanced import BINARY
 from repository_context import Suite, private, stop, wait_for
-from smoke import WebSocket
+from support.bridge import WebSocket
 
 ALICE = 'synthetic-assigned-alice-private'
 BOB = 'synthetic-assigned-bob-private'

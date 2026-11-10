@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 from lifecycle import alive
-from smoke import BINARY, WebSocket
+from support.bridge import BINARY, WebSocket
 
 
 def wait_for(predicate, label, timeout=6):
