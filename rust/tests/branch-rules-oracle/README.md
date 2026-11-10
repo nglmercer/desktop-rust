@@ -108,3 +108,9 @@ syntax interpreted as literals. RE2JS rejects `\C`, unlike native RE2.
 A generic Rust regex engine or native RE2 binding cannot claim equivalence from
 its name or a small passing subset. The corpus is concrete differential
 evidence and is not an exhaustive grammar or Unicode certification.
+
+## Status
+
+Pending. The oracle compares against TypeScript sources under `rust/web`, which
+was removed when the renderer moved to `app/` (see `MIGRATION.md`). It is not
+run by `.github/workflows/rust.yml` until those sources are re-homed.

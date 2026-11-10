@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
-import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import frontMatter from 'front-matter'
 import { createRequire } from 'module'
 import { realpathSync } from 'fs'
@@ -30,6 +30,61 @@ const staticDirName =
     : process.platform === 'win32'
     ? 'win32'
     : 'linux'
+
+/**
+ * The git submodules the renderer's static resources come from. Without them
+ * the bundle would silently miss emoji and gitignore templates, so the build
+ * stops here with the command that fixes it.
+ */
+function requireSubmodules(): Plugin {
+  return {
+    name: 'desktop-require-submodules',
+    apply: 'build',
+    buildStart() {
+      const missing = [
+        'gemoji/db/emoji.json',
+        'app/static/common/gitignore',
+      ].filter(file => !existsSync(path.resolve(__dirname, file)))
+      if (missing.length > 0) {
+        this.error(
+          `Missing git submodule content: ${missing.join(', ')}. ` +
+            'Run `git submodule update --init --recursive` from the repository root.'
+        )
+      }
+    },
+  }
+}
+
+/**
+ * Source maps are for diagnosis. The bundle is embedded in the Rust binary, so
+ * maps are written beside it only when DESKTOP_VITE_SOURCEMAP is set, and then
+ * they are moved out to out/vite-sourcemaps.
+ */
+function moveSourceMaps(outDir: string): Plugin {
+  const mapsDir = path.resolve(outDir, '..', 'vite-sourcemaps')
+  return {
+    name: 'desktop-move-sourcemaps',
+    apply: 'build',
+    closeBundle() {
+      if (!process.env.DESKTOP_VITE_SOURCEMAP) {
+        return
+      }
+      const walk = (directory: string) => {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          const file = path.join(directory, entry.name)
+          if (entry.isDirectory()) {
+            walk(file)
+          } else if (entry.name.endsWith('.map')) {
+            const target = path.join(mapsDir, path.relative(outDir, file))
+            mkdirSync(path.dirname(target), { recursive: true })
+            renameSync(file, target)
+          }
+        }
+      }
+      walk(outDir)
+    },
+  }
+}
 
 /**
  * Mirrors copyStaticResources() in script/build.ts for the files the renderer
@@ -104,7 +159,9 @@ export default defineConfig({
   base: './',
   plugins: [
     react(),
+    requireSubmodules(),
     copyStaticResources(outDir),
+    moveSourceMaps(outDir),
     nodePolyfills({
       include: ['util','buffer','crypto','assert','events','querystring','timers','string_decoder'],
       exclude: ['fs/promises','stream/promises','stream/consumers','fs','stream'],
@@ -179,7 +236,6 @@ export default defineConfig({
       { find: /^node:fs\/promises$/, replacement: path.resolve(__dirname, 'app/src/web/fs-promises.ts') },
       { find: 'node:os', replacement: path.resolve(__dirname, 'app/src/web/os.ts') },
       { find: 'node:path', replacement: path.resolve(__dirname, 'app/src/web/path.ts') },
-      { find: 'node:async_hooks', replacement: path.resolve(__dirname, 'app/src/web/async_hooks.ts') },
       { find: 'node:net', replacement: path.resolve(__dirname, 'app/src/web/net.ts') },
       { find: 'node:stream', replacement: path.resolve(__dirname, 'app/src/web/stream.ts') },
       { find: 'node:stream/promises', replacement: path.resolve(__dirname, 'app/src/web/stream-promises.ts') },
@@ -206,7 +262,8 @@ export default defineConfig({
   build: {
     outDir,
     emptyOutDir: true,
-    sourcemap: true,
+    // Off for the distributed bundle; see moveSourceMaps().
+    sourcemap: process.env.DESKTOP_VITE_SOURCEMAP ? true : false,
     chunkSizeWarningLimit: 2000,
     commonjsOptions: { transformMixedEsModules: true },
     rollupOptions: {

@@ -1,19 +1,29 @@
 # Desktop Rust migration
 
-This checkout is migrating GitHub Desktop to Rust, with a headless CLI and a
-localhost/WebSocket browser UI for Termux. The goal includes removal of the
-legacy Electron backend after its replacements are verified. An optional Wry/Tao
-host now loads the same UI on desktop targets; native runtime validation is pending.
+This checkout is migrating GitHub Desktop to Rust. The desktop UI that runs
+today is the React app in `app/`, built with Vite and hosted by a tao/wry shell
+in `rust/crates/desktop-app`. Host services (git, files, HTTP, processes) are
+Rust in `rust/crates/desktop-core`; parts of the application logic are still
+TypeScript. The browser/WebSocket transport for Termux is **not** connected in
+this tree, so `desktop-rs serve` no longer has a UI to serve.
+
+Build and start the desktop shell:
 
 ```sh
-cargo build --locked -j 1
-./rust/target/debug/desktop-rs serve --empty
+pnpm install --frozen-lockfile --ignore-scripts   # renderer dependencies
+pnpm vite:build                                   # renderer bundle -> out/vite-dist
+cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
+./rust/target/debug/github-desktop-rs
 ```
 
+`pnpm` is pinned by `packageManager` in `package.json`. The root Cargo workspace
+(`Cargo.toml`: headless CLI, bridge, native host) builds separately with
+`cargo build --locked`.
+
 See [Rust development and commands](rust/README.md) and the
-[full migration ledger](rust/MIGRATION.md). The standalone web frontend builds
-with `npm ci --prefix rust/web && npm --prefix rust/web run build`; Rust users can
-build with the checked-in browser bundle without installing Electron or Node.
+[full migration ledger](rust/MIGRATION.md). The Electron-era `postinstall`
+script in `package.json` is not used by the Rust shell; `--ignore-scripts`
+skips it, and the native-helper warnings that pnpm then prints are expected.
 This is an in-progress fork, not an official GitHub Desktop release.
 
 ---

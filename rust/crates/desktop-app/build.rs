@@ -1,69 +1,119 @@
-//! The renderer bundle is embedded with `include_dir!` for release, but
-//! served from disk in debug (`bridge.rs`) so hashed Vite filenames
-//! never go stale between `pnpm vite:build` and `cargo run`.
+//! Makes sure the renderer bundle that `desktop-app` embeds is current.
 //!
-//! To keep `cargo run -p desktop-app` fully automatic, this script
-//! builds the Vite bundle itself when it is missing (or `DESKTOP_VITE_FORCE=1`).
-//! If the build tools are unavailable it panics with the manual command.
+//! The bundle is produced by one command, `pnpm vite:build` (the app and the
+//! highlighter worker). This script runs it when the bundle is missing, when
+//! any input is newer than the bundle, or when `DESKTOP_VITE_FORCE` is set.
+//! Existence of `index.html` and `highlighter.js` alone does not make a bundle
+//! current.
+//!
+//! There is no fallback to another package manager: if the build fails, the
+//! Cargo build stops with the cause.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
-fn run_vite(repo_root: &Path) -> bool {
-    // Try pnpm, then npm, then npx vite.
-    for (prog, args) in [
-        ("pnpm", &["vite:build"][..]),
-        ("npm", &["run", "vite:build"][..]),
-        ("npx", &["vite", "build"][..]),
-    ] {
-        println!("cargo:warning=running `{prog} {}` for renderer bundle", args.join(" "));
-        let status = Command::new(prog)
-            .args(args)
-            .current_dir(repo_root)
-            .status()
-            .ok()
-            .filter(|s| s.success());
-        if status.is_some() {
-            // Build highlighter worker on its own config if `vite:build`
-            // already did it via npm script, otherwise run it again.
-            let highlighter = repo_root.join("out/vite-dist/highlighter.js");
-            if !highlighter.is_file() {
-                let _ = Command::new("npx")
-                    .args(["vite", "build", "-c", "vite.highlighter.config.ts"])
-                    .current_dir(repo_root)
-                    .status();
-            }
-            return highlighter.is_file();
+/// Inputs whose change makes the bundle stale. Directories are scanned.
+const INPUTS: &[&str] = &[
+    "vite.config.ts",
+    "vite.highlighter.config.ts",
+    "package.json",
+    "pnpm-lock.yaml",
+    "app/index.html",
+    "app/src",
+    "app/styles",
+];
+
+/// The newest modification time under `path`, skipping `node_modules`.
+fn newest(path: &Path) -> Option<SystemTime> {
+    let meta = std::fs::metadata(path).ok()?;
+    if meta.is_file() {
+        return meta.modified().ok();
+    }
+    let mut latest = None;
+    for entry in std::fs::read_dir(path).ok()?.flatten() {
+        if entry.file_name() == "node_modules" {
+            continue;
+        }
+        if let Some(time) = newest(&entry.path()) {
+            latest = Some(latest.map_or(time, |current: SystemTime| current.max(time)));
         }
     }
-    false
+    latest
+}
+
+fn bundle_is_stale(repo: &Path, dist: &Path) -> bool {
+    if !dist.join("highlighter.js").is_file() {
+        return true;
+    }
+    let Ok(built) = std::fs::metadata(dist.join("index.html")).and_then(|m| m.modified()) else {
+        return true;
+    };
+    INPUTS
+        .iter()
+        .filter_map(|input| newest(&repo.join(input)))
+        .any(|input| input > built)
+}
+
+fn pnpm() -> &'static str {
+    if cfg!(windows) {
+        "pnpm.cmd"
+    } else {
+        "pnpm"
+    }
+}
+
+fn build_bundle(repo: &Path, dist: &Path) -> Result<(), String> {
+    let probe = Command::new(pnpm())
+        .arg("--version")
+        .output()
+        .map_err(|error| {
+            format!(
+                "pnpm was not found ({error}). Install the version named by `packageManager` in package.json, then run `pnpm install --frozen-lockfile --ignore-scripts` from the repository root."
+            )
+        })?;
+    if !probe.status.success() {
+        return Err("`pnpm --version` failed; check the pnpm installation".into());
+    }
+
+    println!("cargo:warning=building the renderer bundle with `pnpm vite:build`");
+    let status = Command::new(pnpm())
+        .arg("vite:build")
+        .current_dir(repo)
+        .status()
+        .map_err(|error| format!("could not start `pnpm vite:build`: {error}"))?;
+    if !status.success() {
+        return Err(format!(
+            "`pnpm vite:build` failed ({status}). The Vite error printed above is the cause. Fix it, or run `pnpm vite:build` on its own to see it again, then rebuild."
+        ));
+    }
+    if !dist.join("index.html").is_file() || !dist.join("highlighter.js").is_file() {
+        return Err(format!(
+            "`pnpm vite:build` finished, but {} is incomplete",
+            dist.display()
+        ));
+    }
+    Ok(())
 }
 
 fn main() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest.join("../../..");
-    let dist = repo_root.join("out/vite-dist");
-    println!("cargo:rerun-if-changed={}", dist.display());
-    // Re-run if Vite inputs change, so a new hash triggers a rebuild.
-    for p in ["vite.config.ts", "vite.highlighter.config.ts", "app/index.html"] {
-        println!("cargo:rerun-if-changed={}", repo_root.join(p).display());
+    let repo: PathBuf = manifest.join("../../..");
+    let dist = repo.join("out/vite-dist");
+
+    // Cargo re-runs this script when an input changes, and this check decides
+    // whether anything has to be rebuilt.
+    for input in INPUTS {
+        println!("cargo:rerun-if-changed={}", repo.join(input).display());
     }
+    println!("cargo:rerun-if-changed={}", dist.join("index.html").display());
     println!("cargo:rerun-if-env-changed=DESKTOP_VITE_FORCE");
     println!("cargo:rerun-if-env-changed=DESKTOP_SERVE_FROM_DISK");
 
-    let force = std::env::var("DESKTOP_VITE_FORCE").is_ok();
-    let need_build = force || !dist.join("index.html").is_file() || !dist.join("highlighter.js").is_file();
-    if need_build {
-        if !run_vite(&repo_root) {
-            panic!(
-                "the renderer bundle is missing at {}.\n\
-                 Could not build it automatically. Build it from the repository root first:\n\
-                 pnpm install && pnpm vite:build\n\
-                 (which runs `vite build` and `vite build -c vite.highlighter.config.ts`)\n\
-                 Debug builds serve from disk, so `pnpm vite:build` once is enough;\n\
-                 subsequent `cargo run` will pick up fresh hashed filenames without a rebuild.",
-                dist.display()
-            );
+    let force = std::env::var_os("DESKTOP_VITE_FORCE").is_some();
+    if force || bundle_is_stale(&repo, &dist) {
+        if let Err(cause) = build_bundle(&repo, &dist) {
+            panic!("the renderer bundle could not be built: {cause}");
         }
     }
 }

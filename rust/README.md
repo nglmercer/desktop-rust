@@ -1,5 +1,13 @@
 # Desktop Rust migration
 
+> **Current state.** The desktop UI is the React app in `app/`, built by Vite
+> (`pnpm vite:build`) and hosted by `rust/crates/desktop-app`. The browser
+> frontend that used to live in `rust/web` was removed, so the browser/WebSocket
+> transport described below (`desktop-rs serve`, `web/`) has no UI in this tree
+> and is pending. The root Cargo workspace still builds the CLI, bridge and
+> native host crates. See [MIGRATION.md](../MIGRATION.md) for what is
+> implemented, connected and verified.
+
 Rust replacement for GitHub Desktop's backend, CLI, and platform transports. The
 full migration is active. The original Electron app remains until the
 replacement passes the removal gates in [MIGRATION.md](MIGRATION.md). Remaining
@@ -1355,14 +1363,12 @@ Row, Form, HorizontalRule, and HighlightText were moved from upstream into
 `web/src/upstream/`. Original app entrypoints re-export these implementations.
 The GitHub panel reuses them in a standalone React bundle, with no Electron or
 Node dependencies. The rest of the old React UI is still being migrated. The
-browser bundle is checked in so Rust builds do not need Node. After frontend
-source changes, run from the repository root:
+former browser bundle is no longer built. After renderer source changes, run from the repository root:
 
 ```sh
-npm ci --prefix rust/web
-npm --prefix rust/web run typecheck
-npm --prefix rust/web run build
-npm --prefix rust/web test
+pnpm install --frozen-lockfile --ignore-scripts   # from the repository root
+pnpm vite:build                                   # the renderer that is shipped now
+# rust/web (the former browser bundle) is removed; its checks are pending.
 ```
 
 The root Cargo workspace and `.github/workflows/rust.yml` build and validate the

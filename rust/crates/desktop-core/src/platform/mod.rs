@@ -138,13 +138,62 @@ pub fn should_use_dark_colors() -> bool {
     false
 }
 
-/// The colour scheme of a Linux desktop, asked in order of reliability:
-/// the freedesktop Settings portal (GNOME, KDE Plasma and others), the
-/// window colours of a KDE colour scheme, then GNOME's `gsettings`.
+/// A colour-scheme source on Linux, in order of reliability.
+#[cfg(all(unix, not(target_os = "macos")))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SchemeSource {
+    /// The freedesktop Settings portal (GNOME, KDE Plasma and others).
+    Portal = 1,
+    /// The window colours of a KDE colour scheme.
+    Kde = 2,
+    /// GNOME's `gsettings`.
+    Gnome = 3,
+}
+
+/// The source that answered last. Checks ask it first, so a steady state costs
+/// one lookup instead of up to three process starts. 0 means none yet.
+#[cfg(all(unix, not(target_os = "macos")))]
+static LAST_SCHEME_SOURCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The colour scheme of a Linux desktop. The last source that answered is asked
+/// first; when it gives no answer, every source is tried in order again. A
+/// desktop with no preference therefore still ends with `None`, as before.
 #[cfg(all(unix, not(target_os = "macos")))]
 fn linux_prefers_dark() -> Option<bool> {
+    use std::sync::atomic::Ordering;
+    let cached = LAST_SCHEME_SOURCE.load(Ordering::Relaxed);
+    if cached != 0 {
+        let source = match cached {
+            1 => SchemeSource::Portal,
+            2 => SchemeSource::Kde,
+            _ => SchemeSource::Gnome,
+        };
+        if let Some(dark) = ask_scheme_source(source) {
+            return Some(dark);
+        }
+    }
+    for source in [SchemeSource::Portal, SchemeSource::Kde, SchemeSource::Gnome] {
+        if let Some(dark) = ask_scheme_source(source) {
+            LAST_SCHEME_SOURCE.store(source as u8, Ordering::Relaxed);
+            return Some(dark);
+        }
+    }
+    None
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn ask_scheme_source(source: SchemeSource) -> Option<bool> {
+    match source {
+        SchemeSource::Portal => portal_prefers_dark(),
+        SchemeSource::Kde => kde_window_is_dark(),
+        SchemeSource::Gnome => gnome_prefers_dark(),
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn portal_prefers_dark() -> Option<bool> {
     // org.freedesktop.appearance color-scheme: 1 = prefer dark, 2 = prefer light, 0 = no preference.
-    let portal = Command::new("gdbus")
+    let text = Command::new("gdbus")
         .args([
             "call",
             "--session",
@@ -160,25 +209,24 @@ fn linux_prefers_dark() -> Option<bool> {
         .output()
         .ok()
         .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
-    if let Some(text) = portal {
-        if let Some(value) = text
-            .split("uint32 ")
-            .nth(1)
-            .and_then(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse::<u32>().ok())
-        {
-            match value {
-                1 => return Some(true),
-                2 => return Some(false),
-                _ => {}
-            }
-        }
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())?;
+    let value = text
+        .split("uint32 ")
+        .nth(1)?
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse::<u32>()
+        .ok()?;
+    match value {
+        1 => Some(true),
+        2 => Some(false),
+        _ => None,
     }
+}
 
-    if let Some(dark) = kde_window_is_dark() {
-        return Some(dark);
-    }
-
+#[cfg(all(unix, not(target_os = "macos")))]
+fn gnome_prefers_dark() -> Option<bool> {
     let gnome = Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "color-scheme"])
         .output()

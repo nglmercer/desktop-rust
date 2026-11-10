@@ -142,7 +142,10 @@ describe('fs adapter ranges', () => {
   it('reads a range without transferring the whole file', () => {
     const transferred: number[] = []
     const bridge = (globalThis as any).__desktop
+    // The synchronous path is the thing under test, so its spy names it.
+    // eslint-disable-next-line no-sync
     const invokeSync = bridge.invokeSync
+    // eslint-disable-next-line no-sync
     bridge.invokeSync = (channel: string, options: any) => {
       if (channel === 'desktop.io.fs-read-range') {
         transferred.push(options.length)

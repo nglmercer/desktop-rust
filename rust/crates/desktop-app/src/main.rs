@@ -50,6 +50,36 @@ fn main() {
     }
 }
 
+/// How often the colour scheme is re-read. A change made while the window has
+/// focus is seen at once; otherwise it can take up to this long to appear.
+const THEME_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Wakes the colour-scheme watcher early, so a check runs when the window
+/// regains focus instead of waiting for the next poll.
+#[derive(Clone, Default)]
+struct ThemeNudge(Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+impl ThemeNudge {
+    fn nudge(&self) {
+        let (flag, ready) = &*self.0;
+        *flag.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        ready.notify_one();
+    }
+
+    /// Sleep for `interval`, or until nudged, whichever comes first.
+    fn wait(&self, interval: std::time::Duration) {
+        let (flag, ready) = &*self.0;
+        let mut pending = flag.lock().unwrap_or_else(|e| e.into_inner());
+        if !*pending {
+            pending = ready
+                .wait_timeout(pending, interval)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        *pending = false;
+    }
+}
+
 /// Everything that must stop when the window is going away, in order: refuse
 /// new host work, end child processes and release waiting streams, then close
 /// the admission lanes so queued requests get their `Shutdown` answer.
@@ -170,14 +200,16 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing::info!(url = APP_URL, "webview ready; entering tao event loop");
 
     // Desktops expose no reliable change event everywhere, so the colour
-    // scheme is re-read every few seconds and pushed when it changes.
+    // scheme is re-read periodically, and at once when the window regains focus.
+    let theme_nudge = ThemeNudge::default();
     {
         let info = info.clone();
         let app = app.clone();
+        let nudge = theme_nudge.clone();
         std::thread::Builder::new()
             .name("desktop-theme".into())
             .spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(3));
+                nudge.wait(THEME_POLL_INTERVAL);
                 let dark = desktop_core::platform::should_use_dark_colors();
                 let changed = {
                     let mut guard = info.lock().unwrap_or_else(|e| e.into_inner());
@@ -196,6 +228,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let host_loop = host.clone();
     let bridge_loop = bridge.clone();
     let info_loop = info.clone();
+    let theme_nudge_loop = theme_nudge.clone();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -318,6 +351,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Focused(focused) => {
+                    if focused {
+                        // The user may have changed the scheme while away.
+                        theme_nudge_loop.nudge();
+                    }
                     info_loop.lock().unwrap_or_else(|e| e.into_inner()).focused = focused;
                     app_loop.emit(if focused { event::FOCUS } else { event::BLUR }, vec![]);
                 }

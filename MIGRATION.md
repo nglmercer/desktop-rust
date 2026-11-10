@@ -1,12 +1,27 @@
 # Electron → `tao` + `wry` migration (Rust-only backend)
 
-This branch replaces the Electron main process, the Node-enabled renderer and
-all TypeScript backend code with a Rust workspace. The window is created by
+This branch replaces the Electron main process and the Node-enabled renderer
+with a Rust shell. The window is created by
 [`tao`](https://crates.io/crates/tao), the web content is hosted by
 [`wry`](https://crates.io/crates/wry), and **Tauri is not used** — there is no
 Tauri runtime, no `tauri.conf.json`, no `#[tauri::command]` and no Node/Electron
-process. Everything that is not the user interface is Rust; the UI is plain
-HTML/CSS/JavaScript.
+process. The user interface is the React application in `app/`, built by Vite
+(`pnpm vite:build`) into `out/vite-dist`. Host services are Rust, but some
+application logic is still TypeScript in `app/`.
+
+## Status
+
+| Area | Implemented | Connected | Verified |
+|------|-------------|-----------|----------|
+| Window, webview, `desktop://` protocol, bundle serving | yes | yes (Linux, Xvfb) | startup smoke: `rust/tests/app_smoke.py` |
+| IPC bridge: admission lanes, bounded queues, `EBUSY` refusals | yes | yes | `desktop-app` and `desktop-core` unit tests |
+| Process spawn with stdin/stdout flow control | yes | yes (Copilot runtime path) | Rust tests; renderer adapter tests (`app/test/unit/web-child-process-test.ts`) |
+| git execution with `maxBuffer`, ceiling and cancellation | yes | yes | Rust tests (`io.rs`) and adapter (`dugite.ts`) reviewed, not unit-tested |
+| File range reads and native hashes | yes | yes (`fs.ts`, `get-file-hash.ts`) | Rust tests; renderer tests (`web-fs-range-test.ts`) |
+| Renderer-side UI flows (clicks, menus, Git operations) | React UI | yes | not automated: no GUI driver in this tree |
+| Browser / WebSocket transport for Termux | no | no | pending (the `rust/web` frontend was removed) |
+| Copilot parity, multi-account Git auth, installers, updater | partial | partial | pending |
+
 
 ## Why this shape
 
@@ -29,31 +44,28 @@ window or a display server — `cargo test -p desktop-core` runs headless.
 ## Layout
 
 ```
-rust/
-├── Cargo.toml                       workspace: two crates, no Tauri
-├── crates/desktop-core/src/
-│   ├── models/                      app/src/models/** (61 TS files)
-│   ├── git/                         app/src/lib/git/** + dugite (std::process::Command)
-│   ├── storage/                     Dexie + localStorage + keytar → JSON files + DPAPI
-│   ├── api/                         api.ts / http.ts → reqwest::blocking
-│   ├── platform/                    shell, clipboard, theme, notifications, proxy, CLI, updater
-│   ├── ipc/channels.rs              79 Electron channels, transcribed verbatim
-│   ├── ipc/protocol.rs              wire frames, WindowAction, Host
-│   ├── state/dispatcher.rs          ipcMain handlers → Rust dispatch
-│   ├── state/commands.rs            desktop.* domain commands
-│   └── app.rs                       owns AppState, invoke/send/emit
+rust/                                 Rust workspace for the desktop shell (two crates)
+├── Cargo.toml
+├── crates/desktop-core/src/          no GUI dependencies
+│   ├── io.rs                         desktop.io.* host services: git, fs, HTTP, keychain
+│   ├── io/limits.rs                  finite budgets per resource profile
+│   ├── io/executor.rs                fixed workers, bounded non-blocking admission
+│   ├── io/process.rs                 child processes with stdin/stdout flow control
+│   ├── models/, git/, storage/, api/, platform/, ipc/, state/, app.rs
 └── crates/desktop-app/
-    ├── src/main.rs                  tao event loop + wry webview
-    ├── src/host.rs                  Host implementation / event bridge
-    ├── src/bridge.rs                desktop:// protocol, IPC worker, init script
-    ├── src/actions.rs               WindowAction on the UI thread
-    ├── src/menu.rs                  muda native menu
-    └── web/                         the entire frontend (embedded with include_bytes!)
+    ├── src/main.rs                   tao event loop + wry webview
+    ├── src/bridge.rs                 desktop:// protocol and IPC admission lanes
+    ├── src/host.rs                   Host implementation, outbox and Flush batching
+    ├── src/actions.rs, menu.rs       WindowAction on the UI thread, muda menu
+    ├── build.rs                      rebuilds the renderer when its inputs change
+    └── web/ipc-shim.js               the only file of web/ still in use (injected)
+app/                                  the React renderer (active), built by Vite
+out/vite-dist/                        renderer bundle: embedded in release,
+                                      served from disk in debug
 ```
 
-The legacy `app/`, `script/` and `package.json` trees are retained in this
-branch for reference and review; the Rust binary does not read or execute any
-of them.
+The root `Cargo.toml` is a second workspace (CLI, bridge, native host). It
+shares no crates with `rust/`; both are kept for now.
 
 ## The IPC bridge
 
@@ -104,16 +116,26 @@ and replayed in order after `renderer-ready`, so no initial state is lost.
 ## Build and run
 
 ```bash
-cd rust
-cargo build --workspace
-cargo test  --workspace
+# 1. renderer dependencies (pnpm is pinned by packageManager in package.json)
+pnpm install --frozen-lockfile --ignore-scripts
+# 2. renderer bundle; needs the submodules: git submodule update --init --recursive
+pnpm vite:build
+# 3. desktop shell
+cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
+./rust/target/debug/github-desktop-rs
 
-# headless smoke test (no window / no display server)
-./target/debug/github-desktop-rs --self-test
-
-# launch the GUI
-./target/debug/github-desktop-rs
+# checks
+cargo test --manifest-path rust/Cargo.toml --workspace --locked
+python3 rust/tests/app_smoke.py      # starts the real app (Xvfb when no display)
 ```
+
+`cargo build` also rebuilds the bundle when an input is newer than it, by
+running `pnpm vite:build`. A failed Vite build stops Cargo with its cause.
+
+Limits are chosen with `DESKTOP_RESOURCE_PROFILE=default|low-memory`. Parallel
+compilation is `CARGO_BUILD_JOBS`; `.cargo/config.toml` defaults to one job.
+Source maps are off by default; `DESKTOP_VITE_SOURCEMAP=1 pnpm vite:build`
+writes them to `out/vite-sourcemaps`, outside the embedded bundle.
 
 CLI options: `--version`, `--help`, `--self-test`, `--cli-open=<path>`,
 `--cli-clone=<url>`. Any `x-github-client://` / `github-mac://` argument is
@@ -151,6 +173,6 @@ can be ported incrementally without changing the transport.
 * A navigation handler only allows `desktop://` (and its WebView2 origin
   equivalent) plus `about:` URLs.
 * The custom protocol rejects path traversal (`. .`, `\`, `:`).
-* A restrictive CSP is set in `web/index.html`.
+* No Content-Security-Policy is set yet. Adding one to the renderer is pending.
 * Tokens never cross into the webview; they are DPAPI-protected at rest.
 * JSON state is written via a temp file + rename for atomicity.

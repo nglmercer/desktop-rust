@@ -69,7 +69,12 @@ interface IGitErrorDetails {
  * Ids are random so that a cancellation left over from an earlier page load
  * cannot stop a new command that happens to reuse the number.
  */
-const newCancelId = () => Math.floor(Math.random() * 2 ** 52) + 1
+const newCancelId = () => {
+  const words = new Uint32Array(2)
+  globalThis.crypto.getRandomValues(words)
+  // A 53-bit number: the high word keeps 21 bits, so the value stays exact.
+  return (words[0] % 2 ** 21) * 2 ** 32 + words[1] + 1
+}
 
 /**
  * Run git and resolve with its output whatever the exit code, like

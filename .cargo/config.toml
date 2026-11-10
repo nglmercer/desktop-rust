@@ -1,5 +1,11 @@
 # Keep existing Termux builds and CLI paths usable during source migration.
 [build]
 target-dir = "rust/target"
-# Limit compiler parallelism on memory-constrained devices such as Termux.
+# Compiler parallelism. One job is the safe default for memory-constrained
+# devices such as Termux. On a desktop machine, raise it without editing this
+# file by setting the environment variable, which takes precedence:
+#
+#   CARGO_BUILD_JOBS=8 cargo build --manifest-path rust/Cargo.toml --release --locked
+#
+# Choose a value your free RAM can sustain.
 jobs = 1

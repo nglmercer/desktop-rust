@@ -12,6 +12,12 @@ on:
       - 'app/src/lib/git/stash.ts'
       - 'app/src/lib/remove-remote-prefix.ts'
       - 'app/src/lib/helpers/repo-rules.ts'
+      - 'app/src/lib/get-file-hash.ts'
+      - 'app/src/web/**'
+      - 'app/test/unit/web-*'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
       - 'app/src/models/diff/diff-line.ts'
       - 'app/src/models/diff/raw-diff.ts'
       - 'app/src/ui/diff/image-diffs/**'
@@ -32,6 +38,12 @@ on:
       - 'app/src/lib/git/stash.ts'
       - 'app/src/lib/remove-remote-prefix.ts'
       - 'app/src/lib/helpers/repo-rules.ts'
+      - 'app/src/lib/get-file-hash.ts'
+      - 'app/src/web/**'
+      - 'app/test/unit/web-*'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
       - 'app/src/models/diff/diff-line.ts'
       - 'app/src/models/diff/raw-diff.ts'
       - 'app/src/ui/diff/image-diffs/**'
@@ -50,34 +62,29 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: rust/web/package-lock.json
       - name: Set up Rust
         run: |
           rustup update stable --no-self-update
           rustup default stable
           rustup component add rustfmt clippy
-      - name: Build and validate standalone browser frontend
+      - name: Install the renderer and build its bundle
+        # The renderer is the React app built by Vite. The root package.json
+        # postinstall is the Electron-era npm installer, so it is not run here.
         run: |
-          npm ci --prefix rust/web
-          npm --prefix rust/web run format
-          npm --prefix rust/web run typecheck
-          npm --prefix rust/web run build
-          npm --prefix rust/web test
-          npm ci --prefix rust/tests/branch-rules-oracle
-          npm --prefix rust/tests/branch-rules-oracle test
-          git diff --exit-code -- rust/web/panels.js
+          npm install --global pnpm@11.17.0
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm vite:build
       - name: Check Rust
         run: |
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo test --workspace --locked
           cargo build --workspace --locked
+          cargo test --manifest-path rust/Cargo.toml --workspace --locked
       - name: Verify installed Git LFS
         run: git lfs version
       - name: Check repository and GitHub services offline
         run: |
-          python3 rust/tests/smoke.py
           python3 rust/tests/lifecycle.py
           python3 rust/tests/cancellation.py
           python3 rust/tests/signals.py
@@ -124,8 +131,6 @@ jobs:
           python3 rust/tests/github_cli.py
           python3 rust/tests/github_create.py
           python3 rust/tests/github_checkout_tracking.py
-          node --test rust/tests/transport.test.mjs
-          npm --prefix rust/web run test:integration
 
   native:
     strategy:
@@ -167,3 +172,22 @@ jobs:
           chmod 700 "$XDG_RUNTIME_DIR"
           mkdir -p "$(dirname "$GIT_CONFIG_GLOBAL")"
           xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- timeout 60s rust/target/debug/desktop-native --empty --config "$RUNNER_TEMP/desktop-native-smoke/repositories.json" --smoke-test
+      - uses: actions/setup-node@v6
+        if: runner.os == 'Linux'
+        with:
+          node-version: '24'
+      - name: Build the renderer and the desktop shell
+        if: runner.os == 'Linux'
+        run: |
+          npm install --global pnpm@11.17.0
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm vite:build
+          cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
+      - name: Start the desktop application
+        if: runner.os == 'Linux'
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          NO_AT_BRIDGE: '1'
+        run: python3 rust/tests/app_smoke.py

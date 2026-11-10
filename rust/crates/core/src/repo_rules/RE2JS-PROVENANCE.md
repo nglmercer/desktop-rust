@@ -1,6 +1,7 @@
 # Trusted RE2JS matcher provenance
 
-`re2js.js` is generated from `rust/web/src/upstream/repo-rules-matcher.ts` and
+`re2js.js` was generated from `rust/web/src/upstream/repo-rules-matcher.ts`
+(that browser frontend has since been removed; the source remains in git history) and
 the ESM distribution of RE2JS 2.0.1, originally used by GitHub Desktop.
 The shared matcher and model preserve the repository's MIT-licensed source.
 RE2JS's MIT license is included in `RE2JS-LICENSE.txt` and the generated banner.
@@ -9,13 +10,12 @@ The isolated development dependency is pinned in
 `rust/tests/branch-rules-oracle/package-lock.json`, including registry integrity:
 `sha512-X59sWAF3UaMKfsVZT5/kJk1kBK10artA4jxScW4dPYtIuyDAWITcTDgkgEf9GPaqCKMVPgL2oEJGib9jN4WnkQ==`.
 
-Build or verify with:
+Rebuilding `re2js.js` needs the removed `rust/web` sources, so it is pending
+until the matcher is re-homed. The oracle below is not run in CI at present.
 
 ```sh
-npm ci --prefix rust/web --ignore-scripts
 npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts
-node rust/tests/branch-rules-oracle/build-engine.mjs
-node rust/tests/branch-rules-oracle/build-engine.mjs --check
+node rust/tests/branch-rules-oracle/build-engine.mjs --check   # pending: needs rust/web sources
 ```
 
 The bundle exposes only `__desktopMatchRules(patternsJSON, branch)`, which

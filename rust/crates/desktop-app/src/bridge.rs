@@ -339,7 +339,9 @@ impl Bridge {
         }
 
         match asset(&path) {
-            Some((mime, bytes)) => responder.respond(response(200, &mime, bytes)),
+            Some((mime, bytes)) => {
+                responder.respond(response_cached(200, &mime, bytes, asset_cache_control(&path)))
+            }
             None => responder.respond(response(
                 404,
                 "text/plain; charset=utf-8",
@@ -389,18 +391,37 @@ fn lane_json(stats: ExecutorStats) -> Value {
     })
 }
 
-fn response(
+/// A response that must never be cached: IPC results and dynamic data.
+fn response(status: u16, content_type: &str, body: Vec<u8>) -> http::Response<Cow<'static, [u8]>> {
+    response_cached(status, content_type, Cow::Owned(body), "no-store")
+}
+
+fn response_cached(
     status: u16,
     content_type: &str,
-    body: Vec<u8>,
+    body: Cow<'static, [u8]>,
+    cache_control: &str,
 ) -> http::Response<Cow<'static, [u8]>> {
     http::Response::builder()
         .status(status)
         .header(http::header::CONTENT_TYPE, content_type)
-        .header(http::header::CACHE_CONTROL, "no-store")
+        .header(http::header::CACHE_CONTROL, cache_control)
         .header(http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .body(Cow::Owned(body))
+        .body(body)
         .expect("valid response")
+}
+
+/// Cache policy for a renderer asset. Development always re-reads from disk.
+/// Release files whose names carry a content hash never change, so they are
+/// cached for good; other files, including `index.html`, revalidate.
+fn asset_cache_control(path: &str) -> &'static str {
+    if cfg!(debug_assertions) {
+        "no-store"
+    } else if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
 }
 
 /// Load an asset, preferring the on-disk `out/vite-dist` in debug builds so
@@ -421,7 +442,7 @@ fn load_disk(path: &str) -> Option<Vec<u8>> {
     std::fs::read(&full).ok()
 }
 
-fn asset(path: &str) -> Option<(Cow<'static, str>, Vec<u8>)> {
+fn asset(path: &str) -> Option<(Cow<'static, str>, Cow<'static, [u8]>)> {
     // The Vite build of the renderer: index.html, hashed bundles under
     // assets/ and the static resources the UI loads by URL.
     let path = if path.is_empty() { "index.html" } else { path };
@@ -429,19 +450,20 @@ fn asset(path: &str) -> Option<(Cow<'static, str>, Vec<u8>)> {
     #[cfg(debug_assertions)]
     {
         if let Some(bytes) = load_disk(path) {
-            return Some((mime_for(path).into(), bytes));
+            return Some((mime_for(path).into(), Cow::Owned(bytes)));
         }
     }
     #[cfg(not(debug_assertions))]
     {
         if std::env::var("DESKTOP_SERVE_FROM_DISK").is_ok() {
             if let Some(bytes) = load_disk(path) {
-                return Some((mime_for(path).into(), bytes));
+                return Some((mime_for(path).into(), Cow::Owned(bytes)));
             }
         }
     }
+    // Embedded bytes are borrowed from the binary, not copied per request.
     let file = VITE_DIST.get_file(path)?;
-    Some((mime_for(path).into(), file.contents().to_vec()))
+    Some((mime_for(path).into(), Cow::Borrowed(file.contents())))
 }
 
 /// Decode `%XX` escapes in a request path. Invalid escapes are kept verbatim;
@@ -653,13 +675,26 @@ mod tests {
             std::fs::create_dir_all(tmp.parent().unwrap()).unwrap();
             std::fs::write(&tmp, b"// fresh hash\n").unwrap();
             let got = asset("assets/stale-check-0a1b2c.js").expect("disk asset should be served");
-            assert_eq!(got.1, b"// fresh hash\n".to_vec());
+            assert_eq!(got.1.as_ref(), b"// fresh hash\n".as_slice());
             assert_eq!(got.0.as_ref(), "text/javascript; charset=utf-8");
             std::fs::remove_file(&tmp).ok();
             assert!(asset("assets/stale-check-0a1b2c.js").is_none() || {
                 // Embedded fallback would not have this file, disk was cleaned
                 asset("assets/stale-check-0a1b2c.js").is_none()
             });
+        }
+    }
+    #[test]
+    fn asset_cache_policy_depends_on_the_build_and_the_name() {
+        if cfg!(debug_assertions) {
+            // Development reloads must never see a stale bundle.
+            assert_eq!(asset_cache_control("assets/index-0a1b2c.js"), "no-store");
+            assert_eq!(asset_cache_control("index.html"), "no-store");
+        } else {
+            // Hashed names are immutable; HTML and other files revalidate.
+            assert_eq!(asset_cache_control("assets/index-0a1b2c.js"), "public, max-age=31536000, immutable");
+            assert_eq!(asset_cache_control("index.html"), "no-cache");
+            assert_eq!(asset_cache_control("emoji.json"), "no-cache");
         }
     }
 }
