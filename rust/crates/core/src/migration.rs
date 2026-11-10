@@ -156,7 +156,7 @@ impl Migrator {
         std::fs::rename(&tmp, &destination).context("publish migrated repositories")?;
 
         let prefs_dst = self.destination_root.join("preferences.json");
-        write_atomic(&prefs_dst.with_extension("json.tmp"), &bundle.preferences)?;
+        write_atomic(&prefs_dst, &bundle.preferences)?;
 
         // Correspondence: source IDs are preserved as destination IDs.
         let correspondence = bundle
@@ -196,7 +196,7 @@ impl Migrator {
                 .collect(),
         };
         let marker_payload = json!({ "version": MIGRATION_VERSION, "profile": self.profile, "records": report.records_migrated });
-        write_atomic(&marker.with_extension("json.tmp"), &marker_payload)?;
+        write_atomic(&marker, &marker_payload)?;
         Ok(report)
     }
 
