@@ -32,6 +32,10 @@ pub enum AppError {
     /// renderer code that branches on it.
     #[error("{message}")]
     Coded { code: String, message: String },
+    /// A coded failure that also carries typed data for the caller, such as
+    /// the output a git command produced before it was stopped.
+    #[error("{message}")]
+    Detailed { code: String, message: String, details: serde_json::Value },
 }
 
 impl AppError {
@@ -50,7 +54,7 @@ impl AppError {
             Self::UnknownChannel(_) => "UnknownChannelError",
             Self::NotAuthenticated => "AuthenticationError",
             Self::NotImplemented(_) => "NotImplementedError",
-            Self::Message(_) | Self::Coded { .. } => "Error",
+            Self::Message(_) | Self::Coded { .. } | Self::Detailed { .. } => "Error",
         };
         RpcError {
             message: self.to_string(),
@@ -58,7 +62,11 @@ impl AppError {
             stack: None,
             code: match self {
                 Self::Git(e) => Some(format!("{:?}", e.kind)),
-                Self::Coded { code, .. } => Some(code.clone()),
+                Self::Coded { code, .. } | Self::Detailed { code, .. } => Some(code.clone()),
+                _ => None,
+            },
+            details: match self {
+                Self::Detailed { details, .. } => Some(details.clone()),
                 _ => None,
             },
         }
@@ -74,6 +82,10 @@ pub struct RpcError {
     pub stack: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// Typed data for the renderer, such as partial command output. Absent for
+    /// ordinary errors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 /// The Rust equivalent of dugite's `GitError` enum plus Desktop's

@@ -44,6 +44,7 @@ export type IGitSpawnOptions = { readonly env?: Record<string, string | undefine
 
 interface IBridge {
   invoke(channel: string, options: object): Promise<any>
+  send(channel: string, options: object): void
   encodeBase64(bytes: Uint8Array): string
   decodeBase64(text: string): Uint8Array
 }
@@ -52,6 +53,23 @@ const bridge = (): IBridge => (globalThis as any).__desktop
 
 const abortError = (signal: AbortSignal) =>
   signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+
+/**
+ * Typed data Rust attaches to some failures (see `RpcError.details`). For a
+ * command stopped at `maxBuffer`, `stdout` and `stderr` hold what it produced
+ * before it was stopped, encoded as the request asked (base64 for buffers).
+ */
+interface IGitErrorDetails {
+  readonly stdout?: string
+  readonly stderr?: string
+  readonly truncated?: boolean
+}
+
+/**
+ * Ids are random so that a cancellation left over from an earlier page load
+ * cannot stop a new command that happens to reuse the number.
+ */
+const newCancelId = () => Math.floor(Math.random() * 2 ** 52) + 1
 
 /**
  * Run git and resolve with its output whatever the exit code, like
@@ -84,6 +102,11 @@ export async function exec(
     env[key] = value === undefined ? null : String(value)
   }
 
+  // Only a command that can be cancelled gets an id; Rust stops it when the
+  // signal fires, or refuses to start it if the signal fired while it queued.
+  const cancelId = signal === undefined ? undefined : newCancelId()
+
+  const emptyOutput = () => (binary ? Buffer.alloc(0) : '')
   const run = bridge()
     .invoke('desktop.io.git-exec', {
       args,
@@ -97,6 +120,7 @@ export async function exec(
         options?.maxBuffer !== undefined && Number.isFinite(options.maxBuffer)
           ? options.maxBuffer
           : undefined,
+      cancelId,
     })
     .then(
       result => {
@@ -108,7 +132,7 @@ export async function exec(
           exitCode: result.exitCode as number,
         }
       },
-      (error: Error & { code?: string }) => {
+      (error: Error & { code?: string; details?: IGitErrorDetails }) => {
         const message =
           error.code === 'ENOENT'
             ? 'ENOENT: Git failed to execute. This typically means that ' +
@@ -118,16 +142,33 @@ export async function exec(
         const cause = Object.assign(new Error(error.message), {
           code: error.code,
         })
-        throw new ExecError(message, binary ? Buffer.alloc(0) : '', binary ? Buffer.alloc(0) : '', cause)
+        // Keep whatever output arrived before the command was stopped. Without
+        // it, a preview cut at `maxBuffer` would look like an empty file.
+        const partial = (value: string | undefined) =>
+          value === undefined || value === ''
+            ? emptyOutput()
+            : binary
+            ? Buffer.from(bridge().decodeBase64(value))
+            : value
+        const details = error.details
+        throw new ExecError(
+          message,
+          partial(details?.stdout),
+          partial(details?.stderr),
+          cause
+        )
       }
     )
 
-  if (signal === undefined) {
+  if (signal === undefined || cancelId === undefined) {
     return run
   }
-  // The git process cannot be killed from here yet; stop waiting for it.
+  // Stop the git process as well as no longer waiting for it.
   return new Promise((resolve, reject) => {
-    const onAbort = () => reject(abortError(signal))
+    const onAbort = () => {
+      bridge().send('desktop.io.cancel', { cancelId })
+      reject(abortError(signal))
+    }
     signal.addEventListener('abort', onAbort, { once: true })
     run
       .then(resolve, reject)

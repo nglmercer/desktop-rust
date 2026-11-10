@@ -521,6 +521,67 @@ export const promises = {
   opendir: async (path: PathLike) => new Dir(toPath(path), await call('readdir', { path: toPath(path) })),
 }
 
+// --- ranges --------------------------------------------------------------------
+
+/** Largest block one `read-range` call transfers. Longer reads are chained. */
+const RangeBlock = 64 * 1024
+
+interface IFileIdentity {
+  readonly dev: number
+  readonly ino: string
+  readonly size: number
+  readonly mtimeMs: number
+}
+
+/** The same file, not necessarily the same contents. */
+const sameFile = (a: IFileIdentity, b: IFileIdentity) => a.dev === b.dev && a.ino === b.ino
+
+/** The same file and the same version of it. */
+const sameVersion = (a: IFileIdentity, b: IFileIdentity) =>
+  sameFile(a, b) && a.size === b.size && a.mtimeMs === b.mtimeMs
+
+function changedError(path: string, what: 'replaced' | 'changed') {
+  return Object.assign(
+    new Error(`EIO: ${path} was ${what} while it was being read`),
+    { code: 'EIO', syscall: 'read', path }
+  )
+}
+
+/**
+ * The bytes of `[start, end)` of a real file, one block at a time. The file
+ * identity must not change between blocks, otherwise the read fails.
+ */
+async function* readRangeBlocks(
+  path: string,
+  start: number,
+  end: number | undefined,
+  isDestroyed: () => boolean
+): AsyncGenerator<Uint8Array> {
+  let offset = start
+  let first: IFileIdentity | null = null
+  while (!isDestroyed()) {
+    const length = end === undefined ? RangeBlock : Math.min(RangeBlock, end - offset)
+    if (length <= 0) {
+      return
+    }
+    const reply = await call('read-range', { path, offset, length })
+    const identity = reply.identity as IFileIdentity
+    if (first === null) {
+      first = identity
+    } else if (!sameVersion(first, identity)) {
+      throw changedError(path, 'changed')
+    }
+    const bytes = bridge().decodeBase64(reply.data)
+    if (bytes.byteLength > 0) {
+      yield bytes
+    }
+    offset += reply.bytesRead
+    if (reply.eof || reply.bytesRead === 0) {
+      return
+    }
+  }
+}
+
 // --- synchronous ---------------------------------------------------------------
 
 // A synchronous call carries its arguments in a URL (see `invokeSync`), which
@@ -657,16 +718,27 @@ export class Dir {
 export const opendirSync = (path: PathLike) =>
   new Dir(toPath(path), callSync('readdir', { path: toPath(path) }))
 
-// Descriptors are emulated by path, like FileHandle above.
-const descriptors = new Map<number, string>()
+// Descriptors are emulated by path, like FileHandle above. Each one keeps its
+// cursor, and the identity of the file it was opened on: a read after that
+// file was replaced fails instead of returning another file's bytes.
+interface IDescriptor {
+  readonly path: string
+  cursor: number
+  identity: IFileIdentity | null
+}
+const descriptors = new Map<number, IDescriptor>()
 let nextDescriptor = 3
 
-function descriptorPath(fd: number): string {
-  const path = descriptors.get(fd)
-  if (path === undefined) {
+function descriptorState(fd: number): IDescriptor {
+  const state = descriptors.get(fd)
+  if (state === undefined) {
     throw Object.assign(new Error('EBADF: bad file descriptor'), { code: 'EBADF' })
   }
-  return path
+  return state
+}
+
+function descriptorPath(fd: number): string {
+  return descriptorState(fd).path
 }
 
 export function openSync(path: PathLike, flags?: string | number, mode?: number) {
@@ -684,26 +756,62 @@ export function openSync(path: PathLike, flags?: string | number, mode?: number)
     callSync('stat', { path: target })
   }
   const fd = nextDescriptor++
-  descriptors.set(fd, target)
+  descriptors.set(fd, { path: target, cursor: 0, identity: null })
   return fd
 }
 export const closeSync = (fd: number) => {
+  // Releasing the state is the whole of close: nothing is held in Rust.
   descriptors.delete(fd)
 }
 export const fstatSync = (fd: number, options?: any) =>
   statSync(descriptorPath(fd), options)
+/**
+ * Read `length` bytes into `buffer` from `position` (or the descriptor's
+ * cursor when `position` is null), in blocks. Only the requested range is
+ * transferred. A file replaced since the descriptor was opened, or changed
+ * while this call was reading it, is an error: mixing versions is never
+ * returned as data.
+ */
 export function readSync(
   fd: number,
   buffer: Uint8Array,
   offset = 0,
   length = buffer.byteLength - offset,
-  position: number | null = 0
+  position: number | null = null
 ) {
-  const bytes: Buffer = readFileSync(descriptorPath(fd))
-  const start = position ?? 0
-  const chunk = bytes.subarray(start, start + length)
-  buffer.set(chunk, offset)
-  return chunk.byteLength
+  const state = descriptorState(fd)
+  let at = position ?? state.cursor
+  const callStart = at
+  let filled = 0
+  let first: IFileIdentity | null = null
+  while (filled < length) {
+    const reply = callSync('read-range', {
+      path: state.path,
+      offset: at,
+      length: Math.min(RangeBlock, length - filled),
+    })
+    const identity = reply.identity as IFileIdentity
+    if (state.identity !== null && !sameFile(state.identity, identity)) {
+      throw changedError(state.path, 'replaced')
+    }
+    state.identity ??= identity
+    if (first === null) {
+      first = identity
+    } else if (!sameVersion(first, identity)) {
+      throw changedError(state.path, 'changed')
+    }
+    const bytes = Buffer.from(bridge().decodeBase64(reply.data))
+    buffer.set(bytes, offset + filled)
+    filled += bytes.byteLength
+    at += bytes.byteLength
+    if (reply.eof || bytes.byteLength === 0) {
+      break
+    }
+  }
+  if (position === null) {
+    state.cursor = callStart + filled
+  }
+  return filled
 }
 export function writeSync(fd: number, data: unknown) {
   const bytes = toBytes(data)
@@ -770,23 +878,66 @@ export class ReadStream {
 
   public constructor(path: PathLike, options?: any) {
     const encoding = encodingOf(options)
-    promises.readFile(path).then(
-      (bytes: Buffer) => {
+    if (isBundled(path)) {
+      // Embedded resources are small and served whole.
+      promises.readFile(path).then(
+        (bytes: Buffer) => {
+          if (this.destroyed) {
+            return
+          }
+          const start = options?.start ?? 0
+          // Node's `end` is inclusive.
+          const end = options?.end === undefined ? bytes.byteLength : options.end + 1
+          const chunk = bytes.subarray(start, end)
+          if (chunk.byteLength > 0) {
+            this.emit('data', encoding ? chunk.toString(encoding) : chunk)
+          }
+          this.emit('end')
+          this.emit('close')
+        },
+        error => this.emit('error', error)
+      )
+      return
+    }
+
+    // Real files arrive block by block, so a large file never sits in memory.
+    // Node's `end` is inclusive.
+    const start = options?.start ?? 0
+    const end = options?.end === undefined ? undefined : options.end + 1
+    const decoder = encoding && /^utf-?8$/i.test(encoding) ? new TextDecoder('utf-8') : null
+    ;(async () => {
+      for await (const bytes of readRangeBlocks(toPath(path), start, end, () => this.destroyed)) {
         if (this.destroyed) {
           return
         }
-        const start = options?.start ?? 0
-        // Node's `end` is inclusive.
-        const end = options?.end === undefined ? bytes.byteLength : options.end + 1
-        const chunk = bytes.subarray(start, end)
-        if (chunk.byteLength > 0) {
-          this.emit('data', encoding ? chunk.toString(encoding) : chunk)
+        if (!encoding) {
+          this.emit('data', Buffer.from(bytes))
+        } else if (decoder !== null) {
+          // A character split across two blocks is completed by the next one.
+          const text = decoder.decode(bytes, { stream: true })
+          if (text !== '') {
+            this.emit('data', text)
+          }
+        } else {
+          this.emit('data', Buffer.from(bytes).toString(encoding as BufferEncoding))
         }
-        this.emit('end')
-        this.emit('close')
-      },
-      error => this.emit('error', error)
-    )
+      }
+      if (this.destroyed) {
+        return
+      }
+      if (decoder !== null) {
+        const tail = decoder.decode()
+        if (tail !== '') {
+          this.emit('data', tail)
+        }
+      }
+      this.emit('end')
+      this.emit('close')
+    })().catch(error => {
+      if (!this.destroyed) {
+        this.emit('error', error)
+      }
+    })
   }
 
   public on(event: string, listener: Listener) {

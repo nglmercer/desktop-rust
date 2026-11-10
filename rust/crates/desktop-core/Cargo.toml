@@ -14,6 +14,9 @@ thiserror.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 http.workspace = true
+# Hashing of local files for the renderer (fs-hash); both already in the lockfile.
+sha1 = "0.10.7"
+sha2 = "0.10.9"
 
 [dev-dependencies]
 serde_json.workspace = true

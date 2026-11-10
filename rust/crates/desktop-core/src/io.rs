@@ -11,16 +11,21 @@
 //!
 //! [`AppState`]: crate::models::app_state::AppState
 
-use std::io::Write;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
 use crate::app::DesktopApp;
 use crate::error::{AppError, Result};
+use crate::io::limits::{ByteBudget, Permit, Resources, STREAM_BLOCK};
+use sha2::Digest;
 use crate::storage::{base64_decode, base64_encode};
 
 pub const PREFIX: &str = "desktop.io.";
@@ -59,7 +64,7 @@ pub fn handles(channel: &str) -> bool {
 /// they fail quickly with `UnknownChannel`.
 pub fn lane(channel: &str) -> Lane {
     match channel.strip_prefix(PREFIX).unwrap_or("") {
-        "process-write" | "process-end" | "process-kill" | "process-ack" => Lane::Control,
+        "process-write" | "process-end" | "process-kill" | "process-ack" | "cancel" => Lane::Control,
         "git-exec" | "http-fetch" | "process-spawn" | "fs-copy" | "fs-copy-file" | "fs-hash" => Lane::Long,
         "fs-rm" => Lane::Long,
         _ => Lane::Short,
@@ -86,8 +91,11 @@ pub fn invoke(app: &DesktopApp, channel: &str, args: &[Value]) -> Result<Value> 
     let empty = json!({});
     let o = args.first().unwrap_or(&empty);
     match channel.strip_prefix(PREFIX).unwrap_or("") {
-        "git-exec" => git_exec(&app.git.binary, o),
-        "http-fetch" => http_fetch(o),
+        "git-exec" => git_exec(&app.git.binary, &app.resources, o),
+        "http-fetch" => http_fetch(&app.resources, o),
+        "fs-read-range" => read_range(o),
+        "fs-hash" => file_hash(o),
+        "cancel" => cancel(o),
         "keychain-get" => Ok(app
             .secure
             .get_item(&keychain_key(o)?, &string(o, "account")?)?
@@ -145,6 +153,217 @@ fn keychain_key(o: &Value) -> Result<String> {
 // git
 // ---------------------------------------------------------------------------
 
+/// Why a running command was stopped before it finished. The first reason
+/// recorded is the one reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    /// More output than the caller's `maxBuffer`.
+    Requested,
+    /// More output than the per-command retention ceiling.
+    Ceiling,
+    /// The budget for retained results is exhausted.
+    Budget,
+    /// The renderer cancelled the request.
+    Cancelled,
+}
+
+type StopCell = Arc<Mutex<Option<Stop>>>;
+
+fn stop_with(cell: &StopCell, reason: Stop) {
+    cell.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert(reason);
+}
+
+fn stopped(cell: &StopCell) -> Option<Stop> {
+    *cell.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The prefix one stream kept, with the budget credit that retention holds.
+/// Dropping it returns the credit.
+#[derive(Default)]
+struct Captured {
+    bytes: Vec<u8>,
+    _credit: Vec<Permit>,
+}
+
+/// Read a pipe to its end, keeping at most `keep` bytes. Bytes beyond that
+/// are only counted, to decide whether a limit was crossed. Reading stops as
+/// soon as any stream has stopped the command.
+fn capture(
+    mut pipe: impl Read,
+    keep: usize,
+    requested: Option<usize>,
+    ceiling: usize,
+    results: Arc<ByteBudget>,
+    stop: StopCell,
+) -> Captured {
+    let mut captured = Captured::default();
+    let mut seen = 0usize;
+    let mut chunk = vec![0u8; STREAM_BLOCK];
+    while stopped(&stop).is_none() {
+        let read = match pipe.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        seen += read;
+        if requested.is_some_and(|limit| seen > limit) {
+            stop_with(&stop, Stop::Requested);
+        } else if seen > ceiling {
+            stop_with(&stop, Stop::Ceiling);
+        }
+        let take = keep.saturating_sub(captured.bytes.len()).min(read);
+        if take > 0 {
+            match results.try_acquire(take) {
+                Some(permit) => {
+                    captured._credit.push(permit);
+                    captured.bytes.extend_from_slice(&chunk[..take]);
+                }
+                None => stop_with(&stop, Stop::Budget),
+            }
+        }
+    }
+    captured
+}
+
+/// Stop a child and its process group, so hooks and helpers started by git
+/// stop too and the output pipes reach end-of-file. A limit stops at once. A
+/// cancellation gets a short grace period to exit cleanly first.
+fn terminate(child: &mut Child, grace: bool) {
+    #[cfg(unix)]
+    {
+        fn signal_group(flag: &str, pid: u32) {
+            let _ = Command::new("kill").args([flag, "--", &format!("-{pid}")]).status();
+        }
+        if grace {
+            signal_group("-TERM", child.id());
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while std::time::Instant::now() < deadline {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        // Also reached after a clean exit, to remove stragglers in the group.
+        signal_group("-KILL", child.id());
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = grace;
+        let _ = child.kill();
+    }
+}
+
+/// The reason-carrying error for a stopped command. `partial` keeps the output
+/// each stream produced, so callers can use what arrived (for example a
+/// preview cut at `maxBuffer`).
+fn stopped_error(stop: Stop, out: &Captured, err: &Captured, binary: bool, ceiling: usize) -> AppError {
+    let encode = |bytes: &[u8]| {
+        if binary {
+            base64_encode(bytes)
+        } else {
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+    };
+    let encoding = if binary { "buffer" } else { "utf8" };
+    match stop {
+        Stop::Requested => AppError::Detailed {
+            code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER".into(),
+            message: "stdout maxBuffer length exceeded".into(),
+            details: json!({
+                "stdout": encode(&out.bytes),
+                "stderr": encode(&err.bytes),
+                "encoding": encoding,
+                "truncated": true,
+            }),
+        },
+        Stop::Ceiling => AppError::Detailed {
+            code: "DESKTOP_GIT_OUTPUT_LIMIT".into(),
+            message: format!(
+                "git wrote more than {ceiling} bytes; the command was stopped and its output is not complete"
+            ),
+            // Output past the ceiling is never retained, so none is sent.
+            details: json!({ "stdout": "", "stderr": "", "encoding": encoding, "truncated": true }),
+        },
+        Stop::Budget => AppError::Coded {
+            code: "EBUSY".into(),
+            message: "EBUSY: QUEUE_FULL, too much command output is being retained".into(),
+        },
+        Stop::Cancelled => aborted(),
+    }
+}
+
+fn aborted() -> AppError {
+    AppError::Coded {
+        code: "ABORT_ERR".into(),
+        message: "The operation was aborted.".into(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// cancellation
+// ---------------------------------------------------------------------------
+
+/// Cancellation flags by request id. A flag can be raised before its request
+/// starts (the request is then refused) or while it runs (it is stopped).
+fn cancel_flags() -> &'static Mutex<HashMap<u64, Arc<AtomicBool>>> {
+    static FLAGS: OnceLock<Mutex<HashMap<u64, Arc<AtomicBool>>>> = OnceLock::new();
+    FLAGS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Above this many flags, ones nobody is waiting on are dropped. A raised
+/// flag is kept until its request has run.
+const CANCEL_FLAG_LIMIT: usize = 1024;
+
+fn cancel_flag(id: u64) -> Arc<AtomicBool> {
+    let mut flags = cancel_flags().lock().unwrap_or_else(|e| e.into_inner());
+    if flags.len() >= CANCEL_FLAG_LIMIT {
+        flags.retain(|_, flag| Arc::strong_count(flag) > 1 || flag.load(Ordering::SeqCst));
+    }
+    flags.entry(id).or_insert_with(|| Arc::new(AtomicBool::new(false))).clone()
+}
+
+/// Holds a request's flag for the life of the request and removes it on drop.
+struct CancelGuard {
+    id: Option<u64>,
+    flag: Option<Arc<AtomicBool>>,
+}
+
+impl CancelGuard {
+    fn new(o: &Value) -> Self {
+        let id = o.get("cancelId").and_then(Value::as_u64);
+        Self { id, flag: id.map(cancel_flag) }
+    }
+
+    fn raised(&self) -> bool {
+        self.flag.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+}
+
+impl Drop for CancelGuard {
+    fn drop(&mut self) {
+        if let Some(id) = self.id {
+            cancel_flags().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        }
+    }
+}
+
+/// `desktop.io.cancel`: raise the flag of a request, queued or running.
+fn cancel(o: &Value) -> Result<Value> {
+    let id = unsigned(o, "cancelId")?;
+    cancel_flag(id).store(true, Ordering::SeqCst);
+    Ok(Value::Null)
+}
+
+fn unsigned(o: &Value, key: &str) -> Result<u64> {
+    o.get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| AppError::BadArgs(format!("`{key}` must be a non-negative integer")))
+}
+
+// ---------------------------------------------------------------------------
+// git
+// ---------------------------------------------------------------------------
+
 /// Desktop points git at its credential trampoline through this pair of
 /// config parameters. The trampoline needs a socket server inside the
 /// renderer, which a webview cannot host, so the pair is removed and git
@@ -152,13 +371,23 @@ fn keychain_key(o: &Value) -> Result<String> {
 const TRAMPOLINE_CREDENTIAL_CONFIG: &str = "'credential.helper=' 'credential.helper=desktop'";
 
 /// `dugite.exec`: run git and resolve with its output whatever the exit code.
-fn git_exec(binary: &Path, o: &Value) -> Result<Value> {
+///
+/// Output is read while git runs. `maxBuffer` (per stream, requested by the
+/// caller) and the per-command ceiling both stop the command; neither is
+/// reported as success. A stopped command's error carries the output it had
+/// produced (`details`), up to `maxBuffer`.
+fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
     let args: Vec<String> = o
         .get("args")
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
         .ok_or_else(|| AppError::BadArgs("missing `args`".into()))?;
     let cwd = string(o, "cwd").unwrap_or_default();
+    let cancel = CancelGuard::new(o);
+    if cancel.raised() {
+        // Cancelled while queued: never start the command.
+        return Err(aborted());
+    }
 
     let mut command = Command::new(binary);
     command
@@ -189,6 +418,12 @@ fn git_exec(binary: &Path, o: &Value) -> Result<Value> {
     };
     command.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own process group, so a stop reaches the hooks git starts.
+        command.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -204,25 +439,56 @@ fn git_exec(binary: &Path, o: &Value) -> Result<Value> {
 
     if let (Some(input), Some(mut pipe)) = (stdin, child.stdin.take()) {
         // Write from a separate thread so a child that fills its stdout pipe
-        // before draining stdin cannot deadlock us.
+        // before draining stdin cannot deadlock us. A child that stops reading
+        // ends this write with an error, which is ignored.
         std::thread::spawn(move || {
             let _ = pipe.write_all(&input);
         });
     }
 
-    let output = child.wait_with_output()?;
+    let requested = o.get("maxBuffer").and_then(Value::as_u64).map(|limit| limit as usize);
+    let ceiling = resources.limits.git_output;
+    let keep = requested.unwrap_or(usize::MAX).min(ceiling);
+    let stop: StopCell = Arc::new(Mutex::new(None));
+    let spawn_capture = |pipe: Option<Box<dyn Read + Send>>| {
+        let stop = stop.clone();
+        let results = resources.results.clone();
+        pipe.map(|pipe| {
+            std::thread::spawn(move || capture(pipe, keep, requested, ceiling, results, stop))
+        })
+    };
+    let stdout_reader = spawn_capture(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let stderr_reader = spawn_capture(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
 
-    let max_buffer = o.get("maxBuffer").and_then(Value::as_u64);
-    if let Some(limit) = max_buffer {
-        if output.stdout.len() as u64 > limit || output.stderr.len() as u64 > limit {
-            return Err(AppError::Coded {
-                code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER".into(),
-                message: "stdout maxBuffer length exceeded".into(),
-            });
+    // Poll with a bounded, growing delay. Output is read on its own threads,
+    // so this loop only decides when to stop the command.
+    let mut delay = Duration::from_millis(1);
+    loop {
+        if cancel.raised() {
+            stop_with(&stop, Stop::Cancelled);
+        }
+        if let Some(reason) = stopped(&stop) {
+            terminate(&mut child, reason == Stop::Cancelled);
+            break;
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(20));
+            }
+            Err(_) => break,
         }
     }
+    let status = child.wait();
 
+    let out = stdout_reader.and_then(|h| h.join().ok()).unwrap_or_default();
+    let err = stderr_reader.and_then(|h| h.join().ok()).unwrap_or_default();
     let binary_output = o.get("encoding").and_then(Value::as_str) == Some("buffer");
+    if let Some(reason) = stopped(&stop) {
+        return Err(stopped_error(reason, &out, &err, binary_output, ceiling));
+    }
+
     let encode = |bytes: &[u8]| {
         if binary_output {
             base64_encode(bytes)
@@ -230,13 +496,12 @@ fn git_exec(binary: &Path, o: &Value) -> Result<Value> {
             String::from_utf8_lossy(bytes).into_owned()
         }
     };
-
     Ok(json!({
-        "stdout": encode(&output.stdout),
-        "stderr": encode(&output.stderr),
+        "stdout": encode(&out.bytes),
+        "stderr": encode(&err.bytes),
         // Node reports a signal-terminated child with a null code; dugite
         // callers only compare against success codes.
-        "exitCode": output.status.code().unwrap_or(-1),
+        "exitCode": status.ok().and_then(|s| s.code()).unwrap_or(-1),
     }))
 }
 
@@ -299,7 +564,7 @@ fn http_client(follow_redirects: bool) -> &'static reqwest::blocking::Client {
 /// `fetch` for cross-origin requests. The page's origin is `desktop://`, so
 /// the webview's own network stack applies CORS to every GitHub request;
 /// Electron's renderer was exempt from it.
-fn http_fetch(o: &Value) -> Result<Value> {
+fn http_fetch(resources: &Resources, o: &Value) -> Result<Value> {
     let url = string(o, "url")?;
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(AppError::BadArgs("only http(s) URLs can be fetched".into()));
@@ -337,7 +602,25 @@ fn http_fetch(o: &Value) -> Result<Value> {
         .map(|(name, value)| json!([name.as_str(), String::from_utf8_lossy(value.as_bytes())]))
         .collect();
     let final_url = response.url().to_string();
-    let body = response.bytes()?;
+    // Read at most the ceiling plus one byte, so an oversized body is detected
+    // without being retained.
+    let ceiling = resources.limits.http_response;
+    let mut body = Vec::new();
+    response.take(ceiling as u64 + 1).read_to_end(&mut body)?;
+    if body.len() > ceiling {
+        return Err(AppError::Detailed {
+            code: "DESKTOP_HTTP_RESPONSE_LIMIT".into(),
+            message: format!("the response is larger than {ceiling} bytes and was not retained"),
+            details: json!({ "truncated": true }),
+        });
+    }
+    let _credit = resources
+        .results
+        .try_acquire(body.len())
+        .ok_or_else(|| AppError::Coded {
+            code: "EBUSY".into(),
+            message: "EBUSY: QUEUE_FULL, too many results are being retained".into(),
+        })?;
 
     Ok(json!({
         "url": final_url,
@@ -565,6 +848,89 @@ fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
     }
 }
 
+/// Largest range one `fs-read-range` call returns. Longer reads are chained.
+const RANGE_LIMIT: usize = STREAM_BLOCK;
+
+/// `fs-read-range`: `length` bytes at `offset`, read with a seek. Returns the
+/// file identity too, so a caller reading in blocks can detect a replaced or
+/// changed file and fail instead of mixing versions.
+fn read_range(o: &Value) -> Result<Value> {
+    let path = PathBuf::from(string(o, "path")?);
+    let offset = unsigned(o, "offset")?;
+    let length = unsigned(o, "length")?;
+    if length > RANGE_LIMIT as u64 {
+        return Err(AppError::BadArgs(format!("`length` may not exceed {RANGE_LIMIT} bytes")));
+    }
+    offset
+        .checked_add(length)
+        .ok_or_else(|| AppError::BadArgs("`offset` + `length` overflows".into()))?;
+
+    let mut file = File::open(&path).map_err(|e| io_error(&e, &format!("open '{}'", path.display())))?;
+    let meta = file.metadata().map_err(|e| io_error(&e, &format!("stat '{}'", path.display())))?;
+    if meta.is_dir() {
+        return Err(AppError::Coded {
+            code: "EISDIR".into(),
+            message: format!("EISDIR: illegal operation on a directory, read '{}'", path.display()),
+        });
+    }
+    file.seek(SeekFrom::Start(offset))?;
+    let mut data = vec![0u8; length as usize];
+    let mut filled = 0usize;
+    while filled < data.len() {
+        let read = file.read(&mut data[filled..])?;
+        if read == 0 {
+            break;
+        }
+        filled += read;
+    }
+    data.truncate(filled);
+    Ok(json!({
+        "data": base64_encode(&data),
+        "bytesRead": filled,
+        "eof": offset.saturating_add(filled as u64) >= meta.len(),
+        "identity": metadata_json(&meta),
+    }))
+}
+
+/// `fs-hash`: the hex digest of a file, computed in blocks here. The file
+/// never crosses to the renderer. Honours `cancelId` between blocks.
+fn file_hash(o: &Value) -> Result<Value> {
+    let algorithm = string(o, "algorithm")?;
+    let path = PathBuf::from(string(o, "path")?);
+    let cancel = CancelGuard::new(o);
+    if cancel.raised() {
+        return Err(aborted());
+    }
+    let mut file = File::open(&path).map_err(|e| io_error(&e, &format!("open '{}'", path.display())))?;
+    if file.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+        return Err(AppError::Coded {
+            code: "EISDIR".into(),
+            message: format!("EISDIR: illegal operation on a directory, read '{}'", path.display()),
+        });
+    }
+    let digest = match algorithm.as_str() {
+        "sha1" => hash_blocks(&mut file, sha1::Sha1::new(), &cancel)?,
+        "sha256" => hash_blocks(&mut file, sha2::Sha256::new(), &cancel)?,
+        other => return Err(AppError::BadArgs(format!("unsupported digest `{other}`"))),
+    };
+    Ok(json!(digest))
+}
+
+fn hash_blocks<D: sha2::Digest>(file: &mut File, mut hasher: D, cancel: &CancelGuard) -> Result<String> {
+    let mut chunk = vec![0u8; STREAM_BLOCK];
+    loop {
+        if cancel.raised() {
+            return Err(aborted());
+        }
+        let read = file.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&chunk[..read]);
+    }
+    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 fn copy_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(from)?;
     if meta.is_dir() {
@@ -604,6 +970,11 @@ fn unique_suffix(attempt: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::limits::{Limits, Profile};
+
+    fn test_resources() -> Resources {
+        Resources::new(Limits::for_profile(Profile::Default))
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("desktop-io-{name}-{}", unique_suffix(0)));
@@ -661,12 +1032,12 @@ mod tests {
 
     #[test]
     fn git_exec_reports_output_and_exit_code_without_failing() {
-        let ok = git_exec(Path::new("git"), &json!({ "args": ["--version"] })).unwrap();
+        let ok = git_exec(Path::new("git"), &test_resources(), &json!({ "args": ["--version"] })).unwrap();
         assert_eq!(ok["exitCode"], 0);
         assert!(ok["stdout"].as_str().unwrap().starts_with("git version"));
 
         // A failing command resolves; the renderer decides what is an error.
-        let failed = git_exec(Path::new("git"), &json!({ "args": ["not-a-command"] })).unwrap();
+        let failed = git_exec(Path::new("git"), &test_resources(), &json!({ "args": ["not-a-command"] })).unwrap();
         assert_ne!(failed["exitCode"], 0);
         assert!(!failed["stderr"].as_str().unwrap().is_empty());
     }
@@ -680,7 +1051,7 @@ mod tests {
             "stdin": base64_encode(b"hello\n"),
             "encoding": "buffer",
         });
-        let out = git_exec(Path::new("git"), &o).unwrap();
+        let out = git_exec(Path::new("git"), &test_resources(), &o).unwrap();
         let stdout = base64_decode(out["stdout"].as_str().unwrap()).unwrap();
         assert_eq!(String::from_utf8(stdout).unwrap().trim(), "ce013625030ba8dba906f756967f9e9ca394464a");
         std::fs::remove_dir_all(dir).unwrap();
@@ -691,6 +1062,7 @@ mod tests {
         // Fails only if a translation would otherwise apply; harmless elsewhere.
         let out = git_exec(
             Path::new("git"),
+            &test_resources(),
             &json!({ "args": ["definitely-not-a-command"], "env": { "LANG": "es_ES.UTF-8", "LC_ALL": null } }),
         )
         .unwrap();
@@ -700,14 +1072,14 @@ mod tests {
     #[test]
     fn git_exec_missing_directory_is_enoent() {
         let o = json!({ "args": ["status"], "cwd": "/definitely/not/a/real/directory" });
-        assert_eq!(code(git_exec(Path::new("git"), &o).unwrap_err()), "ENOENT");
+        assert_eq!(code(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err()), "ENOENT");
     }
 
     #[test]
     fn git_exec_enforces_max_buffer() {
         let o = json!({ "args": ["--version"], "maxBuffer": 2 });
         assert_eq!(
-            code(git_exec(Path::new("git"), &o).unwrap_err()),
+            code(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err()),
             "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
         );
     }
@@ -741,9 +1113,134 @@ mod tests {
         );
     }
 
+    fn code_and_details(error: AppError) -> (String, Option<Value>) {
+        let rpc = error.to_rpc_error();
+        (rpc.code.unwrap_or_default(), rpc.details)
+    }
+
+    #[test]
+    fn max_buffer_error_keeps_the_prefix_that_was_produced() {
+        // `git --version` prints one line; a 5-byte limit must keep exactly 5 bytes.
+        let o = json!({ "args": ["--version"], "maxBuffer": 5 });
+        let (code, details) = code_and_details(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err());
+        assert_eq!(code, "ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
+        let details = details.expect("the error carries the captured output");
+        assert_eq!(details["stdout"], "git v");
+        assert_eq!(details["truncated"], true);
+    }
+
+    #[test]
+    fn the_retention_ceiling_is_separate_from_maxbuffer_and_never_success() {
+        let mut limits = Limits::for_profile(Profile::Default);
+        limits.git_output = 8;
+        let resources = Resources::new(limits);
+        let o = json!({ "args": ["--version"] });
+        let (code, details) = code_and_details(git_exec(Path::new("git"), &resources, &o).unwrap_err());
+        assert_eq!(code, "DESKTOP_GIT_OUTPUT_LIMIT");
+        assert_eq!(details.unwrap()["stdout"], "", "output past the ceiling is not sent");
+    }
+
+    #[test]
+    fn a_stopped_command_releases_its_result_credit() {
+        let mut limits = Limits::for_profile(Profile::Default);
+        limits.git_output = 8;
+        let resources = Resources::new(limits);
+        let _ = git_exec(Path::new("git"), &resources, &json!({ "args": ["--version"] }));
+        assert_eq!(resources.results.used(), 0);
+    }
+
+    #[test]
+    fn a_cancel_raised_before_the_request_starts_prevents_it() {
+        cancel(&json!({ "cancelId": 4_000_001u64 })).unwrap();
+        let o = json!({ "args": ["--version"], "cancelId": 4_000_001u64 });
+        let (code, _) = code_and_details(git_exec(Path::new("git"), &test_resources(), &o).unwrap_err());
+        assert_eq!(code, "ABORT_ERR");
+        assert!(cancel_flags().lock().unwrap().get(&4_000_001).is_none(), "the flag is released");
+    }
+
+    #[test]
+    fn a_cancel_raised_while_running_stops_the_process_group() {
+        let started = std::time::Instant::now();
+        let canceller = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(200));
+            cancel(&json!({ "cancelId": 4_000_002u64 })).unwrap();
+        });
+        let o = json!({ "args": ["-c", "sleep 30"], "cancelId": 4_000_002u64 });
+        let (code, _) = code_and_details(git_exec(Path::new("sh"), &test_resources(), &o).unwrap_err());
+        canceller.join().unwrap();
+        assert_eq!(code, "ABORT_ERR");
+        assert!(started.elapsed() < Duration::from_secs(10), "the sleeping child was stopped");
+    }
+
+    #[test]
+    fn exceeding_maxbuffer_stops_a_child_that_keeps_writing() {
+        let started = std::time::Instant::now();
+        let o = json!({ "args": ["-c", "head -c 50000000 /dev/zero"], "maxBuffer": 1000, "encoding": "buffer" });
+        let (code, details) = code_and_details(git_exec(Path::new("sh"), &test_resources(), &o).unwrap_err());
+        assert_eq!(code, "ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
+        let details = details.unwrap();
+        assert_eq!(base64_decode(details["stdout"].as_str().unwrap()).unwrap().len(), 1000);
+        assert!(started.elapsed() < Duration::from_secs(20), "the writer was stopped, not waited for");
+    }
+
+    #[test]
+    fn range_reads_return_exact_bytes_and_report_eof() {
+        let dir = temp_dir("range");
+        let file = dir.join("big.bin");
+        let content: Vec<u8> = (0..(3 * 1024 * 1024 + 17)).map(|i| (i % 253) as u8).collect();
+        std::fs::write(&file, &content).unwrap();
+
+        let block = read_range(&json!({ "path": file, "offset": 1024 * 1024u64, "length": 65536u64 })).unwrap();
+        let bytes = base64_decode(block["data"].as_str().unwrap()).unwrap();
+        assert_eq!(block["bytesRead"], 65536);
+        assert_eq!(block["eof"], false);
+        assert_eq!(bytes, content[1024 * 1024..1024 * 1024 + 65536]);
+
+        let tail = read_range(&json!({ "path": file, "offset": content.len() as u64 - 5, "length": 65536u64 })).unwrap();
+        assert_eq!(tail["bytesRead"], 5);
+        assert_eq!(tail["eof"], true);
+        let past = read_range(&json!({ "path": file, "offset": content.len() as u64 + 10, "length": 8u64 })).unwrap();
+        assert_eq!(past["bytesRead"], 0);
+        assert_eq!(past["eof"], true);
+
+        assert!(matches!(
+            read_range(&json!({ "path": file, "offset": 0u64, "length": 65537u64 })),
+            Err(AppError::BadArgs(_))
+        ));
+        assert!(matches!(
+            read_range(&json!({ "path": file, "offset": u64::MAX, "length": 2u64 })),
+            Err(AppError::BadArgs(_))
+        ));
+        assert!(matches!(
+            read_range(&json!({ "path": file, "offset": -1, "length": 2u64 })),
+            Err(AppError::BadArgs(_))
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn file_hashes_match_known_digests() {
+        let dir = temp_dir("hash");
+        let file = dir.join("abc.txt");
+        std::fs::write(&file, b"abc").unwrap();
+        assert_eq!(
+            file_hash(&json!({ "path": file, "algorithm": "sha1" })).unwrap(),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
+        assert_eq!(
+            file_hash(&json!({ "path": file, "algorithm": "sha256" })).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert!(matches!(
+            file_hash(&json!({ "path": file, "algorithm": "md5" })),
+            Err(AppError::BadArgs(_))
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn http_fetch_rejects_non_http_urls() {
-        let error = http_fetch(&json!({ "url": "file:///etc/passwd" })).unwrap_err();
+        let error = http_fetch(&test_resources(), &json!({ "url": "file:///etc/passwd" })).unwrap_err();
         assert!(matches!(error, AppError::BadArgs(_)));
     }
 }

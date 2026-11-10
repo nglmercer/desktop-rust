@@ -732,6 +732,7 @@ pub fn shutdown(app: &DesktopApp) {
     app.resources.process_slots.close();
     app.resources.input.close();
     app.resources.output.close();
+    app.resources.results.close();
 }
 
 /// Live counters for development tooling. Carries no stream content.

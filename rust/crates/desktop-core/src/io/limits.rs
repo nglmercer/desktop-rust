@@ -240,6 +240,8 @@ pub struct Resources {
     pub input: Arc<ByteBudget>,
     /// Global output bytes in flight across processes.
     pub output: Arc<ByteBudget>,
+    /// Bytes retained for whole results (git output, HTTP bodies) at once.
+    pub results: Arc<ByteBudget>,
 }
 
 impl Resources {
@@ -249,6 +251,7 @@ impl Resources {
             process_slots: ByteBudget::new(limits.process_slots),
             input: ByteBudget::new(limits.stream_input),
             output: ByteBudget::new(limits.stream_output),
+            results: ByteBudget::new(limits.git_output),
         }
     }
 
