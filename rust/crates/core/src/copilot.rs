@@ -61,6 +61,11 @@ impl RuntimeInfo {
     pub fn discover(runtime_root: &Path) -> Result<Self> {
         let platform = std::env::consts::OS.to_string();
         let arch = std::env::consts::ARCH.to_string();
+        let arch_npm = if arch == "x86_64" {
+            "x64".to_string()
+        } else {
+            arch.clone()
+        };
         let name = if platform == "windows" {
             "copilot-runtime.exe"
         } else {
@@ -68,7 +73,7 @@ impl RuntimeInfo {
         };
         let binary = runtime_root
             .join("prebuilds")
-            .join(format!("{platform}-{arch}"))
+            .join(format!("{platform}-{arch_npm}"))
             .join(name);
         if !binary.exists() {
             bail!(

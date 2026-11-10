@@ -34,7 +34,7 @@ def read_exact(sock, size):
 class WebSocket:
     def __init__(self, authority, origin):
         host, port = authority.split(':')
-        self.sock = socket.create_connection((host, int(port)), timeout=5)
+        self.sock = socket.create_connection((host, int(port)), timeout=30)
         key = base64.b64encode(os.urandom(16)).decode()
         self.sock.sendall((f'GET /ws HTTP/1.1\r\nHost: {authority}\r\n'
                            f'Origin: {origin}\r\nUpgrade: websocket\r\n'
