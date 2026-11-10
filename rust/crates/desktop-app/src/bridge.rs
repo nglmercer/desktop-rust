@@ -31,6 +31,7 @@ use include_dir::{include_dir, Dir};
 use crate::host::{AppEvent, TaoHost};
 
 static VITE_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
+const DEV_VITE_DIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../out/vite-dist");
 
 
 /// Injected before any page script runs. It defines `window.__desktop`,
@@ -241,7 +242,7 @@ impl Bridge {
         }
 
         match asset(&path) {
-            Some((mime, bytes)) => responder.respond(response(200, mime, bytes.to_vec())),
+            Some((mime, bytes)) => responder.respond(response(200, &mime, bytes)),
             None => responder.respond(response(
                 404,
                 "text/plain; charset=utf-8",
@@ -265,12 +266,45 @@ fn response(
         .expect("valid response")
 }
 
-fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
+/// Load an asset, preferring the on-disk `out/vite-dist` in debug builds so
+/// `cargo run` picks up the latest `pnpm vite:build` / `pnpm vite:dev`
+/// output without needing a `cargo` rebuild. The embedded `VITE_DIST` is
+/// the release fallback (single-file binary).
+///
+/// This is the correct answer to the hash churn problem: Vite writes
+/// `assets/index-[hash].js` and a new `index.html` every build, but cargo's
+/// `include_dir!` snapshot does not track that. Serving from disk in dev
+/// makes `cargo run -p desktop-app` always serve the current hash.
+fn load_disk(path: &str) -> Option<Vec<u8>> {
+    let full = std::path::Path::new(DEV_VITE_DIST).join(path);
+    // Don't escape the bundle root even in dev.
+    if !full.starts_with(DEV_VITE_DIST) {
+        return None;
+    }
+    std::fs::read(&full).ok()
+}
+
+fn asset(path: &str) -> Option<(Cow<'static, str>, Vec<u8>)> {
     // The Vite build of the renderer: index.html, hashed bundles under
     // assets/ and the static resources the UI loads by URL.
     let path = if path.is_empty() { "index.html" } else { path };
+    // Debug: always fresh from disk, so hashes never get stale.
+    #[cfg(debug_assertions)]
+    {
+        if let Some(bytes) = load_disk(path) {
+            return Some((mime_for(path).into(), bytes));
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        if std::env::var("DESKTOP_SERVE_FROM_DISK").is_ok() {
+            if let Some(bytes) = load_disk(path) {
+                return Some((mime_for(path).into(), bytes));
+            }
+        }
+    }
     let file = VITE_DIST.get_file(path)?;
-    Some((mime_for(path), file.contents()))
+    Some((mime_for(path).into(), file.contents().to_vec()))
 }
 
 /// Decode `%XX` escapes in a request path. Invalid escapes are kept verbatim;
@@ -294,12 +328,39 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Describe an embedded resource: a file, a directory with its entries, or
-/// `null` when nothing is embedded at `path`.
+/// Describe a resource: a file, a directory with its entries, or
+/// `null` when nothing is present at `path`. In debug builds this
+/// consults the on-disk `out/vite-dist` first, so a new hashed file
+/// (`assets/index-[hash].js`) is discovered without a rebuild.
 fn bundle_entry(path: &str) -> Value {
     let path = path.trim_matches('/');
     if path.contains("..") || path.contains('\\') || path.contains(':') {
         return Value::Null;
+    }
+    // Debug: disk is authoritative for the current hash.
+    #[cfg(debug_assertions)]
+    {
+        let base = std::path::Path::new(DEV_VITE_DIST).join(path);
+        if base.is_file() {
+            if let Ok(meta) = std::fs::metadata(&base) {
+                return serde_json::json!({ "kind": "file", "size": meta.len() });
+            }
+        }
+        if base.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&base) {
+                let mut out: Vec<Value> = entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                        serde_json::json!({ "name": name, "isDirectory": is_dir })
+                    })
+                    .collect();
+                out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+                return serde_json::json!({ "kind": "directory", "entries": out });
+            }
+        }
+        // If disk missed (file not built yet), fall through to embedded.
     }
     if let Some(file) = VITE_DIST.get_file(path) {
         return serde_json::json!({ "kind": "file", "size": file.contents().len() });
@@ -386,9 +447,30 @@ mod tests {
     #[test]
     fn assets_resolve_with_a_content_type() {
         let (mime, bytes) = asset("").expect("index.html is embedded");
-        assert_eq!(mime, "text/html; charset=utf-8");
+        assert_eq!(mime.as_ref(), "text/html; charset=utf-8");
         assert!(!bytes.is_empty());
         assert!(asset("does/not/exist.js").is_none());
         assert_eq!(mime_for("static/x.svg"), "image/svg+xml");
+    }
+
+    #[test]
+    fn asset_prefers_fresh_disk_hash_in_dev() {
+        // In debug the on-disk `out/vite-dist` is authoritative. Create a
+        // fresh hashed name, verify `asset` returns it without rebuilding
+        // the embedded snapshot from `include_dir!`.
+        #[cfg(debug_assertions)]
+        {
+            let tmp = std::path::Path::new(DEV_VITE_DIST).join("assets/stale-check-0a1b2c.js");
+            std::fs::create_dir_all(tmp.parent().unwrap()).unwrap();
+            std::fs::write(&tmp, b"// fresh hash\n").unwrap();
+            let got = asset("assets/stale-check-0a1b2c.js").expect("disk asset should be served");
+            assert_eq!(got.1, b"// fresh hash\n".to_vec());
+            assert_eq!(got.0.as_ref(), "text/javascript; charset=utf-8");
+            std::fs::remove_file(&tmp).ok();
+            assert!(asset("assets/stale-check-0a1b2c.js").is_none() || {
+                // Embedded fallback would not have this file, disk was cleaned
+                asset("assets/stale-check-0a1b2c.js").is_none()
+            });
+        }
     }
 }
