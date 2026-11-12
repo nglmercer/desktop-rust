@@ -37,6 +37,14 @@ export interface BackendRequestOptions {
 
 export type BackendGitPath = string | { readonly bytes: ReadonlyArray<number> }
 
+export type BackendReadableGitSetting =
+  | 'core.autocrlf'
+  | 'core.safecrlf'
+  | 'pull.ff'
+  | 'pull.rebase'
+  | 'trailer.separators'
+  | 'commit.gpgsign'
+
 export interface ICopilotAccount {
   readonly host: string
   readonly login: string
@@ -314,9 +322,48 @@ class WryTransport {
         method === 'git_info' &&
         isRecord(params) &&
         isRecord(params.operation) &&
-        (params.operation.type === 'set' ||
+        ((params.operation.type === 'set' && params.operation.key !== 'init.defaultbranch') ||
           params.operation.type === 'set_repository' ||
           params.operation.type === 'unset_repository')
+      const settingsWrite =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        params.operation.type === 'set' &&
+        params.operation.key === 'init.defaultbranch'
+      const lfsWrite =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        (params.operation.type === 'lfs_install' || params.operation.type === 'lfs_install_repository')
+      const configPathWrite =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        params.operation.type === 'global_config_path'
+      const descriptionWrite =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        params.operation.type === 'set_description'
+      const initialization =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        params.operation.type === 'initialize_repository'
+      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || initialization
+      const nativeError = (error: unknown): BackendError => {
+        const result = toBackendError(error)
+        if (!mutating || !result.retryable) return result
+        return new BackendError({
+          code: result.code,
+          message: result.message,
+          retryable: false,
+          jobId: result.jobId,
+          recoveryId: result.recoveryId,
+          details: result.details,
+        })
+      }
       return new Promise((resolve, reject) => {
         let settled = false
         let timer: ReturnType<typeof setTimeout>
@@ -351,6 +398,16 @@ class WryTransport {
             'cancelled',
             identityWrite
               ? 'Git identity update cancelled; inspect Git settings before retrying'
+              : settingsWrite
+              ? 'Git setting update cancelled; inspect Git settings before retrying'
+              : configPathWrite
+              ? 'Git config preparation cancelled; check the configuration file before retrying'
+              : descriptionWrite
+              ? 'Description update cancelled; inspect the repository description before retrying'
+              : initialization
+              ? 'Repository initialization cancelled; inspect the destination before retrying'
+              : lfsWrite
+              ? 'Git LFS setup cancelled; inspect Git settings and hooks before retrying'
               : 'Backend operation cancelled'
           )
         opts.signal?.addEventListener('abort', abort, { once: true })
@@ -360,6 +417,16 @@ class WryTransport {
               'ETIMEDOUT',
               identityWrite
                 ? 'Git identity update timed out; inspect Git settings before retrying'
+                : settingsWrite
+                ? 'Git setting update timed out; inspect Git settings before retrying'
+                : configPathWrite
+                ? 'Git config preparation timed out; check the configuration file before retrying'
+                : descriptionWrite
+                ? 'Description update timed out; inspect the repository description before retrying'
+                : initialization
+                ? 'Repository initialization timed out; inspect the destination before retrying'
+                : lfsWrite
+                ? 'Git LFS setup timed out; inspect Git settings and hooks before retrying'
                 : 'Backend operation timed out'
             ),
           deadline
@@ -373,10 +440,10 @@ class WryTransport {
             })
             .then(
               value => finish(() => resolve(value)),
-              error => finish(() => reject(toBackendError(error)))
+              error => finish(() => reject(nativeError(error)))
             )
         } catch (error) {
-          finish(() => reject(toBackendError(error)))
+          finish(() => reject(nativeError(error)))
         }
       })
     }
@@ -1066,6 +1133,17 @@ export class BackendClient {
     return value
   }
 
+  /** Prepare the global Git config file and return the path chosen by Git. */
+  async globalGitConfigPath(): Promise<string> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'global_config_path' } })
+      : await this.request('git_global_config_path', {})
+    if (typeof value !== 'string' || value.length === 0 || value.length > 65536 || value.includes('\0')) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid global Git configuration path', retryable: false })
+    }
+    return value
+  }
+
   /** Check Git LFS availability without invoking a renderer process shim. */
   async lfsAvailable(): Promise<boolean> {
     const value = this.transport === 'wry'
@@ -1082,8 +1160,104 @@ export class BackendClient {
     const value = this.transport === 'wry'
       ? await this.request('git_info', { operation: { type: 'lfs_install', force } })
       : await this.request('lfs_install', { scope: 'global', force, skip_repo: true, skip_smudge: false })
+    this.validateLfsInstallResult(value)
+  }
+
+  /** Install LFS hooks for the requested repository. */
+  async installRepositoryLfsHooks(repositoryPath: string, force: boolean): Promise<void> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'lfs_install_repository', repository_path: repositoryPath, force } })
+      : await this.request('lfs_repository', { path: repositoryPath, action: { type: 'install_hooks', force } })
+    this.validateLfsInstallResult(value)
+  }
+
+  private validateLfsInstallResult(value: unknown): void {
+    if (!isRecord(value) || !Number.isInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid Git LFS setup response', retryable: false })
+    }
+    if (value.code !== 0) {
+      throw new BackendError({ code: 'lfs_install_failed', message: 'Git LFS configuration was not fully installed; inspect existing hooks and filters before retrying', retryable: false })
+    }
+  }
+
+  /** Read whether the repository has any Git LFS tracking patterns. */
+  async repositoryUsesLfs(repositoryPath: string): Promise<boolean> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, 'lfs_status', {})
+      : await this.request('lfs_repository', { path: repositoryPath, action: { type: 'status' } })
+    if (!isRecord(value) || typeof value.available !== 'boolean' ||
+        (value.available ? typeof value.using_lfs !== 'boolean' : value.using_lfs !== null)) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid repository Git LFS status response', retryable: false })
+    }
+    return value.using_lfs === true
+  }
+
+  /** Read effective Git LFS attributes for literal repository-relative paths. */
+  async repositoryLfsFileTracking(repositoryPath: string, paths: ReadonlyArray<string>): Promise<ReadonlyArray<boolean>> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, 'lfs_file_tracking', { paths })
+      : await this.request('lfs_repository', { path: repositoryPath, action: { type: 'file_tracking', paths } })
+    if (!Array.isArray(value) || value.length !== paths.length || !value.every(item => typeof item === 'boolean')) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid Git LFS attribute response', retryable: false })
+    }
+    return value
+  }
+
+  /** Read an allowlisted local or inherited repository setting. */
+  async repositoryGitReadSetting(
+    repositoryPath: string,
+    key: BackendReadableGitSetting,
+    onlyLocal: boolean,
+    canonicalBool: boolean
+  ): Promise<string | null> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, 'git_read_setting', { key, only_local: onlyLocal, canonical_bool: canonicalBool })
+      : await this.request('git_read_repository_setting', { path: repositoryPath, key, only_local: onlyLocal, canonical_bool: canonicalBool })
+    if (value !== null && (typeof value !== 'string' || (canonicalBool && value !== 'true' && value !== 'false'))) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid Git setting response', retryable: false })
+    }
+    return value
+  }
+
+  /** Read the selected repository's Git description. */
+  async repositoryGitDescription(repositoryPath: string): Promise<string> {
+    const value = await this.repositoryRead(repositoryPath, 'git_description', {})
     if (typeof value !== 'string') {
-      throw new BackendError({ code: 'lfs_install_failed', message: 'Git LFS global filter installation failed', retryable: false })
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid repository description response', retryable: false })
+    }
+    return value
+  }
+
+  /** Return a credential-free link for a locally configured submodule. */
+  async repositorySubmoduleDisplayUrl(repositoryPath: string, path: string): Promise<string | null> {
+    const value = await this.repositoryRead(repositoryPath, 'submodule_display_url', this.transport === 'wry' ? { submodule_path: path } : { path })
+    if (value === null) return null
+    if (typeof value === 'string' && value.length <= 16384) {
+      try {
+        const url = new URL(value)
+        if (url.protocol === 'https:' && url.username === '' && url.password === '' && url.search === '' && url.hash === '') return value
+      } catch {}
+    }
+    throw new BackendError({ code: 'invalid_response', message: 'Invalid submodule link response', retryable: false })
+  }
+
+  /** Write the description of the explicitly requested repository. */
+  async setRepositoryGitDescription(repositoryPath: string, description: string): Promise<void> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'set_description', repository_path: repositoryPath, description } })
+      : await this.request('set_repository_description', { path: repositoryPath, description })
+    if (value !== null) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid repository description update response', retryable: false })
+    }
+  }
+
+  /** Initialize the requested directory without changing the selected repository. */
+  async initializeDesktopRepository(path: string, defaultBranch: string): Promise<void> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'initialize_repository', repository_path: path, default_branch: defaultBranch } })
+      : await this.request('initialize_desktop_repository', { path, default_branch: defaultBranch })
+    if (value !== null) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid repository initialization response', retryable: false })
     }
   }
 

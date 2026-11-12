@@ -1,5 +1,6 @@
 import * as Path from 'path'
 import { readFile, writeFile } from 'fs/promises'
+import { backend } from '../../backend/client'
 
 const GitDescriptionPath = '.git/description'
 
@@ -10,6 +11,9 @@ export const DefaultGitDescription =
 export async function getGitDescription(
   repositoryPath: string
 ): Promise<string> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().repositoryGitDescription(repositoryPath)
+  }
   const path = Path.join(repositoryPath, GitDescriptionPath)
 
   try {
@@ -28,6 +32,10 @@ export async function writeGitDescription(
   repositoryPath: string,
   description: string
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().setRepositoryGitDescription(repositoryPath, description)
+    return
+  }
   const fullPath = Path.join(repositoryPath, GitDescriptionPath)
   await writeFile(fullPath, description)
 }

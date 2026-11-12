@@ -8,6 +8,7 @@ describe('backend Copilot session cleanup', () => {
 
   it.each([
     { type: 'set', key: 'user.name', value: 'Alice' },
+    { type: 'set', key: 'init.defaultbranch', value: 'trunk' },
     { type: 'set_repository', repository_path: '/repo', key: 'user.name', value: 'Alice' },
     { type: 'unset_repository', repository_path: '/repo', key: 'user.name' },
   ])('treats interrupted $type identity writes as uncertain', async operation => {
@@ -74,6 +75,69 @@ describe('backend Copilot session cleanup', () => {
     invoke.mockResolvedValueOnce({ version: '2.44.0' })
     await expect(client.gitVersion()).rejects.toMatchObject({ code: 'invalid_response' })
   })
+  it('validates the native global configuration path', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => '/home/test/config with spaces')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.globalGitConfigPath()).resolves.toBe('/home/test/config with spaces')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'global_config_path' } }))
+    for (const value of ['', '/bad\0path', { path: '/tmp/config' }]) {
+      invoke.mockResolvedValueOnce(value)
+      await expect(client.globalGitConfigPath()).rejects.toMatchObject({ code: 'invalid_response' })
+    }
+  })
+  it('treats interrupted global configuration preparation as uncertain', async () => {
+    const invoke = vi.fn(() => new Promise<unknown>(() => {}))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const controller = new AbortController()
+    const pending = new BackendClient().request('git_info', { operation: { type: 'global_config_path' } }, { signal: controller.signal })
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('check the configuration file') })
+  })
+
+  it('validates scoped Git LFS status and file tracking responses', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ available: true, using_lfs: true }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryUsesLfs('/repo')).resolves.toBe(true)
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'lfs_status' }))
+    invoke.mockResolvedValueOnce({ available: false, using_lfs: null })
+    await expect(client.repositoryUsesLfs('/repo')).resolves.toBe(false)
+    invoke.mockResolvedValueOnce({ available: true, using_lfs: null })
+    await expect(client.repositoryUsesLfs('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce([true, false, true])
+    await expect(client.repositoryLfsFileTracking('/repo', ['a', 'b', 'a'])).resolves.toEqual([true, false, true])
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'lfs_file_tracking', paths: ['a', 'b', 'a'] }))
+    for (const response of [[true], [true, false, 'true']]) {
+      invoke.mockResolvedValueOnce(response)
+      await expect(client.repositoryLfsFileTracking('/repo', ['a', 'b', 'a'])).rejects.toMatchObject({ code: 'invalid_response' })
+    }
+  })
+
+  it('routes LFS hook installation to the requested Wry repository and reports failure', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ code: 0, stdout: 'Git LFS initialized', stderr: '' }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.installRepositoryLfsHooks('/repo', false)
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'lfs_install_repository', repository_path: '/repo', force: false } }))
+    invoke.mockResolvedValueOnce({ code: 2, stdout: '', stderr: 'configuration error', error_kind: 'configuration' })
+    await expect(client.installRepositoryLfsHooks('/repo', false)).rejects.toMatchObject({ code: 'lfs_install_failed', retryable: false })
+    invoke.mockResolvedValueOnce('Git LFS initialized')
+    await expect(client.installGlobalLfsFilters(false)).rejects.toMatchObject({ code: 'invalid_response', retryable: false })
+    await expect(client.installGlobalLfsFilters(false)).resolves.toBeUndefined()
+  })
+
+  it('reports interrupted Wry LFS setup as uncertain', async () => {
+    const invoke = vi.fn(() => new Promise<unknown>(() => {}))
+    const send = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send, on: vi.fn() } })
+    const client = new BackendClient()
+    const controller = new AbortController()
+    const pending = client.request('git_info', { operation: { type: 'lfs_install_repository', repository_path: '/repo', force: true } }, { signal: controller.signal })
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect Git settings and hooks') })
+    expect(send).toHaveBeenCalledWith('desktop.backend.cancel', { request_id: expect.any(String) })
+  })
 
   it('routes repository Git identity reads and rejects malformed responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'Local Author')
@@ -83,6 +147,70 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo-a', method: 'git_identity_value', key: 'user.name', only_local: true }))
     invoke.mockResolvedValueOnce({ value: 'unexpected' })
     await expect(client.repositoryGitIdentityValue('/repo-a', 'user.email', false)).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+  it('reads the repository description through the scoped native service', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => 'Description\n')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryGitDescription('/repo')).resolves.toBe('Description\n')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'git_description' }))
+    invoke.mockResolvedValueOnce({ description: 'unexpected' })
+    await expect(client.repositoryGitDescription('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+  it('accepts only credential-free submodule display URLs', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => 'https://github.com/owner/repo')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositorySubmoduleDisplayUrl('/repo', 'libs/nested')).resolves.toBe('https://github.com/owner/repo')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'submodule_display_url', submodule_path: 'libs/nested' }))
+    invoke.mockResolvedValueOnce(null)
+    await expect(client.repositorySubmoduleDisplayUrl('/repo', 'missing')).resolves.toBeNull()
+    for (const value of ['https://user:secret@github.com/a/b', 'https://github.com/a/b?token=secret', 'file:///tmp/a']) {
+      invoke.mockResolvedValueOnce(value)
+      await expect(client.repositorySubmoduleDisplayUrl('/repo', 'libs/nested')).rejects.toMatchObject({ code: 'invalid_response' })
+    }
+  })
+  it('validates description writes and reports interrupted native writes as uncertain', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => null)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.setRepositoryGitDescription('/repo', 'text')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'set_description', repository_path: '/repo', description: 'text' } }))
+    invoke.mockResolvedValueOnce({ ok: true })
+    await expect(client.setRepositoryGitDescription('/repo', 'text')).rejects.toMatchObject({ code: 'invalid_response', retryable: false })
+    invoke.mockImplementationOnce(() => new Promise<unknown>(() => {}))
+    const controller = new AbortController()
+    const pending = client.request('git_info', { operation: { type: 'set_description', repository_path: '/repo', description: 'text' } }, { signal: controller.signal })
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect the repository description') })
+  })
+  it('initializes a specific repository and treats interruption as uncertain', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => null)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.initializeDesktopRepository('/new/repo', 'trunk')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'initialize_repository', repository_path: '/new/repo', default_branch: 'trunk' } }))
+    invoke.mockImplementationOnce(() => new Promise<unknown>(() => {}))
+    const controller = new AbortController()
+    const pending = client.request('git_info', { operation: { type: 'initialize_repository', repository_path: '/new/repo', default_branch: 'trunk' } }, { signal: controller.signal })
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect the destination') })
+  })
+  it('does not mark a native cancellation response as retryable for a write', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => { throw { code: 'cancelled', message: 'inspect the destination' } })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.initializeDesktopRepository('/repo', 'main')).rejects.toMatchObject({ code: 'cancelled', retryable: false })
+    await expect(client.repositoryGitDescription('/repo')).rejects.toMatchObject({ code: 'cancelled', retryable: true })
+  })
+  it('validates scoped repository Git setting reads', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => 'true')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryGitReadSetting('/repo', 'commit.gpgsign', true, true)).resolves.toBe('true')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'git_read_setting', key: 'commit.gpgsign', only_local: true, canonical_bool: true }))
+    invoke.mockResolvedValueOnce('yes')
+    await expect(client.repositoryGitReadSetting('/repo', 'commit.gpgsign', false, true)).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
   it('routes repository identity writes and removals through the scoped Wry operation', async () => {

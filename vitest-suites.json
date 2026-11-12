@@ -56,7 +56,12 @@
   "app/test/unit/rust-directory-exists-test.ts",
   "app/test/unit/rust-path-exists-test.ts",
   "app/test/unit/rust-global-git-identity-test.ts",
+  "app/test/unit/rust-lfs-read-test.ts",
+  "app/test/unit/rust-git-description-test.ts",
+  "app/test/unit/rust-git-init-test.ts",
+  "app/test/unit/git/description-test.ts",
   "app/test/unit/configure-git-user-save-test.tsx",
+  "app/test/unit/preferences-git-save-test.ts",
   "app/test/unit/rust-canonical-path-test.ts",
   "script/draft-release/format-json.test.ts",
   "script/highlighter-build.test.ts"

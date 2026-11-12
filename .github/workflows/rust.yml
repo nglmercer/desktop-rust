@@ -28,6 +28,7 @@ on:
       - 'script/generate-example-usage-data.mts'
       - 'script/highlighter-build.test.ts'
       - 'eslint-rules/**'
+      - 'vendor/desktop-trampoline/**'
       - 'biome.json'
       - 'vitest.config.ts'
       - 'vitest-suites.json'
@@ -72,6 +73,7 @@ on:
       - 'script/generate-example-usage-data.mts'
       - 'script/highlighter-build.test.ts'
       - 'eslint-rules/**'
+      - 'vendor/desktop-trampoline/**'
       - 'biome.json'
       - 'vitest.config.ts'
       - 'vitest-suites.json'
@@ -122,6 +124,9 @@ jobs:
         run: |
           npm run lint:biome
           npm run check:eslint
+          npm ci --prefix vendor/desktop-trampoline --no-audit --no-fund
+          npm run lint --prefix vendor/desktop-trampoline
+          npm test --prefix vendor/desktop-trampoline
           node node_modules/typescript/bin/tsc -p app/test/backend-transport-tsconfig.json
           node node_modules/typescript/bin/tsc -p rust/tests/tsconfig.json
           node node_modules/vitest/vitest.mjs run --config vitest.config.ts

@@ -113,6 +113,7 @@ jobs:
         run: |
           cd vendor/desktop-trampoline
           npm ci
+          npm run lint
           npm test
       - name: Validate notarization API-key secrets
         if:

@@ -3,7 +3,27 @@ import { Repository } from '../../models/repository'
 import { isAbsolute, normalize } from 'path'
 import { realpath } from 'fs/promises'
 import { backend } from '../../backend/client'
+import type { BackendReadableGitSetting } from '../../backend/client'
 import { isRecord } from '../is-record'
+
+function supportedGlobalSetting(name: string): 'user.name' | 'user.email' | 'init.defaultbranch' | null {
+  const key = name.toLowerCase()
+  return key === 'user.name' || key === 'user.email' || key === 'init.defaultbranch' ? key : null
+}
+
+function supportedRepositorySetting(name: string): BackendReadableGitSetting | null {
+  switch (name) {
+    case 'core.autocrlf':
+    case 'core.safecrlf':
+    case 'pull.ff':
+    case 'pull.rebase':
+    case 'trailer.separators':
+    case 'commit.gpgsign':
+      return name
+    default:
+      return null
+  }
+}
 
 /**
  * Look up a config value by name in the repository.
@@ -25,6 +45,10 @@ export function getConfigValue(
   ) {
     return backend().repositoryGitIdentityValue(repository.path, name, onlyLocal)
   }
+  const key = supportedRepositorySetting(name)
+  if (key !== null && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().repositoryGitReadSetting(repository.path, key, onlyLocal, false)
+  }
   return getConfigValueInPath(name, repository.path, onlyLocal)
 }
 
@@ -35,9 +59,10 @@ export function getGlobalConfigValue(
     HOME: string
   }
 ): Promise<string | null> {
+  const key = supportedGlobalSetting(name)
   if (
     env === undefined &&
-    (name === 'user.name' || name === 'user.email') &&
+    key !== null &&
     typeof window !== 'undefined' &&
     backend().transportKind !== 'none'
   ) {
@@ -49,9 +74,9 @@ export function getGlobalConfigValue(
         if (!isRecord(result) || result.scope !== 'global' || !isRecord(result.values)) {
           throw new Error('Invalid global Git settings response')
         }
-        const value = result.values[name]
+        const value = result.values[key]
         if (value !== null && typeof value !== 'string') {
-          throw new Error('Invalid global Git identity value')
+          throw new Error('Invalid global Git setting value')
         }
         return value
       })
@@ -74,6 +99,10 @@ export async function getBooleanConfigValue(
     HOME: string
   }
 ): Promise<boolean | null> {
+  if (env === undefined && name === 'commit.gpgsign' && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const value = await backend().repositoryGitReadSetting(repository.path, 'commit.gpgsign', onlyLocal, true)
+    return value === null ? null : value === 'true'
+  }
   const value = await getConfigValueInPath(
     name,
     repository.path,
@@ -160,14 +189,18 @@ async function getConfigValueInPath(
  * config file if it doesn't exist yet. The primary purpose behind this method
  * is to support opening the global git config for editing.
  */
-export const getGlobalConfigPath = (env?: { HOME: string }) =>
-  git(['config', '--edit', '--global'], __dirname, 'getGlobalConfigPath', {
+export const getGlobalConfigPath = (env?: { HOME: string }) => {
+  if (env === undefined && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().globalGitConfigPath().then(normalize)
+  }
+  return git(['config', '--edit', '--global'], __dirname, 'getGlobalConfigPath', {
     // We're using printf instead of echo because echo could attempt to decode
     // escape sequences like \n which would be bad in a case like
     // c:\Users\niik\.gitconfig
     //         ^^
     env: { ...env, GIT_EDITOR: 'printf %s' },
   }).then(x => normalize(x.stdout))
+}
 
 /** Set the local config value by name. */
 export async function setConfigValue(
@@ -198,19 +231,20 @@ export async function setGlobalConfigValue(
     HOME: string
   }
 ): Promise<void> {
+  const key = supportedGlobalSetting(name)
   if (
     env === undefined &&
-    (name === 'user.name' || name === 'user.email') &&
+    key !== null &&
     typeof window !== 'undefined' &&
     backend().transportKind !== 'none'
   ) {
     const client = backend()
     if (client.transportKind === 'wry') {
       await client.request('git_info', {
-        operation: { type: 'set', key: name, value },
+        operation: { type: 'set', key, value },
       })
     } else {
-      await client.request('set_git_setting', { scope: 'global', key: name, value })
+      await client.request('set_git_setting', { scope: 'global', key, value })
     }
     return
   }

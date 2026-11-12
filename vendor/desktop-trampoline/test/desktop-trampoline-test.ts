@@ -1,15 +1,18 @@
-import { stat, access } from 'fs/promises'
-import { constants } from 'fs'
-import { execFile as execFileSync, ProcessEnvOptions } from 'child_process'
-import { promisify } from 'util'
+import { stat, access } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import {
+  execFile as execFileSync,
+  type ProcessEnvOptions,
+} from 'node:child_process'
+import { promisify } from 'node:util'
 import {
   getDesktopAskpassTrampolinePath,
   getDesktopCredentialHelperTrampolinePath,
 } from '../index'
 import split2 from 'split2'
-import { createServer } from 'net'
+import { createServer } from 'node:net'
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 
 const askPassTrampolinePath = getDesktopAskpassTrampolinePath()
 const helperTrampolinePath = getDesktopCredentialHelperTrampolinePath()
@@ -24,7 +27,7 @@ function captureSession() {
   })
 
   const server = createServer(socket => {
-    let timeoutId: NodeJS.Timeout | null = null
+    let timeoutId: NodeJS.Timeout | null = null
     socket.pipe(split2(/\0/)).on('data', data => {
       output.push(data.toString('utf8'))
 
@@ -71,9 +74,8 @@ describe('desktop-trampoline', () => {
   it('fails when required environment variables are missing', async () =>
     await assert.rejects(execFile(askPassTrampolinePath, ['Username'])))
 
-
   it('forwards arguments and valid environment variables correctly', async () => {
-    const {serverPortPromise, outputPromise} = captureSession()
+    const { serverPortPromise, outputPromise } = captureSession()
     const port = await serverPortPromise
 
     const env = {
@@ -89,7 +91,7 @@ describe('desktop-trampoline', () => {
     const outputArguments = output.slice(1, 2)
     assert.deepEqual(outputArguments, ['baz'])
     // output[2] is the number of env variables
-    const envc = parseInt(output[2])
+    const envc = parseInt(output[2], 10)
     const outputEnv = output.slice(3, 3 + envc)
     assert.equal(outputEnv.length, 2)
     assert.ok(outputEnv.includes('DESKTOP_TRAMPOLINE_TOKEN=123456'))
@@ -131,14 +133,17 @@ describe('desktop-trampoline', () => {
     const port = await serverPortPromise
 
     const cp = execFile(askPassTrampolinePath, ['get'], {
-      env: { DESKTOP_PORT: port.toString(), DESKTOP_TRAMPOLINE_IDENTIFIER: 'foo' },
+      env: {
+        DESKTOP_PORT: port.toString(),
+        DESKTOP_TRAMPOLINE_IDENTIFIER: 'foo',
+      },
     })
     cp.child.stdin?.end('oh hai\n')
 
     await cp
 
     const output = await outputPromise
-    const envc = parseInt(output[2])
+    const envc = parseInt(output[2], 10)
     const outputEnv = output.slice(3, 3 + envc)
     assert.ok(outputEnv.includes('DESKTOP_TRAMPOLINE_IDENTIFIER=ASKPASS'))
   })
@@ -148,17 +153,20 @@ describe('desktop-trampoline', () => {
     const port = await serverPortPromise
 
     const cp = execFile(helperTrampolinePath, ['get'], {
-      env: { DESKTOP_PORT: port.toString(), DESKTOP_TRAMPOLINE_IDENTIFIER: 'foo' },
+      env: {
+        DESKTOP_PORT: port.toString(),
+        DESKTOP_TRAMPOLINE_IDENTIFIER: 'foo',
+      },
     })
     cp.child.stdin?.end('oh hai\n')
 
     await cp
 
     const output = await outputPromise
-    const envc = parseInt(output[2])
+    const envc = parseInt(output[2], 10)
     const outputEnv = output.slice(3, 3 + envc)
-    assert.ok(outputEnv.includes(
-      'DESKTOP_TRAMPOLINE_IDENTIFIER=CREDENTIALHELPER'
-    ))
+    assert.ok(
+      outputEnv.includes('DESKTOP_TRAMPOLINE_IDENTIFIER=CREDENTIALHELPER')
+    )
   })
 })

@@ -36,6 +36,12 @@ struct ReadRequest {
     #[serde(default)]
     only_local: Option<bool>,
     #[serde(default)]
+    canonical_bool: Option<bool>,
+    #[serde(default)]
+    paths: Option<Vec<desktop_backend::GitPath>>,
+    #[serde(default)]
+    submodule_path: Option<desktop_backend::GitPath>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -63,12 +69,25 @@ struct GitInfoRequest {
 enum GitInfoOperation {
     Read {},
     Version {},
+    GlobalConfigPath {},
     LfsStatus {},
     LfsInstall {
         force: bool,
     },
+    LfsInstallRepository {
+        repository_path: String,
+        force: bool,
+    },
+    SetDescription {
+        repository_path: String,
+        description: String,
+    },
+    InitializeRepository {
+        repository_path: String,
+        default_branch: String,
+    },
     Set {
-        key: GitIdentityKey,
+        key: GlobalGitKey,
         value: String,
     },
     SetRepository {
@@ -80,6 +99,26 @@ enum GitInfoOperation {
         repository_path: String,
         key: GitIdentityKey,
     },
+}
+
+#[derive(Clone, Deserialize)]
+enum GlobalGitKey {
+    #[serde(rename = "user.name")]
+    Name,
+    #[serde(rename = "user.email")]
+    Email,
+    #[serde(rename = "init.defaultbranch")]
+    DefaultBranch,
+}
+
+impl GlobalGitKey {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Name => "user.name",
+            Self::Email => "user.email",
+            Self::DefaultBranch => "init.defaultbranch",
+        }
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -119,6 +158,11 @@ enum ReadMethod {
     RevisionList,
     HasMergeCommits,
     GitIdentityValue,
+    GitDescription,
+    SubmoduleDisplayUrl,
+    GitReadSetting,
+    LfsStatus,
+    LfsFileTracking,
 }
 
 pub struct Backend {
@@ -199,6 +243,15 @@ impl Backend {
             repository_path, ..
         }
         | GitInfoOperation::UnsetRepository {
+            repository_path, ..
+        }
+        | GitInfoOperation::LfsInstallRepository {
+            repository_path, ..
+        }
+        | GitInfoOperation::SetDescription {
+            repository_path, ..
+        }
+        | GitInfoOperation::InitializeRepository {
             repository_path, ..
         } = &request.operation
             && !Path::new(repository_path).is_absolute()
@@ -308,11 +361,32 @@ impl Backend {
                 "kind only applies to conflict detail reads".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::GitIdentityValue)
-            && (request.key.is_some() || request.only_local.is_some())
+        if !matches!(
+            &request.method,
+            ReadMethod::GitIdentityValue | ReadMethod::GitReadSetting
+        ) && (request.key.is_some() || request.only_local.is_some())
         {
             return Err(AppError::BadArgs(
                 "identity options only apply to Git identity reads".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::GitReadSetting)
+            && request.canonical_bool.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "boolean parsing only applies to Git setting reads".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
+            return Err(AppError::BadArgs(
+                "paths only apply to LFS file tracking".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::SubmoduleDisplayUrl)
+            && request.submodule_path.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "submodule_path only applies to submodule URL reads".into(),
             ));
         }
         let operation = if matches!(
@@ -337,6 +411,63 @@ impl Backend {
             }
         } else {
             BackendOperation::Repository(match request.method {
+                ReadMethod::SubmoduleDisplayUrl
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::SubmoduleDisplayUrl {
+                        path: request.submodule_path.ok_or_else(|| {
+                            AppError::BadArgs("submodule path is required".into())
+                        })?,
+                    }
+                }
+                ReadMethod::GitDescription
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::GitDescription
+                }
+                ReadMethod::GitReadSetting
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    let key = request
+                        .key
+                        .ok_or_else(|| AppError::BadArgs("setting key is required".into()))?;
+                    let key = serde_json::from_value(Value::String(key))
+                        .map_err(|_| AppError::BadArgs("unsupported Git setting".into()))?;
+                    Operation::GitReadSetting {
+                        key,
+                        only_local: request.only_local.unwrap_or(false),
+                        canonical_bool: request.canonical_bool.unwrap_or(false),
+                    }
+                }
+                ReadMethod::LfsStatus
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::LfsStatus { paths: vec![] }
+                }
+                ReadMethod::LfsFileTracking
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::LfsFileTracking {
+                        paths: request
+                            .paths
+                            .ok_or_else(|| AppError::BadArgs("paths are required".into()))?,
+                    }
+                }
                 ReadMethod::Snapshot
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()
@@ -534,9 +665,36 @@ impl Backend {
         let identity_write = matches!(
             job.operation,
             BackendOperation::GitInfo(
-                GitInfoOperation::Set { .. }
-                    | GitInfoOperation::SetRepository { .. }
+                GitInfoOperation::Set {
+                    key: GlobalGitKey::Name | GlobalGitKey::Email,
+                    ..
+                } | GitInfoOperation::SetRepository { .. }
                     | GitInfoOperation::UnsetRepository { .. }
+            )
+        );
+        let settings_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::Set {
+                key: GlobalGitKey::DefaultBranch,
+                ..
+            })
+        );
+        let config_path_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::GlobalConfigPath {})
+        );
+        let description_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::SetDescription { .. })
+        );
+        let initialization = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::InitializeRepository { .. })
+        );
+        let lfs_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(
+                GitInfoOperation::LfsInstall { .. } | GitInfoOperation::LfsInstallRepository { .. }
             )
         );
         self.runtime.block_on(token.clone().scope(async {
@@ -552,6 +710,7 @@ impl Backend {
                     BackendOperation::GitInfo(operation) => {
                         return match operation {
                             GitInfoOperation::Version {} => desktop_backend::git_version().await.map(serde_json::Value::String),
+                            GitInfoOperation::GlobalConfigPath {} => desktop_backend::git_global_config_path().await.map(serde_json::Value::String),
                             GitInfoOperation::LfsStatus {} => {
                                 let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
                                 desktop_backend::lfs_tool_status(&cwd).await
@@ -559,6 +718,17 @@ impl Backend {
                             GitInfoOperation::LfsInstall { force } => {
                                 let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
                                 desktop_backend::lfs_install(&cwd, desktop_backend::LfsInstallScope::Global, force, true, false).await
+                            }
+                            GitInfoOperation::LfsInstallRepository { repository_path, force } => {
+                                let repo = Repository::open(Path::new(&repository_path)).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                repo.execute(Operation::LfsInstall { scope: desktop_backend::LfsInstallScope::Global, force, skip_repo: false, skip_smudge: false }).await
+                            }
+                            GitInfoOperation::SetDescription { repository_path, description } => {
+                                let repo = Repository::open(Path::new(&repository_path)).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                repo.execute(Operation::SetGitDescription { description }).await
+                            }
+                            GitInfoOperation::InitializeRepository { repository_path, default_branch } => {
+                                desktop_backend::initialize_desktop_repository(Path::new(&repository_path), &default_branch).await.map(|()| Value::Null)
                             }
                             GitInfoOperation::Read {} => {
                                 let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
@@ -596,11 +766,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else { "backend operation timed out" }.into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         }))
@@ -948,6 +1118,18 @@ esac
                 )
             };
             let first = run(json!({"type":"read"})).unwrap();
+            let config_path = PathBuf::from(std::env::var_os("GIT_CONFIG_GLOBAL").unwrap());
+            let saved_config = fs::read(&config_path).unwrap();
+            fs::remove_file(&config_path).unwrap();
+            assert_eq!(
+                run(json!({"type":"global_config_path"}))
+                    .unwrap()
+                    .as_str()
+                    .unwrap(),
+                config_path.to_str().unwrap()
+            );
+            assert!(config_path.is_file());
+            fs::write(&config_path, saved_config).unwrap();
             let expected_version = Command::new("git").arg("--version").output().unwrap();
             assert!(expected_version.status.success());
             assert_eq!(
@@ -959,6 +1141,20 @@ esac
                     .unwrap()
             );
             assert_eq!(first["values"]["user.name"], "Before");
+            assert_eq!(first["values"]["init.defaultbranch"], Value::Null);
+            assert_eq!(
+                run(json!({"type":"set","key":"init.defaultbranch","value":"trunk"})).unwrap()["values"]
+                    ["init.defaultbranch"],
+                "trunk"
+            );
+            assert!(
+                run(json!({"type":"set","key":"init.defaultbranch","value":"bad..branch"}))
+                    .is_err()
+            );
+            assert_eq!(
+                run(json!({"type":"read"})).unwrap()["values"]["init.defaultbranch"],
+                "trunk"
+            );
             assert!(first["values"].get("credential.helper").is_none());
             run(json!({"type":"set_repository","repository_path":repository,"key":"user.name","value":"Updated"})).unwrap();
             assert_eq!(read_identity(true), "Updated");
@@ -969,6 +1165,28 @@ esac
             assert_eq!(read_identity(true), Value::Null);
             assert_eq!(read_identity(false), "Before");
             assert!(backend.admit_git_info(vec![json!({"operation":{"type":"set_repository","repository_path":"relative","key":"user.name","value":"bad"}})]).is_err());
+            assert!(backend.admit_git_info(vec![json!({"operation":{"type":"lfs_install_repository","repository_path":"relative","force":true}})]).is_err());
+            #[cfg(unix)]
+            if run(json!({"type":"lfs_status"})).unwrap()["available"] == true {
+                use std::os::unix::fs::PermissionsExt;
+                let hook = repository.join(".git/hooks/pre-push");
+                fs::create_dir_all(hook.parent().unwrap()).unwrap();
+                fs::write(&hook, "#!/bin/sh\necho custom-test-hook\n").unwrap();
+                fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+                let conflict = run(json!({"type":"lfs_install_repository","repository_path":repository,"force":false})).unwrap();
+                assert_eq!(conflict["error_kind"], "configuration");
+                assert!(
+                    fs::read_to_string(&hook)
+                        .unwrap()
+                        .contains("custom-test-hook")
+                );
+                assert_eq!(run(json!({"type":"lfs_install_repository","repository_path":repository,"force":true})).unwrap()["code"], 0);
+                assert!(
+                    fs::read_to_string(&hook)
+                        .unwrap()
+                        .contains("git lfs pre-push")
+                );
+            }
             assert!(backend.admit_git_info(vec![json!({"operation":{"type":"unset_repository","repository_path":repository,"key":"credential.helper"}})]).is_err());
             assert!(backend.admit_git_info(vec![json!({"operation":{"type":"set_repository","repository_path":repository,"key":"user.name"}})]).is_err());
             let updated = run(json!({"type":"set","key":"user.name","value":""})).unwrap();
@@ -1013,6 +1231,7 @@ esac
             .env("HOME", &root)
             .env("GIT_CONFIG_GLOBAL", root.join("gitconfig"))
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_EDITOR", "false")
             .env_remove("GIT_CONFIG_PARAMETERS")
             .env_remove("GIT_CONFIG_COUNT")
             .output()
@@ -1329,6 +1548,95 @@ esac
         }
         fs::write(first.join("first-only"), "test").unwrap();
         let backend = Backend::new(16).unwrap();
+        let destination = root.join("existing folder");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("keep.txt"), "keep").unwrap();
+        let init = |branch: &str| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"initialize_repository","repository_path":destination,"default_branch":branch}})]).unwrap())
+        };
+        assert_eq!(init("trunk").unwrap(), Value::Null);
+        assert_eq!(
+            fs::read_to_string(destination.join("keep.txt")).unwrap(),
+            "keep"
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join(".git/HEAD")).unwrap(),
+            "ref: refs/heads/trunk\n"
+        );
+        assert!(init("other").is_err());
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"initialize_repository","repository_path":"relative","default_branch":"trunk"}})]).is_err());
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&first)
+                .args([
+                    "config",
+                    "--local",
+                    "submodule.libs/nested.url",
+                    "https://user:synthetic-secret@github.com/Owner/Repo.git?token=synthetic-secret"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(backend.read_args(vec![json!({"repository_path":first,"method":"submodule_display_url","submodule_path":"libs/nested"})]).unwrap(), "https://github.com/owner/repo");
+        assert!(backend.read_args(vec![json!({"repository_path":first,"method":"submodule_display_url","submodule_path":"../outside"})]).is_err());
+        assert!(backend.admit(vec![json!({"repository_path":first,"method":"status","submodule_path":"libs/nested"})]).is_err());
+        fs::write(first.join(".git/description"), "  description\n").unwrap();
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":first,"method":"git_description"})
+                ])
+                .unwrap(),
+            "  description\n"
+        );
+        let write = |description: &str| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"set_description","repository_path":first,"description":description}})]).unwrap())
+        };
+        assert_eq!(write("changed 🦀\n").unwrap(), Value::Null);
+        assert_eq!(
+            fs::read_to_string(first.join(".git/description")).unwrap(),
+            "changed 🦀\n"
+        );
+        assert!(write(&"x".repeat(65537)).is_err());
+        assert_eq!(
+            fs::read_to_string(first.join(".git/description")).unwrap(),
+            "changed 🦀\n"
+        );
+        write("  description\n").unwrap();
+        assert!(backend.admit(vec![json!({"repository_path":first,"method":"git_description","key":"credential.helper"})]).is_err());
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&first)
+                .args(["config", "--local", "commit.gpgsign", "yes"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(backend.read_args(vec![json!({"repository_path":first,"method":"git_read_setting","key":"commit.gpgsign","canonical_bool":true})]).unwrap(), "true");
+        assert!(backend.read_args(vec![json!({"repository_path":first,"method":"git_read_setting","key":"credential.helper"})]).is_err());
+        assert!(backend.read_args(vec![json!({"repository_path":first,"method":"git_read_setting","key":"core.safecrlf","canonical_bool":true})]).is_err());
+        fs::write(first.join(".gitattributes"), "*.bin filter=lfs\n").unwrap();
+        let tracking = backend.read_args(vec![json!({"repository_path":first,"method":"lfs_file_tracking","paths":["a.bin", "-odd.txt", "a.bin"]})]).unwrap();
+        assert_eq!(tracking, json!([true, false, true]));
+        assert!(backend.read_args(vec![json!({"repository_path":first,"method":"lfs_file_tracking","paths":["../outside"]})]).is_err());
+        assert!(
+            backend
+                .admit(vec![
+                    json!({"repository_path":first,"method":"status","paths":[]})
+                ])
+                .is_err()
+        );
+        assert!(
+            backend
+                .admit(vec![
+                    json!({"repository_path":first,"method":"lfs_file_tracking"})
+                ])
+                .is_err()
+        );
+        fs::remove_file(first.join(".gitattributes")).unwrap();
         fs::write(first.join(".git/SQUASH_MSG"), "squash").unwrap();
         let context = backend
             .read_args(vec![
@@ -1413,6 +1721,49 @@ esac
                     json!({"repository_path":"relative","method":"status"})
                 ])
                 .is_err()
+        );
+        assert!(
+            Command::new("git")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", root.join("empty-gitconfig"))
+                .arg("-C")
+                .arg(&first)
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "initial"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let linked = root.join("linked");
+        assert!(
+            Command::new("git")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", root.join("empty-gitconfig"))
+                .arg("-C")
+                .arg(&first)
+                .args(["worktree", "add", "-q", "-b", "linked-branch"])
+                .arg(&linked)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":linked,"method":"git_description"})
+                ])
+                .unwrap(),
+            "  description\n"
         );
         fs::remove_dir_all(root).unwrap();
     }

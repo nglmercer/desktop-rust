@@ -9,20 +9,19 @@
   "scripts": {
     "build": "tsc",
     "install": "node-gyp rebuild && tsc",
-    "lint": "prettier -c **/*.js **/*.md",
-    "lint:fix": "prettier --write **/*.js **/*.md",
-    "test": "node script/test.mjs"
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "vitest run"
   },
   "dependencies": {
     "node-addon-api": "^7.0.0"
   },
   "devDependencies": {
-    "node-test-github-reporter": "^1.2.0",
-    "tsx": "^4.10.5",
     "node-gyp": "^10.1.0",
     "typescript": "^6.0.3",
-    "prettier": "^3.3.1",
-    "split2": "^4.1.0"
+    "@biomejs/biome": "2.6.7",
+    "split2": "^4.1.0",
+    "vitest": "3.2.7"
   },
   "binary": {
     "napi_versions": [

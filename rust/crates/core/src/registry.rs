@@ -756,6 +756,67 @@ pub async fn initialize(path: &Path) -> Result<Repository> {
     Repository::open(&destination).await
 }
 
+/// Initialize the directory chosen in Desktop without selecting or registering it.
+pub async fn initialize_desktop_repository(path: &Path, branch: &str) -> Result<()> {
+    anyhow::ensure!(path.is_absolute(), "repository path must be absolute");
+    anyhow::ensure!(
+        path.file_name().is_some(),
+        "repository path must name a directory"
+    );
+    anyhow::ensure!(
+        !branch.is_empty()
+            && branch.len() <= 4096
+            && !branch.starts_with('-')
+            && !branch.contains("@{"),
+        "invalid default branch"
+    );
+    let check = process::initialization_command(
+        &std::env::current_dir()?,
+        &args(&["check-ref-format", "--branch", branch]),
+    )
+    .await?;
+    anyhow::ensure!(check.code == 0, "invalid default branch");
+    let requested = path.to_owned();
+    let directory = crate::cancellation::blocking(move || {
+        fs::create_dir_all(&requested)?;
+        Ok(requested.canonicalize()?)
+    })
+    .await?;
+    anyhow::ensure!(
+        directory.parent().is_some(),
+        "filesystem root cannot be initialized here"
+    );
+    let bare =
+        process::initialization_command(&directory, &args(&["rev-parse", "--is-bare-repository"]))
+            .await?;
+    anyhow::ensure!(
+        matches!(bare.code, 0 | 128),
+        "Unable to inspect repository destination"
+    );
+    anyhow::ensure!(
+        bare.code != 0
+            || !String::from_utf8_lossy(&bare.stdout)
+                .trim()
+                .eq_ignore_ascii_case("true"),
+        "Destination is already a bare repository"
+    );
+    let git_directory = directory.join(".git");
+    crate::cancellation::blocking(move || {
+        fs::create_dir(&git_directory)
+            .context("Destination already has a Git directory or cannot be initialized")?;
+        Ok(())
+    })
+    .await?;
+    let setting = format!("init.defaultBranch={branch}");
+    let output =
+        process::initialization_command(&directory, &args(&["-c", &setting, "init"])).await?;
+    anyhow::ensure!(
+        output.code == 0,
+        "Repository initialization failed; inspect the destination before retrying"
+    );
+    Ok(())
+}
+
 /// Clone using system Git and its credential configuration. No secrets enter the registry.
 pub async fn clone_repository(url: &str, path: &Path) -> Result<Repository> {
     if url.is_empty()

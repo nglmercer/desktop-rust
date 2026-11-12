@@ -41,6 +41,7 @@ import {
   withoutRepositoryGitAccess,
 } from '../../lib/git/repository-operation'
 import { Repository } from '../../models/repository'
+import { backend } from '../../backend/client'
 
 /** URL used to provide information about submodules to the user. */
 const submoduleDocsUrl = 'https://gh.io/git-submodules'
@@ -327,29 +328,35 @@ export class CreateRepository extends React.Component<
       | 'licenses'
     >
   ): Promise<Repository | undefined> {
-    try {
-      await mkdir(fullPath, { recursive: true })
-      if (this.mounted) {
-        this.setState({ isValidPath: true })
-      }
-    } catch (e) {
-      if (e.code === 'EACCES' && e.errno === -13) {
+    const rustBackend = typeof window !== 'undefined' && backend().transportKind !== 'none'
+    if (!rustBackend) {
+      try {
+        await mkdir(fullPath, { recursive: true })
         if (this.mounted) {
-          this.setState({ isValidPath: false })
+          this.setState({ isValidPath: true })
         }
+      } catch (e) {
+        if (e.code === 'EACCES' && e.errno === -13) {
+          if (this.mounted) {
+            this.setState({ isValidPath: false })
+          }
+          return
+        }
+
+        log.error(
+          `createRepository: the directory at ${fullPath} is not valid`,
+          e
+        )
+        this.postCreationError(e)
         return
       }
-
-      log.error(
-        `createRepository: the directory at ${fullPath} is not valid`,
-        e
-      )
-      this.postCreationError(e)
-      return
     }
 
     try {
       await initGitRepository(fullPath)
+      if (rustBackend && this.mounted) {
+        this.setState({ isValidPath: true })
+      }
     } catch (e) {
       log.error(
         `createRepository: unable to initialize a Git repository at ${fullPath}`,

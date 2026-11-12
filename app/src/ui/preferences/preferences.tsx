@@ -138,6 +138,7 @@ interface IPreferencesState {
   readonly initialCommitterEmail: string | null
   readonly initialDefaultBranch: string | null
   readonly disallowedCharactersMessage: string | null
+  readonly gitSaveError?: string
   readonly useWindowsOpenSSH: boolean
   readonly showCommitLengthWarning: boolean
   readonly notificationsEnabled: boolean
@@ -215,6 +216,7 @@ export class Preferences extends React.Component<
   IPreferencesProps,
   IPreferencesState
 > {
+  private saveInProgress = false
   public constructor(props: IPreferencesProps) {
     super(props)
 
@@ -391,6 +393,11 @@ export class Preferences extends React.Component<
         onSubmit={this.onSave}
       >
         {this.renderDisallowedCharactersError()}
+        {this.state.gitSaveError !== undefined && (
+          <DialogError>
+            <span role="alert">{this.state.gitSaveError}</span>
+          </DialogError>
+        )}
         <div className="preferences-container">
           <TabBar
             onTabClicked={this.onTabClicked}
@@ -1014,6 +1021,18 @@ export class Preferences extends React.Component<
   }
 
   private onSave = async () => {
+    if (this.saveInProgress) {
+      return
+    }
+    this.saveInProgress = true
+    try {
+      await this.savePreferences()
+    } finally {
+      this.saveInProgress = false
+    }
+  }
+
+  private savePreferences = async () => {
     const { dispatcher } = this.props
     const copilotAppPath = this.state.copilotAppPath.trim()
     const initialCopilotAppPath = this.props.copilotAppPath?.trim() ?? ''
@@ -1034,8 +1053,11 @@ export class Preferences extends React.Component<
       return
     }
 
+    this.setState({ gitSaveError: undefined })
+    let shouldRefreshAuthor = false
+    let savingDefaultBranch = false
+    let savingGitSettings = true
     try {
-      let shouldRefreshAuthor = false
 
       if (this.state.committerName !== this.state.initialCommitterName) {
         await setGlobalConfigValue('user.name', this.state.committerName)
@@ -1049,6 +1071,7 @@ export class Preferences extends React.Component<
 
       if (this.props.repository !== null && shouldRefreshAuthor) {
         dispatcher.refreshAuthor(this.props.repository)
+        shouldRefreshAuthor = false
       }
 
       // If the entered default branch is empty, we don't store it and keep
@@ -1062,8 +1085,12 @@ export class Preferences extends React.Component<
         this.state.defaultBranch.length > 0 &&
         this.state.defaultBranch !== this.state.initialDefaultBranch
       ) {
+        savingDefaultBranch = true
         await setDefaultBranch(this.state.defaultBranch)
+        savingDefaultBranch = false
       }
+
+      savingGitSettings = false
 
       if (
         this.props.repositoryIndicatorsEnabled !==
@@ -1088,6 +1115,9 @@ export class Preferences extends React.Component<
         }
       }
     } catch (e) {
+      if (this.props.repository !== null && shouldRefreshAuthor) {
+        dispatcher.refreshAuthor(this.props.repository)
+      }
       if (isConfigFileLockError(e)) {
         const lockFilePath = parseConfigLockFilePathFromError(e.result)
 
@@ -1100,8 +1130,18 @@ export class Preferences extends React.Component<
         }
       }
 
-      this.props.onDismissed()
-      dispatcher.postError(e)
+      if (!savingGitSettings) {
+        this.props.onDismissed()
+        dispatcher.postError(e)
+        return
+      }
+
+      this.setState({
+        selectedIndex: PreferencesTab.Git,
+        gitSaveError: savingDefaultBranch
+          ? 'The default branch could not be saved. Check its name and Git configuration. Some changes may already have been saved; review them before retrying.'
+          : 'Git settings could not be saved. Some changes may already have been saved; review them before retrying.',
+      })
       return
     }
 

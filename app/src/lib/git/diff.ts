@@ -31,6 +31,7 @@ import { NullTreeSHA } from './diff-index'
 import { GitError } from 'dugite'
 import { IChangesetData, parseRawLogWithNumstat } from './log'
 import { getConfigValue } from './config'
+import { backend } from '../../backend/client'
 import { getMergeBase } from './merge'
 import { IStatusEntry } from '../status-parser'
 import { createLogParser } from './git-delimiter-parser'
@@ -807,7 +808,9 @@ async function buildSubmoduleDiff(
 ): Promise<IDiff> {
   const path = file.path
   const fullPath = Path.join(repository.path, path)
-  const url = await getConfigValue(repository, `submodule.${path}.url`, true)
+  const url = typeof window !== 'undefined' && backend().transportKind !== 'none'
+    ? await backend().repositorySubmoduleDisplayUrl(repository.path, path)
+    : await getConfigValue(repository, `submodule.${path}.url`, true)
 
   let oldSHA = null
   let newSHA = null

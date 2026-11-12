@@ -1,17 +1,17 @@
-import { stat, access } from 'fs/promises'
-import { constants } from 'fs'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
+import { stat, access } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { getSSHWrapperPath } from '../index'
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 
 const sshWrapperPath = getSSHWrapperPath()
 const run = promisify(execFile)
 
 describe('ssh-wrapper', () => {
   it('exists and is a regular file', async () =>
-    assert.equal(((await stat(sshWrapperPath)).isFile()), true))
+    assert.equal((await stat(sshWrapperPath)).isFile(), true))
 
   // On Windows, the binary generated is just useless, so no point to test it.
   // Also, this won't be used on Linux (for now at least), so don't bother to
@@ -37,7 +37,8 @@ describe('ssh-wrapper', () => {
       }
     )
 
-    assert.match(result.stderr,
+    assert.match(
+      result.stderr,
       /ssh_askpass: exec\(\/path\/to\/fake\/ssh-askpass\): No such file or directory/
     )
   })

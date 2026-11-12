@@ -53,7 +53,10 @@ pub use paths::{canonical_mutation_path, directory_exists, directory_path, path_
 mod submodules;
 mod worktrees;
 pub use preferences::{Preferences, PreferencesPatch, PreferencesStore, Theme};
-pub use settings::{ConfigScope, git_settings, git_version, set_git_setting};
+pub use settings::{
+    ConfigScope, GitReadSettingKey, git_global_config_path, git_settings, git_version,
+    set_git_setting,
+};
 mod history;
 mod stash;
 pub use stash::remote_deletion::{RemoteBranchDeletion, UpstreamDeletion};
@@ -68,6 +71,7 @@ use anyhow::{Context, Result, bail};
 pub use protocol::*;
 pub use registry::{
     Registry, SavedRepositories, SavedRepositoryRecord, clone_repository, initialize,
+    initialize_desktop_repository,
 };
 use serde_json::Value;
 use std::{
@@ -287,6 +291,7 @@ impl Repository {
             }
             Operation::LfsToolStatus => return lfs_tool_status(&self.path).await,
             Operation::LfsStatus { paths } => return self.lfs_status(paths).await,
+            Operation::LfsFileTracking { paths } => return self.lfs_file_tracking(paths).await,
             Operation::LfsInstall {
                 scope,
                 force,
@@ -294,6 +299,9 @@ impl Repository {
                 skip_smudge,
             } => return lfs_install(&self.path, scope, force, skip_repo, skip_smudge).await,
             Operation::Submodules => return self.submodules().await,
+            Operation::SubmoduleDisplayUrl { path } => {
+                return self.submodule_display_url(path).await;
+            }
             Operation::SubmoduleUpdate { paths, recursive } => {
                 return self
                     .submodule_command("update", paths, recursive, false)
@@ -312,6 +320,18 @@ impl Repository {
             }
 
             Operation::GitSettings { scope } => return git_settings(&self.path, scope).await,
+            Operation::GitDescription => return self.git_description().await,
+            Operation::SetGitDescription { description } => {
+                return self.set_git_description(description).await;
+            }
+            Operation::GitReadSetting {
+                key,
+                only_local,
+                canonical_bool,
+            } => {
+                return settings::git_read_setting(&self.path, key, only_local, canonical_bool)
+                    .await;
+            }
             Operation::GitIdentityValue { key, only_local } => {
                 return settings::git_identity_value(&self.path, &key, only_local).await;
             }
@@ -755,6 +775,9 @@ impl Repository {
             }
             GitSettings { .. }
             | GitIdentityValue { .. }
+            | GitDescription
+            | SetGitDescription { .. }
+            | GitReadSetting { .. }
             | SetGitSetting { .. }
             | Worktrees
             | WorktreeAdd { .. }
@@ -762,6 +785,7 @@ impl Repository {
             | WorktreeMove { .. }
             | WorktreeLock { .. } => unreachable!("handled by execute"),
             Submodules
+            | SubmoduleDisplayUrl { .. }
             | SubmoduleUpdate { .. }
             | SubmoduleSync { .. }
             | SubmoduleDeinit { .. }
@@ -778,6 +802,7 @@ impl Repository {
             | LfsUntrack { .. }
             | LfsToolStatus
             | LfsStatus { .. }
+            | LfsFileTracking { .. }
             | LfsInstall { .. } => unreachable!("handled by execute"),
             Snapshot
             | StatusDetailed { .. }

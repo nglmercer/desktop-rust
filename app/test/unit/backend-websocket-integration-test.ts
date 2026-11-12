@@ -113,8 +113,8 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       )
       await chmod(bin, 0o700)
       await writeFile(
-        path.join(directory, 'gitconfig'),
-        '[user]\n\tname = Bridge Test\n\temail = bridge@example.invalid\n'
+        path.join(directory, 'git config with spaces'),
+        '[user]\n\tname = Bridge Test\n\temail = bridge@example.invalid\n[core]\n\tautocrlf = input\n'
       )
       server = spawn(
         path.resolve('rust/target/debug/desktop-rs'),
@@ -133,7 +133,8 @@ describe.skipIf(!enabled || process.platform === 'win32')(
             PATH: `${directory}${path.delimiter}${process.env.PATH ?? ''}`,
             BRIDGE_GH_PID: marker,
             GIT_CONFIG_NOSYSTEM: '1',
-            GIT_CONFIG_GLOBAL: path.join(directory, 'gitconfig'),
+            GIT_EDITOR: 'false',
+            GIT_CONFIG_GLOBAL: path.join(directory, 'git config with spaces'),
           },
           stdio: ['ignore', 'ignore', 'pipe'],
         }
@@ -165,17 +166,30 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const client = new BackendClient()
       clients.push(client)
       expect((await bounded(client.waitReady())).version).toBe(3)
+      const configPath = path.join(directory, 'git config with spaces')
+      const savedConfig = await readFile(configPath)
+      await unlink(configPath)
+      expect(await client.globalGitConfigPath()).toBe(configPath)
+      await readFile(configPath)
+      await writeFile(configPath, savedConfig)
       expect(await bounded(client.gitVersion())).toBe(execFileSync('git', ['--version'], { encoding: 'utf8' }).trim().replace(/^git version /, ''))
       expect(await bounded(client.request('git_settings', { scope: 'global' }))).toMatchObject({
         scope: 'global',
         values: { 'user.name': 'Bridge Test', 'user.email': 'bridge@example.invalid' },
       })
+      expect(await client.request('set_git_setting', { scope: 'global', key: 'init.defaultbranch', value: 'trunk' })).toMatchObject({ values: { 'init.defaultbranch': 'trunk' } })
+      await expect(client.request('set_git_setting', { scope: 'global', key: 'init.defaultbranch', value: 'bad..branch' })).rejects.toThrow()
+      expect(await client.request('set_git_setting', { scope: 'global', key: 'init.defaultbranch', value: null })).toMatchObject({ values: { 'init.defaultbranch': null } })
       expect(await bounded(client.request('set_git_setting', { scope: 'global', key: 'user.name', value: '' }))).toMatchObject({ values: { 'user.name': '', 'user.email': 'bridge@example.invalid' } })
       expect(await bounded(client.request('git_settings', { scope: 'global' }))).toMatchObject({ values: { 'user.name': '' } })
       await expect(bounded(client.request('set_git_setting', { scope: 'global', key: 'credential.helper', value: 'unsafe' }))).rejects.toThrow()
       expect(await bounded(client.request('set_git_setting', { scope: 'global', key: 'user.name', value: 'Bridge Test' }))).toMatchObject({ values: { 'user.name': 'Bridge Test' } })
       expect(dom.window.location.hash).toBe('')
       await expect(bounded(client.snapshot())).resolves.toBeNull()
+      const beforeSelection = path.join(directory, 'before selection')
+      await client.initializeDesktopRepository(beforeSelection, 'main')
+      expect(await readFile(path.join(beforeSelection, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/main\n')
+      await expect(client.snapshot()).resolves.toBeNull()
       await expect(client.directoryExists(directory)).resolves.toBe(true)
       await expect(client.pathExists(directory)).resolves.toBe(true)
       await expect(
@@ -201,6 +215,100 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await bounded(
         client.request('init_repository', { path: firstRepository })
       )
+      const initialSelection = await client.snapshot()
+      const existingFolder = path.join(directory, 'existing folder')
+      await mkdir(existingFolder)
+      await writeFile(path.join(existingFolder, 'keep.txt'), 'existing content')
+      await client.initializeDesktopRepository(existingFolder, 'trunk')
+      expect(await readFile(path.join(existingFolder, 'keep.txt'), 'utf8')).toBe('existing content')
+      expect(await readFile(path.join(existingFolder, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/trunk\n')
+      await expect(client.initializeDesktopRepository(existingFolder, 'other')).rejects.toThrow()
+      expect(await readFile(path.join(existingFolder, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/trunk\n')
+      const nestedNew = path.join(directory, 'new parent', 'new child')
+      await client.initializeDesktopRepository(nestedNew, 'feature/main')
+      expect(await readFile(path.join(nestedNew, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/feature/main\n')
+      const insideRepository = path.join(firstRepository, 'nested project')
+      await client.initializeDesktopRepository(insideRepository, 'nested')
+      expect(await readFile(path.join(insideRepository, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/nested\n')
+      await rm(insideRepository, { recursive: true, force: true })
+      const blockedFolder = path.join(directory, 'blocked')
+      const protectedFolder = path.join(directory, 'protected')
+      await mkdir(blockedFolder)
+      await mkdir(protectedFolder)
+      await writeFile(path.join(protectedFolder, 'keep'), 'protected')
+      await symlink(protectedFolder, path.join(blockedFolder, '.git'))
+      await expect(client.initializeDesktopRepository(blockedFolder, 'trunk')).rejects.toThrow()
+      expect(await readFile(path.join(protectedFolder, 'keep'), 'utf8')).toBe('protected')
+      const invalidNew = path.join(directory, 'invalid branch')
+      await expect(client.initializeDesktopRepository(invalidNew, 'bad..branch')).rejects.toThrow()
+      expect(await client.directoryExists(invalidNew)).toBe(false)
+      await expect(client.initializeDesktopRepository(bare, 'trunk')).rejects.toThrow()
+      await expect(client.initializeDesktopRepository(path.parse(directory).root, 'trunk')).rejects.toThrow()
+      expect(await client.snapshot()).toEqual(initialSelection)
+      execFileSync('git', ['-C', firstRepository, 'config', '--local', 'submodule.libs/nested.url', 'https://user:synthetic-secret@github.com/Owner/Repo.git?token=synthetic-secret'])
+      await expect(client.repositorySubmoduleDisplayUrl(firstRepository, 'libs/nested')).resolves.toBe('https://github.com/owner/repo')
+      await expect(client.repositorySubmoduleDisplayUrl(firstRepository, 'missing')).resolves.toBeNull()
+      await expect(client.repositorySubmoduleDisplayUrl(firstRepository, '../outside')).rejects.toThrow()
+      await expect(client.repositoryGitDescription(firstRepository)).resolves.toBe('')
+      await writeFile(path.join(firstRepository, '.git', 'description'), '  Publish this repository\n')
+      await expect(client.repositoryGitDescription(firstRepository)).resolves.toBe('  Publish this repository\n')
+      await writeFile(path.join(directory, 'private-description'), 'private synthetic text')
+      await unlink(path.join(firstRepository, '.git', 'description'))
+      await symlink(path.join(directory, 'private-description'), path.join(firstRepository, '.git', 'description'))
+      await expect(client.repositoryGitDescription(firstRepository)).resolves.toBe('')
+      await expect(client.setRepositoryGitDescription(firstRepository, 'unsafe')).rejects.toThrow()
+      expect(await readFile(path.join(directory, 'private-description'), 'utf8')).toBe('private synthetic text')
+      await unlink(path.join(firstRepository, '.git', 'description'))
+      await writeFile(path.join(firstRepository, '.git', 'description'), '  Publish this repository\n')
+      const unselected = path.join(directory, 'unselected')
+      execFileSync('git', ['init', '-q', unselected])
+      await mkdir(path.join(unselected, 'nested'))
+      await writeFile(path.join(unselected, '.gitattributes'), '*.bin filter=lfs\n')
+      execFileSync('git', ['-C', unselected, 'config', '--local', 'core.safecrlf', 'warn'])
+      execFileSync('git', ['-C', unselected, 'config', '--local', 'commit.gpgsign', 'yes'])
+      await expect(client.repositoryGitReadSetting(unselected, 'core.safecrlf', true, false)).resolves.toBe('warn')
+      await expect(client.repositoryGitReadSetting(unselected, 'core.autocrlf', false, false)).resolves.toBe('input')
+      await expect(client.repositoryGitReadSetting(unselected, 'core.autocrlf', true, false)).resolves.toBeNull()
+      await expect(client.repositoryGitReadSetting(unselected, 'commit.gpgsign', false, true)).resolves.toBe('true')
+      await expect(client.repositoryGitReadSetting(unselected, 'pull.ff', true, false)).resolves.toBeNull()
+      await expect(client.request('git_read_repository_setting', { path: unselected, key: 'credential.helper' })).rejects.toThrow()
+      await expect(client.request('git_read_repository_setting', { path: unselected, key: 'core.safecrlf', canonical_bool: true })).rejects.toThrow()
+      const selectedBefore = await client.snapshot()
+      await client.setRepositoryGitDescription(unselected, 'unselected description 🦀\n')
+      expect(await readFile(path.join(unselected, '.git', 'description'), 'utf8')).toBe('unselected description 🦀\n')
+      await expect(client.setRepositoryGitDescription(path.join(unselected, 'nested'), 'bad')).rejects.toThrow()
+      await expect(client.repositoryLfsFileTracking(unselected, ['file.bin', 'plain'])).resolves.toEqual([true, false])
+      expect(await client.repositoryUsesLfs(unselected)).toBe(await client.lfsAvailable())
+      await expect(client.repositoryLfsFileTracking(path.join(unselected, 'nested'), ['file.bin'])).rejects.toThrow()
+      await expect(client.repositoryLfsFileTracking('relative', ['file.bin'])).rejects.toThrow()
+      await expect(client.request('lfs_repository', { path: unselected, action: { type: 'install_hooks', force: true, extra: true } })).rejects.toThrow()
+      if (await client.lfsAvailable()) {
+        const hook = path.join(unselected, '.git', 'hooks', 'pre-push')
+        await mkdir(path.dirname(hook), { recursive: true })
+        await writeFile(hook, '#!/bin/sh\necho unselected-custom-hook\n')
+        await chmod(hook, 0o700)
+        await expect(client.installRepositoryLfsHooks(unselected, false)).rejects.toMatchObject({ code: 'lfs_install_failed' })
+        expect(await readFile(hook, 'utf8')).toContain('unselected-custom-hook')
+        await client.installRepositoryLfsHooks(unselected, true)
+        expect(await readFile(hook, 'utf8')).toContain('git lfs pre-push')
+      }
+      expect(await client.snapshot()).toEqual(selectedBefore)
+      await writeFile(path.join(firstRepository, '.gitattributes'), '*.bin filter=lfs\n')
+      expect(await client.repositoryUsesLfs(firstRepository)).toBe(await client.lfsAvailable())
+      await expect(client.repositoryLfsFileTracking(firstRepository, ['a.bin', '-odd.txt', 'a.bin'])).resolves.toEqual([true, false, true])
+      await expect(client.repositoryLfsFileTracking(firstRepository, ['../outside'])).rejects.toThrow()
+      await unlink(path.join(firstRepository, '.gitattributes'))
+      if (await client.lfsAvailable()) {
+        const hook = path.join(firstRepository, '.git', 'hooks', 'pre-push')
+        await mkdir(path.dirname(hook), { recursive: true })
+        await writeFile(hook, '#!/bin/sh\necho custom-test-hook\n')
+        await chmod(hook, 0o700)
+        await expect(client.installRepositoryLfsHooks(firstRepository, false)).rejects.toMatchObject({ code: 'lfs_install_failed' })
+        expect(await readFile(hook, 'utf8')).toContain('custom-test-hook')
+        await client.installRepositoryLfsHooks(firstRepository, true)
+        expect(await readFile(hook, 'utf8')).toContain('git lfs pre-push')
+        await unlink(hook)
+      }
       expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', true)).toBeNull()
       expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', false)).toBe('Bridge Test')
       await client.setRepositoryGitIdentityValue(firstRepository, 'user.name', 'Local Author')
@@ -611,5 +719,48 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       })
       expect(dom.window.sessionStorage.getItem('desktopBridgeToken')).toBeNull()
     }, 40_000)
+
+    it('initializes the requested directory even when Git environment points elsewhere', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-init-env-'))
+      const decoy = path.join(directory, 'decoy')
+      const destination = path.join(directory, 'destination')
+      execFileSync('git', ['init', '-q', decoy])
+      const originalHead = await readFile(path.join(decoy, '.git', 'HEAD'), 'utf8')
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), [
+        '--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0',
+      ], {
+        env: {
+          ...process.env,
+          HOME: directory,
+          GIT_CONFIG_GLOBAL: path.join(directory, 'gitconfig'),
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_DIR: path.join(decoy, '.git'),
+          GIT_WORK_TREE: decoy,
+          GIT_COMMON_DIR: path.join(decoy, '.git'),
+          GIT_INDEX_FILE: path.join(decoy, '.git', 'index'),
+          GIT_OBJECT_DIRECTORY: path.join(decoy, '.git', 'objects'),
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      })
+      const lines = createInterface({ input: server.stderr! })
+      const announcement = await bounded(new Promise<string>((resolve, reject) => {
+        lines.once('line', resolve)
+        server!.once('error', reject)
+        server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`)))
+      }))
+      const sessionUrl = announcement.startsWith('Open ') ? announcement.slice(5) : ''
+      expect(/^http:\/\/127\.0\.0\.1:\d+\/#token=/.test(sessionUrl)).toBe(true)
+      dom = new JSDOM('', { url: sessionUrl })
+      vi.stubGlobal('window', dom.window)
+      vi.stubGlobal('sessionStorage', dom.window.sessionStorage)
+      vi.stubGlobal('WebSocket', dom.window.WebSocket)
+      const client = new BackendClient()
+      clients.push(client)
+      await bounded(client.waitReady())
+      await client.initializeDesktopRepository(destination, 'trunk')
+      expect(await readFile(path.join(destination, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/trunk\n')
+      expect(await readFile(path.join(decoy, '.git', 'HEAD'), 'utf8')).toBe(originalHead)
+      await expect(client.snapshot()).resolves.toBeNull()
+    }, 30_000)
   }
 )

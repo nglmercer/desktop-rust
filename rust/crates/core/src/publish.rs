@@ -12,9 +12,32 @@ use cap_std::{
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{io::Read, path::Path};
+use std::{
+    io::{Read, Write},
+    path::Path,
+};
 
 impl Repository {
+    /// Read the shared Git description used to prefill repository publication.
+    pub(crate) async fn git_description(&self) -> Result<Value> {
+        let path = self.common_directory().await?.join("description");
+        Ok(json!(
+            cancellation::blocking(move || read_description(&path)).await?
+        ))
+    }
+
+    /// Replace the shared Git description without following a symlink.
+    pub(crate) async fn set_git_description(&self, description: String) -> Result<Value> {
+        ensure!(
+            description.len() <= 65536,
+            "Repository description exceeds 64 KiB"
+        );
+        let directory = self.common_directory().await?;
+        cancellation::blocking(move || write_description(&directory, description.as_bytes()))
+            .await?;
+        Ok(Value::Null)
+    }
+
     /// Discover stored accounts without requiring a pre-existing fetch remote.
     pub(crate) async fn publish_context(&self, host: &str) -> Result<Value> {
         crate::github::validate_host(host)?;
@@ -1318,6 +1341,62 @@ fn publish_push_plan(
     Ok(("planned", pushes))
 }
 
+fn write_description(parent: &Path, contents: &[u8]) -> Result<()> {
+    let directory = Dir::open_ambient_dir(parent, ambient_authority())?;
+    let mut existing_options = OpenOptions::new();
+    existing_options.write(true).follow(FollowSymlinks::No);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        existing_options.custom_flags(libc::O_NONBLOCK);
+    }
+    let permissions = match directory.open_with("description", &existing_options) {
+        Ok(file) => {
+            let metadata = file.metadata()?;
+            ensure!(
+                metadata.is_file(),
+                "Repository description is not a regular file"
+            );
+            Some(metadata.permissions())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let temporary = format!(".desktop-description-{}", uuid::Uuid::new_v4());
+    let result = (|| -> Result<()> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.mode(0o666);
+        }
+        let mut file = directory.open_with(&temporary, &options)?;
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
+        file.write_all(contents)?;
+        file.sync_all()?;
+        cancellation::Cancellation::current().check()?;
+        match directory.symlink_metadata("description") {
+            Ok(metadata) => ensure!(
+                metadata.is_file(),
+                "Repository description is not a regular file"
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        directory.rename(&temporary, &directory, "description")?;
+        #[cfg(unix)]
+        directory.open(".")?.into_std().sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = directory.remove_file(&temporary);
+    }
+    result
+}
+
 fn read_description(path: &Path) -> Result<String> {
     let Some(parent) = path.parent() else {
         return Ok(String::new());
@@ -1338,7 +1417,9 @@ fn read_description(path: &Path) -> Result<String> {
         _ => return Ok(String::new()),
     };
     let mut bytes = Vec::new();
-    file.by_ref().take(65537).read_to_end(&mut bytes)?;
+    Read::by_ref(&mut file)
+        .take(65537)
+        .read_to_end(&mut bytes)?;
     ensure!(
         bytes.len() <= 65536,
         "Repository description exceeds 64 KiB"
@@ -1488,6 +1569,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_description(&description).unwrap(), "");
+        write_description(&root, "  changed 🦀\n".as_bytes()).unwrap();
+        assert_eq!(read_description(&description).unwrap(), "  changed 🦀\n");
         #[cfg(unix)]
         {
             use std::{ffi::CString, os::unix::fs::symlink};
@@ -1496,10 +1579,13 @@ mod tests {
             std::fs::write(&outside, "PRIVATE-MARKER").unwrap();
             symlink(&outside, &description).unwrap();
             assert_eq!(read_description(&description).unwrap(), "");
+            assert!(write_description(&root, b"must not escape").is_err());
+            assert_eq!(std::fs::read_to_string(&outside).unwrap(), "PRIVATE-MARKER");
             std::fs::remove_file(&description).unwrap();
             let name = CString::new(description.as_os_str().as_encoded_bytes()).unwrap();
             assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
             assert_eq!(read_description(&description).unwrap(), "");
+            assert!(write_description(&root, b"must not block").is_err());
         }
         std::fs::remove_dir_all(root).unwrap();
     }

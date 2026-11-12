@@ -156,6 +156,37 @@ pub async fn run_lfs(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     run_command(path, command, args, None, 2 * 1024 * 1024, None).await
 }
 
+/// Ask Git to prepare its global config and print the path passed to its editor.
+pub async fn global_config_path(path: &Path) -> Result<RawOutput> {
+    let mut command = git_native_paths(None);
+    command.env("GIT_EDITOR", "printf %s");
+    run_command(
+        path,
+        command,
+        &crate::args(&["config", "--edit", "--global"]),
+        None,
+        64 * 1024,
+        None,
+    )
+    .await
+}
+
+/// Run initialization checks without inheriting a different Git worktree.
+pub(crate) async fn initialization_command(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    let mut command = git_native_paths(None);
+    for variable in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ] {
+        command.env_remove(variable);
+    }
+    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+}
+
 fn git_native_paths(index: Option<&Path>) -> Command {
     let mut command = git_base(index);
     command

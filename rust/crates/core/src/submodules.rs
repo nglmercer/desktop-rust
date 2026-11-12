@@ -4,6 +4,32 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 impl Repository {
+    /// Read a submodule's local URL as a credential-free repository link.
+    pub(crate) async fn submodule_display_url(&self, path: GitPath) -> Result<Value> {
+        let path = validate_path(path)?;
+        let path = path.to_str().context("Submodule path is not valid UTF-8")?;
+        anyhow::ensure!(path.len() <= 4096, "Submodule path exceeds supported size");
+        let key = format!("submodule.{path}.url");
+        let output = self
+            .run(&args(&["config", "--local", "--null", "--get", &key]))
+            .await?;
+        if output.code == 1 {
+            return Ok(Value::Null);
+        }
+        if output.code != 0 {
+            bail!("Unable to read the submodule URL");
+        }
+        let value = output
+            .stdout
+            .split(|byte| *byte == 0)
+            .next()
+            .unwrap_or_default();
+        let link = std::str::from_utf8(value)
+            .ok()
+            .and_then(submodule_display_link);
+        Ok(json!(link))
+    }
+
     pub(crate) async fn submodules(&self) -> Result<Value> {
         if !self.path.join(".gitmodules").exists() {
             return Ok(json!([]));
@@ -149,5 +175,40 @@ impl Repository {
         command.extend(args(&["--", &url]));
         command.push(validate_path(path)?);
         Ok(serde_json::to_value(self.run(&command).await?.text())?)
+    }
+}
+
+fn submodule_display_link(value: &str) -> Option<String> {
+    let identity = crate::RepositoryIdentity::from_url(value).ok()?;
+    Some(format!(
+        "https://{}/{}/{}",
+        identity.host, identity.owner, identity.name
+    ))
+}
+
+#[cfg(test)]
+mod display_url_tests {
+    use super::submodule_display_link;
+
+    #[test]
+    fn display_links_exclude_private_transport_data() {
+        for remote in [
+            "https://user:secret@github.com/Owner/Repo.git?token=secret#fragment",
+            "git@github.com:Owner/Repo.git",
+            "ssh://git@github.com:2222/Owner/Repo.git",
+        ] {
+            assert_eq!(
+                submodule_display_link(remote).as_deref(),
+                Some("https://github.com/owner/repo")
+            );
+        }
+        for remote in [
+            "../local/repo",
+            "file:///tmp/private",
+            "https://github.com/owner/../secret",
+            "git@github.com:owner/repo?token=secret",
+        ] {
+            assert_eq!(submodule_display_link(remote), None);
+        }
     }
 }

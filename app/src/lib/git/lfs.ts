@@ -62,6 +62,11 @@ export async function installLFSHooks(
     return
   }
 
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().installRepositoryLfsHooks(repository.path, force)
+    return
+  }
+
   const args = ['lfs', 'install']
   if (force) {
     args.push('--force')
@@ -74,6 +79,10 @@ export async function installLFSHooks(
 export async function isUsingLFS(repository: Repository): Promise<boolean> {
   if (!(await isLFSAvailable())) {
     return false
+  }
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().repositoryUsesLfs(repository.path)
   }
 
   const env = {
@@ -114,6 +123,10 @@ export async function isTrackedByLFS(
   repository: Repository,
   path: string
 ): Promise<boolean> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const result = await backend().repositoryLfsFileTracking(repository.path, [path])
+    return result[0]
+  }
   const { stdout } = await git(
     ['check-attr', 'filter', path],
     repository.path,
@@ -152,6 +165,17 @@ export async function filesNotTrackedByLFS(
   repository: Repository,
   filePaths: ReadonlyArray<string>
 ): Promise<ReadonlyArray<string>> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const untracked: string[] = []
+    for (let offset = 0; offset < filePaths.length; offset += 1000) {
+      const paths = filePaths.slice(offset, offset + 1000)
+      const tracked = await backend().repositoryLfsFileTracking(repository.path, paths)
+      paths.forEach((path, index) => {
+        if (!tracked[index]) untracked.push(path)
+      })
+    }
+    return untracked
+  }
   const filesNotTrackedByGitLFS = new Array<string>()
 
   for (const file of filePaths) {

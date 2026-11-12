@@ -63,15 +63,32 @@ asset proxy and an authenticated real bridge. Browser window state, focus,
 theme and app-resource path queries are now answered locally, and the welcome
 screen reads and writes global Git identity through the typed bridge. A failed
 or partially completed identity save keeps the setup form open for review.
-The Wry shell also exposes bounded, cancellable global identity operations for
-the same two keys without requiring a selected repository; interrupted writes
-report an uncertain outcome and must be checked before retrying.
+The Wry shell also exposes bounded, cancellable global identity and default
+branch settings without requiring a selected repository; interrupted writes
+report an uncertain outcome and must be checked before retrying. The default
+branch preference uses the same allowlisted Rust setting through both transports
+and rejects invalid branch names. If a Git setting save fails, Preferences stays
+open on the Git tab, warns that earlier writes may have succeeded, and allows a
+retry; duplicate save submissions are suppressed while a save is in flight.
+The path used to edit the global Git configuration is also obtained from Rust
+using Git's own file-selection and creation behavior. Editor launching itself
+still has legacy renderer callers.
 Repository identity reads now use Git's local-only or inherited lookup through
 both transports. WebSocket requests bind to the selected repository before the
 read, and reject a selection change instead of querying a different repository.
+Identity and other allowlisted reads share the same Git configuration parser;
+the identity protocol remains separate to preserve that selection fence.
 Repository identity writes and removals are scoped to the requested repository;
 WebSocket mutations use the same binding. Repeated removal is idempotent, and a
 cancelled write requires checking Git settings before retry.
+Repository reads for line endings, pull behavior, trailer separators and commit
+signing use a separate allowlist through both Rust transports. They preserve
+Git's inherited/local precedence and boolean parsing, without exposing arbitrary
+configuration keys. The browser transport accepts explicit repository roots
+without changing selection.
+Submodule diff links use a separate repository-scoped Rust read of the local
+submodule URL. Only a validated, credential-free repository link crosses the
+transport; unsupported or local-only URLs do not produce a link.
 This probe does not
 establish full browser workflow parity or enable the production entry. In the
 empty-repository probe, those identity reads no longer invoked the legacy Git
@@ -126,6 +143,27 @@ runs in Vitest against the installed GitHub CLI and a local TLS proxy; its
 duplicate, privacy, race and cancellation checks replace the Python test.
 The Git credential and pull-request checkout tracking suites now run in Vitest
 against real local HTTPS Git and Git LFS services.
+The vendored trampoline package's native-binary tests also run in Vitest; its
+JavaScript test-runner script and Node test reporter dependency were removed.
+Its source, tests, package configuration and README are checked with Biome
+instead of its separate Prettier dependency, and both checks run in CI.
+The trampoline itself remains native legacy code used by the Electron build.
+
+The publish dialog now reads the Git description through the Rust backend for
+both transports, including linked worktrees. The shared reader preserves text,
+normalizes Git's default description to empty, and refuses symlinks and
+non-regular files. Repository-creation description writes use a bounded,
+atomic Rust operation on the explicitly requested repository and reject
+symlinks and non-regular files. The Electron filesystem fallback remains, with
+its filesystem test suite migrated to Vitest.
+
+The Desktop create-repository initializer now uses Rust for directory creation
+and Git initialization when a Rust transport is active. It accepts an existing
+non-empty folder, preserves its files, uses the configured default branch, and
+does not select or register the result. It refuses existing Git metadata or a
+bare repository. A failed or interrupted initialization may leave a partial
+`.git` directory, which must be inspected before retrying. Later registration,
+README, license and commit steps still have legacy callers.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository
@@ -467,11 +505,17 @@ Legacy `lfs.ts` service mappings are now explicit:
 | `installGlobalLFSFilters(force)`          | `lfs_install`, global scope with skip-repo                                                                               |
 | `installLFSHooks(repository, force)`      | `lfs_install` in the selected repository, global scope for the original configuration behavior                           |
 | `isUsingLFS(repository)`                  | `lfs_status.using_lfs`                                                                                                   |
-| `isTrackedByLFS(repository, path)`        | NUL-framed `lfs_status.files[].tracked`                                                                                  |
-| `filesNotTrackedByLFS(repository, paths)` | Batched status data for general callers; staged-blob commit review replaces the oversized-file warning in the new client |
+| `isTrackedByLFS(repository, path)`        | NUL-framed `lfs_file_tracking`, independent of whether Git LFS is installed                                              |
+| `filesNotTrackedByLFS(repository, paths)` | Bounded `lfs_file_tracking` batches; staged-blob commit review replaces the oversized-file warning in the new client      |
 
-The app-store/startup/dispatcher and changes-sidebar callers still retain their
-Electron flows. Source audit found no dedicated lock-management API/UI in those
+The existing TypeScript helpers use scoped Rust requests for availability,
+global setup, repository hook installation, pattern inspection and file
+attributes when a Rust transport is active; their Electron fallback remains.
+Hook conflicts are returned as failures unless force is explicitly selected.
+The browser bridge also supports explicit repository roots for these LFS
+operations, so inspecting or initializing multiple repositories leaves the
+selected repository unchanged. Nested and relative paths are rejected.
+Source audit found no dedicated lock-management API/UI in those
 legacy LFS paths; native locks remain available through Git passthrough, and
 additional typed lock management is not claimed here. Remaining LFS audits
 include extension/reference-cache previews, native filesystem behavior, and
@@ -1825,7 +1869,7 @@ app's models/stores/UI/platform integrations also require audit.
 | `core.ts`                            | Pending semantic audit and replacement                                                                                                                                                                            |
 | `create-tail-stream.ts`              | Pending semantic audit and replacement                                                                                                                                                                            |
 | `credential.ts`                      | Pending semantic audit and replacement                                                                                                                                                                            |
-| `description.ts`                     | Pending semantic audit and replacement                                                                                                                                                                            |
+| `description.ts`                     | Partial: reads and creation-time writes use Rust with worktree and symlink handling; Electron fallback remains                                                                                                    |
 | `diff.ts`                            | Partial: structured working/history/conflict previews, ordinary LFS payloads and selection implemented; larger/custom-filter/image workflows pending                                                              |
 | `diff-check.ts`                      | Partial: native marker diagnostics and explicit consent for edited-resolution staging; other callers/status propagation pending                                                                                   |
 | `diff-index.ts`                      | Pending semantic audit and replacement                                                                                                                                                                            |

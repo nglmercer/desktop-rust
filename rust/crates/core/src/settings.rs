@@ -20,6 +20,86 @@ impl ConfigScope {
         }
     }
 }
+
+/// Non-secret configuration used by the renderer's repository workflows.
+#[derive(Clone, Debug, Deserialize)]
+pub enum GitReadSettingKey {
+    #[serde(rename = "core.autocrlf")]
+    AutoCrlf,
+    #[serde(rename = "core.safecrlf")]
+    SafeCrlf,
+    #[serde(rename = "pull.ff")]
+    PullFf,
+    #[serde(rename = "pull.rebase")]
+    PullRebase,
+    #[serde(rename = "trailer.separators")]
+    TrailerSeparators,
+    #[serde(rename = "commit.gpgsign")]
+    CommitGpgSign,
+}
+
+impl GitReadSettingKey {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::AutoCrlf => "core.autocrlf",
+            Self::SafeCrlf => "core.safecrlf",
+            Self::PullFf => "pull.ff",
+            Self::PullRebase => "pull.rebase",
+            Self::TrailerSeparators => "trailer.separators",
+            Self::CommitGpgSign => "commit.gpgsign",
+        }
+    }
+}
+
+/// Read a fixed non-secret setting using Git's normal precedence and parsing.
+pub async fn git_read_setting(
+    path: &Path,
+    key: GitReadSettingKey,
+    only_local: bool,
+    canonical_bool: bool,
+) -> Result<Value> {
+    if canonical_bool && !matches!(key, GitReadSettingKey::CommitGpgSign) {
+        bail!("boolean parsing is not supported for this setting");
+    }
+    read_git_config(path, key.as_str(), only_local, canonical_bool).await
+}
+
+/// Read one identity field with the same precedence rules as other settings.
+pub(crate) async fn git_identity_value(path: &Path, key: &str, only_local: bool) -> Result<Value> {
+    if !matches!(key, "user.name" | "user.email") {
+        bail!("unsupported Git identity field");
+    }
+    read_git_config(path, key, only_local, false).await
+}
+
+async fn read_git_config(
+    path: &Path,
+    key: &str,
+    only_local: bool,
+    canonical_bool: bool,
+) -> Result<Value> {
+    let mut command = args(&["config", "-z"]);
+    if only_local {
+        command.extend(args(&["--local"]));
+    }
+    if canonical_bool {
+        command.extend(args(&["--type", "bool"]));
+    }
+    command.push(key.into());
+    let output = process::run(path, &command).await?;
+    if output.code == 1 {
+        return Ok(Value::Null);
+    }
+    if output.code != 0 {
+        bail!("Git configuration read failed");
+    }
+    let value = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .next()
+        .unwrap_or_default();
+    Ok(json!(String::from_utf8_lossy(value)))
+}
 const KEYS: &[&str] = &[
     "user.name",
     "user.email",
@@ -49,29 +129,17 @@ pub async fn git_version() -> Result<String> {
     Ok(version.to_owned())
 }
 
-/// Read one identity field using Git's effective or local-only lookup rules.
-pub async fn git_identity_value(path: &Path, key: &str, only_local: bool) -> Result<Value> {
-    if !matches!(key, "user.name" | "user.email") {
-        bail!("unsupported Git identity field");
-    }
-    let mut command = args(&["config", "-z"]);
-    if only_local {
-        command.extend(args(&["--local"]));
-    }
-    command.extend(args(&["--get", key]));
-    let output = process::run(path, &command).await?;
-    if output.code == 1 {
-        return Ok(Value::Null);
-    }
+/// Prepare the global configuration file and return Git's selected path.
+pub async fn git_global_config_path() -> Result<String> {
+    let output = process::global_config_path(&std::env::current_dir()?).await?;
     if output.code != 0 {
-        bail!("{}", output.text().stderr);
+        bail!("Unable to prepare the global Git configuration file");
     }
-    let value = output
-        .stdout
-        .split(|byte| *byte == 0)
-        .next()
-        .unwrap_or_default();
-    Ok(json!(String::from_utf8_lossy(value)))
+    let path = String::from_utf8(output.stdout)?;
+    if path.is_empty() || path.contains('\0') {
+        bail!("Git returned an invalid global configuration path");
+    }
+    Ok(path)
 }
 
 pub async fn git_settings(path: &Path, scope: ConfigScope) -> Result<Value> {

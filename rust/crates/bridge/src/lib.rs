@@ -308,6 +308,7 @@ enum ControlOperation {
 enum ManagementOperation {
     AvailableEditors,
     GitVersion,
+    GitGlobalConfigPath,
     OpenEditor {
         path: Option<desktop_core::GitPath>,
     },
@@ -318,6 +319,22 @@ enum ManagementOperation {
     ListRepositories,
     RepositoryBinding {
         path: desktop_core::GitPath,
+    },
+    LfsRepository {
+        path: desktop_core::GitPath,
+        action: LfsRepositoryAction,
+    },
+    GitReadRepositorySetting {
+        path: desktop_core::GitPath,
+        key: desktop_core::GitReadSettingKey,
+        #[serde(default)]
+        only_local: bool,
+        #[serde(default)]
+        canonical_bool: bool,
+    },
+    SetRepositoryDescription {
+        path: desktop_core::GitPath,
+        description: String,
     },
     RepositoryType {
         path: desktop_core::GitPath,
@@ -349,10 +366,22 @@ enum ManagementOperation {
     InitRepository {
         path: desktop_core::GitPath,
     },
+    InitializeDesktopRepository {
+        path: desktop_core::GitPath,
+        default_branch: String,
+    },
     CloneRepository {
         url: String,
         path: desktop_core::GitPath,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum LfsRepositoryAction {
+    Status {},
+    FileTracking { paths: Vec<desktop_core::GitPath> },
+    InstallHooks { force: bool },
 }
 
 async fn execute(
@@ -436,6 +465,22 @@ async fn execute(
         ApplicationOperation::Management(GitVersion) => {
             Ok(json!(desktop_core::git_version().await?))
         }
+        ApplicationOperation::Management(GitGlobalConfigPath) => {
+            Ok(json!(desktop_core::git_global_config_path().await?))
+        }
+        ApplicationOperation::Management(InitializeDesktopRepository {
+            path,
+            default_branch,
+        }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "Repository initialization does not use a selected-repository binding"
+            );
+            let path = desktop_core::directory_path(path)?;
+            let _current = cancellation::wait(state.repo.lock()).await?;
+            desktop_core::initialize_desktop_repository(&path, &default_branch).await?;
+            Ok(serde_json::Value::Null)
+        }
         ApplicationOperation::Management(RepositoryType { path }) => {
             desktop_core::repository_type(&desktop_core::directory_path(path)?).await
         }
@@ -483,6 +528,68 @@ async fn execute(
             cancellation::blocking(move || registry.read())
                 .await?
                 .public_view()
+        }
+        ApplicationOperation::Management(
+            operation @ (LfsRepository { .. }
+            | GitReadRepositorySetting { .. }
+            | SetRepositoryDescription { .. }),
+        ) => {
+            let (path, operation) = match operation {
+                LfsRepository { path, action } => (
+                    path,
+                    match action {
+                        LfsRepositoryAction::Status {} => Operation::LfsStatus { paths: vec![] },
+                        LfsRepositoryAction::FileTracking { paths } => {
+                            Operation::LfsFileTracking { paths }
+                        }
+                        LfsRepositoryAction::InstallHooks { force } => Operation::LfsInstall {
+                            scope: desktop_core::LfsInstallScope::Global,
+                            force,
+                            skip_repo: false,
+                            skip_smudge: false,
+                        },
+                    },
+                ),
+                GitReadRepositorySetting {
+                    path,
+                    key,
+                    only_local,
+                    canonical_bool,
+                } => (
+                    path,
+                    Operation::GitReadSetting {
+                        key,
+                        only_local,
+                        canonical_bool,
+                    },
+                ),
+                SetRepositoryDescription { path, description } => {
+                    (path, Operation::SetGitDescription { description })
+                }
+                _ => unreachable!(),
+            };
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "An explicit repository cannot use a selected-repository binding"
+            );
+            let requested = desktop_core::directory_path(path)?;
+            anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
+            let canonical = cancellation::blocking(move || Ok(requested.canonicalize()?)).await?;
+            // Hold the selection lock through the operation, sharing the selected
+            // repository's gate when possible and preventing selection changes.
+            let current = cancellation::wait(state.repo.lock()).await?;
+            let repo = if let Some(repo) = current.as_ref().filter(|repo| repo.path() == canonical)
+            {
+                repo.clone()
+            } else {
+                let repo = Repository::open(&canonical).await?;
+                anyhow::ensure!(
+                    repo.path() == canonical,
+                    "select a repository root, not a nested path"
+                );
+                repo
+            };
+            repo.execute(operation).await
         }
         ApplicationOperation::Management(RepositoryBinding { path }) => {
             let Ok(requested) = desktop_core::directory_path(path) else {

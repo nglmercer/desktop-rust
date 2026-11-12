@@ -1,12 +1,12 @@
 // @vitest-environment node
 import assert from 'node:assert/strict'
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { chromium, type Browser } from 'playwright'
-import { afterEach, describe, it } from 'vitest'
+import { afterEach, describe, it, vi } from 'vitest'
 
 let directory: string | undefined
 let server: ChildProcess | undefined
@@ -141,6 +141,21 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           'lfs_tool_status'
         )
       )
+      if (
+        spawnSync('git', ['lfs', 'version'], { stdio: 'ignore' }).status === 0
+      ) {
+        await page.waitForFunction(() =>
+          (Reflect.get(window, '__browserAudit') as string[]).includes(
+            'lfs_install'
+          )
+        )
+        await vi.waitFor(
+          async () => {
+            assert.match(await readFile(gitConfig, 'utf8'), /\[filter "lfs"\]/)
+          },
+          { timeout: 10_000 }
+        )
+      }
       await page.waitForTimeout(1000)
       const calls = await page.evaluate(
         () => Reflect.get(window, '__browserAudit') as string[]

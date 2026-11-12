@@ -104,7 +104,35 @@ pub(crate) fn pointer(bytes: &[u8]) -> Option<LfsObject> {
 }
 
 impl Repository {
+    pub(crate) async fn lfs_file_tracking(&self, paths: Vec<GitPath>) -> Result<Value> {
+        let files = self.lfs_file_attributes(paths).await?;
+        Ok(json!(
+            files
+                .into_iter()
+                .map(|(_, _, tracked)| tracked)
+                .collect::<Vec<_>>()
+        ))
+    }
+
     pub(crate) async fn lfs_status(&self, paths: Vec<GitPath>) -> Result<Value> {
+        let files: Vec<_> = self.lfs_file_attributes(paths).await?.into_iter()
+            .map(|(path, display_path, tracked)| json!({"path":path,"display_path":display_path,"tracked":tracked})).collect();
+        let version = crate::process::run_lfs(&self.path, &args(&["lfs", "version"])).await?;
+        if version.code != 0 {
+            return Ok(
+                json!({"available":false,"version":null,"using_lfs":null,"patterns":[],"files":files,"hint":"Install git-lfs and add it to PATH (Termux: pkg install git-lfs)."}),
+            );
+        }
+        let patterns = crate::lfs_attributes::inspect(self).await?;
+        Ok(
+            json!({"available":true,"version":String::from_utf8(version.stdout)?.trim(),"using_lfs":patterns.iter().any(|pattern|pattern.tracked),"patterns":patterns,"files":files}),
+        )
+    }
+
+    async fn lfs_file_attributes(
+        &self,
+        paths: Vec<GitPath>,
+    ) -> Result<Vec<(GitPath, String, bool)>> {
         anyhow::ensure!(paths.len() <= 1000, "inspect at most 1000 paths at once");
         let mut command = args(&["check-attr", "-z", "filter", "--"]);
         for path in &paths {
@@ -120,20 +148,14 @@ impl Repository {
             );
             for (path, fields) in paths.into_iter().zip(fields.as_chunks::<3>().0) {
                 anyhow::ensure!(fields[1] == b"filter", "unexpected Git attribute");
-                files.push(json!({"path":path,"display_path":String::from_utf8_lossy(fields[0]),"tracked":fields[2] == b"lfs"}));
+                files.push((
+                    path,
+                    String::from_utf8_lossy(fields[0]).into_owned(),
+                    fields[2] == b"lfs",
+                ));
             }
         }
-        let version = crate::process::run_lfs(&self.path, &args(&["lfs", "version"])).await?;
-        if version.code != 0 {
-            // Git's diagnostic may contain configured URLs. Return a fixed hint.
-            return Ok(
-                json!({"available":false,"version":null,"using_lfs":null,"patterns":[],"files":files,"hint":"Install git-lfs and add it to PATH (Termux: pkg install git-lfs)."}),
-            );
-        }
-        let patterns = crate::lfs_attributes::inspect(self).await?;
-        Ok(
-            json!({"available":true,"version":String::from_utf8(version.stdout)?.trim(),"using_lfs":patterns.iter().any(|pattern|pattern.tracked),"patterns":patterns,"files":files}),
-        )
+        Ok(files)
     }
 
     /// Ask Git LFS for its effective media directory, including custom storage

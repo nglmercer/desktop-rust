@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   transport: 'ws',
   request: vi.fn(),
   repositoryIdentity: vi.fn(),
+  repositorySetting: vi.fn(),
+  globalPath: vi.fn(),
   setRepositoryIdentity: vi.fn(),
   git: vi.fn(),
 }))
@@ -12,6 +14,8 @@ vi.mock('../../src/backend/client', () => ({
     transportKind: mocks.transport,
     request: mocks.request,
     repositoryGitIdentityValue: mocks.repositoryIdentity,
+    repositoryGitReadSetting: mocks.repositorySetting,
+    globalGitConfigPath: mocks.globalPath,
     setRepositoryGitIdentityValue: mocks.setRepositoryIdentity,
   }),
 }))
@@ -19,6 +23,8 @@ vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 import {
   getGlobalConfigValue,
   getConfigValue,
+  getBooleanConfigValue,
+  getGlobalConfigPath,
   setConfigValue,
   removeConfigValue,
   setGlobalConfigValue,
@@ -42,6 +48,41 @@ describe('global Git identity reads', () => {
     })
     expect(mocks.git).not.toHaveBeenCalled()
   })
+  it.each(['ws', 'wry'])(
+    'reads and writes the default branch on %s',
+    async transport => {
+      mocks.transport = transport
+      mocks.request.mockResolvedValue({
+        scope: 'global',
+        values: { 'init.defaultbranch': 'main' },
+      })
+      await expect(getGlobalConfigValue('init.defaultBranch')).resolves.toBe(
+        'main'
+      )
+      await setGlobalConfigValue('init.defaultBranch', 'trunk')
+      expect(mocks.request).toHaveBeenNthCalledWith(
+        1,
+        transport === 'wry' ? 'git_info' : 'git_settings',
+        transport === 'wry'
+          ? { operation: { type: 'read' } }
+          : { scope: 'global' }
+      )
+      expect(mocks.request).toHaveBeenNthCalledWith(
+        2,
+        transport === 'wry' ? 'git_info' : 'set_git_setting',
+        transport === 'wry'
+          ? {
+              operation: {
+                type: 'set',
+                key: 'init.defaultbranch',
+                value: 'trunk',
+              },
+            }
+          : { scope: 'global', key: 'init.defaultbranch', value: 'trunk' }
+      )
+      expect(mocks.git).not.toHaveBeenCalled()
+    }
+  )
   it('propagates bridge failures and rejects malformed identity responses', async () => {
     const failure = new Error('disconnected')
     mocks.request.mockRejectedValueOnce(failure)
@@ -69,6 +110,46 @@ describe('global Git identity reads', () => {
     expect(mocks.git).toHaveBeenCalledTimes(3)
     expect(mocks.request).not.toHaveBeenCalled()
   })
+  it.each(['ws', 'wry'])(
+    'uses the Rust global configuration path on %s',
+    async transport => {
+      mocks.transport = transport
+      mocks.globalPath.mockResolvedValue('/home/test/.config/git/config')
+      await expect(getGlobalConfigPath()).resolves.toBe(
+        '/home/test/.config/git/config'
+      )
+      expect(mocks.globalPath).toHaveBeenCalledOnce()
+      expect(mocks.git).not.toHaveBeenCalled()
+      mocks.git.mockResolvedValueOnce({ stdout: '/alternate/.gitconfig' })
+      await expect(getGlobalConfigPath({ HOME: '/alternate' })).resolves.toBe(
+        '/alternate/.gitconfig'
+      )
+    }
+  )
+  it.each(['ws', 'wry'])(
+    'reads allowlisted repository settings with Git boolean semantics on %s',
+    async transport => {
+      mocks.transport = transport
+      const repo = { path: '/repo' } as Repository
+      mocks.repositorySetting
+        .mockResolvedValueOnce('input')
+        .mockResolvedValueOnce('true')
+        .mockResolvedValueOnce(null)
+      await expect(getConfigValue(repo, 'core.autocrlf')).resolves.toBe('input')
+      await expect(
+        getBooleanConfigValue(repo, 'commit.gpgsign', true)
+      ).resolves.toBe(true)
+      await expect(
+        getBooleanConfigValue(repo, 'commit.gpgsign')
+      ).resolves.toBeNull()
+      expect(mocks.repositorySetting.mock.calls).toEqual([
+        ['/repo', 'core.autocrlf', false, false],
+        ['/repo', 'commit.gpgsign', true, true],
+        ['/repo', 'commit.gpgsign', false, true],
+      ])
+      expect(mocks.git).not.toHaveBeenCalled()
+    }
+  )
   it('writes identity through the typed bridge, including empty values', async () => {
     mocks.request.mockResolvedValue({ scope: 'global', values: {} })
     await setGlobalConfigValue('user.name', 'Alice')

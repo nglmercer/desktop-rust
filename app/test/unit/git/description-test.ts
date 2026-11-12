@@ -1,36 +1,57 @@
-import { describe, it } from 'node:test'
-import assert from 'node:assert'
-import { unlink, writeFile } from 'fs/promises'
-import * as Path from 'path'
+// @vitest-environment node
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import * as Path from 'node:path'
+import {
+  DefaultGitDescription,
+  getGitDescription,
+  writeGitDescription,
+} from '../../../src/lib/git/description'
 
-import { getGitDescription } from '../../../src/lib/git'
-import { setupEmptyRepository } from '../../helpers/repositories'
+let directory: string | undefined
 
-describe('git/description', () => {
-  describe('getGitDescription', () => {
-    it('returns empty for an initialized repository', async t => {
-      const repo = await setupEmptyRepository(t)
-      const actual = await getGitDescription(repo.path)
-      assert.equal(actual, '')
-    })
+async function repository(): Promise<string> {
+  directory = await mkdtemp(Path.join(tmpdir(), 'desktop-description-test-'))
+  await mkdir(Path.join(directory, '.git'))
+  await writeFile(
+    Path.join(directory, '.git', 'description'),
+    DefaultGitDescription
+  )
+  return directory
+}
 
-    it('returns empty when path is missing', async t => {
-      const repo = await setupEmptyRepository(t)
-      const path = Path.join(repo.path, '.git', 'description')
-      await unlink(path)
+afterEach(async () => {
+  if (directory !== undefined)
+    await rm(directory, { recursive: true, force: true })
+  directory = undefined
+})
 
-      const actual = await getGitDescription(repo.path)
-      assert.equal(actual, '')
-    })
+describe('Git description Electron fallback', () => {
+  it('returns empty for Git’s default description', async () => {
+    await expect(getGitDescription(await repository())).resolves.toBe('')
+  })
 
-    it('reads the custom text', async t => {
-      const expected = 'this is a repository description'
-      const repo = await setupEmptyRepository(t)
-      const path = Path.join(repo.path, '.git', 'description')
-      await writeFile(path, expected)
+  it('returns empty when the description is missing', async () => {
+    const path = await repository()
+    await unlink(Path.join(path, '.git', 'description'))
+    await expect(getGitDescription(path)).resolves.toBe('')
+  })
 
-      const actual = await getGitDescription(repo.path)
-      assert.equal(actual, expected)
-    })
+  it('writes and reads custom text without changing it', async () => {
+    const path = await repository()
+    const text = '  repository 🦀\n\n'
+    await writeGitDescription(path, text)
+    await expect(getGitDescription(path)).resolves.toBe(text)
+    await expect(
+      readFile(Path.join(path, '.git', 'description'), 'utf8')
+    ).resolves.toBe(text)
   })
 })

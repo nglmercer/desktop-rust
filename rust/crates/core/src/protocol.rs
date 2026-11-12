@@ -112,6 +112,9 @@ pub enum Operation {
         #[serde(default)]
         paths: Vec<GitPath>,
     },
+    LfsFileTracking {
+        paths: Vec<GitPath>,
+    },
     LfsInstall {
         #[serde(default)]
         scope: crate::LfsInstallScope,
@@ -283,6 +286,17 @@ pub enum Operation {
         #[serde(default)]
         only_local: bool,
     },
+    GitDescription,
+    SetGitDescription {
+        description: String,
+    },
+    GitReadSetting {
+        key: crate::GitReadSettingKey,
+        #[serde(default)]
+        only_local: bool,
+        #[serde(default)]
+        canonical_bool: bool,
+    },
     SetGitSetting {
         #[serde(default)]
         scope: crate::ConfigScope,
@@ -316,6 +330,9 @@ pub enum Operation {
         dry_run: bool,
     },
     Submodules,
+    SubmoduleDisplayUrl {
+        path: GitPath,
+    },
     SubmoduleUpdate {
         #[serde(default)]
         paths: Vec<GitPath>,
