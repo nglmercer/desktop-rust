@@ -2,7 +2,34 @@ use crate::{GitPath, Repository, args, os_from_bytes};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Enumerate a repository from an explicit working directory, including bare repositories.
+pub async fn worktrees_at(path: &Path) -> Result<Value> {
+    let path = path.canonicalize().context("resolve repository path")?;
+    let output =
+        crate::process::run(&path, &args(&["worktree", "list", "--porcelain", "-z"])).await?;
+    if output.code != 0 {
+        bail!("{}", output.text().stderr);
+    }
+    Ok(serde_json::to_value(parse_worktrees(&output.stdout)?)?)
+}
+
+/// Enumerate using a linked worktree's administrative directory even if its
+/// working directory has gone away, until Git prunes that metadata.
+pub async fn worktrees_from_git_dir(path: &Path) -> Result<Value> {
+    let path = path
+        .canonicalize()
+        .context("resolve worktree Git directory")?;
+    let mut command = args(&["--git-dir"]);
+    command.push(path.as_os_str().to_owned());
+    command.extend(args(&["worktree", "list", "--porcelain", "-z"]));
+    let output = crate::process::run(&path, &command).await?;
+    if output.code != 0 {
+        bail!("{}", output.text().stderr);
+    }
+    Ok(serde_json::to_value(parse_worktrees(&output.stdout)?)?)
+}
 
 #[derive(Serialize)]
 pub(crate) struct Worktree {

@@ -2,6 +2,8 @@ import { git } from './core'
 import { Repository } from '../../models/repository'
 import { IRemote } from '../../models/remote'
 import { envForRemoteOperation } from './environment'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Create a new tag on the given target commit.
@@ -43,13 +45,20 @@ export async function deleteTag(
 export async function getAllTags(
   repository: Repository
 ): Promise<Map<string, string>> {
-  const args = ['show-ref', '--tags', '-d']
+  let stdout: string
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryRendererTagRefs(repository.path)
+    stdout = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+  } else {
+    const tags = await git(['show-ref', '--tags', '-d'], repository.path, 'getAllTags', {
+      successExitCodes: new Set([0, 1]),
+    })
+    stdout = tags.stdout
+  }
 
-  const tags = await git(args, repository.path, 'getAllTags', {
-    successExitCodes: new Set([0, 1]), // when there are no tags, git exits with 1.
-  })
-
-  const tagsArray: Array<[string, string]> = tags.stdout
+  const tagsArray: Array<[string, string]> = stdout
     .split('\n')
     .filter(line => line !== '')
     .map(line => {

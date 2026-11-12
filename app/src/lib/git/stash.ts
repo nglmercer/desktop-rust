@@ -15,6 +15,8 @@ import { stageFiles } from './update-index'
 import { Branch } from '../../models/branch'
 import { createLogParser } from './git-delimiter-parser'
 import { coerceToString } from './coerce-to-string'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 export const DesktopStashEntryMarker = '!!GitHub_Desktop'
 
@@ -51,23 +53,35 @@ export async function getStashes(repository: Repository): Promise<StashResult> {
     parents: '%P',
   })
 
-  const result = await git(
-    ['log', '-g', ...formatArgs, 'refs/stash', '--'],
-    repository.path,
-    'getStashEntries',
-    { successExitCodes: new Set([0, 128]) }
-  )
+  let stdout: string
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryRendererReflog(repository.path, 'stash')
+    const result =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+    if (result === null) return { desktopEntries: [], stashEntryCount: 0 }
+    stdout = result
+  } else {
+    const result = await git(
+      ['log', '-g', ...formatArgs, 'refs/stash', '--'],
+      repository.path,
+      'getStashEntries',
+      { successExitCodes: new Set([0, 128]) }
+    )
 
-  // There's no refs/stashes reflog in the repository or it's not
-  // even a repository. In either case we don't care
-  if (result.exitCode === 128) {
-    return { desktopEntries: [], stashEntryCount: 0 }
+    // There's no refs/stashes reflog in the repository or it's not
+    // even a repository. In either case we don't care
+    if (result.exitCode === 128) {
+      return { desktopEntries: [], stashEntryCount: 0 }
+    }
+    stdout = result.stdout
   }
 
   const desktopEntries: Array<IStashEntry> = []
   const files: StashedFileChanges = { kind: StashedChangesLoadStates.NotLoaded }
 
-  const entries = parse(result.stdout)
+  const entries = parse(stdout)
 
   for (const { name, message, stashSha, tree, parents } of entries) {
     const branchName = extractBranchFromMessage(message)

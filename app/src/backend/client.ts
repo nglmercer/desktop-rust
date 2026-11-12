@@ -37,6 +37,18 @@ export interface BackendRequestOptions {
 
 export type BackendGitPath = string | { readonly bytes: ReadonlyArray<number> }
 
+export interface ISelectedCommitReview {
+  readonly basis: string
+  readonly head: string | null
+  readonly branch: string | null
+  readonly review: {
+    readonly threshold_bytes: number
+    readonly staged_count: number
+    readonly files: ReadonlyArray<BackendGitPath>
+    readonly large_files: ReadonlyArray<{ readonly path: BackendGitPath; readonly display_path: string; readonly oid: string; readonly size: number; readonly tracked_by_lfs: boolean }>
+  }
+}
+
 export type BackendReadableGitSetting =
   | 'core.autocrlf'
   | 'core.safecrlf'
@@ -1390,6 +1402,27 @@ export class BackendClient {
     return value as Array<{ name: string; url: string }>
   }
 
+  async repositoryWorktrees(repositoryPath: string, fromGitDir = false): Promise<ReadonlyArray<{ readonly path: string; readonly head: string; readonly branch: string | null; readonly isDetached: boolean; readonly type: 'main' | 'linked'; readonly isLocked: boolean; readonly isPrunable: boolean }>> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, fromGitDir ? 'worktrees_from_git_dir' : 'worktrees', {})
+      : await this.request(fromGitDir ? 'repository_worktrees_from_git_dir' : 'repository_worktrees', { path: repositoryPath })
+    const invalid = () => new BackendError({ code: 'invalid_response', message: 'Invalid working tree list', retryable: false })
+    if (!Array.isArray(value)) throw invalid()
+    const seen = new Set<string>()
+    return value.map((entry, index) => {
+      if (!isRecord(entry) || !isBackendGitPath(entry.path) || typeof entry.head !== 'string' || !(entry.branch === null || typeof entry.branch === 'string') || typeof entry.detached !== 'boolean' || !(entry.locked === null || typeof entry.locked === 'string') || !(entry.prunable === null || typeof entry.prunable === 'string') || entry.main !== (index === 0) || typeof entry.bare !== 'boolean') throw invalid()
+      let path: string
+      try {
+        path = typeof entry.path === 'string' ? entry.path : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(new Uint8Array(entry.path.bytes))
+      } catch {
+        throw new BackendError({ code: 'unsupported_path', message: 'A working tree path cannot be represented safely', retryable: false })
+      }
+      if (!path || path.includes('\0') || seen.has(path)) throw invalid()
+      seen.add(path)
+      return { path, head: entry.head, branch: entry.branch, isDetached: entry.detached, type: entry.main ? 'main' : 'linked', isLocked: entry.locked !== null, isPrunable: entry.prunable !== null }
+    })
+  }
+
   /** Resolve one remote, retaining a distinct fallback for sensitive URLs. */
   async repositorySafeRemoteUrl(repositoryPath: string, name: string): Promise<{ readonly kind: 'resolved'; readonly url: string } | { readonly kind: 'missing' | 'unsupported' }> {
     const value = this.transport === 'wry'
@@ -1742,17 +1775,101 @@ export class BackendClient {
     return value as string | null
   }
 
-  private async reviewedDiscardRequest(repositoryPath: string, method: 'diff_detail' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch', params: Record<string, unknown>): Promise<unknown> {
+  async repositoryRendererHistory(repositoryPath: string, revision: string | undefined, limit: number | undefined, skip: number | undefined, firstParent: boolean, excludeRemotes: boolean): Promise<string | null> {
+    if ([limit, skip].some(value => value !== undefined && (!Number.isSafeInteger(value) || value < 0))) throw new BackendError({ code: 'invalid_request', message: 'Invalid history pagination', retryable: false })
+    const params = { ...(this.transport === 'wry' ? { commitish: revision } : { revision }), limit, skip, first_parent: firstParent, exclude_remotes: excludeRemotes }
+    const value = await this.repositoryRead(repositoryPath, 'renderer_history', params)
+    if (value !== null && (typeof value !== 'string' || value.length > 3_000_000 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))) throw new BackendError({ code: 'invalid_response', message: 'Invalid history response', retryable: false })
+    return value as string | null
+  }
+
+  async repositoryRendererReflog(repositoryPath: string, kind: 'branches' | 'stash'): Promise<string | null> {
+    const value = await this.repositoryRead(repositoryPath, kind === 'branches' ? 'renderer_recent_branches' : 'renderer_stash_log', {})
+    if (value !== null && (typeof value !== 'string' || value.length > 2 * 1024 * 1024)) throw new BackendError({ code: 'invalid_response', message: 'Invalid reflog response', retryable: false })
+    return value as string | null
+  }
+
+  async repositoryRendererTagRefs(repositoryPath: string): Promise<string> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_tag_refs', {})
+    if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid tag refs response', retryable: false })
+    return value
+  }
+
+  async repositoryLargeFiles(repositoryPath: string, paths: ReadonlyArray<string>): Promise<ReadonlyArray<boolean>> {
+    if (paths.length > 1000 || new TextEncoder().encode(JSON.stringify({ paths })).length > 60_000) throw new BackendError({ code: 'invalid_request', message: 'File-size review exceeds the request limit', retryable: false })
+    const value = await this.repositoryRead(repositoryPath, 'renderer_large_files', { paths })
+    if (!Array.isArray(value) || value.length !== paths.length || !value.every(entry => typeof entry === 'boolean')) throw new BackendError({ code: 'invalid_response', message: 'Invalid file-size review response', retryable: false })
+    return value
+  }
+
+  async repositoryRendererCommitChanges(repositoryPath: string, revision: string): Promise<string> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_commit_changes', this.transport === 'wry' ? { commitish: revision } : { revision })
+    if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid changed files response', retryable: false })
+    return value
+  }
+
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_working_diff' | 'diff_detail' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
     return this.repositoryRead(repositoryPath, method, params)
   }
 
+  async repositoryRendererCommitDiff(repositoryPath: string, revision: string, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<string> {
+    const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_commit_diff', { revision, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace })
+    if (typeof value !== 'string' || value.length > 3_000_000 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit diff response', retryable: false })
+    return value
+  }
+
+  /** Capture a review basis without publishing the selected index or committing. */
+  async repositorySelectedCommitPreview(repositoryPath: string, selection: Pick<ICopilotCommitOptions, 'paths' | 'remove_paths' | 'partial_selections' | 'amend_head' | 'expected_head'>): Promise<ISelectedCommitReview> {
+    const operation = { method: 'selected_commit_preview', paths: selection.paths ?? [], remove_paths: selection.remove_paths ?? [], partial_selections: selection.partial_selections ?? [], amend_head: selection.amend_head ?? null, expected_head: selection.expected_head ?? null }
+    const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
+    if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Selected commit review exceeds the request limit', retryable: false })
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'selected_commit_preview', repository_path: repositoryPath, operation } })
+      : await this.repositoryRead(repositoryPath, operation.method, operation)
+    if (!isRecord(value) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || !(value.head === null || (typeof value.head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.head))) || !(value.branch === null || (typeof value.branch === 'string' && value.branch.length <= 4096 && !value.branch.includes('\0')))) throw new BackendError({ code: 'invalid_response', message: 'Invalid selected commit review response', retryable: false })
+    const review = value.review
+    const invalid = () => new BackendError({ code: 'invalid_response', message: 'Invalid selected index review', retryable: false })
+    if (!isRecord(review) || typeof review.threshold_bytes !== 'number' || !Number.isSafeInteger(review.threshold_bytes) || review.threshold_bytes <= 0 || !Array.isArray(review.files) || review.files.length > 32768 || !review.files.every(isBackendGitPath) || review.staged_count !== review.files.length || !Array.isArray(review.large_files) || review.large_files.length > 1000) throw invalid()
+    const threshold = review.threshold_bytes
+    const pathKey = (path: BackendGitPath): string => {
+      const bytes = typeof path === 'string' ? [...new TextEncoder().encode(path)] : path.bytes
+      if (bytes.length === 0 || bytes.includes(0)) throw invalid()
+      return bytes.join(',')
+    }
+    const paths = new Set(review.files.map(pathKey))
+    if (paths.size !== review.files.length) throw invalid()
+    const largePaths = new Set<string>()
+    for (const file of review.large_files) {
+      if (!isRecord(file) || !isBackendGitPath(file.path) || typeof file.display_path !== 'string' || typeof file.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(file.oid) || typeof file.size !== 'number' || !Number.isSafeInteger(file.size) || file.size <= threshold || typeof file.tracked_by_lfs !== 'boolean') throw invalid()
+      const key = pathKey(file.path)
+      if (!paths.has(key) || largePaths.has(key)) throw invalid()
+      largePaths.add(key)
+    }
+    return value as unknown as ISelectedCommitReview
+  }
+
+  async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
+    if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
+    const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })
+    if (value !== null && (typeof value !== 'string' || value.length > Math.ceil(length / 3) * 4 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))) throw new BackendError({ code: 'invalid_response', message: 'Invalid blob preview response', retryable: false })
+    if (typeof value === 'string' && value.length / 4 * 3 - (value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0) > length) throw new BackendError({ code: 'invalid_response', message: 'Oversized blob preview response', retryable: false })
+    return value as string | null
+  }
+
+  async repositoryRendererWorkingDiff(repositoryPath: string, path: string, base: 'head' | 'index' | 'empty', hideWhitespace: boolean, noTextconv: boolean): Promise<{ stdout: string; stderr: string }> {
+    const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_working_diff', { path, base, hide_whitespace: hideWhitespace, no_textconv: noTextconv })
+    const valid = (v: unknown): v is string => typeof v === 'string' && v.length <= 3_000_000 && v.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(v)
+    if (!isRecord(value) || !valid(value.stdout) || !valid(value.stderr)) throw new BackendError({ code: 'invalid_response', message: 'Invalid working diff response', retryable: false })
+    return { stdout: value.stdout, stderr: value.stderr }
+  }
+
   async repositoryDiscardBatchPreview(repositoryPath: string, paths: ReadonlyArray<string>): Promise<{ readonly basis: string; readonly files: ReadonlyArray<string> }> {
     if (paths.length === 0 || paths.length > 4096 || new Set(paths).size !== paths.length) throw new BackendError({ code: 'invalid_request', message: 'Select distinct files to discard', retryable: false })
     if (this.transport === 'ws' && new TextEncoder().encode(JSON.stringify({ method: 'discard_batch', paths, basis: 'f'.repeat(64), id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length > 65536) throw new BackendError({ code: 'invalid_request', message: 'The selected files exceed the bridge request limit', retryable: false })
-    const value = await this.reviewedDiscardRequest(repositoryPath, 'discard_batch_preview', { paths })
+    const value = await this.repositoryRendererRequest(repositoryPath, 'discard_batch_preview', { paths })
     if (!isRecord(value) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || !Array.isArray(value.files) || value.files.length === 0 || value.files.length > 8192) throw new BackendError({ code: 'invalid_response', message: 'Invalid discard review', retryable: false })
     const seen = new Set<string>()
     const files = value.files.map(entry => {
@@ -1770,14 +1887,14 @@ export class BackendClient {
 
   async repositoryDiscardBatch(repositoryPath: string, paths: ReadonlyArray<string>, basis: string): Promise<string> {
     let result: unknown
-    try { result = await this.reviewedDiscardRequest(repositoryPath, 'discard_batch', { paths, basis }) }
+    try { result = await this.repositoryRendererRequest(repositoryPath, 'discard_batch', { paths, basis }) }
     catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the files and recovery history before retrying`, retryable: false, recoveryId: cause.recoveryId }) }
     if (!isRecord(result) || result.code !== 0 || typeof result.undo_id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.undo_id)) throw new BackendError({ code: 'invalid_response', message: 'Discard outcome is uncertain; inspect the files and recovery history', retryable: false })
     return result.undo_id
   }
 
   async repositoryDiscardHistory(repositoryPath: string): Promise<ReadonlyArray<IDiscardRecoveryRecord>> {
-    const value = await this.reviewedDiscardRequest(repositoryPath, 'list_discards', {})
+    const value = await this.repositoryRendererRequest(repositoryPath, 'list_discards', {})
     const invalid = () => new BackendError({ code: 'invalid_response', message: 'Invalid discard recovery history', retryable: false })
     if (!Array.isArray(value) || value.length > 1000) throw invalid()
     const ids = new Set<string>()
@@ -1791,7 +1908,7 @@ export class BackendClient {
   }
 
   async repositoryWorkingDiff(repositoryPath: string, path: string): Promise<ICopilotCommitDiff> {
-    const result = await this.reviewedDiscardRequest(repositoryPath, 'diff_detail', { path, staged: false })
+    const result = await this.repositoryRendererRequest(repositoryPath, 'diff_detail', { path, staged: false })
     if (!isCopilotCommitDiff(result)) throw new BackendError({ code: 'invalid_response', message: 'Invalid working diff response', retryable: false })
     return result
   }
@@ -1801,13 +1918,13 @@ export class BackendClient {
     if (this.transport === 'ws' && new TextEncoder().encode(JSON.stringify({ ...params, method: 'discard', basis: 'f'.repeat(64), id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length > 65536) {
       throw new BackendError({ code: 'invalid_request', message: 'The selected lines exceed the bridge request limit', retryable: false })
     }
-    const preview = await this.reviewedDiscardRequest(repositoryPath, 'discard_preview', params)
+    const preview = await this.repositoryRendererRequest(repositoryPath, 'discard_preview', params)
     if (!isRecord(preview) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) {
       throw new BackendError({ code: 'invalid_response', message: 'Invalid discard preview', retryable: false })
     }
     let result: unknown
     try {
-      result = await this.reviewedDiscardRequest(repositoryPath, 'discard', { ...params, basis: preview.basis })
+      result = await this.repositoryRendererRequest(repositoryPath, 'discard', { ...params, basis: preview.basis })
     } catch (error) {
       const cause = toBackendError(error)
       throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the file and recovery history before retrying`, retryable: false, recoveryId: cause.recoveryId })
@@ -1821,7 +1938,7 @@ export class BackendClient {
   async undoRepositoryDiscard(repositoryPath: string, undoId: string): Promise<void> {
     let result: unknown
     try {
-      result = await this.reviewedDiscardRequest(repositoryPath, 'undo_discard', { undo_id: undoId })
+      result = await this.repositoryRendererRequest(repositoryPath, 'undo_discard', { undo_id: undoId })
     } catch (error) {
       const cause = toBackendError(error)
       throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the file and recovery history before retrying`, retryable: false, recoveryId: cause.recoveryId })
@@ -1834,7 +1951,7 @@ export class BackendClient {
   async forgetRepositoryDiscard(repositoryPath: string, undoId: string): Promise<void> {
     let result: unknown
     try {
-      result = await this.reviewedDiscardRequest(repositoryPath, 'forget_discard', { undo_id: undoId })
+      result = await this.repositoryRendererRequest(repositoryPath, 'forget_discard', { undo_id: undoId })
     } catch (error) {
       const cause = toBackendError(error)
       throw new BackendError({ code: cause.code, message: `${cause.message}; inspect recovery history before retrying`, retryable: false })

@@ -14,6 +14,8 @@ import {
   chmod,
   unlink,
   symlink,
+  rename,
+  open,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -226,6 +228,28 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(await client.snapshot()).toBeNull()
       await expect(client.repositoryStatusContext(firstRepository)).rejects.toMatchObject({ code: 'repository_changed' })
       await client.selectBrowserRepository(firstRepository)
+      const largeFixture = await open(path.join(firstRepository, 'oversized'), 'w')
+      await largeFixture.truncate(100 * 1024 * 1024 + 1)
+      await largeFixture.close()
+      const boundaryFixture = await open(path.join(firstRepository, 'boundary'), 'w')
+      await boundaryFixture.truncate(100 * 1024 * 1024)
+      await boundaryFixture.close()
+      await symlink('oversized', path.join(firstRepository, 'large-link'))
+      await expect(client.repositoryLargeFiles(firstRepository, ['oversized', 'boundary', 'large-link', 'missing'])).resolves.toEqual([true, false, false, false])
+      await expect(client.repositoryLargeFiles(firstRepository, ['../outside'])).rejects.toThrow()
+      const outsideSize = path.join(directory, 'outside-size')
+      await mkdir(outsideSize)
+      await writeFile(path.join(outsideSize, 'file'), 'private')
+      await symlink(outsideSize, path.join(firstRepository, 'size-escape'))
+      await expect(client.repositoryLargeFiles(firstRepository, ['size-escape/file'])).rejects.toThrow()
+      await unlink(path.join(firstRepository, 'size-escape'))
+      await unlink(path.join(firstRepository, 'oversized'))
+      await unlink(path.join(firstRepository, 'boundary'))
+      await unlink(path.join(firstRepository, 'large-link'))
+      await expect(client.repositoryRendererTagRefs(firstRepository)).resolves.toBe('')
+      await expect(client.repositoryRendererHistory(firstRepository, 'HEAD', 10, 0, false, false)).resolves.toBeNull()
+      await expect(client.repositoryRendererReflog(firstRepository, 'branches')).resolves.toBeNull()
+      await expect(client.repositoryRendererReflog(firstRepository, 'stash')).resolves.toBeNull()
       await writeFile(path.join(firstRepository, 'staged\nname'), 'staged')
       execFileSync('git', ['-C', firstRepository, 'add', '--', 'staged\nname'])
       await expect(client.repositoryIndexChanges(firstRepository)).resolves.toEqual([{ path: 'staged\nname', status: 'A' }])
@@ -383,6 +407,11 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await expect(client.request('git_read_repository_setting', { path: unselected, key: 'credential.helper' })).rejects.toThrow()
       await expect(client.request('git_read_repository_setting', { path: unselected, key: 'core.safecrlf', canonical_bool: true })).rejects.toThrow()
       const selectedBefore = await client.snapshot()
+      await expect(client.repositoryWorktrees(path.join(unselected, 'nested'))).resolves.toEqual([expect.objectContaining({ path: unselected, type: 'main' })])
+      const worktreesBare = path.join(directory, 'worktrees-bare.git')
+      execFileSync('git', ['init', '--bare', '-q', worktreesBare])
+      await expect(client.repositoryWorktrees(worktreesBare)).resolves.toEqual([expect.objectContaining({ path: worktreesBare, type: 'main' })])
+      await expect(client.repositoryWorktrees('relative')).rejects.toThrow()
       await client.setRepositoryGitDescription(unselected, 'unselected description 🦀\n')
       expect(await readFile(path.join(unselected, '.git', 'description'), 'utf8')).toBe('unselected description 🦀\n')
       await expect(client.setRepositoryGitDescription(path.join(unselected, 'nested'), 'bad')).rejects.toThrow()
@@ -426,6 +455,9 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await client.setRepositoryGitIdentityValue(firstRepository, 'user.name', null)
       expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', true)).toBeNull()
       expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', false)).toBe('Bridge Test')
+      const binary = Buffer.alloc(2 * 1024 * 1024 + 9, Buffer.from([0, 255, 128, 10]))
+      await writeFile(path.join(firstRepository, '-binary file'), binary)
+      execFileSync('git', ['-C', firstRepository, 'add', '--', '-binary file'])
       execFileSync('git', [
         '-C',
         firstRepository,
@@ -439,12 +471,93 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         'initial',
       ])
       const encodedCommit = await client.repositoryRendererCommit(firstRepository, 'HEAD')
+      execFileSync('git', ['-C', firstRepository, 'tag', 'lightweight'])
+      execFileSync('git', ['-C', firstRepository, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'tag', '-a', 'annotated', '-m', 'tag message'])
+      expect(await client.repositoryRendererTagRefs(firstRepository)).toBe(execFileSync('git', ['-C', firstRepository, 'show-ref', '--tags', '-d'], { encoding: 'utf8' }))
+      const changedArgs = ['log', 'HEAD', '-C', '-M', '-m', '-1', '--no-show-signature', '--first-parent', '--raw', '--format=format:', '--numstat', '-z', '--']
+      expect(await client.repositoryRendererCommitChanges(firstRepository, 'HEAD')).toBe(execFileSync('git', ['-C', firstRepository, ...changedArgs], { encoding: 'utf8' }))
+      await expect(client.repositoryRendererCommitChanges(firstRepository, 'missing')).rejects.toThrow()
+      const commitDiffArgs = ['log', 'HEAD', '-m', '-1', '--first-parent', '--patch-with-raw', '--format=', '-z', '--no-color', '--', ':(literal)-binary file']
+      expect(Buffer.from(await client.repositoryRendererCommitDiff(firstRepository, 'HEAD', '-binary file', undefined, false), 'base64')).toEqual(execFileSync('git', ['-C', firstRepository, ...commitDiffArgs]))
+      await expect(client.repositoryRendererCommitDiff(firstRepository, 'HEAD', '../outside', undefined, false)).rejects.toThrow()
+      execFileSync('git', ['-C', firstRepository, 'tag', '-d', 'lightweight', 'annotated'])
+      const initialBranch = execFileSync('git', ['-C', firstRepository, 'symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
+      execFileSync('git', ['-C', firstRepository, 'checkout', '-qb', 'recent-old'])
+      execFileSync('git', ['-C', firstRepository, 'branch', '-m', 'recent-new'])
+      const branchLog = execFileSync('git', ['-C', firstRepository, 'log', '-g', '--no-abbrev-commit', '--pretty=oneline', 'HEAD', '-n', '2500', '--'], { encoding: 'utf8' })
+      expect(await client.repositoryRendererReflog(firstRepository, 'branches')).toBe(branchLog)
+      await writeFile(path.join(firstRepository, 'stash-fixture'), 'stash content\n')
+      execFileSync('git', ['-C', firstRepository, 'add', '--', 'stash-fixture'])
+      execFileSync('git', ['-C', firstRepository, 'stash', 'push', '-qm', '!!GitHub_Desktop<recent-new>'])
+      const stashLog = execFileSync('git', ['-C', firstRepository, 'log', '-g', '-z', '--format=%gD%x00%H%x00%gs%x00%T%x00%P', 'refs/stash', '--'], { encoding: 'utf8' })
+      expect(await client.repositoryRendererReflog(firstRepository, 'stash')).toBe(stashLog)
+      execFileSync('git', ['-C', firstRepository, 'stash', 'drop', '-q'])
+      execFileSync('git', ['-C', firstRepository, 'update-ref', 'refs/remotes/origin/main', initialBranch])
+      await writeFile(path.join(firstRepository, 'history-fixture'), 'second commit\n')
+      execFileSync('git', ['-C', firstRepository, 'add', '--', 'history-fixture'])
+      execFileSync('git', ['-C', firstRepository, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'second'])
+      const historyArgs = ['log', '--date=raw', '--max-count=1', '--skip=0', '-z', '--format=%H%x00%h%x00%s%x00%b%x00%an <%ae> %ad%x00%cn <%ce> %cd%x00%P%x00%(trailers:unfold,only)%x00%D', '--no-show-signature', '--no-color', '--not', '--remotes', '--not', '--end-of-options', 'HEAD', '--']
+      const expectedHistory = execFileSync('git', ['-C', firstRepository, ...historyArgs])
+      const history = await client.repositoryRendererHistory(firstRepository, 'HEAD', 1, 0, false, true)
+      expect(Buffer.from(history!, 'base64')).toEqual(expectedHistory)
+      const parentArgs = ['log', '--date=raw', '--max-count=2', '-z', '--format=%H%x00%h%x00%s%x00%b%x00%an <%ae> %ad%x00%cn <%ce> %cd%x00%P%x00%(trailers:unfold,only)%x00%D', '--no-show-signature', '--no-color', '--first-parent', '--end-of-options', 'HEAD', '--']
+      expect(Buffer.from((await client.repositoryRendererHistory(firstRepository, 'HEAD', 2, undefined, true, false))!, 'base64')).toEqual(execFileSync('git', ['-C', firstRepository, ...parentArgs]))
+      const rangeArgs = [...parentArgs]
+      rangeArgs[rangeArgs.length - 2] = 'HEAD~1..HEAD'
+      expect(Buffer.from((await client.repositoryRendererHistory(firstRepository, 'HEAD~1..HEAD', 2, undefined, true, false))!, 'base64')).toEqual(execFileSync('git', ['-C', firstRepository, ...rangeArgs]))
+      await expect(client.repositoryRendererHistory(firstRepository, 'missing', 1, 0, false, false)).resolves.toBeNull()
+      execFileSync('git', ['-C', firstRepository, 'update-ref', '-d', 'refs/remotes/origin/main'])
+      execFileSync('git', ['-C', firstRepository, 'checkout', '-q', initialBranch])
+      execFileSync('git', ['-C', firstRepository, 'branch', '-D', 'recent-new'])
+      const linked = path.join(directory, 'linked\nworktree')
+      execFileSync('git', ['-C', firstRepository, 'worktree', 'add', '--detach', '-q', linked, 'HEAD'])
+      const linkedGitDir = execFileSync('git', ['-C', linked, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim()
+      execFileSync('git', ['-C', firstRepository, 'worktree', 'lock', '--reason', 'test reason', linked])
+      const worktrees = await client.repositoryWorktrees(firstRepository)
+      expect(worktrees).toEqual([
+        expect.objectContaining({ path: firstRepository, type: 'main', isDetached: false }),
+        expect.objectContaining({ path: linked, type: 'linked', isDetached: true, isLocked: true, isPrunable: false }),
+      ])
+      execFileSync('git', ['-C', firstRepository, 'worktree', 'unlock', linked])
+      const temporarilyMoved = path.join(directory, 'temporarily-moved')
+      await rename(linked, temporarilyMoved)
+      expect(await client.repositoryWorktrees(firstRepository)).toEqual(expect.arrayContaining([expect.objectContaining({ path: linked, isPrunable: true })]))
+      expect(await client.repositoryWorktrees(linkedGitDir, true)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: firstRepository, type: 'main' }),
+        expect.objectContaining({ path: linked, isPrunable: true }),
+      ]))
+      await expect(client.repositoryWorktrees('relative', true)).rejects.toThrow()
+      await rename(temporarilyMoved, linked)
+      execFileSync('git', ['-C', firstRepository, 'worktree', 'remove', linked])
+      await expect(client.repositoryWorktrees(linkedGitDir, true)).rejects.toThrow()
       expect(Buffer.from(encodedCommit!, 'base64').toString('utf8')).toContain('initial')
       await expect(client.repositoryRendererCommit(firstRepository, 'missing')).resolves.toBeNull()
+      const blob = await client.repositoryBlobPrefix(firstRepository, 'HEAD', '-binary file', 1024)
+      expect(Buffer.from(blob!, 'base64')).toEqual(binary.subarray(0, 1024))
+      expect(await client.repositoryBlobPrefix(firstRepository, 'HEAD', '-binary file', 0)).toBe('')
+      expect(await client.repositoryBlobPrefix(firstRepository, 'HEAD', 'missing', 1024)).toBeNull()
+      expect(Buffer.from((await client.repositoryBlobPrefix(firstRepository, '', '-binary file', 4))!, 'base64')).toEqual(binary.subarray(0, 4))
+      execFileSync('git', ['-C', firstRepository, 'update-ref', 'refs/remotes/--remote/base', 'HEAD'])
+      expect(Buffer.from((await client.repositoryBlobPrefix(firstRepository, '--remote/base', '-binary file', 4))!, 'base64')).toEqual(binary.subarray(0, 4))
+      expect(Buffer.from((await client.repositoryBlobPrefix(firstRepository, ':0', '-binary file', 4))!, 'base64')).toEqual(binary.subarray(0, 4))
+      await expect(client.repositoryBlobPrefix(firstRepository, 'missing', '-binary file', 4)).rejects.toThrow()
+      await expect(client.repositoryBlobPrefix(firstRepository, 'HEAD', '../outside', 4)).rejects.toThrow()
       const firstSnapshot = (await bounded(client.snapshot())) as {
         root_id: string
       }
       await writeFile(path.join(firstRepository, 'untracked'), 'new file')
+      const indexBeforeReview = await readFile(path.join(firstRepository, '.git', 'index'))
+      const selectedReview = await client.repositorySelectedCommitPreview(firstRepository, { paths: ['untracked'] })
+      expect(selectedReview.basis).toMatch(/^[a-f0-9]{64}$/)
+      expect(selectedReview.review).toMatchObject({ staged_count: 1, files: [{ bytes: [...Buffer.from('untracked')] }], large_files: [] })
+      expect(await client.repositorySelectedCommitPreview(firstRepository, { paths: ['untracked'] })).toEqual(selectedReview)
+      expect(await readFile(path.join(firstRepository, '.git', 'index'))).toEqual(indexBeforeReview)
+      await writeFile(path.join(firstRepository, 'untracked'), 'newer file')
+      expect((await client.repositorySelectedCommitPreview(firstRepository, { paths: ['untracked'] })).basis).not.toBe(selectedReview.basis)
+      await writeFile(path.join(firstRepository, 'untracked'), 'new file')
+      const rendererDiff = await client.repositoryRendererWorkingDiff(firstRepository, 'untracked', 'empty', false, false)
+      expect(Buffer.from(rendererDiff.stdout, 'base64').toString('utf8')).toContain('+new file')
+      await expect(client.repositoryRendererWorkingDiff(firstRepository, '../outside', 'empty', false, false)).rejects.toThrow()
       const rawDiff = spawnSync(
         'git',
         ['diff', '--no-index', '--', '/dev/null', 'untracked'],
@@ -471,6 +584,9 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       )
       expect(preview.path).toEqual({ bytes: [...Buffer.from(file.path)] })
       expect(getReviewedCopilotLines(file, displayed, preview)).toEqual([0])
+      const partialReview = await client.repositorySelectedCommitPreview(firstRepository, { partial_selections: [{ path: file.path, basis: preview.basis, lines: [0] }] })
+      expect(partialReview.basis).not.toBe(selectedReview.basis)
+      expect(await readFile(path.join(firstRepository, '.git', 'index'))).toEqual(indexBeforeReview)
       const working = await client.repositoryWorkingDiff(firstRepository, file.path)
       const selectedLines = getReviewedDiffLines(file.path, file.selection, displayed, working, 'stale')
       const undoId = await client.repositoryDiscardSelection(firstRepository, file.path, { basis: working.basis, lines: selectedLines })

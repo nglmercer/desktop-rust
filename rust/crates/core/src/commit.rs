@@ -6,17 +6,62 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 const LARGE_BLOB_LIMIT: u64 = 100 * 1024 * 1024;
+
+impl Repository {
+    /// Inspect selected worktree entries without following a file symlink out
+    /// of the repository. Git stores the link itself, not its target.
+    pub(crate) async fn renderer_large_files(&self, paths: Vec<GitPath>) -> Result<Value> {
+        anyhow::ensure!(paths.len() <= 1000, "too many paths for file-size review");
+        let paths = paths
+            .into_iter()
+            .map(validate_path)
+            .collect::<Result<Vec<_>>>()?;
+        anyhow::ensure!(
+            paths
+                .iter()
+                .map(|path| path.as_encoded_bytes().len())
+                .sum::<usize>()
+                <= 60_000,
+            "file-size review paths exceed the request limit"
+        );
+        let root = self.path.clone();
+        let large = cancellation::blocking(move || {
+            let directory = cap_std::fs::Dir::open_ambient_dir(root, cap_std::ambient_authority())?;
+            let mut large = Vec::with_capacity(paths.len());
+            for path in paths {
+                cancellation::Cancellation::current().check()?;
+                match directory.symlink_metadata(path) {
+                    Ok(metadata) => {
+                        large.push(metadata.is_file() && metadata.len() > LARGE_BLOB_LIMIT)
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => large.push(false),
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            Ok(large)
+        })
+        .await?;
+        Ok(json!(large))
+    }
+}
 #[derive(Serialize)]
-struct LargeFile {
+pub(crate) struct LargeFile {
     path: GitPath,
     display_path: String,
     oid: String,
     size: u64,
     tracked_by_lfs: bool,
+}
+#[derive(Serialize)]
+pub(crate) struct StagedReview {
+    pub threshold_bytes: u64,
+    pub staged_count: usize,
+    pub files: Vec<GitPath>,
+    pub large_files: Vec<LargeFile>,
 }
 #[derive(Serialize)]
 struct CommitPreview {
@@ -175,26 +220,68 @@ impl Repository {
             move || crate::discard::operation_certificate(&path)
         })
         .await?;
+        let review = self.review_staged_index(None, None).await?;
+        let StagedReview {
+            staged_count,
+            large_files,
+            ..
+        } = review;
+        anyhow::ensure!(
+            index_identity(index_path).await? == index
+                && self.commit_head_identity().await? == head,
+            "Index or HEAD changed while loading commit review; retry"
+        );
+        anyhow::ensure!(
+            cancellation::blocking(move || crate::discard::operation_certificate(&git_directory))
+                .await?
+                == operation,
+            "Repository operation changed during commit review; retry"
+        );
+        let basis = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(
+                self.id(),
+                index,
+                head,
+                LARGE_BLOB_LIMIT,
+                staged_count,
+                &operation,
+                &large_files
+            ))?)
+        );
+        Ok(CommitPreview {
+            basis,
+            threshold_bytes: LARGE_BLOB_LIMIT,
+            staged_count,
+            large_files,
+        })
+    }
+    pub(crate) async fn review_staged_index(
+        &self,
+        index: Option<&Path>,
+        base: Option<&str>,
+    ) -> Result<StagedReview> {
         // Replacement refs must not hide the size of the real blobs that will
         // be recorded in a tree and sent to a remote. Disable rename detection
         // so every new/changed destination has one unambiguous raw record.
-        let raw = checked(
-            self.run(&args(&[
-                "--no-replace-objects",
-                "diff",
-                "--cached",
-                "--raw",
-                "--no-abbrev",
-                "--no-renames",
-                "--ita-invisible-in-index",
-                "--no-ext-diff",
-                "--no-textconv",
-                "-z",
-                "--",
-            ]))
-            .await?,
-        )?;
-        let (staged_count, candidates) = candidates(&raw.stdout)?;
+        let mut command = args(&[
+            "--no-replace-objects",
+            "diff",
+            "--cached",
+            "--raw",
+            "--no-abbrev",
+            "--no-renames",
+            "--ita-invisible-in-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-z",
+        ]);
+        if let Some(base) = base {
+            command.push(base.into());
+        }
+        command.push("--".into());
+        let raw = checked(process::run_git(&self.path, &command, None, index).await?)?;
+        let (staged_count, candidates, files) = candidates(&raw.stdout)?;
         let unique: BTreeSet<_> = candidates.iter().map(|entry| entry.oid.as_str()).collect();
         let mut sizes = BTreeMap::new();
         if !unique.is_empty() {
@@ -262,37 +349,20 @@ impl Repository {
                 "invalid LFS attribute response during commit review"
             );
             for (file, fields) in large_files.iter_mut().zip(fields.as_chunks::<3>().0) {
-                anyhow::ensure!(fields[1] == b"filter", "unexpected commit attribute");
+                let GitPath::Bytes { bytes } = &file.path else {
+                    unreachable!("candidate paths use bytes")
+                };
+                anyhow::ensure!(
+                    fields[0] == bytes && fields[1] == b"filter",
+                    "unexpected commit attribute"
+                );
                 file.tracked_by_lfs = fields[2] == b"lfs";
             }
         }
-        anyhow::ensure!(
-            index_identity(index_path).await? == index
-                && self.commit_head_identity().await? == head,
-            "Index or HEAD changed while loading commit review; retry"
-        );
-        anyhow::ensure!(
-            cancellation::blocking(move || crate::discard::operation_certificate(&git_directory))
-                .await?
-                == operation,
-            "Repository operation changed during commit review; retry"
-        );
-        let basis = format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(&(
-                self.id(),
-                index,
-                head,
-                LARGE_BLOB_LIMIT,
-                staged_count,
-                &operation,
-                &large_files
-            ))?)
-        );
-        Ok(CommitPreview {
-            basis,
+        Ok(StagedReview {
             threshold_bytes: LARGE_BLOB_LIMIT,
             staged_count,
+            files,
             large_files,
         })
     }
@@ -318,12 +388,13 @@ fn checked(output: process::RawOutput) -> Result<process::RawOutput> {
     }
     Ok(output)
 }
-fn candidates(bytes: &[u8]) -> Result<(usize, Vec<Candidate>)> {
+fn candidates(bytes: &[u8]) -> Result<(usize, Vec<Candidate>, Vec<GitPath>)> {
     let mut fields = bytes
         .split(|byte| *byte == 0)
         .filter(|field| !field.is_empty());
     let mut count = 0;
     let mut files = Vec::new();
+    let mut paths = Vec::new();
     while let Some(header) = fields.next() {
         let header = std::str::from_utf8(header)?
             .strip_prefix(':')
@@ -337,6 +408,11 @@ fn candidates(bytes: &[u8]) -> Result<(usize, Vec<Candidate>)> {
             first
         };
         count += 1;
+        let git_path = GitPath::Bytes {
+            bytes: path.to_vec(),
+        };
+        validate_path(git_path.clone())?;
+        paths.push(git_path);
         if matches!(metadata[1], "100644" | "100755")
             && !metadata[3].bytes().all(|byte| byte == b'0')
         {
@@ -345,14 +421,11 @@ fn candidates(bytes: &[u8]) -> Result<(usize, Vec<Candidate>)> {
                     && metadata[3].bytes().all(|byte| byte.is_ascii_hexdigit()),
                 "invalid staged object ID"
             );
-            validate_path(GitPath::Bytes {
-                bytes: path.to_vec(),
-            })?;
             files.push(Candidate {
                 path: path.to_vec(),
                 oid: metadata[3].to_owned(),
             });
         }
     }
-    Ok((count, files))
+    Ok((count, files, paths))
 }

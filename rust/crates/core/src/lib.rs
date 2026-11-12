@@ -64,6 +64,7 @@ pub use settings::{
     ConfigScope, GitReadSettingKey, git_global_config_path, git_settings, git_version,
     set_git_setting,
 };
+pub use worktrees::{worktrees_at, worktrees_from_git_dir};
 mod history;
 mod stash;
 pub use stash::remote_deletion::{RemoteBranchDeletion, UpstreamDeletion};
@@ -282,6 +283,23 @@ impl Repository {
         }
         match operation {
             Operation::CommitPreview => return self.commit_preview().await,
+            Operation::SelectedCommitPreview {
+                paths,
+                remove_paths,
+                partial_selections,
+                amend_head,
+                expected_head,
+            } => {
+                return self
+                    .selected_commit_preview(
+                        paths,
+                        remove_paths,
+                        partial_selections,
+                        amend_head.as_deref(),
+                        expected_head.as_ref(),
+                    )
+                    .await;
+            }
             Operation::InitialCommit { paths } => return self.initial_commit(paths).await,
             Operation::Commit {
                 summary,
@@ -337,6 +355,59 @@ impl Repository {
             Operation::GitDescription => return self.git_description().await,
             Operation::IndexChanges => return self.index_changes().await,
             Operation::RendererCommit { revision } => return self.renderer_commit(&revision).await,
+            Operation::RendererHistory {
+                revision,
+                limit,
+                skip,
+                first_parent,
+                exclude_remotes,
+            } => {
+                return self
+                    .renderer_history(
+                        revision.as_deref(),
+                        limit,
+                        skip,
+                        first_parent,
+                        exclude_remotes,
+                    )
+                    .await;
+            }
+            Operation::RendererRecentBranches => return self.renderer_reflog(false).await,
+            Operation::RendererStashLog => return self.renderer_reflog(true).await,
+            Operation::RendererTagRefs => return self.renderer_tag_refs().await,
+            Operation::RendererCommitChanges { revision } => {
+                return self.renderer_commit_changes(&revision).await;
+            }
+            Operation::RendererLargeFiles { paths } => {
+                return self.renderer_large_files(paths).await;
+            }
+            Operation::RendererCommitDiff {
+                revision,
+                path,
+                old_path,
+                hide_whitespace,
+            } => {
+                return self
+                    .renderer_commit_diff(&revision, path, old_path, hide_whitespace)
+                    .await;
+            }
+            Operation::RendererWorkingDiff {
+                path,
+                base,
+                hide_whitespace,
+                no_textconv,
+            } => {
+                return self
+                    .renderer_working_diff(path, base, hide_whitespace, no_textconv)
+                    .await;
+            }
+            Operation::RendererBlobPrefix {
+                revision,
+                path,
+                length,
+            } => {
+                return self.renderer_blob_prefix(&revision, path, length).await;
+            }
             Operation::SafeFetchRemotes => return self.safe_fetch_remotes().await,
             Operation::ManageRemote { action } => return self.manage_remote(action).await,
             Operation::SetGitDescription { description } => {
@@ -810,6 +881,15 @@ impl Repository {
             | GitDescription
             | IndexChanges
             | RendererCommit { .. }
+            | RendererHistory { .. }
+            | RendererRecentBranches
+            | RendererStashLog
+            | RendererTagRefs
+            | RendererCommitChanges { .. }
+            | RendererLargeFiles { .. }
+            | RendererCommitDiff { .. }
+            | RendererWorkingDiff { .. }
+            | RendererBlobPrefix { .. }
             | SafeFetchRemotes
             | ManageRemote { .. }
             | SetGitDescription { .. }
@@ -919,7 +999,7 @@ impl Repository {
                     path_command(&["rm", "--cached", "--force", "--quiet", "--"], paths)?
                 }
             }
-            Commit { .. } | CommitPreview | InitialCommit { .. } => {
+            Commit { .. } | CommitPreview | SelectedCommitPreview { .. } | InitialCommit { .. } => {
                 unreachable!("handled by execute")
             }
             Checkout { .. }

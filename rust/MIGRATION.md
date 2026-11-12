@@ -240,6 +240,63 @@ this does not establish parity for the remaining repository workflows. In the
 browser, assisted-commit path discovery is skipped only when no assisted run or
 restored selection exists, because that runtime cannot safely propagate the
 ownership context required for an assisted transaction.
+The main renderer's working-tree text diff now obtains raw diff data through a
+typed Rust operation on both transports. The browser test verifies that the
+old and new lines render. Untracked inputs are snapshotted before invoking
+Git and are currently limited to 1 MiB; command output is limited to 2 MiB.
+These limits are smaller than the legacy renderer's large-diff limits. Other
+background refreshes still invoke the legacy Git runner and may show errors in
+the browser, and image, large-file and history diff parity remain open.
+Syntax highlighting's partial committed-file reads now use a typed Rust blob
+prefix operation on both transports. It resolves trees and index stages,
+preserves binary bytes and bounds the returned prefix to 1 MiB, including when
+the underlying blob is larger. Missing paths return null and invalid revisions
+remain errors. Full blob reads and other legacy background reads still need
+migration.
+Worktree listing from a repository path uses Rust for Wry and WebSocket,
+including unselected, nested and bare repositories. Linked, detached, locked
+and prunable records retain their renderer state, while paths that cannot be
+represented as UTF-8 are rejected. Recovery can also list worktrees using a
+missing worktree's administrative Git directory until Git prunes it. Worktree
+mutations still have legacy renderer callers.
+Recent-branch and stash-list refreshes read their fixed Git reflog formats
+through Rust on both transports; the existing renderer parsers retain ordering,
+rename handling and Desktop stash recognition. The reads retain the 2 MiB
+native command-output bound, and other reflog, stash mutation and history
+callers remain to be migrated.
+Renderer commit-history pages now use a typed Rust log read, with pagination,
+first-parent traversal and exclusion of remote refs. The existing commit parser
+continues to interpret identities, trailers and decorations. The Rust read has
+a 2 MiB command-output bound; larger history results and other history/diff
+operations still require parity work.
+The Rust-hosted renderer now displays contextual menus in the webview instead
+of invoking Electron's menu IPC. Menu actions, submenus, keyboard navigation,
+and dismissal are handled in the renderer. Native spellcheck menu entries and
+platform-specific edit roles beyond the basic edit menu remain outstanding.
+Tag reference enumeration and single-commit changed-file statistics also use
+typed Rust reads on both transports, as does the selected commit's file diff,
+subject to the native 2 MiB output bound. A Chromium integration test now adds
+a repository, opens the context menu, reviews and discards a changed file, and
+undoes it while checking the file bytes and the typed bridge calls. This does
+not establish parity for other menus, diff types or discard workflows.
+
+The renderer's selected-file size preflight now uses Rust on Wry and WebSocket.
+It fails on inaccessible paths rather than silently skipping them, treats a
+symlink as the link Git records, and batches large selections. This is an
+early worktree check, not a substitute for the staged-blob guard; ordinary
+selected-file commit staging and publication are still legacy workflows.
+Rust now exposes a selected-commit preview that builds a private index from
+HEAD for whole-file and certified partial selections. Its basis includes the
+repository identity, request, HEAD and branch, repository-operation state,
+the original live index and the selected index; capture checks HEAD, branch,
+live index and operation
+state again before returning. The preview also reports every changed path and
+oversized Git blob from that private index, with LFS attributes included in the
+basis. For amend, the review compares against the original commit's parent.
+It leaves the live index and commit history unchanged, but Git may write object
+data and run configured clean filters. This is a building block only: no
+renderer commit uses the basis yet, and publication, hooks, size review and
+recovery must be implemented and verified before selected commits migrate.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository

@@ -3,6 +3,8 @@ import { git, isMaxBufferExceededError } from './core'
 import { Repository } from '../../models/repository'
 import { GitError } from 'dugite'
 import { coerceToBuffer } from './coerce-to-buffer'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Resolve leading-dash revisions before appending a path so Git can report a
@@ -96,6 +98,13 @@ export async function getPartialBlobContentsCatchPathNotInRef(
   path: string,
   length: number
 ): Promise<Buffer | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryBlobPrefix(repository.path, commitish, path, length)
+    const result = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    return result === null ? null : Buffer.from(result, 'base64')
+  }
   const revision = await resolveBlobRevision(repository, commitish)
   const args = ['show', `${revision}:${path}`]
 

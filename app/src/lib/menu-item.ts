@@ -1,4 +1,6 @@
 import { invokeContextualMenu } from '../ui/main-process-proxy'
+import { backend } from '../backend/client'
+import { showBrowserContextMenu } from '../ui/lib/browser-context-menu'
 
 export interface IMenuItem {
   /** The user-facing label. */
@@ -83,10 +85,9 @@ export async function showContextualMenu(
   items: ReadonlyArray<IMenuItem>,
   addSpellCheckMenu = false
 ) {
-  const indices = await invokeContextualMenu(
-    serializeMenuItems(items),
-    addSpellCheckMenu
-  )
+  const indices = typeof window !== 'undefined' && backend().transportKind !== 'none'
+    ? await showBrowserContextMenu(items)
+    : await invokeContextualMenu(serializeMenuItems(items), addSpellCheckMenu)
 
   if (indices !== null) {
     const menuItem = findSubmenuItem(items, indices)

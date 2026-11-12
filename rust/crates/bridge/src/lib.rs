@@ -339,6 +339,12 @@ enum ManagementOperation {
     RepositorySafeFetchRemotes {
         path: desktop_core::GitPath,
     },
+    RepositoryWorktrees {
+        path: desktop_core::GitPath,
+    },
+    RepositoryWorktreesFromGitDir {
+        path: desktop_core::GitPath,
+    },
     RepositorySafeRemoteUrl {
         path: desktop_core::GitPath,
         name: String,
@@ -587,6 +593,26 @@ async fn execute(
             anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
             let _current = cancellation::wait(state.repo.lock()).await?;
             desktop_core::safe_fetch_remotes(&requested).await
+        }
+        ApplicationOperation::Management(RepositoryWorktrees { path }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "An explicit repository cannot use a selected-repository binding"
+            );
+            let requested = desktop_core::directory_path(path)?;
+            anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
+            let _current = cancellation::wait(state.repo.lock()).await?;
+            desktop_core::worktrees_at(&requested).await
+        }
+        ApplicationOperation::Management(RepositoryWorktreesFromGitDir { path }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "An explicit repository cannot use a selected-repository binding"
+            );
+            let requested = desktop_core::directory_path(path)?;
+            anyhow::ensure!(requested.is_absolute(), "Git directory must be absolute");
+            let _current = cancellation::wait(state.repo.lock()).await?;
+            desktop_core::worktrees_from_git_dir(&requested).await
         }
         ApplicationOperation::Management(RepositorySafeRemoteUrl { path, name }) => {
             anyhow::ensure!(

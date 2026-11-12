@@ -166,15 +166,20 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
   ): Promise<boolean> => {
     const { workingDirectory } = this.props.changes
 
-    const overSizedFiles = await getLargeFilePaths(
-      this.props.repository,
-      workingDirectory
-    )
-
-    const filesIgnoredByLFS = await filesNotTrackedByLFS(
-      this.props.repository,
-      overSizedFiles
-    )
+    let filesIgnoredByLFS: ReadonlyArray<string>
+    try {
+      const overSizedFiles = await getLargeFilePaths(
+        this.props.repository,
+        workingDirectory
+      )
+      filesIgnoredByLFS = await filesNotTrackedByLFS(
+        this.props.repository,
+        overSizedFiles
+      )
+    } catch (error) {
+      await this.props.dispatcher.postError(error)
+      return false
+    }
 
     if (filesIgnoredByLFS.length !== 0) {
       this.props.dispatcher.showPopup({

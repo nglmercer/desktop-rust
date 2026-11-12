@@ -39,6 +39,7 @@ import { enableImagePreviewsForDDSFiles } from '../feature-flag'
 import { unstageAll } from './reset'
 import { stageFiles } from './update-index'
 import { isAbsolute } from 'path'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * V8 has a limit on the size of string it can create (~256MB), and unless we want to
@@ -119,6 +120,32 @@ export async function getCommitDiff(
   commitish: string,
   hideWhitespaceInDiff: boolean = false
 ): Promise<IDiff> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const oldPath =
+      file.status.kind === AppFileStatusKind.Renamed ||
+      file.status.kind === AppFileStatusKind.Copied
+        ? file.status.oldPath
+        : undefined
+    const read = () =>
+      backend().repositoryRendererCommitDiff(
+        repository.path,
+        commitish,
+        file.path,
+        oldPath,
+        hideWhitespaceInDiff
+      )
+    const encoded =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+    return buildDiff(
+      Buffer.from(encoded, 'base64'),
+      repository,
+      file,
+      commitish,
+      commitish
+    )
+  }
   const args = [
     'log',
     commitish,
@@ -348,6 +375,37 @@ export async function getWorkingDirectoryDiff(
   hideWhitespaceInDiff: boolean = false,
   options: { readonly noTextconv?: boolean } = {}
 ): Promise<IDiff> {
+  const isSubmodule = file.status.submoduleStatus !== undefined
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const base =
+      !isSubmodule &&
+      (file.status.kind === AppFileStatusKind.New ||
+        file.status.kind === AppFileStatusKind.Untracked)
+        ? 'empty'
+        : file.status.kind === AppFileStatusKind.Renamed
+          ? 'index'
+          : 'head'
+    const read = () =>
+      backend().repositoryRendererWorkingDiff(
+        repository.path,
+        file.path,
+        base,
+        hideWhitespaceInDiff,
+        options.noTextconv === true
+      )
+    const result =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+    return buildDiff(
+      Buffer.from(result.stdout, 'base64'),
+      repository,
+      file,
+      'HEAD',
+      'HEAD',
+      parseLineEndingsWarning(Buffer.from(result.stderr, 'base64'))
+    )
+  }
   // `--no-ext-diff` should be provided wherever we invoke `git diff` so that any
   // diff.external program configured by the user is ignored
   const args = [
@@ -360,7 +418,6 @@ export async function getWorkingDirectoryDiff(
     '--no-color',
   ]
   const successExitCodes = new Set([0])
-  const isSubmodule = file.status.submoduleStatus !== undefined
 
   // For added submodules, we'll use the "default" parameters, which are able
   // to output the submodule commit.

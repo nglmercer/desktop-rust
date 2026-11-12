@@ -1,5 +1,55 @@
 @import '../mixins';
 
+.browser-context-menu-root {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.browser-context-menu {
+  position: fixed;
+  min-width: 180px;
+  max-width: min(420px, 100vw);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 4px 0;
+  color: var(--app-menu-pane-color);
+  background: var(--app-menu-pane-background-color);
+  border: var(--base-border);
+  border-radius: 5px;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 25%);
+  pointer-events: auto;
+
+  > button {
+    display: block;
+    width: 100%;
+    padding: 5px 12px;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    text-align: left;
+    white-space: normal;
+
+    &:focus,
+    &:hover:not(:disabled) {
+      color: var(--box-selected-active-text-color);
+      background: var(--box-selected-active-background-color);
+      outline: none;
+    }
+
+    &:disabled {
+      opacity: 0.45;
+    }
+  }
+}
+
+.browser-context-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--app-menu-divider-color);
+}
+
 #app-menu-foldout {
   display: flex;
   max-height: 95%; // When at 100%, can cause some brief shifting of components

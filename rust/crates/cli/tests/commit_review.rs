@@ -210,6 +210,30 @@ fn staged_blob_review_preserves_consent_and_native_git_behavior() {
     assert_eq!(plan["large_files"][0]["oid"], large);
     assert_eq!(plan["large_files"][0]["tracked_by_lfs"], false);
     let index = fs::read(repo.join(".git/index")).unwrap();
+    fs::hard_link(&payload, repo.join("oversized.bin")).unwrap();
+    let selected = f.rpc(
+        repo,
+        "selected_commit_preview",
+        json!({"paths":["oversized.bin"]}),
+    );
+    assert_eq!(selected["review"]["staged_count"], 1);
+    assert_eq!(selected["review"]["large_files"][0]["size"], LIMIT + 1);
+    assert_eq!(selected["review"]["large_files"][0]["oid"], large);
+    assert_eq!(
+        selected["review"]["files"][0]["bytes"],
+        json!(b"oversized.bin".to_vec())
+    );
+    fs::write(repo.join(".gitattributes"), "*.bin filter=lfs\n").unwrap();
+    let with_lfs = f.rpc(
+        repo,
+        "selected_commit_preview",
+        json!({"paths":["oversized.bin"]}),
+    );
+    assert_eq!(with_lfs["review"]["large_files"][0]["tracked_by_lfs"], true);
+    assert_ne!(with_lfs["basis"], selected["basis"]);
+    fs::remove_file(repo.join(".gitattributes")).unwrap();
+    assert_eq!(fs::read(repo.join(".git/index")).unwrap(), index);
+    fs::remove_file(repo.join("oversized.bin")).unwrap();
     let denied = f.rpc_raw(repo, "commit", json!({"summary":"blocked"}), true, false);
     let denied: Value = serde_json::from_slice(&denied.stdout).unwrap();
     assert_eq!(denied["code"], 2);

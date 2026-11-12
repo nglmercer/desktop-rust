@@ -28,6 +28,14 @@ struct ReadRequest {
     #[serde(default)]
     commitish: Option<String>,
     #[serde(default)]
+    limit: Option<u64>,
+    #[serde(default)]
+    skip: Option<u64>,
+    #[serde(default)]
+    first_parent: Option<bool>,
+    #[serde(default)]
+    exclude_remotes: Option<bool>,
+    #[serde(default)]
     range: Option<String>,
     #[serde(default)]
     kind: Option<desktop_backend::StatusConflictKind>,
@@ -96,6 +104,10 @@ enum GitInfoOperation {
         action: desktop_backend::GitIgnoreAction,
     },
     ReviewedDiscard {
+        repository_path: String,
+        operation: Operation,
+    },
+    SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
     },
@@ -176,6 +188,14 @@ enum ReadMethod {
     StatusDetailed,
     IndexChanges,
     RendererCommit,
+    RendererHistory,
+    RendererRecentBranches,
+    RendererStashLog,
+    RendererTagRefs,
+    RendererCommitChanges,
+    RendererLargeFiles,
+    Worktrees,
+    WorktreesFromGitDir,
     StatusContext,
     StatusConflictDetails,
     BranchEnumeration,
@@ -222,6 +242,8 @@ enum BackendOperation {
     CanonicalMutationPath,
     TrustRepository,
     SafeFetchRemotes,
+    Worktrees,
+    WorktreesFromGitDir,
     SafeRemoteUrl(String),
     SymbolicRef(String),
     GitInfo(GitInfoOperation),
@@ -295,6 +317,9 @@ impl Backend {
         | GitInfoOperation::ReviewedDiscard {
             repository_path, ..
         }
+        | GitInfoOperation::SelectedCommitPreview {
+            repository_path, ..
+        }
         | GitInfoOperation::InitialCommit {
             repository_path, ..
         }
@@ -312,6 +337,9 @@ impl Backend {
             && !matches!(
                 operation,
                 Operation::DiffDetail { staged: false, .. }
+                    | Operation::RendererWorkingDiff { .. }
+                    | Operation::RendererBlobPrefix { .. }
+                    | Operation::RendererCommitDiff { .. }
                     | Operation::DiscardPreview {
                         scope: desktop_backend::DiscardScope::WorkingTree,
                         selection: Some(_),
@@ -331,6 +359,13 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported reviewed discard operation".into(),
+            ));
+        }
+        if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
+            && !matches!(operation, Operation::SelectedCommitPreview { .. })
+        {
+            return Err(AppError::BadArgs(
+                "unsupported selected commit preview operation".into(),
             ));
         }
         let duration = request.deadline_ms.unwrap_or(60_000);
@@ -419,6 +454,16 @@ impl Backend {
             .try_into()
             .map_err(|_| AppError::BadArgs("backend read requires exactly one request".into()))?;
         let request: ReadRequest = serde_json::from_value(value)?;
+        if !matches!(&request.method, ReadMethod::RendererHistory)
+            && (request.limit.is_some()
+                || request.skip.is_some()
+                || request.first_parent.is_some()
+                || request.exclude_remotes.is_some())
+        {
+            return Err(AppError::BadArgs(
+                "history options only apply to history reads".into(),
+            ));
+        }
         if !Path::new(&request.repository_path).is_absolute() {
             return Err(AppError::BadArgs("repository path must be absolute".into()));
         }
@@ -452,9 +497,13 @@ impl Backend {
                 "boolean parsing only applies to Git setting reads".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
+        if !matches!(
+            &request.method,
+            ReadMethod::LfsFileTracking | ReadMethod::RendererLargeFiles
+        ) && request.paths.is_some()
+        {
             return Err(AppError::BadArgs(
-                "paths only apply to LFS file tracking".into(),
+                "paths only apply to file-tracking or size reads".into(),
             ));
         }
         if !matches!(&request.method, ReadMethod::SubmoduleDisplayUrl)
@@ -482,6 +531,8 @@ impl Backend {
                 | ReadMethod::CanonicalMutationPath
                 | ReadMethod::TrustRepository
                 | ReadMethod::SafeFetchRemotes
+                | ReadMethod::Worktrees
+                | ReadMethod::WorktreesFromGitDir
                 | ReadMethod::SafeRemoteUrl
                 | ReadMethod::SymbolicRef
         ) && request.include_untracked.is_none()
@@ -496,6 +547,8 @@ impl Backend {
                 ReadMethod::CanonicalMutationPath => BackendOperation::CanonicalMutationPath,
                 ReadMethod::TrustRepository => BackendOperation::TrustRepository,
                 ReadMethod::SafeFetchRemotes => BackendOperation::SafeFetchRemotes,
+                ReadMethod::Worktrees => BackendOperation::Worktrees,
+                ReadMethod::WorktreesFromGitDir => BackendOperation::WorktreesFromGitDir,
                 ReadMethod::SafeRemoteUrl => BackendOperation::SafeRemoteUrl(
                     request
                         .remote_name
@@ -635,6 +688,49 @@ impl Backend {
                 {
                     Operation::IndexChanges
                 }
+                ReadMethod::RendererRecentBranches | ReadMethod::RendererStashLog
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    match request.method {
+                        ReadMethod::RendererRecentBranches => Operation::RendererRecentBranches,
+                        ReadMethod::RendererStashLog => Operation::RendererStashLog,
+                        _ => unreachable!(),
+                    }
+                }
+                ReadMethod::RendererTagRefs
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::RendererTagRefs
+                }
+                ReadMethod::RendererCommitChanges
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none() =>
+                {
+                    Operation::RendererCommitChanges {
+                        revision: request
+                            .commitish
+                            .ok_or_else(|| AppError::BadArgs("commitish is required".into()))?,
+                    }
+                }
+                ReadMethod::RendererLargeFiles
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::RendererLargeFiles {
+                        paths: request
+                            .paths
+                            .ok_or_else(|| AppError::BadArgs("paths are required".into()))?,
+                    }
+                }
                 ReadMethod::RendererCommit
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()
@@ -644,6 +740,19 @@ impl Backend {
                         revision: request
                             .commitish
                             .ok_or_else(|| AppError::BadArgs("commitish is required".into()))?,
+                    }
+                }
+                ReadMethod::RendererHistory
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none() =>
+                {
+                    Operation::RendererHistory {
+                        revision: request.commitish,
+                        limit: request.limit,
+                        skip: request.skip,
+                        first_parent: request.first_parent.unwrap_or(false),
+                        exclude_remotes: request.exclude_remotes.unwrap_or(false),
                     }
                 }
                 ReadMethod::StatusContext
@@ -872,6 +981,8 @@ impl Backend {
                     BackendOperation::CanonicalMutationPath => return desktop_backend::canonical_mutation_path(Path::new(&job.path)).await.map(serde_json::Value::String).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::TrustRepository => return desktop_backend::trust_repository(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::SafeFetchRemotes => return desktop_backend::safe_fetch_remotes(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
+                    BackendOperation::Worktrees => return desktop_backend::worktrees_at(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
+                    BackendOperation::WorktreesFromGitDir => return desktop_backend::worktrees_from_git_dir(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::SafeRemoteUrl(name) => return desktop_backend::safe_remote_url(Path::new(&job.path), &name).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::SymbolicRef(reference) => return desktop_backend::symbolic_ref(Path::new(&job.path), &reference).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::GitInfo(operation) => {
@@ -909,6 +1020,12 @@ impl Backend {
                                 repo.execute(Operation::GitIgnore { action }).await
                             }
                             GitInfoOperation::ReviewedDiscard { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::SelectedCommitPreview { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1782,7 +1899,177 @@ esac
     }
 
     #[test]
+    fn reads_worktrees_from_explicit_paths() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-wry-worktrees-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let bare = root.join("bare.git");
+        assert!(
+            Command::new("git")
+                .args(["init", "--bare", "-q"])
+                .arg(&bare)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let backend = Backend::new(16).unwrap();
+        let result = backend
+            .read_args(vec![json!({"repository_path":bare,"method":"worktrees"})])
+            .unwrap();
+        assert_eq!(result[0]["bare"], true);
+        assert_eq!(result[0]["main"], true);
+        let from_git_dir = backend
+            .read_args(vec![
+                json!({"repository_path":bare,"method":"worktrees_from_git_dir"}),
+            ])
+            .unwrap();
+        assert_eq!(from_git_dir, result);
+        assert!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":"relative","method":"worktrees_from_git_dir"})
+                ])
+                .is_err()
+        );
+        assert!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":bare,"method":"worktrees","include_untracked":true})
+                ])
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_blob_prefix_through_wry() {
+        let root = std::env::temp_dir().join(format!("desktop-wry-blob-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(root.join("file"), b"hello\0world").unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["add", "--", "file"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "initial"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let backend = Backend::new(16).unwrap();
+        let blob = |revision: &str, path: &str| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_blob_prefix","revision":revision,"path":path,"length":5}}})]).unwrap())
+        };
+        assert_eq!(blob("HEAD", "file").unwrap(), json!("aGVsbG8="));
+        assert_eq!(blob("HEAD", "missing").unwrap(), Value::Null);
+        assert!(blob("missing", "file").is_err());
+        let recent = backend
+            .read_args(vec![
+                json!({"repository_path":root,"method":"renderer_recent_branches"}),
+            ])
+            .unwrap();
+        assert!(
+            recent
+                .as_str()
+                .is_some_and(|value| value.contains("initial"))
+        );
+        let history = backend.read_args(vec![json!({"repository_path":root,"method":"renderer_history","commitish":"HEAD","limit":1,"skip":0,"first_parent":true,"exclude_remotes":false})]).unwrap();
+        assert!(history.as_str().is_some_and(|value| !value.is_empty()));
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":root,"method":"renderer_tag_refs"})
+                ])
+                .unwrap(),
+            ""
+        );
+        let changes = backend.read_args(vec![json!({"repository_path":root,"method":"renderer_commit_changes","commitish":"HEAD"})]).unwrap();
+        assert!(changes.as_str().is_some_and(|value| value.contains("file")));
+        let diff = backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_commit_diff","revision":"HEAD","path":"file","old_path":null,"hide_whitespace":false}}})]).unwrap()).unwrap();
+        assert!(diff.as_str().is_some_and(|value| !value.is_empty()));
+        fs::File::create(root.join("large"))
+            .unwrap()
+            .set_len(100 * 1024 * 1024 + 1)
+            .unwrap();
+        assert_eq!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_large_files","paths":["file","large","missing"]})]).unwrap(), json!([false,true,false]));
+        assert!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_large_files","paths":["../outside"]})]).is_err());
+        assert!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_commit_changes","commitish":"missing"})]).is_err());
+        assert_eq!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_history","commitish":"missing"})]).unwrap(), Value::Null);
+        assert!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":root,"method":"renderer_recent_branches","limit":1})
+                ])
+                .is_err()
+        );
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":root,"method":"renderer_stash_log"})
+                ])
+                .unwrap(),
+            Value::Null
+        );
+        fs::write(root.join("selected"), b"selected content\n").unwrap();
+        let original_index = fs::read(root.join(".git/index")).unwrap();
+        let operation = json!({"method":"selected_commit_preview","paths":["selected"],"remove_paths":[],"partial_selections":[],"amend_head":null,"expected_head":null});
+        let preview = || {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        let first = preview().unwrap();
+        assert_eq!(first, preview().unwrap());
+        assert_eq!(first["review"]["staged_count"], 1);
+        assert_eq!(
+            first["review"]["files"],
+            json!([{ "bytes": b"selected".to_vec() }])
+        );
+        assert!(
+            first["basis"]
+                .as_str()
+                .is_some_and(|basis| basis.len() == 64)
+        );
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":{"method":"stage","paths":["selected"]}}})]).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn reads_the_requested_repository_and_rejects_mutations() {
+        // This integration fixture exercises many request shapes in one test;
+        // its debug-build stack frame exceeds Rust's default test-thread stack.
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(reads_the_requested_repository_and_rejects_mutations_inner)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn reads_the_requested_repository_and_rejects_mutations_inner() {
         let root =
             std::env::temp_dir().join(format!("desktop-wry-backend-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
@@ -1830,6 +2117,18 @@ esac
         let reviewed = |operation: Value| {
             backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":first,"operation":operation}})]).unwrap())
         };
+        let renderer =
+            reviewed(json!({"method":"renderer_working_diff","path":"first-only","base":"empty"}))
+                .unwrap();
+        assert!(
+            renderer["stdout"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty())
+        );
+        assert!(
+            reviewed(json!({"method":"renderer_working_diff","path":"../outside","base":"empty"}))
+                .is_err()
+        );
         let diff =
             reviewed(json!({"method":"diff_detail","path":"first-only","staged":false})).unwrap();
         let selection = json!({"basis":diff["basis"],"lines":[diff["hunks"][0]["lines"][0]["id"]]});

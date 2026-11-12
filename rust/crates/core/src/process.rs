@@ -55,6 +55,22 @@ pub async fn run_git(
     run_command(path, command, args, input, 2 * 1024 * 1024, None).await
 }
 
+/// Capture at most `limit` bytes from a known blob. Closing stdout after the
+/// prefix can make Git exit with SIGPIPE, so the caller must verify the blob
+/// beforehand and interpret the exit status together with the expected size.
+pub(crate) async fn blob_prefix(path: &Path, oid: &str, limit: u64) -> Result<RawOutput> {
+    run_command_inner(
+        path,
+        git_command(None),
+        &crate::args(&["cat-file", "blob", oid]),
+        None,
+        limit,
+        None,
+        true,
+    )
+    .await
+}
+
 /// Parse supplied config bytes without discovering a repository or loading user configuration.
 #[cfg(unix)]
 pub(crate) async fn parse_git_config(bytes: Vec<u8>) -> Result<RawOutput> {
@@ -382,11 +398,23 @@ pub async fn diff_files(path: &Path, before: &Path, after: &Path) -> Result<RawO
 
 async fn run_command(
     path: &Path,
+    command: Command,
+    args: &[OsString],
+    input: Option<Vec<u8>>,
+    output_limit: u64,
+    output_file: Option<tokio::fs::File>,
+) -> Result<RawOutput> {
+    run_command_inner(path, command, args, input, output_limit, output_file, false).await
+}
+
+async fn run_command_inner(
+    path: &Path,
     mut command: Command,
     args: &[OsString],
     input: Option<Vec<u8>>,
     output_limit: u64,
     output_file: Option<tokio::fs::File>,
+    prefix_only: bool,
 ) -> Result<RawOutput> {
     let cancellation = crate::cancellation::Cancellation::current();
     cancellation.check()?;
@@ -439,6 +467,10 @@ async fn run_command(
                     tokio::io::copy(&mut stdout, &mut file).await?;
                     file.sync_all().await?;
                     Ok(Vec::new())
+                } else if prefix_only {
+                    let mut bytes = Vec::new();
+                    stdout.take(output_limit).read_to_end(&mut bytes).await?;
+                    Ok(bytes)
                 } else {
                     read_bounded(stdout, output_limit).await
                 }

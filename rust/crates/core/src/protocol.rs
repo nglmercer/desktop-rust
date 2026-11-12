@@ -18,8 +18,17 @@ pub enum CopilotDiffSource {
     WorkingTree,
 }
 
+/// Baseline used by the renderer's working-tree diff.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RendererDiffBase {
+    Head,
+    Index,
+    Empty,
+}
+
 /// A reviewed HEAD-to-working-tree line selection.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CopilotLineSelection {
     pub path: GitPath,
@@ -39,7 +48,7 @@ pub struct CopilotAccount {
 }
 
 /// Branch and commit retained with a restored selection.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CopilotExpectedHead {
     #[serde(rename = "ref")]
@@ -295,6 +304,44 @@ pub enum Operation {
     RendererCommit {
         revision: String,
     },
+    RendererHistory {
+        revision: Option<String>,
+        limit: Option<u64>,
+        skip: Option<u64>,
+        #[serde(default)]
+        first_parent: bool,
+        #[serde(default)]
+        exclude_remotes: bool,
+    },
+    RendererRecentBranches,
+    RendererStashLog,
+    RendererTagRefs,
+    RendererCommitChanges {
+        revision: String,
+    },
+    RendererLargeFiles {
+        paths: Vec<GitPath>,
+    },
+    RendererCommitDiff {
+        revision: String,
+        path: GitPath,
+        old_path: Option<GitPath>,
+        #[serde(default)]
+        hide_whitespace: bool,
+    },
+    RendererWorkingDiff {
+        path: GitPath,
+        base: RendererDiffBase,
+        #[serde(default)]
+        hide_whitespace: bool,
+        #[serde(default)]
+        no_textconv: bool,
+    },
+    RendererBlobPrefix {
+        revision: String,
+        path: GitPath,
+        length: u32,
+    },
     SafeFetchRemotes,
     ManageRemote {
         action: crate::ManagedRemoteAction,
@@ -434,6 +481,16 @@ pub enum Operation {
         paths: Vec<GitPath>,
     },
     CommitPreview,
+    SelectedCommitPreview {
+        #[serde(default)]
+        paths: Vec<GitPath>,
+        #[serde(default)]
+        remove_paths: Vec<GitPath>,
+        #[serde(default)]
+        partial_selections: Vec<CopilotLineSelection>,
+        amend_head: Option<String>,
+        expected_head: Option<CopilotExpectedHead>,
+    },
     InitialCommit {
         paths: Vec<GitPath>,
     },

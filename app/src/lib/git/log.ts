@@ -141,6 +141,18 @@ export async function getCommits(
   skip?: number,
   additionalArgs: ReadonlyArray<string> = []
 ): Promise<ReadonlyArray<Commit>> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const firstParent = additionalArgs.length === 1 && additionalArgs[0] === '--first-parent'
+    const excludeRemotes = additionalArgs.length === 2 && additionalArgs[0] === '--not' && additionalArgs[1] === '--remotes'
+    if (additionalArgs.length !== 0 && !firstParent && !excludeRemotes) {
+      throw new Error('Unsupported history options for the Rust backend')
+    }
+    const read = () => backend().repositoryRendererHistory(repository.path, revisionRange, limit, skip, firstParent, excludeRemotes)
+    const encoded = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    return encoded === null ? [] : parseCommitLog(Buffer.from(encoded, 'base64'))
+  }
   const { formatArgs } = commitLogParser
 
   const args = ['log', '--date=raw']
@@ -235,6 +247,13 @@ export async function getChangedFiles(
   repository: Repository,
   sha: string
 ): Promise<IChangesetData> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryRendererCommitChanges(repository.path, sha)
+    const stdout = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    return parseRawLogWithNumstat(stdout, sha, `${sha}^`)
+  }
   // opt-in for rename detection (-M) and copies detection (-C)
   // this is equivalent to the user configuring 'diff.renames' to 'copies'
   // NOTE: order here matters - doing -M before -C means copies aren't detected

@@ -330,6 +330,70 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.repositoryIndexChanges('/repo-a')).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('validates blob preview lengths and responses', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => 'AA==')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryBlobPrefix('/repo', 'HEAD', 'file', 1)).resolves.toBe('AA==')
+    invoke.mockResolvedValueOnce('AAAA')
+    await expect(client.repositoryBlobPrefix('/repo', 'HEAD', 'file', 1)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce('bad!')
+    await expect(client.repositoryBlobPrefix('/repo', 'HEAD', 'file', 3)).rejects.toMatchObject({ code: 'invalid_response' })
+    await expect(client.repositoryBlobPrefix('/repo', 'HEAD', 'file', -1)).rejects.toMatchObject({ code: 'invalid_request' })
+  })
+
+  it('validates selected-file size review responses', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => [false, true])
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryLargeFiles('/repo', ['small', 'large'])).resolves.toEqual([false, true])
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ method: 'renderer_large_files', paths: ['small', 'large'] }))
+    invoke.mockResolvedValueOnce([true])
+    await expect(client.repositoryLargeFiles('/repo', ['small', 'large'])).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce([false, 'true'])
+    await expect(client.repositoryLargeFiles('/repo', ['small', 'large'])).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('validates selected commit review without staging', async () => {
+    const value = { basis: 'a'.repeat(64), head: 'b'.repeat(40), branch: 'refs/heads/main', review: { threshold_bytes: 100 * 1024 * 1024, staged_count: 1, files: ['selected'], large_files: [] } }
+    const invoke = vi.fn(async (): Promise<unknown> => value)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).resolves.toEqual(value)
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ type: 'selected_commit_preview', repository_path: '/repo', operation: expect.objectContaining({ method: 'selected_commit_preview', paths: ['selected'] }) }) }))
+    invoke.mockResolvedValueOnce({ ...value, basis: 'bad' })
+    await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({ ...value, review: { ...value.review, staged_count: 2 } })
+    await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({ ...value, review: { ...value.review, large_files: [{ path: 'other', display_path: 'other', oid: 'c'.repeat(40), size: 100 * 1024 * 1024 + 1, tracked_by_lfs: false }] } })
+    await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('validates typed history pagination and responses', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => 'YQ==')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryRendererHistory('/repo', 'HEAD', 10, 2, false, true)).resolves.toBe('YQ==')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'renderer_history', commitish: 'HEAD', limit: 10, skip: 2, first_parent: false, exclude_remotes: true }))
+    await expect(client.repositoryRendererHistory('/repo', 'HEAD', -1, 0, false, false)).rejects.toMatchObject({ code: 'invalid_request' })
+    invoke.mockResolvedValueOnce('bad!')
+    await expect(client.repositoryRendererHistory('/repo', 'HEAD', 1, 0, false, false)).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('validates native worktree paths and state', async () => {
+    const entry = { path: { bytes: [...Buffer.from('/repo')] }, head: 'abc', branch: 'refs/heads/main', detached: false, locked: null, prunable: null, main: true, bare: false }
+    const invoke = vi.fn(async (): Promise<unknown> => [entry])
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryWorktrees('/repo')).resolves.toEqual([{ path: '/repo', head: 'abc', branch: 'refs/heads/main', isDetached: false, type: 'main', isLocked: false, isPrunable: false }])
+    await expect(client.repositoryWorktrees('/repo/.git/worktrees/missing', true)).resolves.toEqual([{ path: '/repo', head: 'abc', branch: 'refs/heads/main', isDetached: false, type: 'main', isLocked: false, isPrunable: false }])
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.read', expect.objectContaining({ method: 'worktrees_from_git_dir', repository_path: '/repo/.git/worktrees/missing' }))
+    invoke.mockResolvedValueOnce([{ ...entry, path: { bytes: [255] } }])
+    await expect(client.repositoryWorktrees('/repo')).rejects.toMatchObject({ code: 'unsupported_path' })
+    invoke.mockResolvedValueOnce([{ ...entry, main: false }])
+    await expect(client.repositoryWorktrees('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('uses certified native discard and returns its undo capability', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => null)
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

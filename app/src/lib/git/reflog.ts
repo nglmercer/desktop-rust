@@ -1,5 +1,7 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Get the `limit` most recently checked out branches.
@@ -15,28 +17,41 @@ export async function getRecentBranches(
     /.*? (renamed|checkout)(?:: moving from|\s*) (?:refs\/heads\/|\s*)(.*?) to (?:refs\/heads\/|\s*)(.*?)$/i
   )
 
-  const result = await git(
-    [
-      'log',
-      '-g',
-      '--no-abbrev-commit',
-      '--pretty=oneline',
-      'HEAD',
-      '-n',
-      '2500',
-      '--',
-    ],
-    repository.path,
-    'getRecentBranches',
-    { successExitCodes: new Set([0, 128]) }
-  )
+  let stdout: string
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () =>
+      backend().repositoryRendererReflog(repository.path, 'branches')
+    const result =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+    if (result === null) return []
+    stdout = result
+  } else {
+    const result = await git(
+      [
+        'log',
+        '-g',
+        '--no-abbrev-commit',
+        '--pretty=oneline',
+        'HEAD',
+        '-n',
+        '2500',
+        '--',
+      ],
+      repository.path,
+      'getRecentBranches',
+      { successExitCodes: new Set([0, 128]) }
+    )
 
-  if (result.exitCode === 128) {
-    // error code 128 is returned if the branch is unborn
-    return []
+    if (result.exitCode === 128) {
+      // error code 128 is returned if the branch is unborn
+      return []
+    }
+    stdout = result.stdout
   }
 
-  const lines = result.stdout.split('\n')
+  const lines = stdout.split('\n')
   const names = new Set<string>()
   const excludedNames = new Set<string>()
 

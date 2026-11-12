@@ -5,6 +5,8 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+const RENDERER_LOG_FORMAT: &str = "--format=%H%x00%h%x00%s%x00%b%x00%an <%ae> %ad%x00%cn <%ce> %cd%x00%P%x00%(trailers:unfold,only)%x00%D";
+
 #[derive(Serialize)]
 pub(crate) struct Identity {
     pub name: String,
@@ -27,6 +29,253 @@ pub(crate) struct Commit {
 }
 
 impl Repository {
+    pub(crate) async fn renderer_commit_diff(
+        &self,
+        revision: &str,
+        path: GitPath,
+        old_path: Option<GitPath>,
+        hide_whitespace: bool,
+    ) -> Result<Value> {
+        let commit = self.resolve_commit(revision).await?;
+        let path = crate::validate_path(path)?;
+        let mut command = args(&["log"]);
+        if hide_whitespace {
+            command.push("-w".into());
+        }
+        command.extend(args(&[
+            "-m",
+            "-1",
+            "--first-parent",
+            "--patch-with-raw",
+            "--format=",
+            "-z",
+            "--no-color",
+            "--end-of-options",
+            &commit,
+            "--",
+        ]));
+        command.push(path);
+        if let Some(old_path) = old_path {
+            command.push(crate::validate_path(old_path)?);
+        }
+        let output = self.run(&command).await?;
+        ensure(&output)?;
+        Ok(json!(STANDARD.encode(output.stdout)))
+    }
+
+    pub(crate) async fn renderer_tag_refs(&self) -> Result<Value> {
+        let output = self.run(&args(&["show-ref", "--tags", "-d"])).await?;
+        if !matches!(output.code, 0 | 1) {
+            ensure(&output)?;
+        }
+        Ok(json!(String::from_utf8_lossy(&output.stdout)))
+    }
+
+    pub(crate) async fn renderer_commit_changes(&self, revision: &str) -> Result<Value> {
+        let commit = self.resolve_commit(revision).await?;
+        let output = self
+            .run(&args(&[
+                "log",
+                "-C",
+                "-M",
+                "-m",
+                "-1",
+                "--no-show-signature",
+                "--first-parent",
+                "--raw",
+                "--format=format:",
+                "--numstat",
+                "-z",
+                "--end-of-options",
+                &commit,
+                "--",
+            ]))
+            .await?;
+        ensure(&output)?;
+        Ok(json!(String::from_utf8_lossy(&output.stdout)))
+    }
+
+    /// Preserve the renderer's log format and supported traversal modes without
+    /// allowing the client to supply arbitrary Git options.
+    pub(crate) async fn renderer_history(
+        &self,
+        revision: Option<&str>,
+        limit: Option<u64>,
+        skip: Option<u64>,
+        first_parent: bool,
+        exclude_remotes: bool,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            revision.is_none_or(|value| value.len() <= 4096 && !value.contains('\0')),
+            "invalid history revision"
+        );
+        const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+        anyhow::ensure!(
+            limit.is_none_or(|value| value <= MAX_SAFE_INTEGER)
+                && skip.is_none_or(|value| value <= MAX_SAFE_INTEGER),
+            "invalid history pagination"
+        );
+        let mut command = args(&["log", "--date=raw"]);
+        if let Some(limit) = limit {
+            command.push(format!("--max-count={limit}").into());
+        }
+        if let Some(skip) = skip {
+            command.push(format!("--skip={skip}").into());
+        }
+        command.extend(args(&[
+            "-z",
+            RENDERER_LOG_FORMAT,
+            "--no-show-signature",
+            "--no-color",
+        ]));
+        if first_parent {
+            command.push("--first-parent".into());
+        }
+        if exclude_remotes {
+            command.extend(args(&["--not", "--remotes"]));
+        }
+        if let Some(revision) = revision {
+            if exclude_remotes {
+                command.push("--not".into());
+            }
+            command.extend(args(&["--end-of-options", revision]));
+        }
+        command.push("--".into());
+        let output = self.run(&command).await?;
+        if output.code == 128 {
+            return Ok(Value::Null);
+        }
+        ensure(&output)?;
+        Ok(json!(STANDARD.encode(output.stdout)))
+    }
+
+    /// Fixed-format reflog reads used by the renderer's branch and stash lists.
+    pub(crate) async fn renderer_reflog(&self, stash: bool) -> Result<Value> {
+        let command = if stash {
+            args(&[
+                "log",
+                "-g",
+                "-z",
+                "--format=%gD%x00%H%x00%gs%x00%T%x00%P",
+                "refs/stash",
+                "--",
+            ])
+        } else {
+            args(&[
+                "log",
+                "-g",
+                "--no-abbrev-commit",
+                "--pretty=oneline",
+                "HEAD",
+                "-n",
+                "2500",
+                "--",
+            ])
+        };
+        let output = self.run(&command).await?;
+        if output.code == 128 {
+            return Ok(Value::Null);
+        }
+        ensure(&output)?;
+        Ok(json!(String::from_utf8_lossy(&output.stdout)))
+    }
+
+    /// Read a bounded prefix of a blob, keeping invalid revisions distinct
+    /// from a path that is absent in a valid tree or index stage.
+    pub(crate) async fn renderer_blob_prefix(
+        &self,
+        revision: &str,
+        path: GitPath,
+        length: u32,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            length <= 1024 * 1024,
+            "blob prefix exceeds the preview limit"
+        );
+        anyhow::ensure!(
+            revision.len() <= 4096 && !revision.contains('\0'),
+            "invalid blob revision"
+        );
+        let path = crate::validate_path(path)?;
+        let stage = match revision {
+            "" | ":0" => Some("0"),
+            ":1" => Some("1"),
+            ":2" => Some("2"),
+            ":3" => Some("3"),
+            _ => None,
+        };
+        let mut command = if stage.is_some() {
+            args(&["ls-files", "--stage", "-z", "--"])
+        } else {
+            let tree = self
+                .run(&args(&[
+                    "rev-parse",
+                    "--verify",
+                    "--end-of-options",
+                    &format!("{revision}^{{tree}}"),
+                ]))
+                .await?;
+            ensure(&tree)?;
+            let tree = String::from_utf8(tree.stdout)?.trim().to_owned();
+            args(&["ls-tree", "-z", &tree, "--"])
+        };
+        command.push(path.clone());
+        let resolved = self.run(&command).await?;
+        ensure(&resolved)?;
+        let mut found = None;
+        for record in resolved
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty())
+        {
+            let tab = record
+                .iter()
+                .position(|byte| *byte == b'\t')
+                .context("invalid blob entry")?;
+            let (metadata, name) = (&record[..tab], &record[tab + 1..]);
+            if name != path.as_encoded_bytes() {
+                continue;
+            }
+            let fields: Vec<_> = std::str::from_utf8(metadata)?.split_whitespace().collect();
+            anyhow::ensure!(fields.len() == 3, "invalid blob metadata");
+            let oid = if let Some(stage) = stage {
+                if fields[2] != stage {
+                    continue;
+                }
+                fields[1]
+            } else {
+                anyhow::ensure!(fields[1] == "blob", "path is not a blob");
+                fields[2]
+            };
+            anyhow::ensure!(found.is_none(), "duplicate blob entry");
+            found = Some(oid.to_owned());
+        }
+        let Some(oid) = found else {
+            return Ok(Value::Null);
+        };
+        anyhow::ensure!(
+            (oid.len() == 40 || oid.len() == 64)
+                && oid.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "invalid blob object id"
+        );
+        let kind = self.run(&args(&["cat-file", "-t", &oid])).await?;
+        ensure(&kind)?;
+        anyhow::ensure!(kind.stdout == b"blob\n", "path is not a blob");
+        let size = self.run(&args(&["cat-file", "-s", &oid])).await?;
+        ensure(&size)?;
+        let size: u64 = std::str::from_utf8(&size.stdout)?.trim().parse()?;
+        let output = process::blob_prefix(&self.path, &oid, u64::from(length)).await?;
+        let expected = size.min(u64::from(length)) as usize;
+        anyhow::ensure!(
+            output.stdout.len() == expected,
+            "could not read blob prefix"
+        );
+        if size <= u64::from(length) {
+            ensure(&output)?;
+        }
+        Ok(json!(STANDARD.encode(output.stdout)))
+    }
+
     /// Return the renderer's exact one-commit Git log format without exposing
     /// a generic command interface. The existing parser keeps Git's encoding,
     /// trailer, short-hash and decoration semantics.
@@ -35,11 +284,20 @@ impl Repository {
             !revision.is_empty() && revision.len() <= 4096 && !revision.contains('\0'),
             "invalid commit revision"
         );
-        let output = self.run(&args(&[
-            "log", "--date=raw", "--max-count=1", "-z",
-            "--format=%H%x00%h%x00%s%x00%b%x00%an <%ae> %ad%x00%cn <%ce> %cd%x00%P%x00%(trailers:unfold,only)%x00%D",
-            "--no-show-signature", "--no-color", "--end-of-options", revision, "--",
-        ])).await?;
+        let output = self
+            .run(&args(&[
+                "log",
+                "--date=raw",
+                "--max-count=1",
+                "-z",
+                RENDERER_LOG_FORMAT,
+                "--no-show-signature",
+                "--no-color",
+                "--end-of-options",
+                revision,
+                "--",
+            ]))
+            .await?;
         if output.code == 128 {
             return Ok(Value::Null);
         }

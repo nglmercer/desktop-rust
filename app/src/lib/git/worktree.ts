@@ -3,6 +3,8 @@ import type { Repository } from '../../models/repository'
 import type { WorktreeEntry, WorktreeType } from '../../models/worktree'
 import { pathExists } from '../path-exists'
 import { git } from './core'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 export function parseWorktreePorcelainOutput(
   stdout: string
@@ -56,11 +58,19 @@ export function parseWorktreePorcelainOutput(
 export async function listWorktrees(
   repositoryOrPath: Repository | string
 ): Promise<ReadonlyArray<WorktreeEntry>> {
+  const repositoryPath = typeof repositoryOrPath === 'string'
+    ? repositoryOrPath
+    : repositoryOrPath.path
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryWorktrees(repositoryPath)
+    const entries = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repositoryPath, 'read', read, true)
+      : await read()
+    return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
+  }
   const result = await git(
     ['worktree', 'list', '--porcelain', '-z'],
-    typeof repositoryOrPath === 'string'
-      ? repositoryOrPath
-      : repositoryOrPath.path,
+    repositoryPath,
     'listWorktrees'
   )
 
@@ -70,6 +80,13 @@ export async function listWorktrees(
 export async function listWorktreesFromGitDir(
   gitDir: string
 ): Promise<ReadonlyArray<WorktreeEntry>> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryWorktrees(gitDir, true)
+    const entries = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(gitDir, 'read', read, true)
+      : await read()
+    return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
+  }
   const result = await git(
     ['--git-dir', gitDir, 'worktree', 'list', '--porcelain', '-z'],
     gitDir,

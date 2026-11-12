@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { chromium, type Browser } from 'playwright'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 let directory: string | undefined
 let server: ChildProcess | undefined
@@ -152,12 +152,21 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           .getByText('changed.txt', { exact: true })
           .first()
           .waitFor({ timeout: 20_000 })
+        await page.waitForFunction(
+          () => {
+            const text =
+              document.querySelector('.diff-container')?.textContent ?? ''
+            return text.includes('initial') && text.includes('modified')
+          },
+          undefined,
+          { timeout: 20_000 }
+        )
       } catch {
         const calls = await page.evaluate(
           () => Reflect.get(window, '__browserAudit') as string[]
         )
         throw new Error(
-          `Repository journey did not reach the changes list: ${((await page.locator('body').textContent()) ?? '').slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls.filter(call => !call.includes('"method":"path_exists"')).join(' ')}`
+          `Repository journey did not render the diff: ${((await page.locator('body').textContent()) ?? '').slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls.filter(call => !call.includes('"method":"path_exists"')).join(' ')}`
         )
       }
       const calls = await page.evaluate(
@@ -169,6 +178,143 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
       expect(
         calls.some(call => JSON.parse(call).method === 'status_detailed')
       ).toBe(true)
+      expect(
+        calls.some(call => JSON.parse(call).method === 'renderer_working_diff')
+      ).toBe(true)
+      await page.waitForFunction(() =>
+        (Reflect.get(window, '__browserAudit') as string[]).some(
+          call => JSON.parse(call).method === 'renderer_blob_prefix'
+        )
+      )
+      await page.waitForFunction(() =>
+        (Reflect.get(window, '__browserAudit') as string[]).some(
+          call => JSON.parse(call).method === 'repository_worktrees'
+        )
+      )
+      await page.waitForFunction(() => {
+        const calls = Reflect.get(window, '__browserAudit') as string[]
+        return [
+          'renderer_recent_branches',
+          'renderer_stash_log',
+          'renderer_history',
+          'renderer_tag_refs',
+          'renderer_commit_changes',
+          'renderer_commit_diff',
+        ].every(method =>
+          calls.some(call => JSON.parse(call).method === method)
+        )
+      })
+      const finalCalls = await page.evaluate(
+        () => Reflect.get(window, '__browserAudit') as string[]
+      )
+      expect(
+        finalCalls.filter(
+          call => JSON.parse(call).method === 'desktop.io.git-exec'
+        )
+      ).toEqual([])
+      expect(
+        finalCalls.some(call => {
+          const request = JSON.parse(call)
+          return (
+            request.method === 'desktop.io.git-exec' &&
+            request.args?.[0] === 'show'
+          )
+        })
+      ).toBe(false)
+      expect(
+        finalCalls.some(call => {
+          const request = JSON.parse(call)
+          return (
+            request.method === 'desktop.io.git-exec' &&
+            request.args?.[0] === 'log' &&
+            request.args?.includes('--date=raw')
+          )
+        })
+      ).toBe(false)
+      expect(
+        finalCalls.some(call => {
+          const request = JSON.parse(call)
+          return (
+            request.method === 'desktop.io.git-exec' &&
+            request.args?.[0] === 'log' &&
+            request.args?.[1] === '-g'
+          )
+        })
+      ).toBe(false)
+      expect(
+        finalCalls.some(call => {
+          const request = JSON.parse(call)
+          return (
+            request.method === 'desktop.io.git-exec' &&
+            request.args?.[0] === 'worktree'
+          )
+        })
+      ).toBe(false)
+      expect(
+        calls.some(call => {
+          const request = JSON.parse(call)
+          return (
+            request.method === 'desktop.io.git-exec' &&
+            request.args?.[0] === 'diff'
+          )
+        })
+      ).toBe(false)
+      try {
+        await page
+          .getByText('changed.txt', { exact: true })
+          .first()
+          .click({ button: 'right' })
+        await page.getByRole('menuitem', { name: /^Discard changes/i }).click()
+        const dialog = page.getByRole('alertdialog')
+        await dialog.getByText('changed.txt', { exact: true }).waitFor()
+        await dialog.getByRole('button', { name: /^Discard changes$/i }).click()
+        await page
+          .getByText('Selected changes discarded.')
+          .waitFor({ timeout: 20_000 })
+        expect(
+          await readFile(path.join(repository, 'changed.txt'), 'utf8')
+        ).toBe('initial\n')
+        await page
+          .locator('#successful')
+          .getByRole('button', { name: 'Undo', exact: true })
+          .click()
+        await vi.waitFor(
+          async () => {
+            expect(
+              await readFile(path.join(repository, 'changed.txt'), 'utf8')
+            ).toBe('modified\n')
+          },
+          { timeout: 20_000 }
+        )
+        await page
+          .getByText('changed.txt', { exact: true })
+          .first()
+          .waitFor({ timeout: 20_000 })
+        const afterUndo = await page.evaluate(
+          () => Reflect.get(window, '__browserAudit') as string[]
+        )
+        for (const method of [
+          'discard_batch_preview',
+          'discard_batch',
+          'undo_discard',
+        ]) {
+          expect(
+            afterUndo.some(call => JSON.parse(call).method === method)
+          ).toBe(true)
+        }
+        expect(
+          afterUndo.filter(
+            call => JSON.parse(call).method === 'desktop.io.git-exec'
+          )
+        ).toEqual([])
+      } catch (error) {
+        const calls = await page.evaluate(
+          () => Reflect.get(window, '__browserAudit') as string[]
+        )
+        throw new Error(
+          `Discard/undo journey failed: ${String(error)}; body: ${((await page.locator('body').textContent()) ?? '').slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls.filter(call => !call.includes('"method":"path_exists"')).join(' ')}`
+        )
+      }
     }, 90_000)
   }
 )

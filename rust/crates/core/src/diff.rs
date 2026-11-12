@@ -13,6 +13,62 @@ use std::{
     path::{Path, PathBuf},
 };
 
+impl Repository {
+    /// Produce the renderer's raw working diff without exposing arbitrary Git commands.
+    pub(crate) async fn renderer_working_diff(
+        &self,
+        path: GitPath,
+        base: crate::RendererDiffBase,
+        hide_whitespace: bool,
+        no_textconv: bool,
+    ) -> Result<Value> {
+        let path = validate_path(path)?;
+        let mut command = args(&["diff"]);
+        if no_textconv {
+            command.extend(args(&["--no-textconv"]));
+        }
+        if hide_whitespace {
+            command.extend(args(&["-w"]));
+        }
+        command.extend(args(&[
+            "--no-ext-diff",
+            "--patch-with-raw",
+            "-z",
+            "--no-color",
+        ]));
+        let output = match base {
+            crate::RendererDiffBase::Empty => {
+                // Snapshot the file before invoking Git; `--no-index` must not
+                // follow a renderer-supplied path outside the repository.
+                let side = self.worktree_side(&path).await?;
+                if side.entry.is_none() {
+                    bail!("working file no longer exists");
+                }
+                if side.oversized {
+                    bail!("file exceeds the working diff limit");
+                }
+                command.extend(args(&["--no-index", "--", "/dev/null", "-"]));
+                process::run_git(&self.path, &command, Some(side.bytes), None).await?
+            }
+            _ => {
+                if matches!(base, crate::RendererDiffBase::Head) {
+                    command.push("HEAD".into());
+                }
+                command.push("--".into());
+                command.push(path);
+                self.run(&command).await?
+            }
+        };
+        if output.code != 0 && !(matches!(base, crate::RendererDiffBase::Empty) && output.code == 1)
+        {
+            ensure_success(&output)?;
+        }
+        Ok(
+            json!({"stdout":STANDARD.encode(output.stdout), "stderr":STANDARD.encode(output.stderr)}),
+        )
+    }
+}
+
 const CONTENT_LIMIT: usize = 1024 * 1024;
 const INDEX_LIMIT: u64 = 64 * 1024 * 1024;
 
@@ -34,6 +90,16 @@ struct Side {
     bytes: Vec<u8>,
     oversized: bool,
     size: u64,
+}
+
+struct SelectedWorktreeSnapshot {
+    patch: Vec<u8>,
+    index: Vec<u8>,
+    live_index: Option<Vec<u8>>,
+    head: Vec<u8>,
+    branch: Vec<u8>,
+    operation: String,
+    review: Option<crate::commit::StagedReview>,
 }
 
 #[derive(Serialize)]
@@ -214,6 +280,92 @@ impl Repository {
         amend_head: Option<&str>,
         expected_head: Option<&crate::protocol::CopilotExpectedHead>,
     ) -> Result<Vec<u8>> {
+        Ok(self
+            .capture_selected_worktree(
+                paths,
+                remove_paths,
+                partial,
+                amend_head,
+                expected_head,
+                false,
+            )
+            .await?
+            .patch)
+    }
+
+    /// Preview the exact private index that a later selected-file commit must
+    /// recapture and compare before publishing. This operation does not write
+    /// the live index or create a commit.
+    pub(crate) async fn selected_commit_preview(
+        &self,
+        paths: Vec<GitPath>,
+        remove_paths: Vec<GitPath>,
+        partial: Vec<crate::CopilotLineSelection>,
+        amend_head: Option<&str>,
+        expected_head: Option<&crate::protocol::CopilotExpectedHead>,
+    ) -> Result<Value> {
+        let requested =
+            serde_json::to_vec(&(&paths, &remove_paths, &partial, amend_head, expected_head))?;
+        anyhow::ensure!(
+            requested.len() <= 1024 * 1024,
+            "selected commit review request is too large"
+        );
+        let snapshot = self
+            .capture_selected_worktree(
+                paths,
+                remove_paths,
+                partial,
+                amend_head,
+                expected_head,
+                true,
+            )
+            .await?;
+        let review = snapshot
+            .review
+            .as_ref()
+            .context("missing selected-index review")?;
+        let review_bytes = serde_json::to_vec(review)?;
+        anyhow::ensure!(
+            review_bytes.len() <= 1024 * 1024,
+            "selected commit review is too large; split the selection"
+        );
+        let mut digest = Sha256::new();
+        digest.update(b"desktop-selected-commit-preview-v2\0");
+        let repository_id = self.id();
+        for value in [
+            repository_id.as_bytes(),
+            &requested[..],
+            &snapshot.head,
+            &snapshot.branch,
+            snapshot.operation.as_bytes(),
+            &snapshot.index,
+            &review_bytes,
+        ] {
+            digest.update((value.len() as u64).to_be_bytes());
+            digest.update(value);
+        }
+        match &snapshot.live_index {
+            Some(index) => {
+                digest.update([1]);
+                digest.update((index.len() as u64).to_be_bytes());
+                digest.update(index);
+            }
+            None => digest.update([0]),
+        }
+        Ok(
+            json!({"basis":format!("{:x}", digest.finalize()), "head": if snapshot.head.is_empty() { None } else { Some(String::from_utf8(snapshot.head)?.trim().to_owned()) }, "branch": if snapshot.branch.is_empty() { None } else { Some(String::from_utf8(snapshot.branch)?.trim().to_owned()) }, "review":review}),
+        )
+    }
+
+    async fn capture_selected_worktree(
+        &self,
+        paths: Vec<GitPath>,
+        remove_paths: Vec<GitPath>,
+        partial: Vec<crate::CopilotLineSelection>,
+        amend_head: Option<&str>,
+        expected_head: Option<&crate::protocol::CopilotExpectedHead>,
+        certify_live_index: bool,
+    ) -> Result<SelectedWorktreeSnapshot> {
         anyhow::ensure!(
             !paths.is_empty()
                 || !remove_paths.is_empty()
@@ -259,6 +411,23 @@ impl Repository {
             );
         }
         let scratch = Scratch::new(&self.index_path().await?)?;
+        let live_index = if certify_live_index {
+            read_index(&scratch.index_path)?
+        } else {
+            None
+        };
+        let git_directory = if certify_live_index {
+            Some(self.git_directory().await?)
+        } else {
+            None
+        };
+        let operation = if let Some(directory) = &git_directory {
+            let directory = directory.clone();
+            crate::cancellation::blocking(move || crate::discard::operation_certificate(&directory))
+                .await?
+        } else {
+            String::new()
+        };
         let (head, branch) = self.snapshot_head_index(&scratch).await?;
         if let Some(expected) = expected_head {
             let oid = (head.code == 0)
@@ -443,6 +612,16 @@ impl Repository {
             .await?;
             anyhow::ensure!(updated.code == 0, "cannot snapshot selected lines");
         }
+        let selected_index =
+            read_index(&scratch.alternate_index)?.context("selected index is missing")?;
+        let review = if certify_live_index {
+            Some(
+                self.review_staged_index(Some(&scratch.alternate_index), parent.as_deref())
+                    .await?,
+            )
+        } else {
+            None
+        };
         let mut command = args(&[
             "diff",
             "--cached",
@@ -454,14 +633,55 @@ impl Repository {
             command.push(parent.into());
         }
         command.push("--".into());
-        let patch =
-            process::run_git(&self.path, &command, None, Some(&scratch.alternate_index)).await?;
-        anyhow::ensure!(
-            patch.code == 0,
-            "cannot compare selected working-tree files"
-        );
+        let patch = if certify_live_index {
+            Vec::new()
+        } else {
+            let patch =
+                process::run_git(&self.path, &command, None, Some(&scratch.alternate_index))
+                    .await?;
+            anyhow::ensure!(
+                patch.code == 0,
+                "cannot compare selected working-tree files"
+            );
+            patch.stdout
+        };
         self.ensure_snapshot_head(&head, &branch).await?;
-        Ok(patch.stdout)
+        if certify_live_index {
+            anyhow::ensure!(
+                read_index(&scratch.alternate_index)?.as_ref() == Some(&selected_index),
+                "Selected index changed during review; retry"
+            );
+            anyhow::ensure!(
+                read_index(&scratch.index_path)? == live_index,
+                "Index changed while reviewing selected changes; retry"
+            );
+            let directory = git_directory.context("missing Git directory")?;
+            let now = crate::cancellation::blocking(move || {
+                crate::discard::operation_certificate(&directory)
+            })
+            .await?;
+            anyhow::ensure!(
+                now == operation,
+                "Repository operation changed while reviewing selected changes; retry"
+            );
+        }
+        Ok(SelectedWorktreeSnapshot {
+            patch,
+            index: selected_index,
+            live_index,
+            head: if head.code == 0 {
+                head.stdout
+            } else {
+                Vec::new()
+            },
+            branch: if branch.code == 0 {
+                branch.stdout
+            } else {
+                Vec::new()
+            },
+            operation,
+            review,
+        })
     }
 
     pub(crate) async fn diff_detail(&self, path: GitPath, staged: bool) -> Result<Value> {
@@ -1735,6 +1955,26 @@ mod tests {
         );
         let index = fs::read(root.join(".git/index")).unwrap();
         let repo = Repository::open(&root).await.unwrap();
+        let review = || {
+            repo.selected_commit_preview(
+                vec![GitPath::Text("selected".into())],
+                vec![],
+                vec![],
+                None,
+                None,
+            )
+        };
+        let first_review = review().await.unwrap();
+        let same_review = review().await.unwrap();
+        assert_eq!(first_review["basis"], same_review["basis"]);
+        assert_eq!(first_review["head"], Value::Null);
+        assert_eq!(first_review["review"]["staged_count"], 1);
+        assert_eq!(
+            first_review["review"]["files"],
+            json!([{ "bytes": b"selected".to_vec() }])
+        );
+        assert_eq!(first_review["review"]["large_files"], json!([]));
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
         let patch = repo
             .selected_worktree_patch(
                 vec![GitPath::Text("selected".into())],
@@ -1753,6 +1993,43 @@ mod tests {
             .await
             .unwrap();
         let first_line = preview["hunks"][0]["lines"][0]["id"].as_u64().unwrap() as usize;
+        let partial_selection = crate::CopilotLineSelection {
+            path: GitPath::Text("selected".into()),
+            original_path: None,
+            basis: preview["basis"].as_str().unwrap().to_owned(),
+            lines: vec![first_line],
+        };
+        let partial_review = repo
+            .selected_commit_preview(vec![], vec![], vec![partial_selection.clone()], None, None)
+            .await
+            .unwrap();
+        assert_ne!(first_review["basis"], partial_review["basis"]);
+        assert_eq!(
+            partial_review,
+            repo.selected_commit_preview(
+                vec![],
+                vec![],
+                vec![partial_selection.clone()],
+                None,
+                None
+            )
+            .await
+            .unwrap()
+        );
+        assert!(
+            repo.selected_commit_preview(
+                vec![],
+                vec![],
+                vec![partial_selection.clone()],
+                None,
+                Some(&crate::CopilotExpectedHead {
+                    reference: None,
+                    sha: Some("a".repeat(40))
+                })
+            )
+            .await
+            .is_err()
+        );
         let partial = repo
             .selected_worktree_patch(
                 vec![],
@@ -1772,6 +2049,51 @@ mod tests {
         assert!(partial.contains("+selected content"));
         assert!(!partial.contains("excluded content"));
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        fs::write(root.join("selected"), b"changed after review\n").unwrap();
+        assert!(
+            repo.selected_commit_preview(vec![], vec![], vec![partial_selection], None, None)
+                .await
+                .is_err()
+        );
+        assert_ne!(first_review["basis"], review().await.unwrap()["basis"]);
+        fs::write(
+            root.join("selected"),
+            b"selected content\nexcluded content\n",
+        )
+        .unwrap();
+        fs::write(root.join("other"), b"new staged state\n").unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["add", "--", "other"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_ne!(first_review["basis"], review().await.unwrap()["basis"]);
+        let after_index_change = review().await.unwrap();
+        fs::write(root.join(".git/MERGE_MSG"), b"merge state changed\n").unwrap();
+        assert_ne!(
+            after_index_change["basis"],
+            review().await.unwrap()["basis"]
+        );
+        assert!(
+            repo.selected_commit_preview(vec![], vec![], vec![], None, None)
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.selected_commit_preview(
+                vec![GitPath::Text("../outside".into())],
+                vec![],
+                vec![],
+                None,
+                None
+            )
+            .await
+            .is_err()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1846,6 +2168,21 @@ mod tests {
         assert!(patch.contains("rename from old"), "{patch}");
         assert!(patch.contains("rename to new"), "{patch}");
         assert!(!patch.contains("replacement"), "{patch}");
+        let review = repo
+            .selected_commit_preview(
+                vec![GitPath::Text("new".into())],
+                vec![GitPath::Text("old".into())],
+                vec![],
+                None,
+                Some(&expected),
+            )
+            .await
+            .unwrap();
+        assert_eq!(review["review"]["staged_count"], 2);
+        assert_eq!(
+            review["review"]["files"],
+            json!([{ "bytes": b"new".to_vec() }, { "bytes": b"old".to_vec() }])
+        );
         let both = repo
             .selected_worktree_patch(
                 vec![GitPath::Text("new".into()), GitPath::Text("old".into())],
@@ -1857,6 +2194,60 @@ mod tests {
             .await
             .unwrap();
         assert!(String::from_utf8(both).unwrap().contains("+replacement"));
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn selected_amend_review_includes_original_commit_files() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-selected-amend-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let result = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            String::from_utf8(result.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        fs::write(root.join("existing"), b"base\n").unwrap();
+        git(&["add", "--", "existing"]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("existing"), b"original commit\n").unwrap();
+        git(&["add", "--", "existing"]);
+        git(&["commit", "-qm", "original"]);
+        let head = git(&["rev-parse", "HEAD"]);
+        fs::write(root.join("new"), b"selected\n").unwrap();
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let selected = || vec![GitPath::Text("new".into())];
+        let ordinary = repo
+            .selected_commit_preview(selected(), vec![], vec![], None, None)
+            .await
+            .unwrap();
+        let amended = repo
+            .selected_commit_preview(selected(), vec![], vec![], Some(&head), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            ordinary["review"]["files"],
+            json!([{ "bytes": b"new".to_vec() }])
+        );
+        assert_eq!(
+            amended["review"]["files"],
+            json!([{ "bytes": b"existing".to_vec() }, { "bytes": b"new".to_vec() }])
+        );
+        assert_ne!(ordinary["basis"], amended["basis"]);
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
         fs::remove_dir_all(root).unwrap();
     }
