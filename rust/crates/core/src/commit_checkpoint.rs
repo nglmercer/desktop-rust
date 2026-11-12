@@ -52,6 +52,10 @@ struct Checkpoint {
     operation: String,
     original_index: Option<String>,
     selected_index: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tree: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parents: Option<Vec<String>>,
     objects: Vec<SavedObject>,
     lfs: Vec<LfsObject>,
     shared: Vec<SharedIndex>,
@@ -149,6 +153,21 @@ fn read_checkpoint(base: &Path, id: &str, repository_id: &str) -> Result<Checkpo
             && record.basis.bytes().all(|b| b.is_ascii_hexdigit()),
         "invalid commit checkpoint manifest"
     );
+    match (&record.tree, &record.parents) {
+        (None, None) => {} // Checkpoints prepared before publication metadata was recorded.
+        (Some(tree), Some(parents)) => {
+            let length = tree.len();
+            anyhow::ensure!(
+                matches!(length, 40 | 64)
+                    && tree.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    && parents.len() <= 1024
+                    && parents.iter().all(|parent| parent.len() == length
+                        && parent.bytes().all(|byte| byte.is_ascii_hexdigit())),
+                "invalid commit checkpoint publication metadata"
+            );
+        }
+        _ => anyhow::bail!("incomplete commit checkpoint publication metadata"),
+    }
     Ok(record)
 }
 fn index_entries(bytes: &[u8]) -> Result<Vec<(String, String)>> {
@@ -354,6 +373,42 @@ fn verify_checkpoint_files(base: &Path, record: &Checkpoint, hash_length: usize)
 }
 
 impl Repository {
+    async fn reviewed_commit_parents(
+        &self,
+        head: Option<&str>,
+        amend: bool,
+    ) -> Result<Vec<String>> {
+        let Some(head) = head else {
+            anyhow::ensure!(!amend, "cannot amend an unborn HEAD");
+            return Ok(Vec::new());
+        };
+        if !amend {
+            return Ok(vec![head.to_owned()]);
+        }
+        let commit = self
+            .run(&args(&["--no-replace-objects", "cat-file", "commit", head]))
+            .await?;
+        anyhow::ensure!(commit.code == 0, "cannot inspect commit parents");
+        let mut parents = Vec::new();
+        for line in commit
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .take_while(|line| !line.is_empty())
+        {
+            if let Some(parent) = line.strip_prefix(b"parent ") {
+                let parent = std::str::from_utf8(parent)?;
+                anyhow::ensure!(
+                    parent.len() == head.len()
+                        && parent.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    "invalid commit parent"
+                );
+                parents.push(parent.to_owned());
+                anyhow::ensure!(parents.len() <= 1024, "too many commit parents");
+            }
+        }
+        Ok(parents)
+    }
+
     async fn checkpoint_directory(&self) -> Result<PathBuf> {
         let base = self.git_directory().await?.join(DIRECTORY);
         private_directory(&base)?;
@@ -540,6 +595,13 @@ impl Repository {
         } else {
             Some(std::str::from_utf8(&snapshot.branch)?.trim().to_owned())
         };
+        let tree = snapshot
+            .tree
+            .clone()
+            .context("missing reviewed commit tree")?;
+        let parents = self
+            .reviewed_commit_parents(head.as_deref(), amend_head.is_some())
+            .await?;
         let current_head = self
             .run(&args(&["rev-parse", "--verify", "--quiet", "HEAD"]))
             .await?;
@@ -573,6 +635,8 @@ impl Repository {
             operation,
             original_index: snapshot.live_index.as_deref().map(hash),
             selected_index: hash(&snapshot.index),
+            tree: Some(tree),
+            parents: Some(parents),
             objects,
             lfs,
             shared,
@@ -621,6 +685,7 @@ impl Repository {
         .iter()
         .all(|field| inspection[*field] == true);
         let matches = if unchanged {
+            let amend = request.amend_head.is_some();
             let (_, review) = self
                 .capture_selected_commit_review(
                     request.paths,
@@ -631,7 +696,18 @@ impl Repository {
                     request.expected_head.as_ref(),
                 )
                 .await?;
-            review["basis"].as_str() == Some(record.basis.as_str())
+            let publication_matches = match (&record.tree, &record.parents) {
+                (Some(tree), Some(parents)) => {
+                    review["tree"].as_str() == Some(tree.as_str())
+                        && self
+                            .reviewed_commit_parents(record.head.as_deref(), amend)
+                            .await?
+                            == *parents
+                }
+                (None, None) => true,
+                _ => false,
+            };
+            publication_matches && review["basis"].as_str() == Some(record.basis.as_str())
         } else {
             false
         };
@@ -715,7 +791,7 @@ impl Repository {
             cancellation::blocking(move || crate::discard::operation_certificate(&git_directory))
                 .await?;
         Ok(
-            json!({"id":id,"state":record.state,"basis":record.basis,"recorded_files_verified":true,"index_coverage_verified":true,"objects_verified":record.objects.len(),"lfs_verified":record.lfs.len(),"shared_indexes_verified":record.shared.len(),"head_matches":current_head == record.head,"branch_matches":current_branch == record.branch,"index_matches":index == record.original_index,"operation_matches":operation == record.operation}),
+            json!({"id":id,"state":record.state,"basis":record.basis,"publication_metadata_present":record.tree.is_some() && record.parents.is_some(),"recorded_files_verified":true,"index_coverage_verified":true,"objects_verified":record.objects.len(),"lfs_verified":record.lfs.len(),"shared_indexes_verified":record.shared.len(),"head_matches":current_head == record.head,"branch_matches":current_branch == record.branch,"index_matches":index == record.original_index,"operation_matches":operation == record.operation}),
         )
     }
 
@@ -745,6 +821,79 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn checkpoint_records_all_merge_parents_for_amend() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-commit-merge-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        fs::write(root.join("file"), b"initial\n").unwrap();
+        git(&["add", "file"]);
+        git(&["commit", "-qm", "initial"]);
+        let first = git(&["rev-parse", "HEAD"]);
+        let tree = git(&["write-tree"]);
+        let second = git(&["commit-tree", &tree, "-p", &first, "-m", "second"]);
+        let merge = git(&[
+            "commit-tree",
+            &tree,
+            "-p",
+            &first,
+            "-p",
+            &second,
+            "-m",
+            "merge",
+        ]);
+        git(&["update-ref", "HEAD", &merge, &first]);
+        fs::write(root.join("file"), b"amended\n").unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let selection = || vec![GitPath::Text("file".into())];
+        let preview = repo
+            .selected_commit_preview_with_empty(
+                selection(),
+                vec![],
+                vec![],
+                false,
+                Some(&merge),
+                None,
+            )
+            .await
+            .unwrap();
+        let prepared = repo
+            .prepare_selected_commit(
+                selection(),
+                vec![],
+                vec![],
+                false,
+                Some(&merge),
+                None,
+                preview["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        let id = prepared["id"].as_str().unwrap();
+        let record = read_checkpoint(&root.join(".git").join(DIRECTORY), id, &repo.id()).unwrap();
+        assert_eq!(record.tree.as_deref(), preview["tree"].as_str());
+        assert_eq!(record.parents, Some(vec![first, second]));
+        assert_eq!(git(&["rev-parse", "HEAD"]), merge);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn checkpoint_retains_staged_data_without_publishing_and_can_be_forgotten() {
         let root = std::env::temp_dir().join(format!(
@@ -809,6 +958,8 @@ mod tests {
         assert_eq!(git(&["rev-parse", "HEAD"]), head);
         let base = root.join(".git").join(DIRECTORY);
         let record = read_checkpoint(&base, id, &repo.id()).unwrap();
+        assert_eq!(record.tree.as_deref(), preview["tree"].as_str());
+        assert_eq!(record.parents.as_deref(), Some(&[head.clone()][..]));
         assert!(!record.shared.is_empty());
         assert!(record.objects.iter().any(|object| object.oid == staged_oid));
         assert!(
@@ -826,6 +977,7 @@ mod tests {
             id
         );
         let inspection = repo.inspect_commit_checkpoint(id).await.unwrap();
+        assert_eq!(inspection["publication_metadata_present"], true);
         for field in [
             "recorded_files_verified",
             "head_matches",
@@ -846,6 +998,14 @@ mod tests {
         fs::write(root.join("file"), b"selected worktree\n").unwrap();
         let manifest_path = base.join(id).join("manifest.json");
         let current_manifest = fs::read(&manifest_path).unwrap();
+        let mut changed_parent: Value = serde_json::from_slice(&current_manifest).unwrap();
+        changed_parent["parents"][0] = json!("0".repeat(head.len()));
+        fs::write(&manifest_path, serde_json::to_vec(&changed_parent).unwrap()).unwrap();
+        assert_eq!(
+            repo.revalidate_commit_checkpoint(id).await.unwrap()["matches"],
+            false
+        );
+        fs::write(&manifest_path, &current_manifest).unwrap();
         let mut old_manifest: Value = serde_json::from_slice(&current_manifest).unwrap();
         old_manifest.as_object_mut().unwrap().remove("request");
         fs::write(&manifest_path, serde_json::to_vec(&old_manifest).unwrap()).unwrap();

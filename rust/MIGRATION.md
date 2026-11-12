@@ -318,10 +318,10 @@ leave the staged index changed. This observation does not lock the index or
 refs through Git's commit and hooks; publication and recovery must still be
 implemented and verified before selected commits migrate.
 Rust also has a commit reference fence that preserves existing Git hooks and
-checks the reviewed branch, old tip, parent and tree during Git's reference
+checks the reviewed branch, old tip, ordered parents and tree during Git's reference
 transaction. The tree is mandatory, so a pre-commit hook that changes staged
 content cannot silently publish an unreviewed tree. It supports unborn,
-detached and amended commits, and rejects Git versions that cannot run its
+detached and amended commits, including merge amendments, and rejects Git versions that cannot run its
 configured hook. It is not yet wired into commit publication and is not a
 substitute for durable recovery; a rejected hook can leave the index changed.
 Split-index backup and restore is now shared infrastructure for commit recovery
@@ -334,7 +334,11 @@ journal so the selected-commit transaction can reuse it. The existing journal
 format is unchanged. A typed selected-commit preparation now rechecks the
 review basis while holding the index lock and writes a durable checkpoint of
 the original index, selected index, both indexes' blobs, LFS payloads, and split-index
-dependencies. Prepared checkpoints can be listed or removed on both transports;
+dependencies. Newly prepared checkpoints also retain the reviewed tree and ordered
+commit parents; revalidation compares both against a fresh review and the original
+commit object. Older checkpoints without that metadata remain inspectable but
+cannot supply a publication fence without being prepared again. Prepared
+checkpoints can be listed or removed on both transports;
 non-prepared or unreadable records cannot be removed by that operation. The
 checkpoint can require significant disk space, is limited to 32,768 staged
 entries and Git's 2 MiB listing bound, and is not yet used to publish commits
