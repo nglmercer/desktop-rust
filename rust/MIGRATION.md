@@ -324,6 +324,11 @@ content cannot silently publish an unreviewed tree. It supports unborn,
 detached and amended commits, including merge amendments, and rejects Git versions that cannot run its
 configured hook. It is not yet wired into commit publication and is not a
 substitute for durable recovery; a rejected hook can leave the index changed.
+A private-index commit runner now preserves Git's normal hook environment and
+accepts the commit message on stdin. A real Git test combines it with the
+reference fence: a hook's unreviewed index change is rejected, while a valid
+commit succeeds without modifying the live index. It is not wired into the
+renderer: durable publication state and index reconciliation remain required.
 Split-index backup and restore is now shared infrastructure for commit recovery
 and the existing discard journal. Restoring a missing shared index uses an
 atomic hard link and refuses to overwrite a concurrently created conflicting

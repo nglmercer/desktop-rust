@@ -163,6 +163,27 @@ pub async fn run_commit(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     .await
 }
 
+/// Run a commit against a private index while preserving Git's normal hook
+/// pathspec environment. The caller owns index/ref reconciliation and must
+/// not treat a successful process exit as proof that publication is durable.
+#[allow(dead_code)]
+pub(crate) async fn run_commit_with_index(
+    path: &Path,
+    args: &[OsString],
+    input: Vec<u8>,
+    index: &Path,
+) -> Result<RawOutput> {
+    run_command(
+        path,
+        git_native_paths(Some(index)),
+        args,
+        Some(input),
+        2 * 1024 * 1024,
+        None,
+    )
+    .await
+}
+
 /// Remote management uses names, not pathspecs; do not pass a literal-path
 /// override to any Git hook spawned by the operation.
 pub(crate) async fn run_remote(path: &Path, args: &[OsString]) -> Result<RawOutput> {

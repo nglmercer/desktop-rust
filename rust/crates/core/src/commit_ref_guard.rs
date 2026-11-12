@@ -296,6 +296,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn guarded_private_index_commit_preserves_live_index_and_runs_hooks() {
+        let f = Fixture::new();
+        let repo = Repository::open(&f.root).await.unwrap();
+        let branch = f.git(&["symbolic-ref", "HEAD"]);
+        let head = f.git(&["rev-parse", "HEAD"]);
+        fs::write(f.root.join("file"), b"previously staged\n").unwrap();
+        f.git(&["add", "file"]);
+        let live_index = fs::read(f.root.join(".git/index")).unwrap();
+        let private_index = f.root.join(".git/desktop-private-test-index");
+        fs::copy(f.root.join(".git/index"), &private_index).unwrap();
+        let private_git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&f.root)
+                .env("GIT_INDEX_FILE", &private_index)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        fs::write(f.root.join("file"), b"reviewed content\n").unwrap();
+        private_git(&["add", "file"]);
+        let tree = private_git(&["write-tree"]);
+        let guard = match repo
+            .commit_reference_guard(Some(&branch), Some(&head), &[&head], &tree, head.len())
+            .await
+        {
+            Ok(guard) => guard,
+            Err(error) if error.to_string().contains("does not support") => return,
+            Err(error) => panic!("{error:#}"),
+        };
+        let hook = f.root.join(".git/hooks/pre-commit");
+        fs::write(
+            &hook,
+            "#!/bin/sh\nprintf 'hook content\\n' > file\ngit add -- file\n",
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut command = guard.configuration().to_vec();
+        command.extend(args(&["commit", "-F", "-"]));
+        let rejected = process::run_commit_with_index(
+            &f.root,
+            &command,
+            b"private commit\n".to_vec(),
+            &private_index,
+        )
+        .await
+        .unwrap();
+        assert_ne!(rejected.code, 0);
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(fs::read(f.root.join(".git/index")).unwrap(), live_index);
+        assert!(guard.prepared_oid().unwrap().is_none());
+
+        fs::write(f.root.join("file"), b"reviewed content\n").unwrap();
+        private_git(&["add", "file"]);
+        fs::write(&hook, "#!/bin/sh\nprintf pre >> .git/pre-events\n").unwrap();
+        let guard = repo
+            .commit_reference_guard(Some(&branch), Some(&head), &[&head], &tree, head.len())
+            .await
+            .unwrap();
+        let mut command = guard.configuration().to_vec();
+        command.extend(args(&["commit", "-F", "-"]));
+        let result = process::run_commit_with_index(
+            &f.root,
+            &command,
+            b"private commit\n".to_vec(),
+            &private_index,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result.code,
+            0,
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD^{tree}"]), tree);
+        assert_eq!(f.git(&["show", "HEAD:file"]), "reviewed content");
+        assert_eq!(f.git(&["show", ":file"]), "previously staged");
+        assert_eq!(fs::read(f.root.join(".git/index")).unwrap(), live_index);
+        assert_eq!(
+            guard.prepared_oid().unwrap().as_deref(),
+            Some(f.git(&["rev-parse", "HEAD"]).as_str())
+        );
+        assert!(f.root.join(".git/pre-events").exists());
+    }
+
+    #[tokio::test]
     async fn commit_reference_fence_checks_all_merge_amend_parents_in_order() {
         let f = Fixture::new();
         let repo = Repository::open(&f.root).await.unwrap();
