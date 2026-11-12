@@ -1,5 +1,6 @@
 import * as Path from 'path'
 import { readdir, readFile, writeFile } from 'fs/promises'
+import { backend } from '../../backend/client'
 
 const GitIgnoreExtension = '.gitignore'
 
@@ -53,5 +54,9 @@ export async function writeGitIgnore(
 ): Promise<void> {
   const fullPath = Path.join(repositoryPath, '.gitignore')
   const text = await getGitIgnoreText(name)
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().writeRepositoryCreationFile(repositoryPath, 'gitignore', text)
+    return
+  }
   await writeFile(fullPath, text)
 }

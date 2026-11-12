@@ -1,5 +1,6 @@
 import { writeFile } from 'fs/promises'
 import * as Path from 'path'
+import { backend } from '../../backend/client'
 
 const DefaultReadmeName = 'README.md'
 
@@ -19,5 +20,9 @@ export async function writeDefaultReadme(
 ): Promise<void> {
   const fullPath = Path.join(path, DefaultReadmeName)
   const contents = defaultReadmeContents(name, description)
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().writeRepositoryCreationFile(path, 'readme', contents)
+    return
+  }
   await writeFile(fullPath, contents)
 }

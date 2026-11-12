@@ -338,6 +338,8 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::LfsTransfer { .. }
             | Operation::LfsCheckout { .. }
             | Operation::Commit { .. }
+            | Operation::InitialCommit { .. }
+            | Operation::ManageRemote { .. }
             | Operation::Stage { .. }
             | Operation::StageConflict { .. }
             | Operation::ResolveConflict { .. }

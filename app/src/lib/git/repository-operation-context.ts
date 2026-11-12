@@ -1,4 +1,4 @@
-import { createHook } from 'async_hooks'
+import { createHook } from 'node:async_hooks'
 
 /**
  * Async operation context using public async-hooks callbacks.
@@ -12,7 +12,7 @@ export function createRepositoryOperationContext<T>() {
   const stack: Array<T | undefined> = []
   let current: T | undefined
 
-  createHook({
+  const hook = createHook({
     init: asyncId => {
       if (current !== undefined) {
         resources.set(asyncId, current)
@@ -28,7 +28,11 @@ export function createRepositoryOperationContext<T>() {
     destroy: asyncId => {
       resources.delete(asyncId)
     },
-  }).enable()
+  })
+  const supportsAsyncPropagation =
+    (hook as typeof hook & { readonly __desktopNoAsyncPropagation?: boolean })
+      .__desktopNoAsyncPropagation !== true
+  hook.enable()
 
   const run = <TResult>(
     value: T | undefined,
@@ -45,6 +49,7 @@ export function createRepositoryOperationContext<T>() {
 
   return {
     getStore: () => current,
+    supportsAsyncPropagation,
     run,
     exit: <TResult>(operation: () => TResult) => run(undefined, operation),
   }

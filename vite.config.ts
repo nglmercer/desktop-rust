@@ -27,6 +27,9 @@ const legacyUrlPackage = createRequire(
 const legacyCryptoPackage = createRequire(
   polyfillRequire.resolve('node-stdlib-browser')
 ).resolve('crypto-browserify')
+const legacyStreamPackage = createRequire(
+  polyfillRequire.resolve('node-stdlib-browser')
+).resolve('stream-browserify')
 
 const staticDirName =
   process.platform === 'darwin'
@@ -220,6 +223,7 @@ export default defineConfig({
       { find: /^koffi$/, replacement: path.resolve(__dirname, 'app/src/web/koffi.ts') },
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
       { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
+      { find: /^desktop-stream-impl$/, replacement: legacyStreamPackage },
       { find: /^(node:)?url$/, replacement: path.resolve(__dirname, 'app/src/web/url.ts') },
       { find: /^keytar$/, replacement: path.resolve(__dirname, 'app/src/web/keytar.ts') },
       { find: /^desktop-dugite\/(.+)$/, replacement: path.resolve(__dirname, 'app/node_modules/dugite/build/lib') + '/$1.js' },

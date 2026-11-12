@@ -1,5 +1,8 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
+import { backend } from '../../backend/client'
+import { resolve } from 'path'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Format a local branch in the ref syntax, ensuring situations when the branch
@@ -42,6 +45,13 @@ export async function getSymbolicRef(
   repository: Repository,
   ref: string
 ): Promise<string | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () =>
+      backend().repositorySymbolicRef(resolve(repository.path), ref)
+    return backend().transportKind === 'wry'
+      ? withRepositoryGitOperation(repository.path, 'read', read, true)
+      : read()
+  }
   const result = await git(
     ['symbolic-ref', '-q', ref],
     repository.path,

@@ -40,8 +40,13 @@ mod lfs_operations;
 pub use lfs::LfsInstallScope;
 pub use lfs_operations::{LfsTransferRequest, lfs_install, lfs_tool_status};
 mod paths;
+mod remote_discovery;
+pub use remote_discovery::{ManagedRemoteAction, safe_fetch_remotes, safe_remote_url};
+mod refs;
+pub use refs::symbolic_ref;
 mod repository_discovery;
 pub use repository_discovery::{repository_type, trust_repository};
+mod creation;
 mod preferences;
 mod publish;
 mod publish_origin;
@@ -68,6 +73,7 @@ mod protocol;
 mod registry;
 mod status;
 use anyhow::{Context, Result, bail};
+pub use creation::CreationFile;
 pub use protocol::*;
 pub use registry::{
     Registry, SavedRepositories, SavedRepositoryRecord, clone_repository, initialize,
@@ -241,6 +247,11 @@ impl Repository {
     pub async fn execute(&self, operation: Operation) -> Result<Value> {
         let _guard = cancellation::wait(self.gate.lock()).await?;
         cancellation::Cancellation::current().check()?;
+        if let Operation::ManageRemote { action } = &operation
+            && !action.is_supported()
+        {
+            return Ok(serde_json::json!({"kind":"unsupported"}));
+        }
         if matches!(
             operation,
             Operation::PublishContinuePreview { .. } | Operation::PublishContinue { .. }
@@ -269,6 +280,7 @@ impl Repository {
         }
         match operation {
             Operation::CommitPreview => return self.commit_preview().await,
+            Operation::InitialCommit { paths } => return self.initial_commit(paths).await,
             Operation::Commit {
                 summary,
                 description,
@@ -321,8 +333,13 @@ impl Repository {
 
             Operation::GitSettings { scope } => return git_settings(&self.path, scope).await,
             Operation::GitDescription => return self.git_description().await,
+            Operation::SafeFetchRemotes => return self.safe_fetch_remotes().await,
+            Operation::ManageRemote { action } => return self.manage_remote(action).await,
             Operation::SetGitDescription { description } => {
                 return self.set_git_description(description).await;
+            }
+            Operation::WriteCreationFile { kind, contents } => {
+                return self.write_creation_file(kind, contents).await;
             }
             Operation::GitReadSetting {
                 key,
@@ -334,6 +351,9 @@ impl Repository {
             }
             Operation::GitIdentityValue { key, only_local } => {
                 return settings::git_identity_value(&self.path, &key, only_local).await;
+            }
+            Operation::GitEffectiveIdentity { role } => {
+                return settings::git_effective_identity(&self.path, role).await;
             }
             Operation::SetGitSetting { scope, key, value } => {
                 return set_git_setting(&self.path, scope, &key, value).await;
@@ -775,8 +795,12 @@ impl Repository {
             }
             GitSettings { .. }
             | GitIdentityValue { .. }
+            | GitEffectiveIdentity { .. }
             | GitDescription
+            | SafeFetchRemotes
+            | ManageRemote { .. }
             | SetGitDescription { .. }
+            | WriteCreationFile { .. }
             | GitReadSetting { .. }
             | SetGitSetting { .. }
             | Worktrees
@@ -879,7 +903,9 @@ impl Repository {
                     path_command(&["rm", "--cached", "--force", "--quiet", "--"], paths)?
                 }
             }
-            Commit { .. } | CommitPreview => unreachable!("handled by execute"),
+            Commit { .. } | CommitPreview | InitialCommit { .. } => {
+                unreachable!("handled by execute")
+            }
             Checkout { .. }
             | CheckoutPreview { .. }
             | CheckoutHistory

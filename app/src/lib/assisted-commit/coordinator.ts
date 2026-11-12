@@ -16,6 +16,7 @@ import {
 import {
   isRepositoryAffectedByAssistedCommit,
   isRepositoryGitMutationInProgress,
+  requireRepositoryGitAsyncOwnership,
   withoutRepositoryGitAccess,
   withRepositoryGitErrorPropagation,
 } from '../git/repository-operation'
@@ -115,6 +116,7 @@ export class AssistedCommitCoordinator {
     repository: Repository,
     request: ICopilotAssistedCommitRequest
   ): Promise<ICopilotAssistedCommitRequest> {
+    requireRepositoryGitAsyncOwnership()
     repository = this.repository.getCurrent(repository)
     this.state.assertAvailable(repository)
     if (isRepositoryGitMutationInProgress(repository.path)) {

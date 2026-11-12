@@ -332,9 +332,41 @@ enum ManagementOperation {
         #[serde(default)]
         canonical_bool: bool,
     },
+    GitRepositoryEffectiveIdentity {
+        path: desktop_core::GitPath,
+        role: desktop_core::GitIdentityRole,
+    },
+    RepositorySafeFetchRemotes {
+        path: desktop_core::GitPath,
+    },
+    RepositorySafeRemoteUrl {
+        path: desktop_core::GitPath,
+        name: String,
+    },
+    RepositorySymbolicRef {
+        path: desktop_core::GitPath,
+        reference: String,
+    },
+    ManageRepositoryRemote {
+        path: desktop_core::GitPath,
+        action: desktop_core::ManagedRemoteAction,
+    },
     SetRepositoryDescription {
         path: desktop_core::GitPath,
         description: String,
+    },
+    WriteRepositoryCreationFile {
+        path: desktop_core::GitPath,
+        kind: desktop_core::CreationFile,
+        contents: String,
+    },
+    ReadRepositoryCreationStatus {
+        path: desktop_core::GitPath,
+        action: CreationStatusAction,
+    },
+    CreateInitialCommit {
+        path: desktop_core::GitPath,
+        paths: Vec<desktop_core::GitPath>,
     },
     RepositoryType {
         path: desktop_core::GitPath,
@@ -382,6 +414,18 @@ enum LfsRepositoryAction {
     Status {},
     FileTracking { paths: Vec<desktop_core::GitPath> },
     InstallHooks { force: bool },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum CreationStatusAction {
+    Detailed {
+        include_untracked: bool,
+    },
+    Context {},
+    ConflictDetails {
+        kind: desktop_core::StatusConflictKind,
+    },
 }
 
 async fn execute(
@@ -529,11 +573,50 @@ async fn execute(
                 .await?
                 .public_view()
         }
+        ApplicationOperation::Management(RepositorySafeFetchRemotes { path }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "An explicit repository cannot use a selected-repository binding"
+            );
+            let requested = desktop_core::directory_path(path)?;
+            anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
+            let _current = cancellation::wait(state.repo.lock()).await?;
+            desktop_core::safe_fetch_remotes(&requested).await
+        }
+        ApplicationOperation::Management(RepositorySafeRemoteUrl { path, name }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "An explicit repository cannot use a selected-repository binding"
+            );
+            let requested = desktop_core::directory_path(path)?;
+            anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
+            let _current = cancellation::wait(state.repo.lock()).await?;
+            desktop_core::safe_remote_url(&requested, &name).await
+        }
+        ApplicationOperation::Management(RepositorySymbolicRef { path, reference }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "An explicit repository cannot use a selected-repository binding"
+            );
+            let requested = desktop_core::directory_path(path)?;
+            anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
+            let _current = cancellation::wait(state.repo.lock()).await?;
+            desktop_core::symbolic_ref(&requested, &reference).await
+        }
         ApplicationOperation::Management(
             operation @ (LfsRepository { .. }
             | GitReadRepositorySetting { .. }
-            | SetRepositoryDescription { .. }),
+            | GitRepositoryEffectiveIdentity { .. }
+            | ManageRepositoryRemote { .. }
+            | SetRepositoryDescription { .. }
+            | WriteRepositoryCreationFile { .. }
+            | ReadRepositoryCreationStatus { .. }
+            | CreateInitialCommit { .. }),
         ) => {
+            let registry_bound_mutation = matches!(
+                operation,
+                CreateInitialCommit { .. } | ManageRepositoryRemote { .. }
+            );
             let (path, operation) = match operation {
                 LfsRepository { path, action } => (
                     path,
@@ -563,9 +646,33 @@ async fn execute(
                         canonical_bool,
                     },
                 ),
+                GitRepositoryEffectiveIdentity { path, role } => {
+                    (path, Operation::GitEffectiveIdentity { role })
+                }
+                ManageRepositoryRemote { path, action } => {
+                    (path, Operation::ManageRemote { action })
+                }
                 SetRepositoryDescription { path, description } => {
                     (path, Operation::SetGitDescription { description })
                 }
+                WriteRepositoryCreationFile {
+                    path,
+                    kind,
+                    contents,
+                } => (path, Operation::WriteCreationFile { kind, contents }),
+                ReadRepositoryCreationStatus { path, action } => (
+                    path,
+                    match action {
+                        CreationStatusAction::Detailed { include_untracked } => {
+                            Operation::StatusDetailed { include_untracked }
+                        }
+                        CreationStatusAction::Context {} => Operation::StatusContext,
+                        CreationStatusAction::ConflictDetails { kind } => {
+                            Operation::StatusConflictDetails { kind }
+                        }
+                    },
+                ),
+                CreateInitialCommit { path, paths } => (path, Operation::InitialCommit { paths }),
                 _ => unreachable!(),
             };
             anyhow::ensure!(
@@ -582,11 +689,14 @@ async fn execute(
             {
                 repo.clone()
             } else {
-                let repo = Repository::open(&canonical).await?;
+                let mut repo = Repository::open(&canonical).await?;
                 anyhow::ensure!(
                     repo.path() == canonical,
                     "select a repository root, not a nested path"
                 );
+                if registry_bound_mutation {
+                    repo = repo.with_registry(registry.clone());
+                }
                 repo
             };
             repo.execute(operation).await

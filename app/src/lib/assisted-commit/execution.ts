@@ -22,6 +22,7 @@ import {
   acquireAssistedCommitGitLease,
   getAssistedCommitProtectedPaths,
   protectAssistedCommitResources,
+  requireRepositoryGitAsyncOwnership,
   withoutRepositoryGitAccess,
 } from '../git/repository-operation'
 import { useRepoRulesLogic } from '../helpers/repo-rules'
@@ -55,6 +56,7 @@ export async function executeAssistedCommitRun(
   prepared: IAssistedCommitPreparedIntent | undefined,
   services: IAssistedCommitExecution
 ): Promise<IAssistedCommitResult> {
+  requireRepositoryGitAsyncOwnership()
   const { state, context, dialogs, readers, selections, push } = services
   const repository = run.repository
   state.runs.set(repository.id, run)

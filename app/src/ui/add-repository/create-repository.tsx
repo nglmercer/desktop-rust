@@ -41,6 +41,7 @@ import {
   withoutRepositoryGitAccess,
 } from '../../lib/git/repository-operation'
 import { Repository } from '../../models/repository'
+import { DiffSelectionType } from '../../models/diff'
 import { backend } from '../../backend/client'
 
 /** URL used to provide information about submodules to the user. */
@@ -431,7 +432,7 @@ export class CreateRepository extends React.Component<
 
     try {
       const gitAttributes = Path.join(fullPath, '.gitattributes')
-      const gitAttributesExists = await pathExists(gitAttributes)
+      const gitAttributesExists = !rustBackend && await pathExists(gitAttributes)
       if (!gitAttributesExists) {
         await writeGitAttributes(fullPath)
       }
@@ -443,7 +444,7 @@ export class CreateRepository extends React.Component<
       this.postCreationError(e)
     }
 
-    const status = await getStatus(repository, true, true).catch(e => {
+    const status = await getStatus(repository, true, true, true).catch(e => {
       log.error(`createRepository: unable to get status for ${fullPath}`, e)
       this.postCreationError(new CreateRepositoryError(e))
       return null
@@ -457,7 +458,16 @@ export class CreateRepository extends React.Component<
       const wd = status.workingDirectory
       const files = wd.files
       if (files.length > 0) {
-        await createCommit(repository, 'Initial commit', files)
+        if (rustBackend) {
+          const selectedPaths = files
+            .filter(file => file.selection.getSelectionType() === DiffSelectionType.All)
+            .map(file => file.path)
+          if (selectedPaths.length > 0) {
+            await backend().createInitialCommit(repository.path, selectedPaths)
+          }
+        } else {
+          await createCommit(repository, 'Initial commit', files)
+        }
       }
     } catch (e) {
       log.error(`createRepository: initial commit failed at ${fullPath}`, e)

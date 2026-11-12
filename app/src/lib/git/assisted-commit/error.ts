@@ -18,6 +18,7 @@ export type AssistedCommitErrorCode =
   | 'cleanup-failed'
   | 'disposed'
   | 'busy'
+  | 'unsupported-runtime'
 
 /** Exact recovery information for an interrupted Desktop-owned transaction. */
 export interface IAssistedCommitRecovery {

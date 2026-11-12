@@ -72,6 +72,27 @@ pub(crate) async fn git_identity_value(path: &Path, key: &str, only_local: bool)
     read_git_config(path, key, only_local, false).await
 }
 
+/// Resolve the identity Git would actually use, including its environment and
+/// fallback rules, without exposing arbitrary `git var` variables.
+pub(crate) async fn git_effective_identity(
+    path: &Path,
+    role: crate::GitIdentityRole,
+) -> Result<Value> {
+    let variable = match role {
+        crate::GitIdentityRole::Author => "GIT_AUTHOR_IDENT",
+        crate::GitIdentityRole::Committer => "GIT_COMMITTER_IDENT",
+    };
+    let output = process::run(path, &args(&["var", variable])).await?;
+    if output.code == 128 {
+        return Ok(Value::Null);
+    }
+    if output.code != 0 {
+        bail!("Unable to resolve Git identity");
+    }
+    anyhow::ensure!(output.stdout.len() <= 65536, "Git identity exceeds 64 KiB");
+    Ok(json!(String::from_utf8_lossy(&output.stdout)))
+}
+
 async fn read_git_config(
     path: &Path,
     key: &str,

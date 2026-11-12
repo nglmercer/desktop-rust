@@ -205,12 +205,19 @@ export async function getStatus(
 export async function getStatus(
   repository: Repository,
   includeUntracked: boolean,
+  rejectOnError: true,
+  forCreation: true
+): Promise<IStatusResult>
+export async function getStatus(
+  repository: Repository,
+  includeUntracked: boolean,
   rejectOnError: false
 ): Promise<IStatusResult | null>
 export async function getStatus(
   repository: Repository,
   includeUntracked = true,
-  rejectOnError = false
+  rejectOnError = false,
+  forCreation = false
 ): Promise<IStatusResult | null> {
   const args = [
     '--no-optional-locks',
@@ -225,14 +232,13 @@ export async function getStatus(
   let usedRustStatus = false
   if (backend().transportKind === 'ws') {
     parsed = statusItemsFromBackend(
-      await backend().detailedRepositoryStatus(
-        repository.path,
-        includeUntracked
-      )
+      await (forCreation
+        ? backend().detailedRepositoryStatus(repository.path, includeUntracked, {}, true)
+        : backend().detailedRepositoryStatus(repository.path, includeUntracked))
     )
     usedRustStatus = true
   }
-  if (!rejectOnError && backend().transportKind === 'wry') {
+  if (backend().transportKind === 'wry') {
     parsed = await withRepositoryGitOperation(
       repository.path,
       'read',
@@ -244,6 +250,7 @@ export async function getStatus(
           )
           return statusItemsFromBackend(records)
         } catch (error) {
+          if (rejectOnError) throw error
           // Missing repositories and oversized reads still use the legacy
           // path so its existing error and output-size behavior is preserved.
           log.warn(
@@ -279,7 +286,9 @@ export async function getStatus(
     | Awaited<ReturnType<ReturnType<typeof backend>['repositoryStatusContext']>>
     | undefined
   if (transport === 'ws') {
-    context = await backend().repositoryStatusContext(repository.path)
+    context = forCreation
+      ? await backend().repositoryStatusContext(repository.path, true)
+      : await backend().repositoryStatusContext(repository.path)
   } else if (transport === 'wry' && usedRustStatus) {
     context = await withRepositoryGitOperation(
       repository.path,
@@ -288,6 +297,7 @@ export async function getStatus(
         try {
           return await backend().repositoryStatusContext(repository.path)
         } catch (error) {
+          if (rejectOnError) throw error
           log.warn(
             'Rust status context read failed; retrying with the existing shell path',
             error
@@ -314,7 +324,8 @@ export async function getStatus(
       repository,
       mergeHeadFound,
       conflictedFilesInIndex,
-      rebaseInternalState
+      rebaseInternalState,
+      forCreation
     )
   } else if (
     transport === 'wry' &&
@@ -335,6 +346,7 @@ export async function getStatus(
             rebaseInternalState
           )
         } catch (error) {
+          if (rejectOnError) throw error
           log.warn(
             'Rust conflict details read failed; retrying with the existing Git path',
             error
@@ -615,7 +627,8 @@ async function getBridgeConflictDetails(
   repository: Repository,
   mergeHeadFound: boolean,
   conflictedFilesInIndex: ReadonlyArray<IStatusEntry>,
-  rebaseInternalState: RebaseInternalState | null
+  rebaseInternalState: RebaseInternalState | null,
+  forCreation = false
 ): Promise<ConflictFilesDetails> {
   if (
     !mergeHeadFound &&
@@ -629,10 +642,9 @@ async function getBridgeConflictDetails(
     : rebaseInternalState !== null
     ? 'rebase'
     : 'working'
-  const details = await backend().repositoryConflictDetails(
-    repository.path,
-    kind
-  )
+  const details = forCreation
+    ? await backend().repositoryConflictDetails(repository.path, kind, true)
+    : await backend().repositoryConflictDetails(repository.path, kind)
   const counts = new Map<string, number>()
   for (const [, path] of details.check.matchAll(
     /^(.+):\d+: leftover conflict marker/gm

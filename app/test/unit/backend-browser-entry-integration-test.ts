@@ -125,9 +125,18 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         // in Playwright's navigation error.
         throw new Error('Could not open the isolated browser frontend')
       }
-      await page.waitForSelector('#desktop-app-container > *', {
-        timeout: 20_000,
-      })
+      try {
+        await page.waitForSelector('#desktop-app-container > *', {
+          timeout: 20_000,
+        })
+      } catch {
+        const diagnostics = errors.map(error =>
+          error.replace(/#token=[^\s]+/g, '#token=[redacted]')
+        )
+        throw new Error(
+          `Browser frontend did not mount: ${diagnostics.join('; ') || 'no page error was reported'}`
+        )
+      }
       await page.waitForFunction(
         () => Reflect.get(window, '__desktop')?.__backendReady === true
       )

@@ -242,11 +242,57 @@ describe('Rust status integration', () => {
     expect(status?.workingDirectory.files[0].path).toBe('file')
   })
 
-  it('preserves strict Git error behavior without invoking the Rust shortcut', async () => {
+  it('uses Rust for strict status reads required during repository creation', async () => {
+    mocks.backendStatus.mockResolvedValueOnce([
+      { kind: 'header', value: bytes('branch.head main') },
+      {
+        kind: 'entry',
+        entry_kind: '?',
+        status_code: '??',
+        submodule_status_code: '????',
+        path: bytes('README.md'),
+        old_path: null,
+        rename_or_copy_score: null,
+      },
+    ])
+    const status = await getStatus(repository, true, true)
+    expect(status.workingDirectory.files[0].path).toBe('README.md')
+    expect(mocks.backendStatus).toHaveBeenCalledWith('/repo-a', true)
+    expect(mocks.context).toHaveBeenCalledWith('/repo-a')
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('uses explicitly scoped reads for an unselected repository during creation', async () => {
+    mocks.transport = 'ws'
+    mocks.backendStatus.mockResolvedValueOnce([])
+    await getStatus(repository, true, true, true)
+    expect(mocks.backendStatus).toHaveBeenCalledWith('/repo-a', true, {}, true)
+    expect(mocks.context).toHaveBeenCalledWith('/repo-a', true)
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('propagates strict Rust status and context failures without a legacy retry', async () => {
     const failure = new Error('missing repository')
-    mocks.git.mockRejectedValue(failure)
+    mocks.backendStatus.mockRejectedValueOnce(failure)
     await expect(getStatus(repository, true, true)).rejects.toBe(failure)
-    expect(mocks.backendStatus).not.toHaveBeenCalled()
+    mocks.backendStatus.mockResolvedValueOnce([])
+    mocks.context.mockRejectedValueOnce(failure)
+    await expect(getStatus(repository, true, true)).rejects.toBe(failure)
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('propagates strict conflict-detail failures without a legacy retry', async () => {
+    const failure = new Error('conflict details unavailable')
+    mocks.backendStatus.mockResolvedValueOnce([])
+    mocks.context.mockResolvedValueOnce({
+      mergeHeadFound: true,
+      squashMsgFound: false,
+      isCherryPickingHeadFound: false,
+      rebaseInternalState: null,
+    })
+    mocks.conflicts.mockRejectedValueOnce(failure)
+    await expect(getStatus(repository, true, true)).rejects.toBe(failure)
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('propagates repository admission failures without retrying', async () => {

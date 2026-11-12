@@ -2,6 +2,7 @@ import { git } from './core'
 import { Repository } from '../../models/repository'
 import { CommitIdentity } from '../../models/commit-identity'
 import { IGitExecutionOptions } from './core'
+import { backend } from '../../backend/client'
 
 /**
  * Gets the author identity, ie the name and email which would
@@ -49,6 +50,18 @@ async function getIdentity(
   name: string,
   options?: Pick<IGitExecutionOptions, 'env'>
 ): Promise<CommitIdentity | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none' && options?.env === undefined) {
+    const value = await backend().repositoryEffectiveGitIdentity(
+      repository.path,
+      variable === 'GIT_AUTHOR_IDENT' ? 'author' : 'committer'
+    )
+    if (value === null) return null
+    try {
+      return CommitIdentity.parseIdentity(value)
+    } catch {
+      return null
+    }
+  }
   const result = await git(['var', variable], repository.path, name, {
     successExitCodes: new Set([0, 128]),
     ...options,

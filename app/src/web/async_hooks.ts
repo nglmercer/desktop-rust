@@ -1,7 +1,11 @@
 // `async_hooks` for the webview build. There is no async-context tracking in
 // a browser, so the store is only visible synchronously inside `run`.
 export function createHook(_callbacks?: unknown) {
-  const hook = { enable: () => hook, disable: () => hook }
+  const hook = {
+    __desktopNoAsyncPropagation: true,
+    enable: () => hook,
+    disable: () => hook,
+  }
   return hook
 }
 export function executionAsyncId() {
@@ -17,7 +21,11 @@ export class AsyncLocalStorage<T> {
   public getStore() {
     return this.store
   }
-  public run<R>(store: T, callback: (...args: any[]) => R, ...args: any[]): R {
+  public run<R, A extends unknown[]>(
+    store: T,
+    callback: (...args: A) => R,
+    ...args: A
+  ): R {
     const previous = this.store
     this.store = store
     try {
@@ -26,7 +34,10 @@ export class AsyncLocalStorage<T> {
       this.store = previous
     }
   }
-  public exit<R>(callback: (...args: any[]) => R, ...args: any[]): R {
+  public exit<R, A extends unknown[]>(
+    callback: (...args: A) => R,
+    ...args: A
+  ): R {
     return this.run(undefined as T, callback, ...args)
   }
   public enterWith(store: T) {
@@ -38,7 +49,11 @@ export class AsyncLocalStorage<T> {
 }
 
 export class AsyncResource {
-  public runInAsyncScope<R>(fn: (...args: any[]) => R, thisArg?: unknown, ...args: any[]): R {
+  public runInAsyncScope<R, A extends unknown[]>(
+    fn: (...args: A) => R,
+    thisArg?: unknown,
+    ...args: A
+  ): R {
     return fn.apply(thisArg, args)
   }
   public emitDestroy() {
@@ -46,4 +61,10 @@ export class AsyncResource {
   }
 }
 
-export default { createHook, executionAsyncId, triggerAsyncId, AsyncLocalStorage, AsyncResource }
+export default {
+  createHook,
+  executionAsyncId,
+  triggerAsyncId,
+  AsyncLocalStorage,
+  AsyncResource,
+}

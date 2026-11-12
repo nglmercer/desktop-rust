@@ -5,6 +5,9 @@ import { Repository } from '../../models/repository'
 import { IRemote } from '../../models/remote'
 import { envForRemoteOperation } from './environment'
 import { getSymbolicRef } from './refs'
+import { backend } from '../../backend/client'
+import { resolve } from 'path'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * List the remotes, sorted alphabetically by `name`, for a repository.
@@ -17,6 +20,18 @@ export async function getRemotes(
   repository: Repository,
   options?: Pick<IGitStringExecutionOptions, 'env'>
 ): Promise<ReadonlyArray<IRemote>> {
+  if (
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none' &&
+    options?.env === undefined
+  ) {
+    const read = () =>
+      backend().repositorySafeFetchRemotes(resolve(repository.path))
+    const remotes = await (backend().transportKind === 'wry'
+      ? withRepositoryGitOperation(repository.path, 'read', read, true)
+      : read())
+    if (remotes !== null) return remotes
+  }
   // Config queries also work outside repositories, where they can still return
   // global remotes. Preserve the empty result for non-repository directories.
   const result = await git(
@@ -97,6 +112,9 @@ export async function addRemote(
   name: string,
   url: string
 ): Promise<IRemote> {
+  if (await manageRemote(repository, { type: 'add', name, url })) {
+    return { url, name }
+  }
   await git(['remote', 'add', '--', name, url], repository.path, 'addRemote')
 
   return { url, name }
@@ -107,6 +125,7 @@ export async function removeRemote(
   repository: Repository,
   name: string
 ): Promise<void> {
+  if (await manageRemote(repository, { type: 'remove', name })) return
   const options = {
     successExitCodes: new Set([0, 2, 128]),
   }
@@ -125,12 +144,27 @@ export async function setRemoteURL(
   name: string,
   url: string
 ): Promise<true> {
+  if (await manageRemote(repository, { type: 'set_url', name, url })) return true
   await git(
     ['remote', 'set-url', '--', name, url],
     repository.path,
     'setRemoteURL'
   )
   return true
+}
+
+async function manageRemote(
+  repository: Repository,
+  action: { readonly type: 'add' | 'set_url'; readonly name: string; readonly url: string } | { readonly type: 'remove'; readonly name: string }
+): Promise<boolean> {
+  if (typeof window === 'undefined' || backend().transportKind === 'none') return false
+  const result = await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().manageRepositoryRemote(resolve(repository.path), action),
+    true
+  )
+  return result === 'updated'
 }
 
 /**
@@ -143,6 +177,15 @@ export async function getRemoteURL(
   repository: Repository,
   name: string
 ): Promise<string | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () =>
+      backend().repositorySafeRemoteUrl(resolve(repository.path), name)
+    const result = await (backend().transportKind === 'wry'
+      ? withRepositoryGitOperation(repository.path, 'read', read, true)
+      : read())
+    if (result.kind === 'resolved') return result.url
+    if (result.kind === 'missing') return null
+  }
   const result = await git(
     ['remote', 'get-url', '--', name],
     repository.path,

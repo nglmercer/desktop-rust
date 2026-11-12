@@ -76,6 +76,10 @@ still has legacy renderer callers.
 Repository identity reads now use Git's local-only or inherited lookup through
 both transports. WebSocket requests bind to the selected repository before the
 read, and reject a selection change instead of querying a different repository.
+The effective author and committer identities used for commits and license
+templates are resolved by Git through Rust on both transports, including for
+an explicit unselected repository. Calls with explicit environment overrides
+still use the existing Git execution path until those overrides are migrated.
 Identity and other allowlisted reads share the same Git configuration parser;
 the identity protocol remains separate to preserve that selection fence.
 Repository identity writes and removals are scoped to the requested repository;
@@ -162,8 +166,41 @@ and Git initialization when a Rust transport is active. It accepts an existing
 non-empty folder, preserves its files, uses the configured default branch, and
 does not select or register the result. It refuses existing Git metadata or a
 bare repository. A failed or interrupted initialization may leave a partial
-`.git` directory, which must be inspected before retrying. Later registration,
-README, license and commit steps still have legacy callers.
+`.git` directory, which must be inspected before retrying. README, gitignore,
+license, and attributes writes also use Rust for these transports, restricted
+to fixed filenames in the requested repository root. Existing attributes are
+preserved with an atomic create-only operation; this requires hard-link support
+in the destination filesystem. Strict status reads in this flow now use Rust on
+both transports and report backend errors rather than silently retrying through
+the legacy native path. The WebSocket creation flow reads the explicit new root
+without changing the currently selected repository. Initial commits for Rust
+transports stage the selected paths through Rust and refuse a repository with an
+existing commit or a populated index. It uses the Rust large-blob guard before
+committing; a blocked, failed or interrupted commit can leave files staged and
+requires inspection before retrying. Template loading remains
+in the renderer. Registration and ordinary remote refreshes resolve supported
+fetch remotes through Rust, preserving Git's URL rewrites and exact editable
+URLs. Bare repositories and non-repository directories are also handled by
+Rust. Credential-bearing or unsupported URL forms and calls with custom Git
+environments retain the legacy discovery path.
+Individual remote URL reads also use Rust for supported URLs, distinguishing a
+missing remote from an unsupported URL without exposing credentials.
+Adding, updating and removing supported remotes now use a typed Rust operation
+under the repository mutation fence. Credential-bearing URLs and unsupported
+remote names retain their legacy mutation path; interrupted updates require
+inspection before retrying. The browser async-hooks shim does not propagate
+renderer operation ownership across awaits, so browser-side fencing still needs
+replacement and end-to-end validation; the bridge serializes repository work.
+The legacy assisted-commit transaction now refuses to start or acquire a
+recovery lease in this runtime instead of assuming ownership survives an await.
+It remains available with native async hooks; a Rust transaction replacement
+is still required to restore this workflow in the web renderer.
+Chromium checks exercise the guard and browserified crypto and stream APIs; an
+embedded frontend smoke test confirms the renderer still mounts against the
+authenticated bridge. This does not establish assisted-commit parity.
+Symbolic-ref reads for the current branch, remote default branches and branch
+pruning use Rust on both transports, including detached and missing refs.
+Repository persistence and Electron fallback paths still have legacy callers.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository

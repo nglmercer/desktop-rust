@@ -1,3 +1,4 @@
+use crate::CreationFile;
 use serde::{Deserialize, Serialize};
 
 /// A literal repository-relative path, preserving Unix filename bytes when needed.
@@ -286,9 +287,20 @@ pub enum Operation {
         #[serde(default)]
         only_local: bool,
     },
+    GitEffectiveIdentity {
+        role: GitIdentityRole,
+    },
     GitDescription,
+    SafeFetchRemotes,
+    ManageRemote {
+        action: crate::ManagedRemoteAction,
+    },
     SetGitDescription {
         description: String,
+    },
+    WriteCreationFile {
+        kind: CreationFile,
+        contents: String,
     },
     GitReadSetting {
         key: crate::GitReadSettingKey,
@@ -408,6 +420,9 @@ pub enum Operation {
         paths: Vec<GitPath>,
     },
     CommitPreview,
+    InitialCommit {
+        paths: Vec<GitPath>,
+    },
     Commit {
         #[serde(default)]
         allow_large_files: bool,
@@ -623,6 +638,13 @@ pub enum StatusConflictKind {
     Merge,
     Rebase,
     Working,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitIdentityRole {
+    Author,
+    Committer,
 }
 
 #[derive(Debug, Serialize)]

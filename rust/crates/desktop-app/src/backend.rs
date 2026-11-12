@@ -42,6 +42,10 @@ struct ReadRequest {
     #[serde(default)]
     submodule_path: Option<desktop_backend::GitPath>,
     #[serde(default)]
+    remote_name: Option<String>,
+    #[serde(default)]
+    reference: Option<String>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -81,6 +85,19 @@ enum GitInfoOperation {
     SetDescription {
         repository_path: String,
         description: String,
+    },
+    WriteCreationFile {
+        repository_path: String,
+        kind: desktop_backend::CreationFile,
+        contents: String,
+    },
+    InitialCommit {
+        repository_path: String,
+        paths: Vec<desktop_backend::GitPath>,
+    },
+    ManageRemote {
+        repository_path: String,
+        action: desktop_backend::ManagedRemoteAction,
     },
     InitializeRepository {
         repository_path: String,
@@ -158,7 +175,12 @@ enum ReadMethod {
     RevisionList,
     HasMergeCommits,
     GitIdentityValue,
+    GitAuthorIdentity,
+    GitCommitterIdentity,
     GitDescription,
+    SafeFetchRemotes,
+    SafeRemoteUrl,
+    SymbolicRef,
     SubmoduleDisplayUrl,
     GitReadSetting,
     LfsStatus,
@@ -189,6 +211,9 @@ enum BackendOperation {
     PathExists,
     CanonicalMutationPath,
     TrustRepository,
+    SafeFetchRemotes,
+    SafeRemoteUrl(String),
+    SymbolicRef(String),
     GitInfo(GitInfoOperation),
     Repository(Operation),
     Copilot(Operation),
@@ -249,6 +274,15 @@ impl Backend {
             repository_path, ..
         }
         | GitInfoOperation::SetDescription {
+            repository_path, ..
+        }
+        | GitInfoOperation::WriteCreationFile {
+            repository_path, ..
+        }
+        | GitInfoOperation::InitialCommit {
+            repository_path, ..
+        }
+        | GitInfoOperation::ManageRemote {
             repository_path, ..
         }
         | GitInfoOperation::InitializeRepository {
@@ -389,6 +423,16 @@ impl Backend {
                 "submodule_path only applies to submodule URL reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::SafeRemoteUrl) && request.remote_name.is_some() {
+            return Err(AppError::BadArgs(
+                "remote_name only applies to remote URL reads".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::SymbolicRef) && request.reference.is_some() {
+            return Err(AppError::BadArgs(
+                "reference only applies to symbolic ref reads".into(),
+            ));
+        }
         let operation = if matches!(
             &request.method,
             ReadMethod::RepositoryType
@@ -396,6 +440,9 @@ impl Backend {
                 | ReadMethod::PathExists
                 | ReadMethod::CanonicalMutationPath
                 | ReadMethod::TrustRepository
+                | ReadMethod::SafeFetchRemotes
+                | ReadMethod::SafeRemoteUrl
+                | ReadMethod::SymbolicRef
         ) && request.include_untracked.is_none()
             && request.prefixes.is_none()
             && request.branch.is_none()
@@ -407,10 +454,39 @@ impl Backend {
                 ReadMethod::PathExists => BackendOperation::PathExists,
                 ReadMethod::CanonicalMutationPath => BackendOperation::CanonicalMutationPath,
                 ReadMethod::TrustRepository => BackendOperation::TrustRepository,
+                ReadMethod::SafeFetchRemotes => BackendOperation::SafeFetchRemotes,
+                ReadMethod::SafeRemoteUrl => BackendOperation::SafeRemoteUrl(
+                    request
+                        .remote_name
+                        .ok_or_else(|| AppError::BadArgs("remote name is required".into()))?,
+                ),
+                ReadMethod::SymbolicRef => BackendOperation::SymbolicRef(
+                    request
+                        .reference
+                        .ok_or_else(|| AppError::BadArgs("symbolic ref is required".into()))?,
+                ),
                 _ => unreachable!(),
             }
         } else {
             BackendOperation::Repository(match request.method {
+                ReadMethod::GitAuthorIdentity | ReadMethod::GitCommitterIdentity
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::GitEffectiveIdentity {
+                        role: match request.method {
+                            ReadMethod::GitAuthorIdentity => {
+                                desktop_backend::GitIdentityRole::Author
+                            }
+                            ReadMethod::GitCommitterIdentity => {
+                                desktop_backend::GitIdentityRole::Committer
+                            }
+                            _ => unreachable!(),
+                        },
+                    }
+                }
                 ReadMethod::SubmoduleDisplayUrl
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()
@@ -687,6 +763,16 @@ impl Backend {
             job.operation,
             BackendOperation::GitInfo(GitInfoOperation::SetDescription { .. })
         );
+        let creation_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(
+                GitInfoOperation::WriteCreationFile { .. } | GitInfoOperation::InitialCommit { .. }
+            )
+        );
+        let remote_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::ManageRemote { .. })
+        );
         let initialization = matches!(
             job.operation,
             BackendOperation::GitInfo(GitInfoOperation::InitializeRepository { .. })
@@ -707,6 +793,9 @@ impl Backend {
                     BackendOperation::PathExists => return desktop_backend::path_exists(Path::new(&job.path)).await.map(serde_json::Value::Bool).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::CanonicalMutationPath => return desktop_backend::canonical_mutation_path(Path::new(&job.path)).await.map(serde_json::Value::String).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::TrustRepository => return desktop_backend::trust_repository(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
+                    BackendOperation::SafeFetchRemotes => return desktop_backend::safe_fetch_remotes(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
+                    BackendOperation::SafeRemoteUrl(name) => return desktop_backend::safe_remote_url(Path::new(&job.path), &name).await.map_err(|error| AppError::msg(error.to_string())),
+                    BackendOperation::SymbolicRef(reference) => return desktop_backend::symbolic_ref(Path::new(&job.path), &reference).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::GitInfo(operation) => {
                         return match operation {
                             GitInfoOperation::Version {} => desktop_backend::git_version().await.map(serde_json::Value::String),
@@ -726,6 +815,32 @@ impl Backend {
                             GitInfoOperation::SetDescription { repository_path, description } => {
                                 let repo = Repository::open(Path::new(&repository_path)).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 repo.execute(Operation::SetGitDescription { description }).await
+                            }
+                            GitInfoOperation::WriteCreationFile { repository_path, kind, contents } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical {
+                                    return Err(AppError::msg("select a repository root, not a nested path"));
+                                }
+                                repo.execute(Operation::WriteCreationFile { kind, contents }).await
+                            }
+                            GitInfoOperation::InitialCommit { repository_path, paths } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical {
+                                    return Err(AppError::msg("select a repository root, not a nested path"));
+                                }
+                                if let Some(registry) = &self.registry {
+                                    repo = repo.with_registry(registry.clone());
+                                }
+                                repo.execute(Operation::InitialCommit { paths }).await
+                            }
+                            GitInfoOperation::ManageRemote { repository_path, action } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(Operation::ManageRemote { action }).await
                             }
                             GitInfoOperation::InitializeRepository { repository_path, default_branch } => {
                                 desktop_backend::initialize_desktop_repository(Path::new(&repository_path), &default_branch).await.map(|()| Value::Null)
@@ -766,11 +881,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         }))
@@ -1382,6 +1497,53 @@ esac
         git(&["config", "branch.topic.remote", "origin"]);
         git(&["config", "branch.topic.merge", "refs/heads/topic"]);
         let backend = Backend::new(16).unwrap();
+        let outside = root.join("outside");
+        fs::create_dir(&outside).unwrap();
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":outside,"method":"safe_fetch_remotes"})
+                ])
+                .unwrap(),
+            json!([])
+        );
+        let bare = root.join("bare.git");
+        assert!(
+            Command::new("git")
+                .args(["init", "--bare", "-q"])
+                .arg(&bare)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&bare)
+                .args([
+                    "config",
+                    "remote.desktop-bare-test.url",
+                    "https://example.invalid/bare"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let bare_result = backend
+            .read_args(vec![
+                json!({"repository_path":bare,"method":"safe_fetch_remotes"}),
+            ])
+            .unwrap();
+        if let Some(remotes) = bare_result.as_array() {
+            assert!(
+                remotes
+                    .iter()
+                    .any(|remote| remote["name"] == "desktop-bare-test"
+                        && remote["url"] == "https://example.invalid/bare")
+            );
+        } else {
+            assert!(bare_result.is_null());
+        }
         let enumerate = |prefixes: Value| {
             backend.read_args(vec![json!({"repository_path":root, "method":"branch_enumeration", "prefixes":prefixes})]).unwrap()
         };
@@ -1564,6 +1726,262 @@ esac
             "ref: refs/heads/trunk\n"
         );
         assert!(init("other").is_err());
+        let symbolic = |reference: &str| {
+            backend.read_args(vec![json!({"repository_path":destination,"method":"symbolic_ref","reference":reference})])
+        };
+        assert_eq!(symbolic("HEAD").unwrap(), "refs/heads/trunk");
+        assert_eq!(symbolic("refs/remotes/origin/HEAD").unwrap(), Value::Null);
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&destination)
+                .args([
+                    "symbolic-ref",
+                    "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/main"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(
+            symbolic("refs/remotes/origin/HEAD").unwrap(),
+            "refs/remotes/origin/main"
+        );
+        assert!(symbolic("--invalid").is_err());
+        assert!(
+            backend
+                .admit(vec![
+                    json!({"repository_path":destination,"method":"symbolic_ref"})
+                ])
+                .is_err()
+        );
+        assert!(
+            backend
+                .admit(vec![
+                    json!({"repository_path":destination,"method":"status","reference":"HEAD"})
+                ])
+                .is_err()
+        );
+        let has_remotes = || {
+            backend.read_args(vec![
+                json!({"repository_path":destination,"method":"safe_fetch_remotes"}),
+            ])
+        };
+        let before_remotes = has_remotes().unwrap();
+        assert!(before_remotes.is_array() || before_remotes.is_null());
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&destination)
+                .args([
+                    "config",
+                    "--add",
+                    "remote.desktop-rust-test.url",
+                    "https://example.invalid/repo.git"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let remote_url = |name: &str| {
+            backend.read_args(vec![json!({"repository_path":destination,"method":"safe_remote_url","remote_name":name})])
+        };
+        assert_eq!(
+            remote_url("desktop-rust-test").unwrap(),
+            json!({"kind":"resolved","url":"https://example.invalid/repo.git"})
+        );
+        assert_eq!(
+            remote_url("missing-remote").unwrap(),
+            json!({"kind":"missing"})
+        );
+        assert!(
+            backend
+                .admit(vec![
+                    json!({"repository_path":destination,"method":"safe_remote_url"})
+                ])
+                .is_err()
+        );
+        assert!(
+            backend
+                .admit(vec![
+                    json!({"repository_path":destination,"method":"status","remote_name":"origin"})
+                ])
+                .is_err()
+        );
+        if before_remotes.is_array() {
+            assert!(
+                has_remotes()
+                    .unwrap()
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|remote| remote["name"] == "desktop-rust-test"
+                        && remote["url"] == "https://example.invalid/repo.git")
+            );
+        }
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&destination)
+                .args(["config", "--unset-all", "remote.desktop-rust-test.url"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&destination)
+                .args([
+                    "config",
+                    "--add",
+                    "remote.desktop-rust-test.url",
+                    "https://user:synthetic-secret@example.invalid/repo"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(has_remotes().unwrap(), Value::Null);
+        assert_eq!(
+            remote_url("desktop-rust-test").unwrap(),
+            json!({"kind":"unsupported"})
+        );
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&destination)
+                .args(["config", "--unset-all", "remote.desktop-rust-test.url"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(has_remotes().unwrap(), before_remotes);
+        let manage = |action: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"manage_remote","repository_path":destination,"action":action}})]).unwrap())
+        };
+        assert_eq!(manage(json!({"type":"add","name":"test-rust-mutation","url":"https://example.invalid/one"})).unwrap(), json!({"kind":"updated"}));
+        assert!(manage(json!({"type":"add","name":"test-rust-mutation","url":"https://example.invalid/duplicate"})).is_err());
+        assert_eq!(manage(json!({"type":"set_url","name":"test-rust-mutation","url":"https://example.invalid/two"})).unwrap(), json!({"kind":"updated"}));
+        assert_eq!(manage(json!({"type":"set_url","name":"test-rust-mutation","url":"https://user:synthetic-secret@example.invalid/repo"})).unwrap(), json!({"kind":"unsupported"}));
+        let configured = Command::new("git")
+            .arg("-C")
+            .arg(&destination)
+            .args([
+                "config",
+                "--local",
+                "--get",
+                "remote.test-rust-mutation.url",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(configured.stdout, b"https://example.invalid/two\n");
+        assert_eq!(
+            manage(json!({"type":"remove","name":"test-rust-mutation"})).unwrap(),
+            json!({"kind":"updated"})
+        );
+        assert_eq!(
+            manage(json!({"type":"remove","name":"test-rust-mutation"})).unwrap(),
+            json!({"kind":"updated"})
+        );
+        let creation = |path: &Path, kind: &str, contents: &str| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"write_creation_file","repository_path":path,"kind":kind,"contents":contents}})]).unwrap())
+        };
+        assert_eq!(
+            creation(&destination, "readme", "hello 🦀\n").unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("README.md")).unwrap(),
+            "hello 🦀\n"
+        );
+        let created_status = backend.read_args(vec![json!({"repository_path":destination,"method":"status_detailed","include_untracked":true})]).unwrap();
+        assert!(
+            created_status
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|record| record["path"]["bytes"] == json!(b"README.md"))
+        );
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":destination,"method":"status_context"})
+                ])
+                .unwrap()["mergeHeadFound"],
+            false
+        );
+        assert_eq!(
+            creation(&destination, "git_attributes", "original").unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            creation(&destination, "git_attributes", "replacement").unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join(".gitattributes")).unwrap(),
+            "original"
+        );
+        fs::create_dir(destination.join("nested")).unwrap();
+        assert!(creation(&destination.join("nested"), "readme", "bad").is_err());
+        for (key, value) in [
+            ("user.name", "Creation Test"),
+            ("user.email", "creation@example.invalid"),
+            ("author.name", "Creation Test"),
+            ("author.email", "creation@example.invalid"),
+            ("committer.name", "Creation Test"),
+            ("committer.email", "creation@example.invalid"),
+        ] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&destination)
+                    .args(["config", key, value])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let author = backend
+            .read_args(vec![
+                json!({"repository_path":destination,"method":"git_author_identity"}),
+            ])
+            .unwrap();
+        let committer = backend
+            .read_args(vec![
+                json!({"repository_path":destination,"method":"git_committer_identity"}),
+            ])
+            .unwrap();
+        assert!(
+            author
+                .as_str()
+                .unwrap()
+                .starts_with("Creation Test <creation@example.invalid> ")
+        );
+        assert!(
+            committer
+                .as_str()
+                .unwrap()
+                .starts_with("Creation Test <creation@example.invalid> ")
+        );
+        assert!(backend.admit(vec![json!({"repository_path":destination,"method":"git_author_identity","key":"credential.helper"})]).is_err());
+        let initial_commit = |path: &Path, paths: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"initial_commit","repository_path":path,"paths":paths}})]).unwrap())
+        };
+        assert!(initial_commit(&destination.join("nested"), json!(["README.md"])).is_err());
+        let result = initial_commit(&destination, json!(["README.md", ".gitattributes"])).unwrap();
+        assert_eq!(result["code"], 0);
+        assert!(initial_commit(&destination, json!(["keep.txt"])).is_err());
+        let tree = Command::new("git")
+            .arg("-C")
+            .arg(&destination)
+            .args(["ls-tree", "--name-only", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(tree.stdout, b".gitattributes\nREADME.md\n");
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"write_creation_file","repository_path":destination,"kind":"other","contents":"bad"}})]).is_err());
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"initialize_repository","repository_path":"relative","default_branch":"trunk"}})]).is_err());
         assert!(
             Command::new("git")

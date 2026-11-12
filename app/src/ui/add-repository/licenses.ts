@@ -1,5 +1,6 @@
 import * as Path from 'path'
 import { readFile, writeFile } from 'fs/promises'
+import { backend } from '../../backend/client'
 
 export interface ILicense {
   /** The human-readable name. */
@@ -91,5 +92,9 @@ export async function writeLicense(
   ]
 
   const body = replaceTokens(license.body, tokens, fields)
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().writeRepositoryCreationFile(repositoryPath, 'license', body)
+    return
+  }
   await writeFile(fullPath, body)
 }

@@ -31,6 +31,63 @@ struct Candidate {
 }
 
 impl Repository {
+    /// Create the first commit from the paths shown by the creation dialog.
+    /// Refuse to reset an existing index or commit on an already born branch.
+    pub(crate) async fn initial_commit(&self, paths: Vec<GitPath>) -> Result<Value> {
+        anyhow::ensure!(
+            !paths.is_empty() && paths.len() <= 32_768,
+            "Select between 1 and 32768 files"
+        );
+        let mut input = Vec::new();
+        let mut unique = BTreeSet::new();
+        for path in paths {
+            let path = validate_path(path)?;
+            let bytes = path.as_encoded_bytes();
+            anyhow::ensure!(
+                unique.insert(bytes.to_vec()),
+                "Duplicate initial commit path"
+            );
+            input.extend_from_slice(bytes);
+            input.push(0);
+            anyhow::ensure!(
+                input.len() <= 1024 * 1024,
+                "Initial commit paths exceed 1 MiB"
+            );
+        }
+        anyhow::ensure!(
+            self.commit_head_identity().await?.0.is_none(),
+            "Repository already has a commit"
+        );
+        let index = checked(self.run(&args(&["ls-files", "--stage", "-z"])).await?)?;
+        anyhow::ensure!(
+            index.stdout.is_empty(),
+            "Repository index is not empty; inspect staged files before committing"
+        );
+        checked(
+            process::update_index(
+                &self.path,
+                &args(&[
+                    "update-index",
+                    "--add",
+                    "--remove",
+                    "--replace",
+                    "-z",
+                    "--stdin",
+                ]),
+                input,
+            )
+            .await?,
+        )
+        .context("Staging failed; inspect the index before retrying")?;
+        anyhow::ensure!(
+            self.commit_head_identity().await?.0.is_none(),
+            "Repository HEAD changed during staging; inspect the index before retrying"
+        );
+        self.reviewed_commit("Initial commit".into(), String::new(), false, None)
+            .await
+            .context("Initial commit failed; inspect the index and repository before retrying")
+    }
+
     pub(crate) async fn commit_preview(&self) -> Result<Value> {
         Ok(serde_json::to_value(self.capture_commit_preview().await?)?)
     }

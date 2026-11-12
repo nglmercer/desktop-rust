@@ -99,6 +99,38 @@ pub async fn run_commit(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     .await
 }
 
+/// Remote management uses names, not pathspecs; do not pass a literal-path
+/// override to any Git hook spawned by the operation.
+pub(crate) async fn run_remote(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    run_command(
+        path,
+        git_native_paths(None),
+        args,
+        None,
+        2 * 1024 * 1024,
+        None,
+    )
+    .await
+}
+
+/// `update-index --stdin -z` reads literal paths, so filters should inherit
+/// Git's normal pathspec environment rather than the direct-file override.
+pub(crate) async fn update_index(
+    path: &Path,
+    args: &[OsString],
+    input: Vec<u8>,
+) -> Result<RawOutput> {
+    run_command(
+        path,
+        git_native_paths(None),
+        args,
+        Some(input),
+        2 * 1024 * 1024,
+        None,
+    )
+    .await
+}
+
 /// Inspect only existing objects; a partial clone must not fetch implicitly.
 pub async fn local_commit_available(path: &Path, oid: &str) -> Result<bool> {
     let mut command = git_command(None);

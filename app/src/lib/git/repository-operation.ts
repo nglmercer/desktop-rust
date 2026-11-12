@@ -69,6 +69,16 @@ const protectionIdentities = new WeakMap<
 >()
 const mutationReservations = new Set<ReadonlySet<string>>()
 
+/** The legacy assisted transaction requires ownership to survive awaits. */
+export function requireRepositoryGitAsyncOwnership(): void {
+  if (!contexts.supportsAsyncPropagation) {
+    throw new AssistedCommitError(
+      'unsupported-runtime',
+      'Assisted commit transactions are unavailable in this runtime because repository ownership cannot be maintained across asynchronous operations.'
+    )
+  }
+}
+
 function pendingOperation(
   kind: 'read' | 'mutation' = 'read'
 ): IRepositoryOperation {
@@ -101,12 +111,14 @@ async function repositoryOperations(
   if (existing !== undefined) {
     return existing
   }
-  const canonical = await realpath(path).catch(error => {
-    if (isErrnoException(error) && error.code === 'ENOENT') {
-      return resolve(path)
-    }
-    throw error
-  })
+  const canonical = typeof window !== 'undefined' && backend().transportKind !== 'none'
+    ? await canonicalMutationPath(path)
+    : await realpath(path).catch(error => {
+        if (isErrnoException(error) && error.code === 'ENOENT') {
+          return resolve(path)
+        }
+        throw error
+      })
   const key = pathKey(canonical)
   const repository = repositories.get(key) ?? {
     path: canonical,
@@ -662,6 +674,7 @@ export async function acquireAssistedCommitGitLease(
   protectedPaths: ReadonlyArray<string> = [path],
   beforeSpawn?: () => void
 ): Promise<IAssistedCommitGitLease> {
+  requireRepositoryGitAsyncOwnership()
   const repository = await repositoryOperations(path)
   if (repository.lease !== undefined) {
     throw new AssistedCommitError(

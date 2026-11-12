@@ -1,8 +1,20 @@
-export class Readable { on(_e:string,_f:any){ return this } pipe(){ return this } }
-export class Writable { write(_d:any,_cb?:any){ if(_cb)_cb() } end(){ } }
-export class Duplex extends Readable {}
-export class PassThrough extends Duplex { write(_d:any,_cb?:any){ if(_cb)_cb() } }
-export class Transform extends Duplex {}
-export function ReadStream(){}
-export function WriteStream(){}
-export function pipeline(...a:any[]){ return Promise.reject(new Error('pipeline shim')) }
+// Use Node-compatible stream constructors for browserified dependencies.
+// @ts-expect-error -- aliased to stream-browserify in vite.config.ts
+import streamBrowserify from 'desktop-stream-impl'
+
+export const {
+  Readable,
+  Writable,
+  Duplex,
+  PassThrough,
+  Transform,
+  pipeline,
+  finished,
+} = streamBrowserify
+
+export const Stream = streamBrowserify
+// Retain the previous shim's compatibility names for consumers that import
+// these from `stream` instead of the filesystem module.
+export function ReadStream() {}
+export function WriteStream() {}
+export default streamBrowserify

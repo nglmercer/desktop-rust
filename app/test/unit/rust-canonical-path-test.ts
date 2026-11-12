@@ -16,9 +16,17 @@ vi.mock('fs/promises', () => ({
   default: { realpath: mocks.realpath },
 }))
 vi.mock('../../src/lib/git/core', () => ({ git: vi.fn() }))
-import { canonicalMutationPath } from '../../src/lib/git/repository-operation'
+import {
+  canonicalMutationPath,
+  hasRepositoryGitOperationAccess,
+  withRepositoryGitOperation,
+  requireRepositoryGitAsyncOwnership,
+} from '../../src/lib/git/repository-operation'
 
 describe('canonical mutation destinations', () => {
+  it('retains assisted ownership support when native async hooks are available', () => {
+    expect(() => requireRepositoryGitAsyncOwnership()).not.toThrow()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.transport = 'ws'
@@ -48,5 +56,25 @@ describe('canonical mutation destinations', () => {
       '/physical/repo'
     )
     expect(mocks.canonical).not.toHaveBeenCalled()
+  })
+  it.each(['ws', 'wry'])(
+    'admits repository operations using %s canonicalization',
+    async transport => {
+      mocks.transport = transport
+      mocks.canonical.mockResolvedValueOnce('/physical/repo')
+      await withRepositoryGitOperation('/alias/repo', 'mutation', async () => {
+        expect(hasRepositoryGitOperationAccess('/alias/repo')).toBe(true)
+      })
+      expect(mocks.canonical).toHaveBeenCalledWith('/alias/repo')
+      expect(mocks.realpath).not.toHaveBeenCalled()
+    }
+  )
+  it('does not enter an operation if the Rust path check fails', async () => {
+    mocks.canonical.mockRejectedValueOnce(new Error('disconnected'))
+    const operation = vi.fn()
+    await expect(
+      withRepositoryGitOperation('/repo', 'mutation', operation)
+    ).rejects.toThrow('disconnected')
+    expect(operation).not.toHaveBeenCalled()
   })
 })

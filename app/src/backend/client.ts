@@ -346,12 +346,22 @@ class WryTransport {
         isRecord(params) &&
         isRecord(params.operation) &&
         params.operation.type === 'set_description'
+      const creationWrite =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        (params.operation.type === 'write_creation_file' || params.operation.type === 'initial_commit')
+      const remoteWrite =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        params.operation.type === 'manage_remote'
       const initialization =
         method === 'git_info' &&
         isRecord(params) &&
         isRecord(params.operation) &&
         params.operation.type === 'initialize_repository'
-      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || initialization
+      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || initialization
       const nativeError = (error: unknown): BackendError => {
         const result = toBackendError(error)
         if (!mutating || !result.retryable) return result
@@ -404,6 +414,10 @@ class WryTransport {
               ? 'Git config preparation cancelled; check the configuration file before retrying'
               : descriptionWrite
               ? 'Description update cancelled; inspect the repository description before retrying'
+              : creationWrite
+              ? 'Repository creation operation cancelled; inspect the repository and index before retrying'
+              : remoteWrite
+              ? 'Remote update cancelled; inspect Git configuration before retrying'
               : initialization
               ? 'Repository initialization cancelled; inspect the destination before retrying'
               : lfsWrite
@@ -423,6 +437,10 @@ class WryTransport {
                 ? 'Git config preparation timed out; check the configuration file before retrying'
                 : descriptionWrite
                 ? 'Description update timed out; inspect the repository description before retrying'
+                : creationWrite
+                ? 'Repository creation operation timed out; inspect the repository and index before retrying'
+                : remoteWrite
+                ? 'Remote update timed out; inspect Git configuration before retrying'
                 : initialization
                 ? 'Repository initialization timed out; inspect the destination before retrying'
                 : lfsWrite
@@ -1251,6 +1269,37 @@ export class BackendClient {
     }
   }
 
+  /** Write a file offered by the new-repository dialog. */
+  async writeRepositoryCreationFile(repositoryPath: string, kind: 'readme' | 'gitignore' | 'license' | 'git_attributes', contents: string): Promise<void> {
+    const params = { path: repositoryPath, kind, contents }
+    if (this.transport !== 'wry' && new TextEncoder().encode(JSON.stringify({ ...params, method: 'write_repository_creation_file', id: Number.MAX_SAFE_INTEGER })).length > 65536) {
+      throw new BackendError({ code: 'invalid_request', message: 'Creation file exceeds the bridge request limit', retryable: false })
+    }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'write_creation_file', repository_path: repositoryPath, kind, contents } })
+      : await this.request('write_repository_creation_file', params)
+    if (value !== null) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid creation file update response', retryable: false })
+    }
+  }
+
+  /** Stage the displayed paths and make the first commit at an explicit root. */
+  async createInitialCommit(repositoryPath: string, paths: ReadonlyArray<string>): Promise<void> {
+    const params = { path: repositoryPath, paths }
+    if (this.transport !== 'wry' && new TextEncoder().encode(JSON.stringify({ ...params, method: 'create_initial_commit', id: Number.MAX_SAFE_INTEGER })).length > 65536) {
+      throw new BackendError({ code: 'invalid_request', message: 'Initial commit paths exceed the bridge request limit', retryable: false })
+    }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'initial_commit', repository_path: repositoryPath, paths } })
+      : await this.request('create_initial_commit', params)
+    if (!isRecord(value) || typeof value.code !== 'number' || typeof value.stderr !== 'string') {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid initial commit response; inspect the repository before retrying', retryable: false })
+    }
+    if (value.code !== 0) {
+      throw new BackendError({ code: 'initial_commit_failed', message: `${value.stderr || 'Initial commit failed'}; inspect staged files before retrying`, retryable: false })
+    }
+  }
+
   /** Initialize the requested directory without changing the selected repository. */
   async initializeDesktopRepository(path: string, defaultBranch: string): Promise<void> {
     const value = this.transport === 'wry'
@@ -1259,6 +1308,67 @@ export class BackendClient {
     if (value !== null) {
       throw new BackendError({ code: 'invalid_response', message: 'Invalid repository initialization response', retryable: false })
     }
+  }
+
+  /** Resolve the author or committer identity Git would use. */
+  async repositoryEffectiveGitIdentity(repositoryPath: string, role: 'author' | 'committer'): Promise<string | null> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, role === 'author' ? 'git_author_identity' : 'git_committer_identity', {})
+      : await this.request('git_repository_effective_identity', { path: repositoryPath, role })
+    if (value !== null && (typeof value !== 'string' || value.length > 65536)) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid effective Git identity response', retryable: false })
+    }
+    return value
+  }
+
+  /** Resolve ordinary fetch remotes, or return null for sensitive URL forms. */
+  async repositorySafeFetchRemotes(repositoryPath: string): Promise<ReadonlyArray<{ readonly name: string; readonly url: string }> | null> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, 'safe_fetch_remotes', {})
+      : await this.request('repository_safe_fetch_remotes', { path: repositoryPath })
+    if (value === null) return null
+    if (!Array.isArray(value) || value.length > 1000 || !value.every(remote =>
+      isRecord(remote) && typeof remote.name === 'string' && remote.name.length > 0 && typeof remote.url === 'string' && remote.url.length > 0
+    )) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid remote discovery response', retryable: false })
+    }
+    return value as Array<{ name: string; url: string }>
+  }
+
+  /** Resolve one remote, retaining a distinct fallback for sensitive URLs. */
+  async repositorySafeRemoteUrl(repositoryPath: string, name: string): Promise<{ readonly kind: 'resolved'; readonly url: string } | { readonly kind: 'missing' | 'unsupported' }> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, 'safe_remote_url', { remote_name: name })
+      : await this.request('repository_safe_remote_url', { path: repositoryPath, name })
+    if (isRecord(value) && (value.kind === 'missing' || value.kind === 'unsupported')) return { kind: value.kind }
+    if (isRecord(value) && value.kind === 'resolved' && typeof value.url === 'string' && value.url.length > 0 && value.url.length <= 16384) return { kind: 'resolved', url: value.url }
+    throw new BackendError({ code: 'invalid_response', message: 'Invalid remote URL response', retryable: false })
+  }
+
+  /** Apply a supported remote configuration change without echoing its URL. */
+  async manageRepositoryRemote(repositoryPath: string, action: { readonly type: 'add' | 'set_url'; readonly name: string; readonly url: string } | { readonly type: 'remove'; readonly name: string }): Promise<'updated' | 'unsupported'> {
+    const params = { path: repositoryPath, action }
+    if (this.transport !== 'wry' && new TextEncoder().encode(JSON.stringify({ ...params, method: 'manage_repository_remote', id: Number.MAX_SAFE_INTEGER })).length > 65536) {
+      throw new BackendError({ code: 'invalid_request', message: 'Remote update exceeds the bridge request limit', retryable: false })
+    }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'manage_remote', repository_path: repositoryPath, action } })
+      : await this.request('manage_repository_remote', params)
+    if (!isRecord(value) || (value.kind !== 'updated' && value.kind !== 'unsupported')) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid remote update response; inspect Git configuration before retrying', retryable: false })
+    }
+    return value.kind
+  }
+
+  /** Read a symbolic ref in the requested repository. */
+  async repositorySymbolicRef(repositoryPath: string, reference: string): Promise<string | null> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, 'symbolic_ref', { reference })
+      : await this.request('repository_symbolic_ref', { path: repositoryPath, reference })
+    if (value !== null && (typeof value !== 'string' || value.length > 65536)) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid symbolic ref response', retryable: false })
+    }
+    return value
   }
 
   /** Read a repository's local or inherited Git identity through Rust. */
@@ -1544,7 +1654,7 @@ export class BackendClient {
     return value
   }
 
-  async repositoryStatusContext(repositoryPath: string): Promise<{
+  async repositoryStatusContext(repositoryPath: string, creation = false): Promise<{
     readonly mergeHeadFound: boolean
     readonly squashMsgFound: boolean
     readonly isCherryPickingHeadFound: boolean
@@ -1554,7 +1664,9 @@ export class BackendClient {
       readonly baseBranchTip: string
     } | null
   }> {
-    const value = await this.repositoryRead(
+    const value = creation && this.transport === 'ws'
+      ? await this.request('read_repository_creation_status', { path: repositoryPath, action: { type: 'context' } })
+      : await this.repositoryRead(
       repositoryPath,
       'status_context',
       {}
@@ -1602,13 +1714,16 @@ export class BackendClient {
 
   async repositoryConflictDetails(
     repositoryPath: string,
-    kind: 'merge' | 'rebase' | 'working'
+    kind: 'merge' | 'rebase' | 'working',
+    creation = false
   ): Promise<{
     readonly check: string
     readonly numstat: string
     readonly attributes: string
   }> {
-    const value = await this.repositoryRead(
+    const value = creation && this.transport === 'ws'
+      ? await this.request('read_repository_creation_status', { path: repositoryPath, action: { type: 'conflict_details', kind } })
+      : await this.repositoryRead(
       repositoryPath,
       'status_conflict_details',
       { kind }
@@ -1636,8 +1751,12 @@ export class BackendClient {
   async detailedRepositoryStatus(
     repositoryPath: string,
     includeUntracked = true,
-    options: BackendRequestOptions = {}
+    options: BackendRequestOptions = {},
+    creation = false
   ): Promise<ReadonlyArray<DetailedStatusRecord>> {
+    if (creation && this.transport === 'ws') {
+      return this.request('read_repository_creation_status', { path: repositoryPath, action: { type: 'detailed', include_untracked: includeUntracked } }, options) as Promise<ReadonlyArray<DetailedStatusRecord>>
+    }
     return this.repositoryRead(
       repositoryPath,
       'status_detailed',
