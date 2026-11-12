@@ -334,16 +334,17 @@ under the live index lock. A real Git test covers a hook that changes the tree
 and a successful commit with preexisting staged changes. Interrupted and
 completed checkpoints are retained and cannot be forgotten by the preparation
 cleanup operation. The prototype is not exposed to the renderer: hook reporting
-and recovery for interruption before a published OID was recorded remain
-required. The reference fence and its prepared OID receipt are retained in the
-checkpoint for process-interruption inspection; the receipt is only a proposed
-update, is not proof that the ref was published, and is not fsynced by the Git
-hook. Once the published OID and final-index checksum are recorded, typed
-recovery locks HEAD, the direct branch and index; verifies the commit, backups
-and private index; and installs that index only if the live index is still the
-original or already the published one. Concurrent ref/index changes and
-modified backups are refused. Both Rust transports expose this recovery
-operation, which is not yet connected to a recovery UI.
+and full commit integration remain required. The reference fence and its
+prepared OID receipt are retained in the checkpoint; the receipt is only a
+proposed update, is not proof of publication, and is not fsynced by the Git
+hook. Recovery locks HEAD, the direct branch and both indexes; verifies the
+actual commit, receipt, backups and private index; and installs the index only
+if the live index is still the original or already the published one. It can
+recover a publishing checkpoint with a retained receipt that matches the actual
+ref and reviewed commit; missing receipts, concurrent changes and invalid
+backups are refused. A hard interruption may leave a checkpoint use lock that
+requires manual investigation. The recovery history UI now exposes interrupted
+commit recovery through both Rust transports.
 Split-index backup and restore is now shared infrastructure for commit recovery
 and the existing discard journal. Restoring a missing shared index uses an
 atomic hard link and refuses to overwrite a concurrently created conflicting

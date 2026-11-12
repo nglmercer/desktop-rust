@@ -959,7 +959,8 @@ impl Repository {
         Ok(json!({"id": id, "state": "complete", "oid": published}))
     }
 
-    /// Complete index installation only for a durably recorded publication.
+    /// Complete index installation when a recorded ref or retained prepared
+    /// receipt can be verified against the actual repository state.
     pub(crate) async fn recover_published_commit_checkpoint(&self, id: &str) -> Result<Value> {
         let base = self.checkpoint_directory().await?;
         read_checkpoint(&base, id, &self.id())?;
@@ -970,20 +971,26 @@ impl Repository {
         };
         let mut record = read_checkpoint(&base, id, &self.id())?;
         anyhow::ensure!(
-            record.state == "published",
+            matches!(record.state.as_str(), "publishing" | "published"),
             "checkpoint does not have a recoverable published commit"
         );
-        let published = record
-            .published_oid
-            .clone()
-            .context("missing published commit")?;
-        let expected_index = record
-            .published_index
-            .clone()
-            .context("missing published index checksum")?;
+        let was_publishing = record.state == "publishing";
+        let published = if was_publishing {
+            read_reference_receipt(&base, &record)?
+                .context("missing prepared reference receipt; checkpoint retained")?
+        } else {
+            record
+                .published_oid
+                .clone()
+                .context("missing published commit")?
+        };
+        let expected_index = record.published_index.clone();
         let tree = record.tree.clone().context("missing reviewed tree")?;
         let index_path = self.index_path().await?;
         let mut transaction = IndexTransaction::begin(&index_path)?;
+        let directory = base.join(id);
+        let private_index_path = directory.join("index.commit");
+        let _private_index_lock = IndexTransaction::begin(&private_index_path)?;
         let _references = self.lock_discard_refs().await?;
         self.inspect_commit_checkpoint(id).await?;
         let head = self
@@ -1054,14 +1061,18 @@ impl Repository {
         let live_hash = live_index.as_deref().map(hash);
         anyhow::ensure!(
             live_hash == record.original_index
-                || live_hash.as_deref() == Some(expected_index.as_str()),
+                || expected_index
+                    .as_ref()
+                    .is_some_and(|expected| live_hash.as_deref() == Some(expected.as_str())),
             "Index changed; checkpoint retained for inspection"
         );
-        let directory = base.join(id);
-        let final_index = read_shared_index(&directory.join("index.commit"))?
-            .context("private commit index is missing")?;
+        let final_index =
+            read_shared_index(&private_index_path)?.context("private commit index is missing")?;
+        let final_hash = hash(&final_index);
         anyhow::ensure!(
-            hash(&final_index) == expected_index,
+            expected_index
+                .as_ref()
+                .is_none_or(|expected| *expected == final_hash),
             "private commit index changed; checkpoint retained"
         );
         self.restore_shared_indexes(&directory, &record.shared)
@@ -1098,11 +1109,41 @@ impl Repository {
         anyhow::ensure!(
             serde_json::to_vec(&read_checkpoint(&base, id, &self.id())?)?
                 == serde_json::to_vec(&record)?
-                && read_shared_index(&index_path)?.as_deref().map(hash) == live_hash,
+                && read_shared_index(&index_path)?.as_deref().map(hash) == live_hash
+                && read_shared_index(&private_index_path)?.as_deref()
+                    == Some(final_index.as_slice())
+                && (!was_publishing
+                    || read_reference_receipt(&base, &record)?.as_deref()
+                        == Some(published.as_str())),
             "Checkpoint or index changed during recovery"
         );
         Cancellation::current().check()?;
-        if live_hash.as_deref() != Some(expected_index.as_str()) {
+        if was_publishing {
+            let directory =
+                Dir::open_ambient_dir(&base, ambient_authority())?.open_dir_nofollow(id)?;
+            let mut options = OpenOptions::new();
+            options.read(true).follow(FollowSymlinks::No);
+            #[cfg(unix)]
+            {
+                use cap_std::fs::OpenOptionsExt;
+                options.custom_flags(libc::O_NONBLOCK);
+            }
+            let file = directory.open_with("index.commit", &options)?;
+            anyhow::ensure!(
+                file.metadata()?.is_file(),
+                "private commit index is not a regular file"
+            );
+            file.sync_all()?;
+            anyhow::ensure!(
+                read_shared_index(&private_index_path)?.as_deref() == Some(final_index.as_slice()),
+                "private commit index changed during recovery"
+            );
+            record.state = "published".into();
+            record.published_oid = Some(published.clone());
+            record.published_index = Some(final_hash.clone());
+            write_checkpoint(&base, &record)?;
+        }
+        if live_hash.as_deref() != Some(final_hash.as_str()) {
             transaction.commit(&final_index)?;
         }
         record.state = "complete".into();
@@ -1368,7 +1409,31 @@ mod tests {
         std::os::unix::fs::symlink(root.join("file"), &receipt).unwrap();
         assert!(repo.inspect_commit_checkpoint(id).await.is_err());
         fs::remove_file(&receipt).unwrap();
-        fs::write(&receipt, bytes).unwrap();
+        fs::write(&receipt, &bytes).unwrap();
+        fs::remove_file(root.join(".git/HEAD.lock")).unwrap();
+        fs::write(&receipt, format!("{old_head}\n")).unwrap();
+        assert!(repo.recover_published_commit_checkpoint(id).await.is_err());
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        fs::write(&receipt, &bytes).unwrap();
+        let private_index = receipt
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("index.commit");
+        let private_bytes = fs::read(&private_index).unwrap();
+        fs::write(&private_index, &original_index).unwrap();
+        assert!(repo.recover_published_commit_checkpoint(id).await.is_err());
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        fs::write(&private_index, &private_bytes).unwrap();
+        let private_lock = private_index.with_extension("commit.lock");
+        fs::write(&private_lock, b"other process").unwrap();
+        assert!(repo.recover_published_commit_checkpoint(id).await.is_err());
+        fs::remove_file(private_lock).unwrap();
+        let recovered = repo.recover_published_commit_checkpoint(id).await.unwrap();
+        assert_eq!(recovered["state"], "complete");
+        assert_eq!(git(&["show", ":file"]), "reviewed");
+        assert_eq!(git(&["show", "HEAD:file"]), "reviewed");
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1454,6 +1519,12 @@ mod tests {
             repo.inspect_commit_checkpoint(first_id).await.unwrap()["state"],
             "publishing"
         );
+        assert!(
+            repo.recover_published_commit_checkpoint(first_id)
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
         assert!(repo.forget_commit_checkpoint(first_id).await.is_err());
         assert!(repo.revalidate_commit_checkpoint(first_id).await.is_err());
 

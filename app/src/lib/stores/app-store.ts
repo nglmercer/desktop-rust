@@ -6855,6 +6855,22 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
   }
 
+  /** This shouldn't be called directly. See 'Dispatcher'. */
+  public async _recoverPublishedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+    this.assistedCommits.state.assertAvailable(repository)
+    await this.assistedCommits.state.withDestruction(repository.path, () =>
+      withRepositoryGitOperation(repository.path, 'mutation', async () => {
+        this.assistedCommits.state.assertAvailable(repository)
+        await backend().recoverPublishedCommitCheckpoint(repository.path, id)
+      })
+    )
+    try {
+      await this._refreshRepository(repository)
+    } catch (error) {
+      this.emitError(error)
+    }
+  }
+
   public async _forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
     this.assistedCommits.state.assertAvailable(repository)
     await this.assistedCommits.state.withDestruction(repository.path, () =>

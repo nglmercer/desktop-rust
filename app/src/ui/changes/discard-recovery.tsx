@@ -1,5 +1,9 @@
 import * as React from 'react'
-import { backend, type IDiscardRecoveryRecord } from '../../backend/client'
+import {
+  backend,
+  type CommitCheckpoint,
+  type IDiscardRecoveryRecord,
+} from '../../backend/client'
 import type { Repository } from '../../models/repository'
 import type { Dispatcher } from '../dispatcher'
 import { DefaultDialogFooter, Dialog, DialogContent } from '../dialog'
@@ -16,7 +20,9 @@ interface IState {
   readonly loading: boolean
   readonly busy: boolean
   readonly records: ReadonlyArray<IDiscardRecoveryRecord>
+  readonly commits: ReadonlyArray<CommitCheckpoint>
   readonly error: string | null
+  readonly commitError: string | null
   readonly confirming: string | null
 }
 
@@ -30,7 +36,9 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
     loading: false,
     busy: false,
     records: [],
+    commits: [],
     error: null,
+    commitError: null,
     confirming: null,
   }
 
@@ -55,29 +63,87 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
       open: false,
       loading: false,
       error: null,
+      commitError: null,
       confirming: null,
     })
   }
 
   private async load() {
     const generation = ++this.generation
-    this.setState({ loading: true, error: null })
+    this.setState({ loading: true, error: null, commitError: null })
     try {
-      const records = await backend().repositoryDiscardHistory(
-        this.props.repository.path
-      )
+      const [discardResult, commitResult] = await Promise.all([
+        backend()
+          .repositoryDiscardHistory(this.props.repository.path)
+          .then(
+            records => ({ records, error: null }),
+            error => ({
+              records: [],
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Could not load discard recovery history.',
+            })
+          ),
+        backend()
+          .listCommitCheckpoints(this.props.repository.path)
+          .then(
+            commits => ({ commits, error: null }),
+            error => ({
+              commits: [],
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Could not load commit recovery history.',
+            })
+          ),
+      ])
       if (this.mounted && generation === this.generation)
-        this.setState({ records, loading: false })
+        this.setState({
+          records: discardResult.records,
+          error: discardResult.error,
+          commits: commitResult.commits,
+          commitError: commitResult.error,
+          loading: false,
+        })
     } catch (error) {
       if (this.mounted && generation === this.generation)
         this.setState({
           loading: false,
           records: [],
+          commits: [],
           error:
             error instanceof Error
               ? error.message
               : 'Could not load recovery history.',
         })
+    }
+  }
+
+  private recoverCommit = async (id: string) => {
+    if (this.operationInFlight) return
+    this.operationInFlight = true
+    this.setState({ busy: true, error: null })
+    try {
+      await this.props.dispatcher.recoverPublishedCommitCheckpoint(
+        this.props.repository,
+        id
+      )
+      if (this.mounted) {
+        this.setState({ busy: false })
+        await this.load()
+      }
+    } catch (error) {
+      if (this.mounted)
+        this.setState({
+          busy: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Could not recover this commit.',
+        })
+    } finally {
+      this.operationInFlight = false
     }
   }
 
@@ -143,7 +209,22 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
   }
 
   public render() {
-    const { open, loading, busy, records, error, confirming } = this.state
+    const {
+      open,
+      loading,
+      busy,
+      records,
+      commits,
+      error,
+      commitError,
+      confirming,
+    } = this.state
+    const interruptedCommits = commits.filter(
+      record =>
+        record.state === 'publishing' ||
+        record.state === 'published' ||
+        record.state === 'invalid'
+    )
     return (
       <>
         <Button
@@ -170,9 +251,12 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
               </p>
               {loading && <p>Loading recovery history…</p>}
               {error !== null && <p role="alert">{error}</p>}
-              {!loading && error === null && records.length === 0 && (
-                <p>No recovery records.</p>
-              )}
+              {commitError !== null && <p role="alert">{commitError}</p>}
+              {!loading &&
+                error === null &&
+                commitError === null &&
+                records.length === 0 &&
+                interruptedCommits.length === 0 && <p>No recovery records.</p>}
               <ul>
                 {records.map(record => (
                   <li key={record.id}>
@@ -263,6 +347,39 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
                   </li>
                 ))}
               </ul>
+              {interruptedCommits.length > 0 && (
+                <section aria-label="Commit recovery">
+                  <h3>Interrupted commits</h3>
+                  <p>
+                    Recovery checks the branch and staged changes before
+                    finishing the commit.
+                  </p>
+                  <ul>
+                    {interruptedCommits.map(record => (
+                      <li key={record.id}>
+                        <p>
+                          {record.state === 'invalid'
+                            ? 'Unreadable commit checkpoint'
+                            : 'Commit needs inspection'}
+                        </p>
+                        <code>{record.id}</code>
+                        {record.state !== 'invalid' && (
+                          <Button
+                            type="button"
+                            size="small"
+                            disabled={busy || loading || confirming !== null}
+                            onClick={() => {
+                              void this.recoverCommit(record.id)
+                            }}
+                          >
+                            Recover commit
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </DialogContent>
             <DefaultDialogFooter disabled={busy} />
           </Dialog>

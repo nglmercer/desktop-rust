@@ -1013,6 +1013,10 @@ export class Dispatcher {
     return this.appStore._undoRepositoryDiscard(repository, undoId)
   }
 
+  public recoverPublishedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+    return this.appStore._recoverPublishedCommitCheckpoint(repository, id)
+  }
+
   public forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
     return this.appStore._forgetRepositoryDiscard(repository, undoId)
   }

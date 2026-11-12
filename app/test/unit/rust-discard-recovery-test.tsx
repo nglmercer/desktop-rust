@@ -14,9 +14,14 @@ const mocks = vi.hoisted(() => ({
   history: vi.fn(),
   undo: vi.fn(),
   forget: vi.fn(),
+  commitHistory: vi.fn(),
+  recoverCommit: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
-  backend: () => ({ repositoryDiscardHistory: mocks.history }),
+  backend: () => ({
+    repositoryDiscardHistory: mocks.history,
+    listCommitCheckpoints: mocks.commitHistory,
+  }),
 }))
 vi.mock('../../src/ui/dialog', () => {
   return {
@@ -33,6 +38,7 @@ const repository = { path: '/repo' } as Repository
 const dispatcher = {
   undoRepositoryDiscard: mocks.undo,
   forgetRepositoryDiscard: mocks.forget,
+  recoverPublishedCommitCheckpoint: mocks.recoverCommit,
 } as unknown as Dispatcher
 const id = '12345678-1234-1234-1234-123456789abc'
 const record = {
@@ -44,6 +50,7 @@ const record = {
   unavailableLfs: 0,
 }
 beforeEach(() => {
+  mocks.commitHistory.mockResolvedValue([])
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -60,6 +67,94 @@ afterEach(() => {
 })
 
 describe('discard recovery history', () => {
+  it('keeps discard recovery available when commit history fails', async () => {
+    mocks.history.mockResolvedValue([record])
+    mocks.commitHistory.mockRejectedValue(
+      new Error('Commit history unavailable')
+    )
+    render(
+      <DiscardRecovery
+        repository={repository}
+        dispatcher={dispatcher}
+        disabled={false}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Commit history unavailable'
+    )
+    expect(screen.getByText('file.txt')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy()
+  })
+
+  it('keeps commit recovery available when discard history fails', async () => {
+    mocks.history.mockRejectedValue(new Error('Discard history unavailable'))
+    mocks.commitHistory.mockResolvedValue([
+      { id, state: 'published', head: null, branch: 'refs/heads/main' },
+    ])
+    render(
+      <DiscardRecovery
+        repository={repository}
+        dispatcher={dispatcher}
+        disabled={false}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Discard history unavailable'
+    )
+    expect(screen.getByRole('button', { name: 'Recover commit' })).toBeTruthy()
+  })
+
+  it('recovers an interrupted commit through the dispatcher', async () => {
+    mocks.history.mockResolvedValue([])
+    mocks.commitHistory
+      .mockResolvedValueOnce([
+        { id, state: 'publishing', head: null, branch: 'refs/heads/main' },
+      ])
+      .mockResolvedValueOnce([
+        { id, state: 'complete', head: null, branch: 'refs/heads/main' },
+      ])
+    mocks.recoverCommit.mockResolvedValue(undefined)
+    render(
+      <DiscardRecovery
+        repository={repository}
+        dispatcher={dispatcher}
+        disabled={false}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Recover commit' })
+    )
+    await waitFor(() =>
+      expect(mocks.recoverCommit).toHaveBeenCalledWith(repository, id)
+    )
+    await screen.findByText('No recovery records.')
+  })
+
+  it('keeps an interrupted commit when recovery refuses changed state', async () => {
+    mocks.history.mockResolvedValue([])
+    mocks.commitHistory.mockResolvedValue([
+      { id, state: 'published', head: null, branch: 'refs/heads/main' },
+    ])
+    mocks.recoverCommit.mockRejectedValue(new Error('Index changed'))
+    render(
+      <DiscardRecovery
+        repository={repository}
+        dispatcher={dispatcher}
+        disabled={false}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Recover commit' })
+    )
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Index changed'
+    )
+    expect(screen.getByRole('button', { name: 'Recover commit' })).toBeTruthy()
+  })
   it('loads durable records and restores through the dispatcher', async () => {
     mocks.history
       .mockResolvedValueOnce([record])
