@@ -407,11 +407,13 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.listCommitCheckpoints('/repo')).resolves.toEqual([expect.objectContaining({ state: 'published' })])
     invoke.mockResolvedValueOnce({ checkpoints: [{ id: '../bad', state: 'prepared' }] })
     await expect(client.listCommitCheckpoints('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
-    const inspection = { id, state: 'prepared', basis, recorded_files_verified: true, index_coverage_verified: true, objects_verified: 1, lfs_verified: 0, shared_indexes_verified: 0, head_matches: true, branch_matches: true, index_matches: true, operation_matches: true }
+    const inspection = { id, state: 'prepared', basis, prepared_oid: null, recorded_files_verified: true, index_coverage_verified: true, objects_verified: 1, lfs_verified: 0, shared_indexes_verified: 0, head_matches: true, branch_matches: true, index_matches: true, operation_matches: true }
     invoke.mockResolvedValueOnce(inspection)
     await expect(client.inspectCommitCheckpoint('/repo', id)).resolves.toEqual(inspection)
     invoke.mockResolvedValueOnce({ ...inspection, state: 'publishing' })
     await expect(client.inspectCommitCheckpoint('/repo', id)).resolves.toMatchObject({ state: 'publishing' })
+    invoke.mockResolvedValueOnce({ ...inspection, prepared_oid: 'bad' })
+    await expect(client.inspectCommitCheckpoint('/repo', id)).rejects.toMatchObject({ code: 'invalid_response' })
     invoke.mockResolvedValueOnce({ ...inspection, recorded_files_verified: false })
     await expect(client.inspectCommitCheckpoint('/repo', id)).rejects.toMatchObject({ code: 'invalid_response' })
     invoke.mockResolvedValueOnce({ id, basis, matches: true })

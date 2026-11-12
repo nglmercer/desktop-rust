@@ -60,6 +60,8 @@ export interface CommitCheckpointInspection {
   readonly id: string
   readonly state: CommitCheckpointState
   readonly basis: string
+  /** Git's proposed ref update; the ref may not have been published. */
+  readonly prepared_oid: string | null
   readonly recorded_files_verified: true
   readonly index_coverage_verified: true
   readonly objects_verified: number
@@ -1940,7 +1942,7 @@ export class BackendClient {
   async inspectCommitCheckpoint(repositoryPath: string, id: string): Promise<CommitCheckpointInspection> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint ID', retryable: false })
     const value = await this.commitCheckpointRequest(repositoryPath, { method: 'inspect_commit_checkpoint', checkpoint_id: id })
-    if (!isRecord(value) || value.id !== id || !isCommitCheckpointState(value.state) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || value.recorded_files_verified !== true || value.index_coverage_verified !== true || ![value.objects_verified, value.lfs_verified, value.shared_indexes_verified].every(count => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 && count <= 65536) || ![value.head_matches, value.branch_matches, value.index_matches, value.operation_matches].every(flag => typeof flag === 'boolean')) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint inspection', retryable: false })
+    if (!isRecord(value) || value.id !== id || !isCommitCheckpointState(value.state) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || !(value.prepared_oid === null || (typeof value.prepared_oid === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.prepared_oid))) || value.recorded_files_verified !== true || value.index_coverage_verified !== true || ![value.objects_verified, value.lfs_verified, value.shared_indexes_verified].every(count => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 && count <= 65536) || ![value.head_matches, value.branch_matches, value.index_matches, value.operation_matches].every(flag => typeof flag === 'boolean')) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint inspection', retryable: false })
     return value as unknown as CommitCheckpointInspection
   }
 

@@ -335,7 +335,10 @@ and a successful commit with preexisting staged changes. Interrupted and
 completed checkpoints are retained and cannot be forgotten by the preparation
 cleanup operation. The prototype is not exposed to the renderer: hook reporting
 and recovery for interruption before a published OID was recorded remain
-required. Once the published OID and final-index checksum are recorded, typed
+required. The reference fence and its prepared OID receipt are retained in the
+checkpoint for process-interruption inspection; the receipt is only a proposed
+update, is not proof that the ref was published, and is not fsynced by the Git
+hook. Once the published OID and final-index checksum are recorded, typed
 recovery locks HEAD, the direct branch and index; verifies the commit, backups
 and private index; and installs that index only if the live index is still the
 original or already the published one. Concurrent ref/index changes and

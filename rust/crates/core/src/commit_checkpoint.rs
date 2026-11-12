@@ -209,6 +209,45 @@ fn read_checkpoint(base: &Path, id: &str, repository_id: &str) -> Result<Checkpo
     Ok(record)
 }
 
+/// A prepared receipt is evidence of Git's proposed ref update, not proof it
+/// committed. It may be absent after a crash or an aborted reference update.
+fn read_reference_receipt(base: &Path, record: &Checkpoint) -> Result<Option<String>> {
+    let base = Dir::open_ambient_dir(base, ambient_authority())?;
+    let checkpoint = base.open_dir_nofollow(&record.id)?;
+    let guard = match checkpoint.open_dir_nofollow("reference-guard") {
+        Ok(guard) => guard,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = match guard.open_with("prepared", &options) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        file.metadata()?.is_file(),
+        "invalid commit reference receipt"
+    );
+    let mut bytes = Vec::new();
+    file.take(66).read_to_end(&mut bytes)?;
+    let oid = std::str::from_utf8(&bytes)?
+        .strip_suffix('\n')
+        .context("invalid commit reference receipt")?;
+    let length = record.tree.as_ref().context("missing reviewed tree")?.len();
+    anyhow::ensure!(
+        oid.len() == length && oid.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "invalid commit reference receipt"
+    );
+    Ok(Some(oid.to_owned()))
+}
+
 fn write_checkpoint(base: &Path, record: &Checkpoint) -> Result<()> {
     let directory = base.join(&record.id);
     let temporary = directory.join(format!("manifest-{}.tmp", uuid::Uuid::new_v4()));
@@ -784,13 +823,14 @@ impl Repository {
             "Selected commit changed; review again"
         );
         let parent_refs: Vec<&str> = parents.iter().map(String::as_str).collect();
-        let guard = self
-            .commit_reference_guard(
+        let mut guard = self
+            .checkpoint_commit_reference_guard(
                 record.branch.as_deref(),
                 record.head.as_deref(),
                 &parent_refs,
                 &tree,
                 tree.len(),
+                &base.join(id),
             )
             .await?;
         let private_index = base.join(id).join("index.commit");
@@ -812,8 +852,10 @@ impl Repository {
                     == serde_json::to_vec(&record)?,
             "Checkpoint, index or repository operation changed; review again"
         );
+        sync_directory(&base.join(id))?;
         record.state = "publishing".into();
         private_index_cleanup.retain = true;
+        guard.retain_for_recovery();
         write_checkpoint(&base, &record)?;
         let mut command = guard.configuration().to_vec();
         command.extend(args(&["commit", "-F", "-"]));
@@ -842,8 +884,15 @@ impl Repository {
             "Git commit failed; checkpoint {id} requires inspection: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let published = guard
-            .prepared_oid()?
+        // Git released its reference locks after publication. Reacquire them
+        // before checking HEAD and keep them until index installation is done.
+        // Otherwise another Git process could move the branch between those
+        // steps and leave its new HEAD paired with our selected index.
+        let _references = self
+            .lock_discard_refs()
+            .await
+            .with_context(|| format!("Commit checkpoint {id} requires inspection"))?;
+        let published = read_reference_receipt(&base, &record)?
             .context("Commit reference receipt is missing; checkpoint requires inspection")?;
         let head = self
             .run(&args(&["rev-parse", "--verify", "--quiet", "HEAD"]))
@@ -1197,8 +1246,9 @@ impl Repository {
         let operation =
             cancellation::blocking(move || crate::discard::operation_certificate(&git_directory))
                 .await?;
+        let prepared_oid = read_reference_receipt(&base, &record)?;
         Ok(
-            json!({"id":id,"state":record.state,"basis":record.basis,"publication_metadata_present":record.tree.is_some() && record.parents.is_some(),"recorded_files_verified":true,"index_coverage_verified":true,"objects_verified":record.objects.len(),"lfs_verified":record.lfs.len(),"shared_indexes_verified":record.shared.len(),"head_matches":current_head == record.head,"branch_matches":current_branch == record.branch,"index_matches":index == record.original_index,"operation_matches":operation == record.operation}),
+            json!({"id":id,"state":record.state,"basis":record.basis,"prepared_oid":prepared_oid,"publication_metadata_present":record.tree.is_some() && record.parents.is_some(),"recorded_files_verified":true,"index_coverage_verified":true,"objects_verified":record.objects.len(),"lfs_verified":record.lfs.len(),"shared_indexes_verified":record.shared.len(),"head_matches":current_head == record.head,"branch_matches":current_branch == record.branch,"index_matches":index == record.original_index,"operation_matches":operation == record.operation}),
         )
     }
 
@@ -1228,6 +1278,100 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn publication_does_not_install_index_when_head_is_locked_after_commit() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("desktop-commit-ref-lock-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("file"), b"initial\n").unwrap();
+        git(&["add", "file"]);
+        git(&["commit", "-qm", "initial"]);
+        let old_head = git(&["rev-parse", "HEAD"]);
+        fs::write(root.join("file"), b"staged\n").unwrap();
+        git(&["add", "file"]);
+        let original_index = fs::read(root.join(".git/index")).unwrap();
+        fs::write(root.join("file"), b"reviewed\n").unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let selection = || vec![GitPath::Text("file".into())];
+        let preview = repo
+            .selected_commit_preview_with_empty(selection(), vec![], vec![], false, None, None)
+            .await
+            .unwrap();
+        let prepared = repo
+            .prepare_selected_commit(
+                selection(),
+                vec![],
+                vec![],
+                false,
+                None,
+                None,
+                preview["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        let id = prepared["id"].as_str().unwrap();
+        let hook = root.join(".git/hooks/post-commit");
+        fs::write(&hook, "#!/bin/sh\n: > .git/HEAD.lock\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+        let failure = repo
+            .publish_selected_checkpoint(id, "message\n".into(), false, false)
+            .await
+            .unwrap_err();
+        if failure.to_string().contains("does not support") {
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        assert!(format!("{failure:#}").contains("locked by another operation"));
+        assert_ne!(git(&["rev-parse", "HEAD"]), old_head);
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        assert_eq!(
+            fs::read_to_string(
+                root.join(".git")
+                    .join(DIRECTORY)
+                    .join(id)
+                    .join("reference-guard/prepared")
+            )
+            .unwrap()
+            .trim(),
+            git(&["rev-parse", "HEAD"])
+        );
+        let inspection = repo.inspect_commit_checkpoint(id).await.unwrap();
+        assert_eq!(inspection["state"], "publishing");
+        assert_eq!(inspection["prepared_oid"], git(&["rev-parse", "HEAD"]));
+        let receipt = root
+            .join(".git")
+            .join(DIRECTORY)
+            .join(id)
+            .join("reference-guard/prepared");
+        let bytes = fs::read(&receipt).unwrap();
+        fs::remove_file(&receipt).unwrap();
+        std::os::unix::fs::symlink(root.join("file"), &receipt).unwrap();
+        assert!(repo.inspect_commit_checkpoint(id).await.is_err());
+        fs::remove_file(&receipt).unwrap();
+        fs::write(&receipt, bytes).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn private_publication_journals_failures_and_installs_reviewed_index() {

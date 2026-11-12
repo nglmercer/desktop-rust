@@ -5,12 +5,17 @@
 //! until Git and all of its hooks have finished.
 use crate::{Repository, args, discard_fs, os_from_bytes, process};
 use anyhow::Result;
-use std::{ffi::OsString, fs, path::PathBuf};
+use std::{
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub struct CommitReferenceGuard {
     directory: PathBuf,
     configuration: Vec<OsString>,
     hash_length: usize,
+    retain: bool,
 }
 
 impl CommitReferenceGuard {
@@ -36,11 +41,18 @@ impl CommitReferenceGuard {
             }
         }
     }
+
+    /// Retain the guard and its receipt as part of a recovery checkpoint.
+    pub(crate) fn retain_for_recovery(&mut self) {
+        self.retain = true;
+    }
 }
 
 impl Drop for CommitReferenceGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
+        if !self.retain {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
     }
 }
 
@@ -76,6 +88,39 @@ impl Repository {
         tree: &str,
         hash_length: usize,
     ) -> Result<CommitReferenceGuard> {
+        self.create_commit_reference_guard(branch, head, parents, tree, hash_length, None)
+            .await
+    }
+
+    pub(crate) async fn checkpoint_commit_reference_guard(
+        &self,
+        branch: Option<&str>,
+        head: Option<&str>,
+        parents: &[&str],
+        tree: &str,
+        hash_length: usize,
+        checkpoint: &Path,
+    ) -> Result<CommitReferenceGuard> {
+        self.create_commit_reference_guard(
+            branch,
+            head,
+            parents,
+            tree,
+            hash_length,
+            Some(checkpoint),
+        )
+        .await
+    }
+
+    async fn create_commit_reference_guard(
+        &self,
+        branch: Option<&str>,
+        head: Option<&str>,
+        parents: &[&str],
+        tree: &str,
+        hash_length: usize,
+        checkpoint: Option<&Path>,
+    ) -> Result<CommitReferenceGuard> {
         anyhow::ensure!(
             matches!(hash_length, 40 | 64),
             "unsupported Git object format"
@@ -97,7 +142,10 @@ impl Repository {
         }
         let base = self.git_directory().await?;
         let id = uuid::Uuid::new_v4().simple().to_string();
-        let directory = base.join(format!("desktop-commit-guard-{id}"));
+        let directory = checkpoint.map_or_else(
+            || base.join(format!("desktop-commit-guard-{id}")),
+            |path| path.join("reference-guard"),
+        );
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
         {
@@ -109,6 +157,7 @@ impl Repository {
             directory,
             configuration: Vec::new(),
             hash_length,
+            retain: false,
         };
         let shell = self.run(&args(&["var", "GIT_SHELL_PATH"])).await?;
         anyhow::ensure!(shell.code == 0, "cannot resolve Git hook shell");
@@ -216,6 +265,10 @@ impl Repository {
                 && fs::read(guard.directory.join("probe")).ok().as_deref() == Some(b"ok"),
             "Git does not support the selected-commit reference guard"
         );
+        #[cfg(unix)]
+        if checkpoint.is_some() {
+            fs::File::open(&guard.directory)?.sync_all()?;
+        }
         Ok(guard)
     }
 }
