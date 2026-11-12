@@ -353,6 +353,11 @@ impl Repository {
             Operation::RevalidateCommitCheckpoint { checkpoint_id } => {
                 return self.revalidate_commit_checkpoint(&checkpoint_id).await;
             }
+            Operation::RecoverPublishedCommitCheckpoint { checkpoint_id } => {
+                return self
+                    .recover_published_commit_checkpoint(&checkpoint_id)
+                    .await;
+            }
             Operation::ForgetCommitCheckpoint { checkpoint_id } => {
                 return self.forget_commit_checkpoint(&checkpoint_id).await;
             }
@@ -1137,6 +1142,7 @@ impl Repository {
             | ListCommitCheckpoints
             | InspectCommitCheckpoint { .. }
             | RevalidateCommitCheckpoint { .. }
+            | RecoverPublishedCommitCheckpoint { .. }
             | ForgetCommitCheckpoint { .. }
             | InitialCommit { .. } => {
                 unreachable!("handled by execute")

@@ -644,6 +644,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(await client.listCommitCheckpoints(firstRepository)).toEqual([expect.objectContaining({ id: checkpoint, state: 'prepared' })])
       expect(await client.inspectCommitCheckpoint(firstRepository, checkpoint)).toMatchObject({ recorded_files_verified: true, index_coverage_verified: true, head_matches: true, branch_matches: true, index_matches: true, operation_matches: true })
       expect(await client.revalidateCommitCheckpoint(firstRepository, checkpoint)).toEqual({ basis: selectedReview.basis, matches: true })
+      await expect(client.recoverPublishedCommitCheckpoint(firstRepository, checkpoint)).rejects.toThrow('does not have a recoverable published commit')
       const savedIndex = path.join(firstRepository, '.git', 'desktop-commit-checkpoints', checkpoint, 'index.selected')
       const originalSelectedIndex = await readFile(savedIndex)
       await writeFile(savedIndex, 'damaged')

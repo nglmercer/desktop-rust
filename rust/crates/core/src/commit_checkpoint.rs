@@ -58,6 +58,8 @@ struct Checkpoint {
     parents: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     published_oid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    published_index: Option<String>,
     objects: Vec<SavedObject>,
     lfs: Vec<LfsObject>,
     shared: Vec<SharedIndex>,
@@ -186,14 +188,20 @@ fn read_checkpoint(base: &Path, id: &str, repository_id: &str) -> Result<Checkpo
     }
     anyhow::ensure!(
         match record.state.as_str() {
-            "prepared" | "publishing" => record.published_oid.is_none(),
-            "published" | "complete" => record.published_oid.as_ref().is_some_and(|oid| {
-                record
-                    .tree
+            "prepared" | "publishing" =>
+                record.published_oid.is_none() && record.published_index.is_none(),
+            "published" | "complete" =>
+                record.published_oid.as_ref().is_some_and(|oid| {
+                    record
+                        .tree
+                        .as_ref()
+                        .is_some_and(|tree| oid.len() == tree.len())
+                        && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+                }) && record
+                    .published_index
                     .as_ref()
-                    .is_some_and(|tree| oid.len() == tree.len())
-                    && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
-            }),
+                    .is_some_and(|value| value.len() == 64
+                        && value.bytes().all(|byte| byte.is_ascii_hexdigit())),
             _ => false,
         },
         "invalid commit checkpoint publication state"
@@ -682,6 +690,7 @@ impl Repository {
             tree: Some(tree),
             parents: Some(parents),
             published_oid: None,
+            published_index: None,
             objects,
             lfs,
             shared,
@@ -866,13 +875,32 @@ impl Repository {
             "Commit index changed after publication; checkpoint {id} requires inspection"
         );
         let final_index =
-            read_index(&private_index)?.context("private commit index disappeared")?;
+            read_shared_index(&private_index)?.context("private commit index disappeared")?;
+        let directory = Dir::open_ambient_dir(&base, ambient_authority())?.open_dir_nofollow(id)?;
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let index_file = directory.open_with("index.commit", &options)?;
+        anyhow::ensure!(
+            index_file.metadata()?.is_file(),
+            "private commit index is not a regular file"
+        );
+        index_file.sync_all()?;
+        anyhow::ensure!(
+            read_shared_index(&private_index)?.as_deref() == Some(final_index.as_slice()),
+            "private commit index changed; checkpoint {id} requires inspection"
+        );
         anyhow::ensure!(
             read_index(&self.index_path().await?)?.as_deref().map(hash) == record.original_index,
             "Original index changed; checkpoint {id} requires inspection"
         );
         record.state = "published".into();
         record.published_oid = Some(published.clone());
+        record.published_index = Some(hash(&final_index));
         write_checkpoint(&base, &record)?;
         transaction
             .commit(&final_index)
@@ -880,6 +908,157 @@ impl Repository {
         record.state = "complete".into();
         write_checkpoint(&base, &record)?;
         Ok(json!({"id": id, "state": "complete", "oid": published}))
+    }
+
+    /// Complete index installation only for a durably recorded publication.
+    pub(crate) async fn recover_published_commit_checkpoint(&self, id: &str) -> Result<Value> {
+        let base = self.checkpoint_directory().await?;
+        read_checkpoint(&base, id, &self.id())?;
+        let lock_path = base.join(id).join(".use.lock");
+        let _use_lock = CheckpointUse {
+            file: Some(work::private_file(&lock_path).context("commit checkpoint is in use")?),
+            path: lock_path,
+        };
+        let mut record = read_checkpoint(&base, id, &self.id())?;
+        anyhow::ensure!(
+            record.state == "published",
+            "checkpoint does not have a recoverable published commit"
+        );
+        let published = record
+            .published_oid
+            .clone()
+            .context("missing published commit")?;
+        let expected_index = record
+            .published_index
+            .clone()
+            .context("missing published index checksum")?;
+        let tree = record.tree.clone().context("missing reviewed tree")?;
+        let index_path = self.index_path().await?;
+        let mut transaction = IndexTransaction::begin(&index_path)?;
+        let _references = self.lock_discard_refs().await?;
+        self.inspect_commit_checkpoint(id).await?;
+        let head = self
+            .run(&args(&["rev-parse", "--verify", "--quiet", "HEAD"]))
+            .await?;
+        let branch = self
+            .run(&args(&["symbolic-ref", "--quiet", "HEAD"]))
+            .await?;
+        let current_branch = if branch.code == 0 {
+            Some(std::str::from_utf8(&branch.stdout)?.trim())
+        } else {
+            None
+        };
+        anyhow::ensure!(
+            head.code == 0
+                && std::str::from_utf8(&head.stdout)?.trim() == published
+                && matches!(branch.code, 0 | 1)
+                && current_branch == record.branch.as_deref(),
+            "HEAD or branch changed; checkpoint retained for inspection"
+        );
+        let direct_head = self
+            .run(&args(&["symbolic-ref", "--quiet", "--no-recurse", "HEAD"]))
+            .await?;
+        anyhow::ensure!(
+            direct_head.code == branch.code && direct_head.stdout == branch.stdout,
+            "HEAD is not a direct branch reference; checkpoint retained for inspection"
+        );
+        if let Some(name) = record.branch.as_deref() {
+            let direct_branch = self.run(&args(&["symbolic-ref", "--quiet", name])).await?;
+            anyhow::ensure!(
+                direct_branch.code == 1,
+                "branch is not a direct reference; checkpoint retained for inspection"
+            );
+        }
+        let commit = self
+            .run(&args(&[
+                "--no-replace-objects",
+                "cat-file",
+                "commit",
+                &published,
+            ]))
+            .await?;
+        anyhow::ensure!(commit.code == 0, "published commit is unavailable");
+        let mut headers = commit
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .take_while(|line| !line.is_empty());
+        let commit_tree = headers
+            .next()
+            .and_then(|line| line.strip_prefix(b"tree "))
+            .context("invalid published commit")?;
+        let commit_parents: Vec<&[u8]> = headers
+            .filter_map(|line| line.strip_prefix(b"parent "))
+            .collect();
+        let expected_parents = record
+            .parents
+            .as_ref()
+            .context("missing reviewed parents")?;
+        anyhow::ensure!(
+            commit_tree == tree.as_bytes()
+                && commit_parents
+                    .iter()
+                    .copied()
+                    .eq(expected_parents.iter().map(|parent| parent.as_bytes())),
+            "published commit differs from the reviewed tree or parents"
+        );
+        let live_index = read_shared_index(&index_path)?;
+        let live_hash = live_index.as_deref().map(hash);
+        anyhow::ensure!(
+            live_hash == record.original_index
+                || live_hash.as_deref() == Some(expected_index.as_str()),
+            "Index changed; checkpoint retained for inspection"
+        );
+        let directory = base.join(id);
+        let final_index = read_shared_index(&directory.join("index.commit"))?
+            .context("private commit index is missing")?;
+        anyhow::ensure!(
+            hash(&final_index) == expected_index,
+            "private commit index changed; checkpoint retained"
+        );
+        self.restore_shared_indexes(&directory, &record.shared)
+            .await?;
+        self.restore_index_objects(
+            &directory,
+            &record.objects,
+            &record.lfs,
+            &[],
+            tree.len(),
+            true,
+        )
+        .await?;
+        let check_index = self
+            .git_directory()
+            .await?
+            .join(format!("desktop-commit-recover-{}", uuid::Uuid::new_v4()));
+        work::private_write(&check_index, &final_index)?;
+        let _cleanup = PrivateCommitIndex {
+            path: check_index.clone(),
+            retain: false,
+        };
+        let actual = process::run_git(
+            &self.path,
+            &args(&["-c", "core.fsmonitor=false", "write-tree"]),
+            None,
+            Some(&check_index),
+        )
+        .await?;
+        anyhow::ensure!(
+            actual.code == 0 && std::str::from_utf8(&actual.stdout)?.trim() == tree,
+            "private commit index does not match the reviewed tree"
+        );
+        anyhow::ensure!(
+            serde_json::to_vec(&read_checkpoint(&base, id, &self.id())?)?
+                == serde_json::to_vec(&record)?
+                && read_shared_index(&index_path)?.as_deref().map(hash) == live_hash,
+            "Checkpoint or index changed during recovery"
+        );
+        Cancellation::current().check()?;
+        if live_hash.as_deref() != Some(expected_index.as_str()) {
+            transaction.commit(&final_index)?;
+        }
+        record.state = "complete".into();
+        write_checkpoint(&base, &record)?;
+        Ok(json!({"id":id,"state":"complete","oid":published}))
     }
 
     /// Recapture the selection as an observation, not a publication authorization.
@@ -1176,6 +1355,40 @@ mod tests {
             "complete"
         );
         assert!(repo.forget_commit_checkpoint(id).await.is_err());
+        let base = root.join(".git").join(DIRECTORY);
+        let mut record = read_checkpoint(&base, id, &repo.id()).unwrap();
+        record.state = "published".into();
+        write_checkpoint(&base, &record).unwrap();
+        let branch = git(&["symbolic-ref", "HEAD"]);
+        git(&["symbolic-ref", "HEAD", "refs/heads/other"]);
+        let index_before_ref_change = fs::read(root.join(".git/index")).unwrap();
+        assert!(repo.recover_published_commit_checkpoint(id).await.is_err());
+        assert_eq!(
+            fs::read(root.join(".git/index")).unwrap(),
+            index_before_ref_change
+        );
+        git(&["symbolic-ref", "HEAD", &branch]);
+        fs::write(root.join("file"), b"later staged change\n").unwrap();
+        git(&["add", "file"]);
+        let later = fs::read(root.join(".git/index")).unwrap();
+        assert!(repo.recover_published_commit_checkpoint(id).await.is_err());
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), later);
+        fs::write(root.join(".git/index"), &original_index).unwrap();
+        let private = base.join(id).join("index.commit");
+        let final_index = fs::read(&private).unwrap();
+        fs::write(&private, b"tampered").unwrap();
+        assert!(repo.recover_published_commit_checkpoint(id).await.is_err());
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        fs::write(&private, &final_index).unwrap();
+        let recovered = repo.recover_published_commit_checkpoint(id).await.unwrap();
+        assert_eq!(recovered["state"], "complete");
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), final_index);
+        record.state = "published".into();
+        write_checkpoint(&base, &record).unwrap();
+        assert_eq!(
+            repo.recover_published_commit_checkpoint(id).await.unwrap()["state"],
+            "complete"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

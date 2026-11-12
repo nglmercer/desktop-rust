@@ -578,7 +578,7 @@ impl Repository {
             || effective.stdout.is_empty() && self.at_head(head, path).await?.is_none())
     }
 
-    async fn lock_discard_refs(&self) -> Result<Vec<RefLock>> {
+    pub(crate) async fn lock_discard_refs(&self) -> Result<Vec<RefLock>> {
         let format = self.run(&args(&["rev-parse", "--show-ref-format"])).await?;
         anyhow::ensure!(
             !format.stdout.starts_with(b"reftable"),
@@ -1400,7 +1400,7 @@ fn read_record(directory: &Path, id: &str) -> Result<Record> {
     Ok(record)
 }
 
-struct RefLock {
+pub(crate) struct RefLock {
     path: PathBuf,
     _file: fs::File,
 }

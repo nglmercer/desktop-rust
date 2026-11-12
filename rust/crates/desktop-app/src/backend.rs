@@ -469,6 +469,7 @@ impl Backend {
                     | Operation::ListCommitCheckpoints
                     | Operation::InspectCommitCheckpoint { .. }
                     | Operation::RevalidateCommitCheckpoint { .. }
+                    | Operation::RecoverPublishedCommitCheckpoint { .. }
                     | Operation::ForgetCommitCheckpoint { .. }
             )
         {
@@ -2639,6 +2640,10 @@ esac
             checkpoint(json!({"method":"inspect_commit_checkpoint","checkpoint_id":id})).unwrap();
         assert_eq!(inspection["recorded_files_verified"], true);
         assert_eq!(inspection["index_matches"], true);
+        assert!(
+            checkpoint(json!({"method":"recover_published_commit_checkpoint","checkpoint_id":id}))
+                .is_err()
+        );
         assert_eq!(
             checkpoint(json!({"method":"revalidate_commit_checkpoint","checkpoint_id":id}))
                 .unwrap()["matches"],

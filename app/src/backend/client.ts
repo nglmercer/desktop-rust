@@ -51,10 +51,14 @@ export interface ISelectedCommitReview {
 }
 
 export type SelectedCommitSelection = Pick<ICopilotCommitOptions, 'paths' | 'remove_paths' | 'partial_selections' | 'amend_head' | 'expected_head'> & { readonly allow_empty?: boolean }
-export type CommitCheckpoint = { readonly id: string; readonly state: 'prepared'; readonly head: string | null; readonly branch: string | null } | { readonly id: string; readonly state: 'invalid' }
+type CommitCheckpointState = 'prepared' | 'publishing' | 'published' | 'complete'
+function isCommitCheckpointState(value: unknown): value is CommitCheckpointState {
+  return value === 'prepared' || value === 'publishing' || value === 'published' || value === 'complete'
+}
+export type CommitCheckpoint = { readonly id: string; readonly state: CommitCheckpointState; readonly head: string | null; readonly branch: string | null } | { readonly id: string; readonly state: 'invalid' }
 export interface CommitCheckpointInspection {
   readonly id: string
-  readonly state: 'prepared'
+  readonly state: CommitCheckpointState
   readonly basis: string
   readonly recorded_files_verified: true
   readonly index_coverage_verified: true
@@ -1918,7 +1922,7 @@ export class BackendClient {
     if (!isRecord(value) || !Array.isArray(value.checkpoints) || value.checkpoints.length > 1000) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint history', retryable: false })
     const ids = new Set<string>()
     for (const item of value.checkpoints) {
-      if (!isRecord(item) || typeof item.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.id) || (item.state !== 'invalid' && (item.state !== 'prepared' || !(item.head === null || (typeof item.head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(item.head))) || !(item.branch === null || (typeof item.branch === 'string' && item.branch.length <= 4096 && !item.branch.includes('\0')))))) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint history', retryable: false })
+      if (!isRecord(item) || typeof item.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.id) || (item.state !== 'invalid' && (!isCommitCheckpointState(item.state) || !(item.head === null || (typeof item.head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(item.head))) || !(item.branch === null || (typeof item.branch === 'string' && item.branch.length <= 4096 && !item.branch.includes('\0')))))) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint history', retryable: false })
       if (ids.has(item.id)) throw new BackendError({ code: 'invalid_response', message: 'Duplicate commit checkpoint ID', retryable: false })
       ids.add(item.id)
     }
@@ -1936,8 +1940,17 @@ export class BackendClient {
   async inspectCommitCheckpoint(repositoryPath: string, id: string): Promise<CommitCheckpointInspection> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint ID', retryable: false })
     const value = await this.commitCheckpointRequest(repositoryPath, { method: 'inspect_commit_checkpoint', checkpoint_id: id })
-    if (!isRecord(value) || value.id !== id || value.state !== 'prepared' || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || value.recorded_files_verified !== true || value.index_coverage_verified !== true || ![value.objects_verified, value.lfs_verified, value.shared_indexes_verified].every(count => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 && count <= 65536) || ![value.head_matches, value.branch_matches, value.index_matches, value.operation_matches].every(flag => typeof flag === 'boolean')) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint inspection', retryable: false })
+    if (!isRecord(value) || value.id !== id || !isCommitCheckpointState(value.state) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || value.recorded_files_verified !== true || value.index_coverage_verified !== true || ![value.objects_verified, value.lfs_verified, value.shared_indexes_verified].every(count => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 && count <= 65536) || ![value.head_matches, value.branch_matches, value.index_matches, value.operation_matches].every(flag => typeof flag === 'boolean')) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint inspection', retryable: false })
     return value as unknown as CommitCheckpointInspection
+  }
+
+  async recoverPublishedCommitCheckpoint(repositoryPath: string, id: string): Promise<string> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint ID', retryable: false })
+    let value: unknown
+    try { value = await this.commitCheckpointRequest(repositoryPath, { method: 'recover_published_commit_checkpoint', checkpoint_id: id }) }
+    catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
+    if (!isRecord(value) || value.id !== id || value.state !== 'complete' || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid)) throw new BackendError({ code: 'invalid_response', message: 'Recovery outcome is uncertain; inspect commit checkpoints', retryable: false })
+    return value.oid
   }
 
   async revalidateCommitCheckpoint(repositoryPath: string, id: string): Promise<{ readonly basis: string; readonly matches: boolean }> {

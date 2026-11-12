@@ -333,8 +333,14 @@ and tree, records the published OID, then installs the resulting private index
 under the live index lock. A real Git test covers a hook that changes the tree
 and a successful commit with preexisting staged changes. Interrupted and
 completed checkpoints are retained and cannot be forgotten by the preparation
-cleanup operation. The prototype is not exposed to the renderer: guarded
-recovery for interrupted publication and hook reporting remain required.
+cleanup operation. The prototype is not exposed to the renderer: hook reporting
+and recovery for interruption before a published OID was recorded remain
+required. Once the published OID and final-index checksum are recorded, typed
+recovery locks HEAD, the direct branch and index; verifies the commit, backups
+and private index; and installs that index only if the live index is still the
+original or already the published one. Concurrent ref/index changes and
+modified backups are refused. Both Rust transports expose this recovery
+operation, which is not yet connected to a recovery UI.
 Split-index backup and restore is now shared infrastructure for commit recovery
 and the existing discard journal. Restoring a missing shared index uses an
 atomic hard link and refuses to overwrite a concurrently created conflicting
