@@ -3,6 +3,8 @@ import { Repository } from '../../models/repository'
 import { ChildProcess } from 'child_process'
 import { mkdir } from 'fs/promises'
 import { dirname } from 'path'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 import {
   acquireOwnedFileLock,
   IOwnedFileLease,
@@ -291,9 +293,14 @@ async function preparedRefTransaction(
 export async function deleteRef(
   repository: Repository,
   ref: string,
-  reason?: string
+  reason?: string,
+  expectedOid?: string
 ) {
-  const args = ['update-ref', '-d', ref]
+  if (ref === 'HEAD' && expectedOid !== undefined && reason === 'Reverting first commit' && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().repositoryDeleteInitialHead(repository.path, expectedOid), true)
+    return
+  }
+  const args = ['update-ref', '-d', ref, ...(expectedOid === undefined ? [] : [expectedOid])]
 
   if (reason !== undefined) {
     args.push('-m', reason)

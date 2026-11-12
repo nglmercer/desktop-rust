@@ -1,11 +1,12 @@
 import { git, HookCallbackOptions, parseCommitSHA } from './core'
-import { stageFiles } from './update-index'
+import { preparePartialStagingDiffs, stageFiles } from './update-index'
 import { Repository } from '../../models/repository'
 import { WorkingDirectoryFileChange } from '../../models/status'
 import { unstageAll } from './reset'
 import { ManualConflictResolution } from '../../models/manual-conflict-resolution'
 import { stageManualConflictResolution } from './stage'
 import { ITextDiff, ILargeTextDiff } from '../../models/diff'
+import { backend, type ISelectedCommitReview } from '../../backend/client'
 
 /**
  * @param repository repository to execute merge in
@@ -27,14 +28,20 @@ export async function createCommit(
       string,
       ITextDiff | ILargeTextDiff
     >
+    readonly selectedReview?: Pick<ISelectedCommitReview, 'tree' | 'head' | 'branch'>
   } & HookCallbackOptions
 ): Promise<string> {
   // Clear the staging area, our diffs reflect the difference between the
   // working directory and the last commit (if any) so our commits should
   // do the same thing.
+  const partialDiffs = await preparePartialStagingDiffs(repository, files, options?.certifiedPartialDiffs)
   await unstageAll(repository)
 
-  await stageFiles(repository, files, options?.certifiedPartialDiffs)
+  await stageFiles(repository, files, partialDiffs)
+
+  if (options?.selectedReview !== undefined && !(await backend().verifySelectedIndex(repository.path, options.selectedReview))) {
+    throw new Error('Selected changes or HEAD changed since review. Inspect the index, then review and try again.')
+  }
 
   const args = ['-F', '-']
 

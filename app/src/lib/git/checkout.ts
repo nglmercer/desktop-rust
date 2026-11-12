@@ -16,6 +16,9 @@ import { ManualConflictResolution } from '../../models/manual-conflict-resolutio
 import { CommitOneLine, shortenSHA } from '../../models/commit'
 import { IRemote } from '../../models/remote'
 import { updateSubmodulesAfterOperation } from './submodule'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
+import { batchIndexPaths } from './checkout-index'
 
 export type ProgressCallback = (progress: ICheckoutProgress) => void
 
@@ -213,6 +216,18 @@ export async function checkoutPaths(
   repository: Repository,
   paths: ReadonlyArray<string>
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const batches = batchIndexPaths(paths)
+    await withRepositoryGitOperation(repository.path, 'mutation', async () => {
+      if (batches.length === 0) {
+        await backend().repositoryCheckoutHeadPaths(repository.path, [])
+      }
+      for (const selected of batches) {
+        await backend().repositoryCheckoutHeadPaths(repository.path, selected)
+      }
+    }, true)
+    return
+  }
   await git(
     ['--literal-pathspecs', 'checkout', 'HEAD', '--', ...paths],
     repository.path,

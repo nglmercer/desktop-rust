@@ -3983,6 +3983,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
 
     const gitStore = this.gitStoreCache.get(repository)
+    let selectedReview: Awaited<ReturnType<typeof reviewSelectedCommit>> | undefined
     if (
       typeof window !== 'undefined' &&
       backend().transportKind !== 'none' &&
@@ -4044,11 +4045,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
             })
             return undefined
           }
-          return true
+          return review
         },
         { gitContext: { kind: 'commit' }, repository }
       )
       if (reviewed === undefined) return false
+      selectedReview = reviewed
     }
 
     return this.withIsCommitting(repository, selectedFiles, async () => {
@@ -4063,6 +4065,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
           let aborted = false
           return createCommit(repository, message, selectedFiles, {
             certifiedPartialDiffs,
+            selectedReview,
             amend: context.amend,
             onHookProgress: this.onHookProgress(repository),
             onHookFailure: this.onHookFailure(() => (aborted = true)),

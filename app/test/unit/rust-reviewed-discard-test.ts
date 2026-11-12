@@ -6,25 +6,51 @@ import {
   DiffType,
 } from '../../src/models/diff'
 import type { Repository } from '../../src/models/repository'
+import {
+  AppFileStatusKind,
+  type WorkingDirectoryFileChange,
+} from '../../src/models/status'
 
 const mocks = vi.hoisted(() => ({
   diff: vi.fn(),
   discard: vi.fn(),
   batchPreview: vi.fn(),
   batch: vi.fn(),
+  stage: vi.fn(),
+  stageRenamed: vi.fn(),
+  renameDiff: vi.fn(),
+  displayDiff: vi.fn(),
+  git: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
+    transportKind: 'ws',
     repositoryWorkingDiff: mocks.diff,
+    repositoryStageSelectedLines: mocks.stage,
+    repositoryStageRenamedLines: mocks.stageRenamed,
+    copilotCommitDiffForRepository: mocks.renameDiff,
     repositoryDiscardSelection: mocks.discard,
     repositoryDiscardBatchPreview: mocks.batchPreview,
     repositoryDiscardBatch: mocks.batch,
   }),
 }))
+vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
+vi.mock('../../src/lib/git/diff', () => ({
+  getWorkingDirectoryDiff: mocks.displayDiff,
+}))
+vi.mock('../../src/lib/git/repository-operation', () => ({
+  withRepositoryGitOperation: async (
+    _path: string,
+    _kind: string,
+    run: () => Promise<unknown>
+  ) => run(),
+}))
 import {
   discardBatchWithoutDialog,
   discardReviewedSelection,
 } from '../../src/lib/git/reviewed-discard'
+import { applyPatchToIndex } from '../../src/lib/git/apply'
+import { preparePartialStagingDiffs } from '../../src/lib/git/update-index'
 
 const raw = new DiffParser().parse(`diff --git a/file b/file
 --- a/file
@@ -76,6 +102,77 @@ const preview = {
     },
   ],
 }
+
+describe('reviewed selected-line staging', () => {
+  const file = {
+    path: 'file',
+    status: { kind: AppFileStatusKind.Modified },
+    selection,
+  } as WorkingDirectoryFileChange
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.diff.mockResolvedValue(preview)
+    mocks.stage.mockResolvedValue(undefined)
+  })
+  it('stages the certified lines without the generic Git runner', async () => {
+    await applyPatchToIndex(repository, file, displayed)
+    expect(mocks.stage).toHaveBeenCalledWith('/repo', 'file', 'diff-basis', [1])
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+  it('refuses a stale displayed diff before staging', async () => {
+    mocks.diff.mockResolvedValue({
+      ...preview,
+      hunks: [
+        {
+          ...preview.hunks[0],
+          lines: [
+            preview.hunks[0].lines[0],
+            { ...preview.hunks[0].lines[1], text: 'changed' },
+          ],
+        },
+      ],
+    })
+    await expect(
+      applyPatchToIndex(repository, file, displayed)
+    ).rejects.toThrow('selected diff changed')
+    expect(mocks.stage).not.toHaveBeenCalled()
+  })
+  it('uses the original path when staging a certified rename', async () => {
+    const renamed = {
+      ...file,
+      id: 'rename',
+      status: { kind: AppFileStatusKind.Renamed, oldPath: 'original' },
+    } as WorkingDirectoryFileChange
+    mocks.renameDiff.mockResolvedValue(preview)
+    await applyPatchToIndex(repository, renamed, displayed)
+    expect(mocks.renameDiff).toHaveBeenCalledWith(
+      '/repo',
+      'file',
+      {},
+      'original'
+    )
+    expect(mocks.stageRenamed).toHaveBeenCalledWith(
+      '/repo',
+      'file',
+      'original',
+      'diff-basis',
+      [1],
+      false
+    )
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+  it('retains renamed partial diffs before the index is reset', async () => {
+    const renamed = {
+      ...file,
+      id: 'rename',
+      status: { kind: AppFileStatusKind.Renamed, oldPath: 'original' },
+    } as WorkingDirectoryFileChange
+    mocks.displayDiff.mockResolvedValue(displayed)
+    const diffs = await preparePartialStagingDiffs(repository, [renamed])
+    expect(diffs?.get('rename')).toBe(displayed)
+    expect(mocks.displayDiff).toHaveBeenCalledWith(repository, renamed)
+  })
+})
 
 describe('reviewed selected-line discard', () => {
   beforeEach(() => {

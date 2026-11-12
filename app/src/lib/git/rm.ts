@@ -1,6 +1,8 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
 import { WorkingDirectoryFileChange } from '../../models/status'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Remove all files from the index
@@ -8,6 +10,10 @@ import { WorkingDirectoryFileChange } from '../../models/status'
  * @param repository the repository to update
  */
 export async function unstageAllFiles(repository: Repository): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().repositoryRemoveIndexAll(repository.path), true)
+    return
+  }
   await git(
     // these flags are important:
     // --cached to only remove files from the index

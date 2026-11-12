@@ -700,8 +700,17 @@ fn git_path(path: PathBuf) -> GitPath {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<std::process::ExitCode> {
+fn main() -> Result<std::process::ExitCode> {
+    // Repository recovery operations compose several asynchronous Git workflows.
+    // Reserve enough worker stack for their nested polling and cancellation paths.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<std::process::ExitCode> {
     let cli = Cli::parse();
     if let Action::CredentialHelper { operation } = &cli.command {
         desktop_core::git_credential_helper(operation).await?;

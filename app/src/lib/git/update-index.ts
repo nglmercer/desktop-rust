@@ -1,7 +1,11 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
-import { DiffSelectionType, ITextDiff, ILargeTextDiff } from '../../models/diff'
+import { DiffSelectionType, DiffType, ITextDiff, ILargeTextDiff } from '../../models/diff'
 import { applyPatchToIndex } from './apply'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
+import { batchIndexPaths } from './checkout-index'
+import { getWorkingDirectoryDiff } from './diff'
 import {
   WorkingDirectoryFileChange,
   AppFileStatusKind,
@@ -55,6 +59,55 @@ interface IUpdateIndexOptions {
   replace?: boolean
 }
 
+/** Order partial renames before any separately selected source. */
+function orderPartialSelections(files: ReadonlyArray<WorkingDirectoryFileChange>): Array<WorkingDirectoryFileChange> {
+  const partial = files.filter(file => file.selection.getSelectionType() !== DiffSelectionType.All)
+  const byPath = new Map(partial.map(file => [file.path, file]))
+  const dependencies = new Map(partial.map(file => [file, 0]))
+  for (const file of partial) {
+    if (file.status.kind === AppFileStatusKind.Renamed) {
+      const source = byPath.get(file.status.oldPath)
+      if (source !== undefined) dependencies.set(source, (dependencies.get(source) ?? 0) + 1)
+    }
+  }
+  const ready = partial.filter(file => dependencies.get(file) === 0)
+  const ordered: Array<WorkingDirectoryFileChange> = []
+  let cursor = 0
+  while (cursor < ready.length) {
+    const file = ready[cursor++]
+    if (file === undefined) break
+    ordered.push(file)
+    if (file.status.kind === AppFileStatusKind.Renamed) {
+      const source = byPath.get(file.status.oldPath)
+      if (source !== undefined) {
+        const remaining = (dependencies.get(source) ?? 0) - 1
+        dependencies.set(source, remaining)
+        if (remaining === 0) ready.push(source)
+      }
+    }
+  }
+  if (ordered.length !== partial.length) throw new Error('Overlapping renamed selections must be reviewed separately')
+  return ordered
+}
+
+/** Retain renamed partial diffs before resetting the index that displays them. */
+export async function preparePartialStagingDiffs(
+  repository: Repository,
+  files: ReadonlyArray<WorkingDirectoryFileChange>,
+  certified?: ReadonlyMap<string, ITextDiff | ILargeTextDiff>
+): Promise<ReadonlyMap<string, ITextDiff | ILargeTextDiff> | undefined> {
+  if (typeof window === 'undefined' || backend().transportKind === 'none') return certified
+  orderPartialSelections(files)
+  const diffs = new Map(certified)
+  for (const file of files) {
+    if (file.status.kind !== AppFileStatusKind.Renamed || file.selection.getSelectionType() !== DiffSelectionType.Partial || diffs.has(file.id)) continue
+    const diff = await getWorkingDirectoryDiff(repository, file)
+    if (diff.kind !== DiffType.Text && diff.kind !== DiffType.LargeText) throw new Error('The renamed file no longer has a selectable text diff')
+    diffs.set(file.id, diff)
+  }
+  return diffs
+}
+
 /**
  * Updates the index with file contents from the working tree. This method
  * is a noop when no paths are provided.
@@ -70,6 +123,16 @@ async function updateIndex(
   options: IUpdateIndexOptions = {}
 ) {
   if (paths.length === 0) {
+    return
+  }
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none' && options.add !== false && options.remove !== false && options.replace !== false) {
+    const batches = batchIndexPaths(paths)
+    await withRepositoryGitOperation(repository.path, 'mutation', async () => {
+      for (const selected of batches) {
+        await backend().repositoryUpdateIndex(repository.path, selected, options.forceRemove === true)
+      }
+    }, true)
     return
   }
 
@@ -113,10 +176,12 @@ export async function stageFiles(
   files: ReadonlyArray<WorkingDirectoryFileChange>,
   certifiedPartialDiffs?: ReadonlyMap<string, ITextDiff | ILargeTextDiff>
 ): Promise<void> {
+  const partialDiffs = await preparePartialStagingDiffs(repository, files, certifiedPartialDiffs)
   const normal = []
   const oldRenamed = []
   const partial = []
   const deletedFiles = []
+  const fullSelections = new Set(files.filter(file => file.selection.getSelectionType() === DiffSelectionType.All).map(file => file.path))
 
   for (const file of files) {
     if (file.selection.getSelectionType() === DiffSelectionType.All) {
@@ -130,6 +195,10 @@ export async function stageFiles(
       partial.push(file)
     }
   }
+
+  const orderedPartial = typeof window !== 'undefined' && backend().transportKind !== 'none'
+    ? orderPartialSelections(files)
+    : partial
 
   // Staging files happens in three steps.
   //
@@ -164,13 +233,13 @@ export async function stageFiles(
   await updateIndex(repository, deletedFiles, { forceRemove: true })
 
   // Finally we run through all files that have partial selections.
-  // We don't care about renamed or not here since applyPatchToIndex
-  // has logic to support that scenario.
-  for (const file of partial) {
+  // Apply rename sources after their destinations when both are partial.
+  for (const file of orderedPartial) {
     await applyPatchToIndex(
       repository,
       file,
-      certifiedPartialDiffs?.get(file.id)
+      partialDiffs?.get(file.id),
+      file.status.kind === AppFileStatusKind.Renamed && fullSelections.has(file.status.oldPath)
     )
   }
 }

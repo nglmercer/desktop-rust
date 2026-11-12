@@ -39,6 +39,7 @@ export type BackendGitPath = string | { readonly bytes: ReadonlyArray<number> }
 
 export interface ISelectedCommitReview {
   readonly basis: string
+  readonly tree: string
   readonly head: string | null
   readonly branch: string | null
   readonly review: {
@@ -1842,7 +1843,7 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_working_diff' | 'diff_detail' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
@@ -1863,7 +1864,7 @@ export class BackendClient {
     const value = this.transport === 'wry'
       ? await this.request('git_info', { operation: { type: 'selected_commit_preview', repository_path: repositoryPath, operation } })
       : await this.repositoryRead(repositoryPath, operation.method, operation)
-    if (!isRecord(value) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || !(value.head === null || (typeof value.head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.head))) || !(value.branch === null || (typeof value.branch === 'string' && value.branch.length <= 4096 && !value.branch.includes('\0')))) throw new BackendError({ code: 'invalid_response', message: 'Invalid selected commit review response', retryable: false })
+    if (!isRecord(value) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || typeof value.tree !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.tree) || !(value.head === null || (typeof value.head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.head))) || !(value.branch === null || (typeof value.branch === 'string' && value.branch.length <= 4096 && !value.branch.includes('\0')))) throw new BackendError({ code: 'invalid_response', message: 'Invalid selected commit review response', retryable: false })
     const review = value.review
     const invalid = () => new BackendError({ code: 'invalid_response', message: 'Invalid selected index review', retryable: false })
     if (!isRecord(review) || typeof review.threshold_bytes !== 'number' || !Number.isSafeInteger(review.threshold_bytes) || review.threshold_bytes <= 0 || !Array.isArray(review.files) || review.files.length > 32768 || !review.files.every(isBackendGitPath) || review.staged_count !== review.files.length || !Array.isArray(review.large_files) || review.large_files.length > 1000) throw invalid()
@@ -1883,6 +1884,15 @@ export class BackendClient {
       largePaths.add(key)
     }
     return value as unknown as ISelectedCommitReview
+  }
+
+  async verifySelectedIndex(repositoryPath: string, review: Pick<ISelectedCommitReview, 'tree' | 'head' | 'branch'>): Promise<boolean> {
+    const operation = { method: 'verify_selected_index', tree: review.tree, head: review.head, branch: review.branch }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'selected_commit_preview', repository_path: repositoryPath, operation } })
+      : await this.repositoryRead(repositoryPath, operation.method, operation)
+    if (!isRecord(value) || typeof value.matches !== 'boolean') throw new BackendError({ code: 'invalid_response', message: 'Invalid staged tree verification', retryable: false })
+    return value.matches
   }
 
   private async commitCheckpointRequest(repositoryPath: string, operation: Record<string, unknown>): Promise<unknown> {
@@ -1946,6 +1956,93 @@ export class BackendClient {
       : await this.repositoryRead(repositoryPath, operation.method, operation)
     if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid Git trailer response', retryable: false })
     return value
+  }
+
+  async repositoryCheckoutIndex(repositoryPath: string, paths: ReadonlyArray<string>): Promise<void> {
+    return this.repositoryMutateIndex(repositoryPath, paths, 'checkout')
+  }
+
+  async repositoryResetIndex(repositoryPath: string, paths: ReadonlyArray<string>): Promise<void> {
+    return this.repositoryMutateIndex(repositoryPath, paths, 'reset')
+  }
+
+  async repositoryUpdateIndex(repositoryPath: string, paths: ReadonlyArray<string>, forceRemove: boolean): Promise<void> {
+    if (paths.length === 0 || paths.length > 4096) throw new BackendError({ code: 'invalid_request', message: 'Invalid index selection', retryable: false })
+    const operation = { method: 'renderer_update_index', paths, force_remove: forceRemove }
+    const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
+    if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Index selection exceeds the request limit', retryable: false })
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'update_index', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the index before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Index update outcome is uncertain; inspect the index', retryable: false })
+    if (value.code !== 0) throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Unable to update the index'}; inspect the index`, retryable: false })
+  }
+
+  async repositoryCheckoutHeadPaths(repositoryPath: string, paths: ReadonlyArray<string>): Promise<void> {
+    return this.repositoryMutateIndex(repositoryPath, paths, 'head')
+  }
+
+  async repositoryUnstageAll(repositoryPath: string): Promise<void> {
+    return this.repositoryClearIndex(repositoryPath, false)
+  }
+
+  async repositoryRemoveIndexAll(repositoryPath: string): Promise<void> {
+    return this.repositoryClearIndex(repositoryPath, true)
+  }
+
+  async repositoryDeleteInitialHead(repositoryPath: string, expectedOid: string): Promise<void> {
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(expectedOid)) throw new BackendError({ code: 'invalid_request', message: 'Invalid expected commit ID', retryable: false })
+    const operation = { method: 'renderer_delete_initial_head', expected_oid: expectedOid }
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'delete_initial_head', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect HEAD and the index before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'HEAD deletion outcome is uncertain; inspect HEAD and the index', retryable: false })
+    if (value.code !== 0) throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Unable to delete HEAD'}; inspect HEAD and the index`, retryable: false })
+  }
+
+  private async repositoryClearIndex(repositoryPath: string, remove: boolean): Promise<void> {
+    const operation = { method: remove ? 'renderer_remove_index_all' : 'renderer_unstage_all' }
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'reset_index', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the index before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Unstage outcome is uncertain; inspect the index', retryable: false })
+    if (value.code !== 0) throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Unable to unstage files'}; inspect the index`, retryable: false })
+  }
+
+  private async repositoryMutateIndex(repositoryPath: string, paths: ReadonlyArray<string>, action: 'checkout' | 'reset' | 'head'): Promise<void> {
+    if ((paths.length === 0 && action !== 'head') || paths.length > 4096) throw new BackendError({ code: 'invalid_request', message: 'Invalid index selection', retryable: false })
+    const operation = { method: action === 'checkout' ? 'renderer_checkout_index' : action === 'head' ? 'renderer_checkout_head_paths' : 'renderer_reset_index', paths }
+    const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
+    if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Index selection exceeds the request limit', retryable: false })
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: action === 'reset' ? 'reset_index' : 'checkout_index', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the selected files before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Index operation outcome is uncertain; inspect the selected files', retryable: false })
+    if (value.code !== 0 && (action !== 'checkout' || value.code !== 1)) throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Index operation failed'}; inspect the selected files`, retryable: false })
   }
 
   async repositorySubmoduleStatus(repositoryPath: string): Promise<string> {
@@ -2087,6 +2184,26 @@ export class BackendClient {
     const result = await this.repositoryRendererRequest(repositoryPath, 'diff_detail', { path, staged: false })
     if (!isCopilotCommitDiff(result)) throw new BackendError({ code: 'invalid_response', message: 'Invalid working diff response', retryable: false })
     return result
+  }
+
+  async repositoryStageSelectedLines(repositoryPath: string, path: string, basis: string, lines: ReadonlyArray<number>): Promise<void> {
+    return this.repositoryStageLines(repositoryPath, path, undefined, basis, lines)
+  }
+
+  async repositoryStageRenamedLines(repositoryPath: string, path: string, originalPath: string, basis: string, lines: ReadonlyArray<number>, preserveSource = false): Promise<void> {
+    return this.repositoryStageLines(repositoryPath, path, originalPath, basis, lines, preserveSource)
+  }
+
+  private async repositoryStageLines(repositoryPath: string, path: string, originalPath: string | undefined, basis: string, lines: ReadonlyArray<number>, preserveSource = false): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(basis) || lines.length === 0 || lines.some(line => !Number.isSafeInteger(line) || line < 0) || new Set(lines).size !== lines.length) throw new BackendError({ code: 'invalid_request', message: 'Invalid line selection', retryable: false })
+    const method = originalPath === undefined ? 'select_diff' : 'select_renamed_diff'
+    const params = originalPath === undefined ? { path, staged: false, basis, lines } : { path, original_path: originalPath, basis, lines, preserve_source: preserveSource }
+    const size = new TextEncoder().encode(JSON.stringify({ method, ...params, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
+    if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Line selection exceeds the request limit', retryable: false })
+    let result: unknown
+    try { result = await this.repositoryRendererRequest(repositoryPath, method, params) }
+    catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the index before retrying`, retryable: false }) }
+    if (!isRecord(result) || result.code !== 0 || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Line staging outcome is uncertain; inspect the index', retryable: false })
   }
 
   async repositoryDiscardSelection(repositoryPath: string, path: string, selection: { readonly basis: string; readonly lines: ReadonlyArray<number> }): Promise<string> {

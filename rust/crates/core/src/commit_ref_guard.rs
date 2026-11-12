@@ -64,14 +64,16 @@ fn quote(value: &[u8]) -> Vec<u8> {
 impl Repository {
     /// Fence a later Git commit's reference update to the reviewed HEAD and
     /// parent. `branch` is None for detached HEAD. `parent` is the resulting
-    /// commit's parent, which differs from HEAD when amending. The caller must
-    /// pass the returned configuration before the commit subcommand, reject a
-    /// missing prepared receipt, and independently reconcile index and refs.
+    /// commit's parent, which differs from HEAD when amending. `tree` is
+    /// checked against the prepared commit under the ref lock. The
+    /// caller must retain the guard, reject a missing receipt, and reconcile
+    /// the index and refs after Git and its hooks finish.
     pub async fn commit_reference_guard(
         &self,
         branch: Option<&str>,
         head: Option<&str>,
         parent: Option<&str>,
+        tree: &str,
         hash_length: usize,
     ) -> Result<CommitReferenceGuard> {
         anyhow::ensure!(
@@ -81,6 +83,7 @@ impl Repository {
         anyhow::ensure!(
             head.into_iter()
                 .chain(parent)
+                .chain(Some(tree))
                 .all(|oid| valid_oid(oid, hash_length)),
             "invalid reviewed commit object ID"
         );
@@ -154,6 +157,8 @@ impl Repository {
                 .unwrap_or_default()
                 .as_bytes(),
         ));
+        script.extend_from_slice(b"\nexpected_tree=");
+        script.extend(quote(tree.as_bytes()));
         script.extend_from_slice(b"\nwhile IFS=' ' read -r old new ref; do\n if { [ \"$1\" = preparing ] && [ \"$ref\" = HEAD ]; } || { [ \"$1\" = prepared ] && [ \"$ref\" = \"$target\" ]; }; then\n  actual=$(git symbolic-ref --quiet HEAD)\n  status=$?\n");
         if let Some(branch) = branch {
             script.extend_from_slice(b"  [ \"$status\" = 0 ] && [ \"$actual\" = ");
@@ -164,7 +169,9 @@ impl Repository {
         }
         script.extend_from_slice(b"  [ \"$old\" = \"$expected\" ] || { echo 'Reviewed HEAD changed; commit refused' >&2; exit 1; }\n  [ ${#new} = ");
         script.extend_from_slice(hash_length.to_string().as_bytes());
-        script.extend_from_slice(b" ] || exit 1\n  case \"$new\" in *[!0-9a-fA-F]*|'') exit 1 ;; esac\n  git --no-replace-objects cat-file commit \"$new\" >\"$object\" || exit 1\n  parents=$(sed -n '/^$/q; /^parent /p' \"$object\") || exit 1\n  [ \"$parents\" = \"$parent\" ] || { echo 'Commit parent differs from review; commit refused' >&2; exit 1; }\n  if [ \"$1\" = prepared ]; then printf '%s\\n' \"$new\" > ");
+        script.extend_from_slice(b" ] || exit 1\n  case \"$new\" in *[!0-9a-fA-F]*|'') exit 1 ;; esac\n  git --no-replace-objects cat-file commit \"$new\" >\"$object\" || exit 1\n  parents=$(sed -n '/^$/q; /^parent /p' \"$object\") || exit 1\n  [ \"$parents\" = \"$parent\" ] || { echo 'Commit parent differs from review; commit refused' >&2; exit 1; }\n");
+        script.extend_from_slice(b"  actual_tree=$(sed -n '1s/^tree //p' \"$object\") || exit 1\n  [ \"$actual_tree\" = \"$expected_tree\" ] || { echo 'Commit tree differs from review; commit refused' >&2; exit 1; }\n");
+        script.extend_from_slice(b"  if [ \"$1\" = prepared ]; then printf '%s\\n' \"$new\" > ");
         script.extend(quote(
             guard
                 .directory
@@ -289,13 +296,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn commit_reference_fence_rejects_tree_changed_by_pre_commit_hook() {
+        let f = Fixture::new();
+        let repo = Repository::open(&f.root).await.unwrap();
+        let branch = f.git(&["symbolic-ref", "HEAD"]);
+        let head = f.git(&["rev-parse", "HEAD"]);
+        fs::write(f.root.join("file"), b"reviewed\n").unwrap();
+        f.git(&["add", "file"]);
+        let tree = f.git(&["write-tree"]);
+        assert!(
+            repo.commit_reference_guard(
+                Some(&branch),
+                Some(&head),
+                Some(&head),
+                "invalid",
+                head.len()
+            )
+            .await
+            .is_err()
+        );
+        let guard = match repo
+            .commit_reference_guard(Some(&branch), Some(&head), Some(&head), &tree, head.len())
+            .await
+        {
+            Ok(guard) => guard,
+            Err(error) if error.to_string().contains("does not support") => {
+                eprintln!("configured Git hooks are unavailable; guard rejected this Git version");
+                return;
+            }
+            Err(error) => panic!("{error:#}"),
+        };
+        let hook = f.root.join(".git/hooks/pre-commit");
+        fs::write(
+            &hook,
+            "#!/bin/sh\nprintf 'unreviewed\\n' > file\ngit add -- file\n",
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+        let result = f.commit(&guard, &[]).await;
+        assert_ne!(result.code, 0);
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("Commit tree differs from review")
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), head);
+        assert!(guard.prepared_oid().unwrap().is_none());
+        assert_ne!(f.git(&["write-tree"]), tree);
+
+        fs::write(f.root.join("file"), b"reviewed\n").unwrap();
+        f.git(&["add", "file"]);
+        fs::write(&hook, "#!/bin/sh\nprintf pre >> .git/pre-events\n").unwrap();
+        let valid = repo
+            .commit_reference_guard(Some(&branch), Some(&head), Some(&head), &tree, head.len())
+            .await
+            .unwrap();
+        let result = f.commit(&valid, &[]).await;
+        assert_eq!(
+            result.code,
+            0,
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD^{tree}"]), tree);
+        assert_eq!(
+            valid.prepared_oid().unwrap().as_deref(),
+            Some(f.git(&["rev-parse", "HEAD"]).as_str())
+        );
+    }
+
+    #[tokio::test]
     async fn commit_reference_fence_preserves_hooks_and_rejects_changed_heads() {
         let f = Fixture::new();
         let repo = Repository::open(&f.root).await.unwrap();
         let branch = f.git(&["symbolic-ref", "HEAD"]);
         let old = f.git(&["rev-parse", "HEAD"]);
+        let tree = f.git(&["write-tree"]);
         let guard = match repo
-            .commit_reference_guard(Some(&branch), Some(&old), Some(&old), old.len())
+            .commit_reference_guard(Some(&branch), Some(&old), Some(&old), &tree, old.len())
             .await
         {
             Ok(guard) => guard,
@@ -326,6 +402,7 @@ mod tests {
                 Some(&branch),
                 Some(&previous),
                 Some(&previous),
+                &tree,
                 previous.len(),
             )
             .await
@@ -346,7 +423,7 @@ mod tests {
         assert!(stale.prepared_oid().unwrap().is_none());
 
         let wrong_parent = repo
-            .commit_reference_guard(Some(&branch), Some(&current), Some(&old), old.len())
+            .commit_reference_guard(Some(&branch), Some(&current), Some(&old), &tree, old.len())
             .await
             .unwrap();
         assert_ne!(f.commit(&wrong_parent, &[]).await.code, 0);
@@ -354,7 +431,13 @@ mod tests {
         assert!(wrong_parent.prepared_oid().unwrap().is_none());
 
         let switch_guard = repo
-            .commit_reference_guard(Some(&branch), Some(&current), Some(&current), current.len())
+            .commit_reference_guard(
+                Some(&branch),
+                Some(&current),
+                Some(&current),
+                &tree,
+                current.len(),
+            )
             .await
             .unwrap();
         f.git(&["switch", "-qc", "other-branch"]);
@@ -368,9 +451,16 @@ mod tests {
         let f = Fixture::new();
         let repo = Repository::open(&f.root).await.unwrap();
         let original = f.git(&["rev-parse", "HEAD"]);
+        let tree = f.git(&["write-tree"]);
         f.git(&["checkout", "-q", "--detach"]);
         let guard = match repo
-            .commit_reference_guard(None, Some(&original), Some(&original), original.len())
+            .commit_reference_guard(
+                None,
+                Some(&original),
+                Some(&original),
+                &tree,
+                original.len(),
+            )
             .await
         {
             Ok(guard) => guard,
@@ -389,7 +479,7 @@ mod tests {
         );
         let tip = f.git(&["rev-parse", "HEAD"]);
         let amend = repo
-            .commit_reference_guard(None, Some(&tip), Some(&original), tip.len())
+            .commit_reference_guard(None, Some(&tip), Some(&original), &tree, tip.len())
             .await
             .unwrap();
         let result = f.commit(&amend, &["--amend"]).await;
@@ -415,7 +505,7 @@ mod tests {
         let tree = f.git(&["rev-parse", "HEAD^{tree}"]);
         let other = f.git(&["commit-tree", &tree, "-p", &old, "-m", "external change"]);
         let guard = match repo
-            .commit_reference_guard(Some(&branch), Some(&old), Some(&old), old.len())
+            .commit_reference_guard(Some(&branch), Some(&old), Some(&old), &tree, old.len())
             .await
         {
             Ok(guard) => guard,
@@ -460,8 +550,9 @@ mod tests {
             let branch = f.git(&["symbolic-ref", "HEAD"]);
             let repo = Repository::open(&f.root).await.unwrap();
             let length = if format == "sha1" { 40 } else { 64 };
+            let tree = f.git(&["write-tree"]);
             let guard = match repo
-                .commit_reference_guard(Some(&branch), None, None, length)
+                .commit_reference_guard(Some(&branch), None, None, &tree, length)
                 .await
             {
                 Ok(guard) => guard,

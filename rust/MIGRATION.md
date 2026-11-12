@@ -311,15 +311,19 @@ the Rust preview without changing HEAD or the index. The following resource
 discovery now uses Rust on both transports, including linked worktrees,
 canonical aliases, and Git's transitive alternate-object graph. Invalid paths
 and unresolved object routing fail closed. A browser test reaches this typed
-discovery and then encounters the still-legacy commit step. The renderer does
-not yet use the basis to fence publication;
-publication, hooks and recovery must be implemented and verified before
-selected commits migrate.
+discovery and then encounters the still-legacy commit step. After staging,
+the renderer compares a tree computed from a private copy of the live index,
+plus HEAD and branch, against the review. A mismatch stops the commit and may
+leave the staged index changed. This observation does not lock the index or
+refs through Git's commit and hooks; publication and recovery must still be
+implemented and verified before selected commits migrate.
 Rust also has a commit reference fence that preserves existing Git hooks and
-checks the reviewed branch, old tip, and resulting parent during Git's
-reference transaction. It supports unborn, detached and amended commits,
-and rejects Git versions that cannot run its configured hook. It is not yet
-wired into commit publication and is not a substitute for durable recovery.
+checks the reviewed branch, old tip, parent and tree during Git's reference
+transaction. The tree is mandatory, so a pre-commit hook that changes staged
+content cannot silently publish an unreviewed tree. It supports unborn,
+detached and amended commits, and rejects Git versions that cannot run its
+configured hook. It is not yet wired into commit publication and is not a
+substitute for durable recovery; a rejected hook can leave the index changed.
 Split-index backup and restore is now shared infrastructure for commit recovery
 and the existing discard journal. Restoring a missing shared index uses an
 atomic hard link and refuses to overwrite a concurrently created conflicting
@@ -2078,12 +2082,12 @@ app's models/stores/UI/platform integrations also require audit.
 | Upstream module (`app/src/lib/git/`) | Replacement status                                                                                                                                                                                                |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `add.ts`                             | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
-| `apply.ts`                           | Partial: transactional staging/unstaging and reviewed selected-line discard with durable undo implemented; remaining caller/filter semantics pending                                                              |
+| `apply.ts`                           | Partial: selected-line staging, including renames, and reviewed discard use Rust; Electron fallback and remaining filter/rename parity are pending. A recreated source is staged only when selected; partial sources follow their rename, and cyclic selections are refused. Renamed selections require the displayed diff to match the HEAD-based preview, and ignored rename destinations can be refused after the index reset. |
 | `assisted-commit-push.ts`            | Pending semantic audit and replacement                                                                                                                                                                            |
 | `authentication.ts`                  | Partial: saved-record HTTPS credential broker and headless failures implemented; full sign-in/import/platform flows pending                                                                                                                                                                            |
 | `branch.ts`                          | Partial: reviewed create/rename/local-delete and per-destination remote/combined upstream deletion, creation identity guard, case-only rename and default-branch permissions with recovery implemented; verified fork preferences/cache and parent default selection implemented; parent upstream setup after association implemented; GitHub name/ruleset checks implemented; saved-record account assignment implemented; provisional clone/worktree/submodule credentials, startup/platform and remaining callers pending                                                                      |
-| `checkout.ts`                        | Partial: reviewed local/remote leave/bring, stash replacement, native submodules/hooks and phase recovery implemented; reviewed create uses shared engine; remaining callers/auth/protection/native audit pending |
-| `checkout-index.ts`                  | Pending semantic audit and replacement                                                                                                                                                                            |
+| `checkout.ts`                        | Partial: reviewed branch switching and selected HEAD path checkout use Rust; remaining callers, authentication, protection and native audit pending |
+| `checkout-index.ts`                  | Selected index checkout uses typed Rust operations on Wry and WebSocket; Electron fallback and the surrounding discard workflow remain                                                                            |
 | `cherry-pick.ts`                     | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `clone.ts`                           | Partial; Rust clone and saved repository flow covered offline                                                                                                                                                     |
 | `coerce-to-buffer.ts`                | Pending semantic audit and replacement                                                                                                                                                                            |
@@ -2123,11 +2127,11 @@ app's models/stores/UI/platform integrations also require audit.
 | `reorder.ts`                         | Pending semantic audit and replacement                                                                                                                                                                            |
 | `repository-operation.ts`            | Partial: ordered bounded sessions and scoped cancellation implemented; remaining operation callers pending                                                                                                        |
 | `repository-operation-context.ts`    | Partial: ordered bounded sessions and scoped cancellation implemented; remaining operation callers pending                                                                                                        |
-| `reset.ts`                           | Pending semantic audit and replacement                                                                                                                                                                            |
+| `reset.ts`                           | Selected mixed resets and unstage-all use typed Rust operations on Wry and WebSocket; other reset modes and Electron fallback remain                                                                              |
 | `rev-list.ts`                        | Pending semantic audit and replacement                                                                                                                                                                            |
 | `rev-parse.ts`                       | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `revert.ts`                          | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
-| `rm.ts`                              | Pending semantic audit and replacement                                                                                                                                                                            |
+| `rm.ts`                              | Removing all index entries uses typed Rust on Wry and WebSocket; conflict removal and Electron fallback remain                                                                                                   |
 | `show.ts`                            | Pending semantic audit and replacement                                                                                                                                                                            |
 | `spawn.ts`                           | Partial: bounded capture, cancellation, Unix groups, timeout and signals; streaming and Windows process trees pending                                                                                             |
 | `squash.ts`                          | Pending semantic audit and replacement                                                                                                                                                                            |
@@ -2136,8 +2140,8 @@ app's models/stores/UI/platform integrations also require audit.
 | `status.ts`                          | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `submodule.ts`                       | Partial: structured state and lifecycle operations implemented/tested; complete nested/filter parity pending                                                                                                      |
 | `tag.ts`                             | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
-| `update-index.ts`                    | Pending semantic audit and replacement                                                                                                                                                                            |
-| `update-ref.ts`                      | Pending semantic audit and replacement                                                                                                                                                                            |
+| `update-index.ts`                    | Full-file staging and forced index removal use typed Rust operations on Wry and WebSocket; partial patches and Electron fallback remain                                                                          |
+| `update-ref.ts`                      | Initial-commit undo checks the selected tip before file restoration and uses a typed Rust ref deletion with an expected object ID; restoration, deletion and index clearing remain separate, and symbolic HEAD identity is not bound across them. Other callers and Electron fallback remain |
 | `var.ts`                             | Pending semantic audit and replacement                                                                                                                                                                            |
 | `worktree.ts`                        | Partial: lifecycle, locks, prune and byte paths implemented/tested; repair/retry/import flows pending                                                                                                             |
 

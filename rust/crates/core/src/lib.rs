@@ -387,6 +387,35 @@ impl Repository {
                 skip_smudge,
             } => return lfs_install(&self.path, scope, force, skip_repo, skip_smudge).await,
             Operation::Submodules => return self.submodules().await,
+            Operation::RendererCheckoutIndex { paths } => {
+                return self.renderer_checkout_index(paths).await;
+            }
+            Operation::RendererCheckoutHeadPaths { paths } => {
+                return self.renderer_checkout_head_paths(paths).await;
+            }
+            Operation::RendererResetIndex { paths } => {
+                return self.renderer_reset_index(paths).await;
+            }
+            Operation::RendererUpdateIndex {
+                paths,
+                force_remove,
+            } => {
+                return self.renderer_update_index(paths, force_remove).await;
+            }
+            Operation::RendererUnstageAll => {
+                return self.renderer_unstage_all().await;
+            }
+            Operation::RendererRemoveIndexAll => {
+                return self.renderer_remove_index_all().await;
+            }
+            Operation::RendererDeleteInitialHead { expected_oid } => {
+                return self.renderer_delete_initial_head(&expected_oid).await;
+            }
+            Operation::VerifySelectedIndex { tree, head, branch } => {
+                return self
+                    .verify_selected_index(&tree, head.as_deref(), branch.as_deref())
+                    .await;
+            }
             Operation::RendererSubmoduleStatus => return self.renderer_submodule_status().await,
             Operation::RendererResetSubmodules { paths } => {
                 return self.renderer_reset_submodules(paths).await;
@@ -799,6 +828,22 @@ impl Repository {
                 basis,
                 lines,
             } => return self.select_diff(path, staged, &basis, lines).await,
+            Operation::SelectRenamedDiff {
+                path,
+                original_path,
+                basis,
+                lines,
+                preserve_source,
+            } => {
+                return Box::pin(self.select_renamed_diff(
+                    path,
+                    original_path,
+                    &basis,
+                    lines,
+                    preserve_source,
+                ))
+                .await;
+            }
             Operation::CopilotProbe { runtime_root } => {
                 return self.copilot_probe(runtime_root.as_deref()).await;
             }
@@ -977,6 +1022,14 @@ impl Repository {
             | WorktreeMove { .. }
             | WorktreeLock { .. } => unreachable!("handled by execute"),
             Submodules
+            | RendererCheckoutIndex { .. }
+            | RendererCheckoutHeadPaths { .. }
+            | RendererResetIndex { .. }
+            | RendererUpdateIndex { .. }
+            | RendererUnstageAll
+            | RendererRemoveIndexAll
+            | RendererDeleteInitialHead { .. }
+            | VerifySelectedIndex { .. }
             | RendererSubmoduleStatus
             | RendererResetSubmodules { .. }
             | RendererUpdateSubmodules { .. }
@@ -1004,6 +1057,7 @@ impl Repository {
             | Github { .. }
             | DiffDetail { .. }
             | SelectDiff { .. }
+            | SelectRenamedDiff { .. }
             | DiscardPreview { .. }
             | DiscardBatchPreview { .. }
             | DiscardBatch { .. }

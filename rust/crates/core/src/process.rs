@@ -114,6 +114,7 @@ pub(crate) async fn blob_prefix(path: &Path, oid: &str, limit: u64) -> Result<Ra
         limit,
         None,
         true,
+        None,
     )
     .await
 }
@@ -345,6 +346,25 @@ pub async fn git_to_file(path: &Path, args: &[OsString], output: &Path) -> Resul
     .await
 }
 
+/// Stream an already-open regular file to Git without reopening its pathname.
+pub(crate) async fn git_from_file(
+    path: &Path,
+    args: &[OsString],
+    input: std::fs::File,
+) -> Result<RawOutput> {
+    run_command_inner(
+        path,
+        git_command(None),
+        args,
+        None,
+        2 * 1024 * 1024,
+        None,
+        false,
+        Some(input),
+    )
+    .await
+}
+
 pub async fn run_gh(path: &Path, args: &[OsString], input: Option<Vec<u8>>) -> Result<RawOutput> {
     let mut command = Command::new("gh");
     command
@@ -451,7 +471,17 @@ async fn run_command(
     output_limit: u64,
     output_file: Option<tokio::fs::File>,
 ) -> Result<RawOutput> {
-    run_command_inner(path, command, args, input, output_limit, output_file, false).await
+    run_command_inner(
+        path,
+        command,
+        args,
+        input,
+        output_limit,
+        output_file,
+        false,
+        None,
+    )
+    .await
 }
 
 async fn run_command_inner(
@@ -462,6 +492,7 @@ async fn run_command_inner(
     output_limit: u64,
     output_file: Option<tokio::fs::File>,
     prefix_only: bool,
+    input_file: Option<std::fs::File>,
 ) -> Result<RawOutput> {
     let cancellation = crate::cancellation::Cancellation::current();
     cancellation.check()?;
@@ -475,7 +506,9 @@ async fn run_command_inner(
     let mut child = command
         .args(args)
         .current_dir(path)
-        .stdin(if input.is_some() {
+        .stdin(if let Some(file) = input_file {
+            Stdio::from(file)
+        } else if input.is_some() {
             Stdio::piped()
         } else {
             Stdio::null()

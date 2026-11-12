@@ -377,13 +377,15 @@ describe('backend Copilot session cleanup', () => {
   })
 
   it('validates selected commit review without staging', async () => {
-    const value = { basis: 'a'.repeat(64), head: 'b'.repeat(40), branch: 'refs/heads/main', review: { threshold_bytes: 100 * 1024 * 1024, staged_count: 1, files: ['selected'], large_files: [] } }
+    const value = { basis: 'a'.repeat(64), tree: 'c'.repeat(40), head: 'b'.repeat(40), branch: 'refs/heads/main', review: { threshold_bytes: 100 * 1024 * 1024, staged_count: 1, files: ['selected'], large_files: [] } }
     const invoke = vi.fn(async (): Promise<unknown> => value)
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
     const client = new BackendClient()
     await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).resolves.toEqual(value)
     expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ type: 'selected_commit_preview', repository_path: '/repo', operation: expect.objectContaining({ method: 'selected_commit_preview', paths: ['selected'] }) }) }))
     invoke.mockResolvedValueOnce({ ...value, basis: 'bad' })
+    await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({ ...value, tree: 'bad' })
     await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })
     invoke.mockResolvedValueOnce({ ...value, review: { ...value.review, staged_count: 2 } })
     await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })

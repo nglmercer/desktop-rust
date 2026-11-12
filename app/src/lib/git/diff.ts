@@ -37,7 +37,7 @@ import { IStatusEntry } from '../status-parser'
 import { createLogParser } from './git-delimiter-parser'
 import { enableImagePreviewsForDDSFiles } from '../feature-flag'
 import { unstageAll } from './reset'
-import { stageFiles } from './update-index'
+import { preparePartialStagingDiffs, stageFiles } from './update-index'
 import { isAbsolute } from 'path'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -636,9 +636,10 @@ export async function getFilesDiffText(
   // Clear the staging area, our diffs reflect the difference between the
   // working directory and the last commit (if any) so our commits should
   // do the same thing.
+  const partialDiffs = await preparePartialStagingDiffs(repository, files)
   await unstageAll(repository)
 
-  await stageFiles(repository, files)
+  await stageFiles(repository, files, partialDiffs)
 
   // `--no-ext-diff` should be provided wherever we invoke `git diff` so that any
   // diff.external program configured by the user is ignored

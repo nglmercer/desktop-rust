@@ -346,11 +346,21 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::MergeTreePreview { .. }
             | Operation::MergeBase { .. }
             | Operation::RendererSubmoduleStatus
+            | Operation::RendererCheckoutIndex { .. }
+            | Operation::RendererCheckoutHeadPaths { .. }
+            | Operation::RendererResetIndex { .. }
+            | Operation::RendererUpdateIndex { .. }
+            | Operation::RendererUnstageAll
+            | Operation::RendererRemoveIndexAll
+            | Operation::RendererDeleteInitialHead { .. }
+            | Operation::VerifySelectedIndex { .. }
             | Operation::RendererResetSubmodules { .. }
             | Operation::RendererUpdateSubmodules { .. }
             | Operation::InitialCommit { .. }
             | Operation::ManageRemote { .. }
             | Operation::Stage { .. }
+            | Operation::SelectDiff { .. }
+            | Operation::SelectRenamedDiff { .. }
             | Operation::StageConflict { .. }
             | Operation::ResolveConflict { .. }
             | Operation::Recover { .. }

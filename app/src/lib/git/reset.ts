@@ -1,6 +1,9 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
 import { assertNever } from '../fatal-error'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
+import { batchIndexPaths } from './checkout-index'
 
 /** The reset modes which are supported. */
 export const enum GitResetMode {
@@ -73,6 +76,16 @@ export async function resetPaths(
     return
   }
 
+  if (mode === GitResetMode.Mixed && ref === 'HEAD' && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const batches = batchIndexPaths(paths)
+    await withRepositoryGitOperation(repository.path, 'mutation', async () => {
+      for (const selected of batches) {
+        await backend().repositoryResetIndex(repository.path, selected)
+      }
+    }, true)
+    return
+  }
+
   const baseArgs = ['--literal-pathspecs', ...resetModeToArgs(mode, ref)]
 
   if (__WIN32__ && mode === GitResetMode.Mixed) {
@@ -96,6 +109,10 @@ export async function resetPaths(
 
 /** Unstage all paths. */
 export async function unstageAll(repository: Repository): Promise<true> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().repositoryUnstageAll(repository.path), true)
+    return true
+  }
   await git(['reset', '--', '.'], repository.path, 'unstageAll')
   return true
 }

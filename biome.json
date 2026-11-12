@@ -35,6 +35,8 @@
       "app/test/unit/rust-merge-tree-routing-test.ts",
       "app/test/unit/rust-merge-base-routing-test.ts",
       "app/test/unit/rust-submodule-routing-test.ts",
+      "app/test/unit/rust-first-undo-routing-test.ts",
+      "app/test/unit/rust-commit-review-guard-test.ts",
       "app/test/unit/selected-commit-review-test.ts",
       "app/test/unit/browser-context-menu-test.ts",
       "app/test/unit/rust-large-files-routing-test.ts",

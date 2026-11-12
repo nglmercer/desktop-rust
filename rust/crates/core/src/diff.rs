@@ -14,6 +14,38 @@ use std::{
 };
 
 impl Repository {
+    /// Compute a tree from a private copy without refreshing the live index.
+    pub(crate) async fn live_index_tree(&self) -> Result<String> {
+        let index_path = self.index_path().await?;
+        let original = read_index(&index_path)?;
+        let scratch = Scratch::new(&index_path)?;
+        if let Some(index) = &original {
+            scratch.write_index(index)?;
+        } else {
+            let empty = process::run_git(
+                &self.path,
+                &args(&["read-tree", "--empty"]),
+                None,
+                Some(&scratch.alternate_index),
+            )
+            .await?;
+            ensure_success(&empty)?;
+        }
+        let output = process::run_git(
+            &self.path,
+            &args(&["write-tree"]),
+            None,
+            Some(&scratch.alternate_index),
+        )
+        .await?;
+        ensure_success(&output)?;
+        anyhow::ensure!(
+            read_index(&index_path)? == original,
+            "Index changed while checking the reviewed tree"
+        );
+        Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    }
+
     /// Produce the renderer's raw working diff without exposing arbitrary Git commands.
     pub(crate) async fn renderer_working_diff(
         &self,
@@ -99,6 +131,7 @@ pub(crate) struct SelectedWorktreeSnapshot {
     pub(crate) head: Vec<u8>,
     pub(crate) branch: Vec<u8>,
     pub(crate) operation: String,
+    pub(crate) tree: Option<String>,
     review: Option<crate::commit::StagedReview>,
 }
 
@@ -403,7 +436,7 @@ impl Repository {
             }
             None => digest.update([0]),
         }
-        let result = json!({"basis":format!("{:x}", digest.finalize()), "head": if snapshot.head.is_empty() { None } else { Some(std::str::from_utf8(&snapshot.head)?.trim().to_owned()) }, "branch": if snapshot.branch.is_empty() { None } else { Some(std::str::from_utf8(&snapshot.branch)?.trim().to_owned()) }, "review":review});
+        let result = json!({"basis":format!("{:x}", digest.finalize()), "tree":snapshot.tree, "head": if snapshot.head.is_empty() { None } else { Some(std::str::from_utf8(&snapshot.head)?.trim().to_owned()) }, "branch": if snapshot.branch.is_empty() { None } else { Some(std::str::from_utf8(&snapshot.branch)?.trim().to_owned()) }, "review":review});
         Ok((snapshot, result))
     }
 
@@ -704,6 +737,24 @@ impl Repository {
             .await?;
             anyhow::ensure!(updated.code == 0, "cannot snapshot selected lines");
         }
+        let tree = if certify_live_index {
+            let output = process::run_git(
+                &self.path,
+                &args(&["write-tree"]),
+                None,
+                Some(&scratch.alternate_index),
+            )
+            .await?;
+            ensure_success(&output)?;
+            let oid = String::from_utf8(output.stdout)?.trim().to_owned();
+            anyhow::ensure!(
+                matches!(oid.len(), 40 | 64) && oid.bytes().all(|b| b.is_ascii_hexdigit()),
+                "Invalid selected tree ID"
+            );
+            Some(oid)
+        } else {
+            None
+        };
         let selected_index =
             read_index(&scratch.alternate_index)?.context("selected index is missing")?;
         let review = if certify_live_index {
@@ -772,6 +823,7 @@ impl Repository {
                 Vec::new()
             },
             operation,
+            tree,
             review,
         })
     }
@@ -874,6 +926,138 @@ impl Repository {
         ensure_success(&updated)?;
         let replacement =
             read_index(&scratch.alternate_index)?.context("Git did not produce an index")?;
+        transaction.commit(&replacement)?;
+        Ok(json!({"code":0,"stdout":"","stderr":""}))
+    }
+
+    /// Apply a reviewed rename selection to the live index without losing
+    /// unrelated entries or including a recreated, unselected source file.
+    pub(crate) async fn select_renamed_diff(
+        &self,
+        path: GitPath,
+        original_path: GitPath,
+        basis: &str,
+        selected: Vec<usize>,
+        preserve_source: bool,
+    ) -> Result<Value> {
+        anyhow::ensure!(!selected.is_empty(), "select at least one changed line");
+        let path = normalized_selection_path(path)?;
+        let source = normalized_selection_path(original_path)?;
+        anyhow::ensure!(path != source, "invalid rename source");
+        let index_path = self.index_path().await?;
+        let mut transaction = IndexTransaction::begin(&index_path)?;
+        let original = read_index(&index_path)?;
+        let head_scratch = Scratch::new(&index_path)?;
+        let (head, branch) = self.snapshot_head_index(&head_scratch).await?;
+        let head_index = read_index(&head_scratch.alternate_index)?;
+        let (view, before, after) = self
+            .capture_diff(
+                &path,
+                false,
+                &head_index,
+                &head_scratch,
+                true,
+                Some(&source),
+            )
+            .await?;
+        anyhow::ensure!(
+            view.can_select && view.basis == basis,
+            "File or HEAD changed; reload the diff and select lines again"
+        );
+        let selected: HashSet<_> = selected.into_iter().collect();
+        let valid: HashSet<_> = view
+            .hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .filter(|line| matches!(line.kind, "added" | "deleted"))
+            .map(|line| line.id)
+            .collect();
+        anyhow::ensure!(
+            selected.is_subset(&valid),
+            "selection contains a context or unknown line"
+        );
+        let desired = select_content(&before.bytes, &view.hunks, &selected, false)?;
+        let exists = after.exists() || !desired.is_empty();
+        let (mode, oid) = if exists {
+            let mode = before
+                .entry
+                .as_ref()
+                .or(after.entry.as_ref())
+                .context("missing file mode")?
+                .mode
+                .clone();
+            (
+                mode,
+                self.hash_selection(&path, desired, view.selection_lfs)
+                    .await?,
+            )
+        } else {
+            (
+                "0".to_owned(),
+                "0".repeat(
+                    before
+                        .entry
+                        .as_ref()
+                        .context("missing source entry")?
+                        .oid
+                        .len(),
+                ),
+            )
+        };
+        let scratch = Scratch::new(&index_path)?;
+        if let Some(original) = &original {
+            scratch.write_index(original)?;
+        } else {
+            let empty = process::run_git(
+                &self.path,
+                &args(&["read-tree", "--empty"]),
+                None,
+                Some(&scratch.alternate_index),
+            )
+            .await?;
+            ensure_success(&empty)?;
+        }
+        if !preserve_source {
+            let mut input = source.as_encoded_bytes().to_vec();
+            input.push(0);
+            let updated = process::run_git(
+                &self.path,
+                &args(&["update-index", "--force-remove", "-z", "--stdin"]),
+                Some(input),
+                Some(&scratch.alternate_index),
+            )
+            .await?;
+            ensure_success(&updated)?;
+        }
+        let mut instruction = format!("{mode} {oid}\t").into_bytes();
+        instruction.extend(path.as_encoded_bytes());
+        instruction.push(0);
+        let updated = process::run_git(
+            &self.path,
+            &args(&["update-index", "-z", "--index-info"]),
+            Some(instruction),
+            Some(&scratch.alternate_index),
+        )
+        .await?;
+        ensure_success(&updated)?;
+        let replacement =
+            read_index(&scratch.alternate_index)?.context("Git did not produce an index")?;
+        let (current, _, _) = self
+            .capture_diff(
+                &path,
+                false,
+                &head_index,
+                &head_scratch,
+                true,
+                Some(&source),
+            )
+            .await?;
+        anyhow::ensure!(
+            current.basis == basis && read_index(&index_path)? == original,
+            "File or index changed; reload the diff and select lines again"
+        );
+        self.ensure_snapshot_head(&head, &branch).await?;
+        crate::cancellation::Cancellation::current().check()?;
         transaction.commit(&replacement)?;
         Ok(json!({"code":0,"stdout":"","stderr":""}))
     }
@@ -2018,6 +2202,61 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn selected_line_staging_preserves_other_entries_and_rejects_stale_content() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-stage-lines-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q"]);
+        fs::write(root.join("selected"), b"first\nsecond\n").unwrap();
+        fs::write(root.join("other"), b"staged\n").unwrap();
+        git(&["add", "other"]);
+        let original_index = fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let path = || GitPath::Text("selected".into());
+        let preview = repo.diff_detail(path(), false).await.unwrap();
+        let first = preview["hunks"][0]["lines"][0]["id"].as_u64().unwrap() as usize;
+        fs::write(root.join("selected"), b"changed\n").unwrap();
+        assert!(
+            repo.select_diff(
+                path(),
+                false,
+                preview["basis"].as_str().unwrap(),
+                vec![first]
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        fs::write(root.join("selected"), b"first\nsecond\n").unwrap();
+        let fresh = repo.diff_detail(path(), false).await.unwrap();
+        let first = fresh["hunks"][0]["lines"][0]["id"].as_u64().unwrap() as usize;
+        assert_eq!(
+            repo.select_diff(path(), false, fresh["basis"].as_str().unwrap(), vec![first])
+                .await
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(git(&["show", ":selected"]), b"first\n");
+        assert_eq!(git(&["show", ":other"]), b"staged\n");
+        assert_eq!(fs::read(root.join("selected")).unwrap(), b"first\nsecond\n");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn selected_empty_commit_review_requires_explicit_permission() {
         let root =
             std::env::temp_dir().join(format!("desktop-empty-commit-{}", uuid::Uuid::new_v4()));
@@ -2579,6 +2818,104 @@ mod tests {
                 .is_err()
         );
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        fs::write(
+            root.join("new"),
+            format!("new-first\n{}new-last\n", "context\n".repeat(10)),
+        )
+        .unwrap();
+        git(&["reset", "--quiet", "HEAD", "--", "."]);
+        let before = fs::read(root.join(".git/index")).unwrap();
+        let fresh = repo
+            .copilot_commit_diff_detail(destination(), Some(source()))
+            .await
+            .unwrap();
+        let lines: Vec<usize> = fresh["hunks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|hunk| hunk["lines"].as_array().unwrap())
+            .filter(|line| line["text"] == "old-first" || line["text"] == "new-first")
+            .map(|line| line["id"].as_u64().unwrap() as usize)
+            .collect();
+        fs::write(root.join("new"), b"changed after review\n").unwrap();
+        assert!(
+            repo.select_renamed_diff(
+                destination(),
+                source(),
+                fresh["basis"].as_str().unwrap(),
+                lines.clone(),
+                false
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), before);
+        fs::write(
+            root.join("new"),
+            format!("new-first\n{}new-last\n", "context\n".repeat(10)),
+        )
+        .unwrap();
+        let fresh = repo
+            .copilot_commit_diff_detail(destination(), Some(source()))
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.select_renamed_diff(
+                destination(),
+                source(),
+                fresh["basis"].as_str().unwrap(),
+                lines.clone(),
+                false
+            )
+            .await
+            .unwrap()["code"],
+            0
+        );
+        let show = |name: &str| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["show", name])
+                .output()
+                .unwrap()
+                .stdout
+        };
+        let staged = String::from_utf8(show(":new")).unwrap();
+        assert!(
+            staged.contains("new-first")
+                && staged.contains("old-last")
+                && !staged.contains("new-last")
+        );
+        assert!(
+            !std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["cat-file", "-e", ":old"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert_eq!(show(":other"), base.as_bytes());
+        git(&["reset", "--quiet", "HEAD", "--", "."]);
+        git(&["add", "--", "old"]);
+        let fresh = repo
+            .copilot_commit_diff_detail(destination(), Some(source()))
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.select_renamed_diff(
+                destination(),
+                source(),
+                fresh["basis"].as_str().unwrap(),
+                lines,
+                true
+            )
+            .await
+            .unwrap()["code"],
+            0
+        );
+        assert_eq!(show(":old"), b"private replacement\n");
         fs::remove_dir_all(root).unwrap();
     }
 

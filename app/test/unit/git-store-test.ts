@@ -1,6 +1,6 @@
 import { beforeEach, describe, it, TestContext } from 'node:test'
 import assert from 'node:assert'
-import { writeFile } from 'fs/promises'
+import { readFile, unlink, writeFile } from 'fs/promises'
 import * as Path from 'path'
 import { exec } from 'dugite'
 
@@ -139,6 +139,23 @@ describe('GitStore', () => {
 
       const after = await getStatusOrThrow(repository)
       assert(after.currentTip === undefined)
+    })
+
+    it('does not restore deleted files when the selected commit is stale', async t => {
+      const { repository, firstCommit } = await setupRepo(t)
+      const file = Path.join(repository.path, 'README.md')
+      await writeFile(file, 'newer commit\n')
+      await exec(['add', '--', 'README.md'], repository.path)
+      await exec(['commit', '-m', 'second'], repository.path)
+      const before = await exec(['rev-parse', 'HEAD'], repository.path)
+      await unlink(file)
+      const gitStore = new GitStore(repository, shell, new TestStatsStore())
+      const errors: Array<Error> = []
+      gitStore.onDidError(error => errors.push(error))
+      await gitStore.undoCommit(firstCommit)
+      assert.equal(errors.length, 1)
+      await assert.rejects(readFile(file), { code: 'ENOENT' })
+      assert.equal((await exec(['rev-parse', 'HEAD'], repository.path)).stdout, before.stdout)
     })
 
     it('pre-fills the commit message', async t => {

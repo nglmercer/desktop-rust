@@ -13,17 +13,22 @@ import { Repository } from '../../models/repository'
 import { getWorkingDirectoryDiff } from './diff'
 import { formatPatch, formatPatchToDiscardChanges } from '../patch-formatter'
 import { assertNever } from '../fatal-error'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
+import { getReviewedDiffLines } from '../copilot/commit-selection'
 
 /** Stage selected lines using their certified diff basis when supplied. */
 export async function applyPatchToIndex(
   repository: Repository,
   file: WorkingDirectoryFileChange,
-  certifiedDiff?: ITextDiff | ILargeTextDiff
+  certifiedDiff?: ITextDiff | ILargeTextDiff,
+  preserveRenameSource = false
 ): Promise<void> {
+  const useRust = typeof window !== 'undefined' && backend().transportKind !== 'none'
   // If the file was a rename we have to recreate that rename since we've
   // just blown away the index. Think of this block of weird looking commands
   // as running `git mv`.
-  if (file.status.kind === AppFileStatusKind.Renamed) {
+  if (file.status.kind === AppFileStatusKind.Renamed && !useRust) {
     // Make sure the index knows of the removed file. We could use
     // update-index --force-remove here but we're not since it's
     // possible that someone staged a rename and then recreated the
@@ -83,6 +88,22 @@ export async function applyPatchToIndex(
       default:
         assertNever(diff, `Unknown diff kind: ${kind}`)
     }
+  }
+
+  if (useRust) {
+    await withRepositoryGitOperation(repository.path, 'mutation', async () => {
+      const originalPath = file.status.kind === AppFileStatusKind.Renamed ? file.status.oldPath : undefined
+      const preview = originalPath === undefined
+        ? await backend().repositoryWorkingDiff(repository.path, file.path)
+        : await backend().copilotCommitDiffForRepository(repository.path, file.path, {}, originalPath)
+      const lines = getReviewedDiffLines(file.path, file.selection, diff, preview, 'The selected diff changed. Review and reselect its lines before committing.')
+      if (originalPath === undefined) {
+        await backend().repositoryStageSelectedLines(repository.path, file.path, preview.basis, lines)
+      } else {
+        await backend().repositoryStageRenamedLines(repository.path, file.path, originalPath, preview.basis, lines, preserveRenameSource)
+      }
+    }, true)
+    return
   }
 
   const patch = await formatPatch(file, diff)

@@ -763,7 +763,8 @@ export class GitStore extends BaseStore {
   }
 
   private async undoFirstCommit(
-    repository: Repository
+    repository: Repository,
+    expectedOid: string
   ): Promise<true | undefined> {
     // What are we doing here?
     // The state of the working directory here is rather important, because we
@@ -782,6 +783,10 @@ export class GitStore extends BaseStore {
       )
     }
 
+    if (status.currentTip !== expectedOid) {
+      throw new Error('HEAD changed since the commit was selected; refresh before undoing it')
+    }
+
     const paths = status.workingDirectory.files
 
     const deletedFiles = paths.filter(
@@ -794,7 +799,7 @@ export class GitStore extends BaseStore {
     // Now that we have the working directory changes, as well the restored
     // deleted files, we can remove the HEAD ref to make the current branch
     // disappear
-    await deleteRef(repository, 'HEAD', 'Reverting first commit')
+    await deleteRef(repository, 'HEAD', 'Reverting first commit', expectedOid)
 
     // Finally, ensure any changes in the index are unstaged. This ensures all
     // files in the repository will be untracked.
@@ -812,7 +817,7 @@ export class GitStore extends BaseStore {
     // will make the branch unborn again.
     const success = await this.performFailableOperation(() =>
       commit.parentSHAs.length === 0
-        ? this.undoFirstCommit(this.repository)
+        ? this.undoFirstCommit(this.repository, commit.sha)
         : reset(this.repository, GitResetMode.Mixed, commit.parentSHAs[0])
     )
 

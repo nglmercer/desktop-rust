@@ -274,7 +274,7 @@ impl Repository {
             selection.is_none() || scope == DiscardScope::WorkingTree && requested.len() == 1,
             "selected lines require one working-tree file"
         );
-        let snapshot = self.snapshot().await?;
+        let snapshot = Box::pin(self.snapshot()).await?;
         let visible: std::collections::HashMap<_, _> = snapshot
             .files
             .iter()
@@ -356,7 +356,7 @@ impl Repository {
                 "submodules require their own recovery workflow"
             );
             let desired = if let Some(selection) = &selection {
-                self.discarded_selection(path, &selection.basis, &selection.lines)
+                Box::pin(self.discarded_selection(path, &selection.basis, &selection.lines))
                     .await?
                     .map(|(mode, oid)| IndexEntry {
                         mode,
@@ -377,14 +377,13 @@ impl Repository {
             } else {
                 before_index.clone()
             };
-            let after = self
-                .restore_bytes(
-                    path,
-                    desired.as_ref(),
-                    &space.file(position, "after"),
-                    &before,
-                )
-                .await?;
+            let after = Box::pin(self.restore_bytes(
+                path,
+                desired.as_ref(),
+                &space.file(position, "after"),
+                &before,
+            ))
+            .await?;
             let current = cancellation::blocking({
                 let root = self.path.clone();
                 let path = path.clone();
@@ -964,7 +963,7 @@ impl Repository {
         scope: DiscardScope,
         selection: Option<DiscardSelection>,
     ) -> Result<Value> {
-        let plan = self.prepare_discard(vec![path], scope, selection).await?;
+        let plan = Box::pin(self.prepare_discard(vec![path], scope, selection)).await?;
         Ok(
             json!({"basis":plan.basis,"scope":scope,"files":display_changes(&plan.record.changes),"index_changes":plan.replacement_index.is_some(),"undo_requires_unchanged_index":plan.record.exact_before.is_some(),"backup_bytes":plan.record.changes.iter().map(|change|change.before.size).sum::<u64>()+plan.record.objects.iter().map(|object|object.size).sum::<u64>()+plan.record.shared.iter().map(|index|index.size).sum::<u64>()+plan.record.lfs.iter().map(|object|object.size).sum::<u64>()}),
         )
@@ -980,13 +979,12 @@ impl Repository {
         let index_path = self.index_path().await?;
         let transaction = IndexTransaction::begin(&index_path)?;
         let references = self.lock_discard_refs().await?;
-        let plan = self.prepare_discard(vec![path], scope, selection).await?;
+        let plan = Box::pin(self.prepare_discard(vec![path], scope, selection)).await?;
         anyhow::ensure!(
             plan.basis == basis,
             "File, index, HEAD, or restore filters changed; review discard again"
         );
-        self.publish_plan(plan, transaction, references, index_path)
-            .await
+        Box::pin(self.publish_plan(plan, transaction, references, index_path)).await
     }
 
     pub(crate) async fn discard_batch_preview(&self, paths: Vec<GitPath>) -> Result<Value> {
@@ -1509,6 +1507,40 @@ fn checkout_permissions(directory: &Path) -> Result<u32> {
     {
         let _ = directory;
         Ok(0o644)
+    }
+}
+
+#[cfg(test)]
+mod future_stack_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn discard_preparation_future_stays_bounded() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-discard-stack-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .arg("init")
+                .arg("-q")
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let repository = Repository::open(&root).await.unwrap();
+        let future = repository.prepare_discard(
+            vec![GitPath::Text("file".into())],
+            DiscardScope::WorkingTree,
+            None,
+        );
+        let size = std::mem::size_of_val(&future);
+        assert!(
+            size <= 64 * 1024,
+            "discard preparation future grew to {size} bytes"
+        );
+        drop(future);
+        fs::remove_dir_all(root).unwrap();
     }
 }
 

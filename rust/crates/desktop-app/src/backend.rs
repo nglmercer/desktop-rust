@@ -133,6 +133,22 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    CheckoutIndex {
+        repository_path: String,
+        operation: Operation,
+    },
+    ResetIndex {
+        repository_path: String,
+        operation: Operation,
+    },
+    UpdateIndex {
+        repository_path: String,
+        operation: Operation,
+    },
+    DeleteInitialHead {
+        repository_path: String,
+        operation: Operation,
+    },
     ResetSubmodules {
         repository_path: String,
         operation: Operation,
@@ -372,6 +388,18 @@ impl Backend {
         | GitInfoOperation::SubmoduleStatus {
             repository_path, ..
         }
+        | GitInfoOperation::CheckoutIndex {
+            repository_path, ..
+        }
+        | GitInfoOperation::ResetIndex {
+            repository_path, ..
+        }
+        | GitInfoOperation::UpdateIndex {
+            repository_path, ..
+        }
+        | GitInfoOperation::DeleteInitialHead {
+            repository_path, ..
+        }
         | GitInfoOperation::ResetSubmodules {
             repository_path, ..
         }
@@ -398,6 +426,8 @@ impl Backend {
             && !matches!(
                 operation,
                 Operation::DiffDetail { staged: false, .. }
+                    | Operation::SelectDiff { staged: false, .. }
+                    | Operation::SelectRenamedDiff { .. }
                     | Operation::RendererWorkingDiff { .. }
                     | Operation::RendererBlobPrefix { .. }
                     | Operation::RendererCommitDiff { .. }
@@ -423,7 +453,10 @@ impl Backend {
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
-            && !matches!(operation, Operation::SelectedCommitPreview { .. })
+            && !matches!(
+                operation,
+                Operation::SelectedCommitPreview { .. } | Operation::VerifySelectedIndex { .. }
+            )
         {
             return Err(AppError::BadArgs(
                 "unsupported selected commit preview operation".into(),
@@ -465,6 +498,43 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported submodule status operation".into(),
+            ));
+        }
+        if let GitInfoOperation::CheckoutIndex { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererCheckoutIndex { .. }
+                    | Operation::RendererCheckoutHeadPaths { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported index checkout operation".into(),
+            ));
+        }
+        if let GitInfoOperation::ResetIndex { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererResetIndex { .. }
+                    | Operation::RendererUnstageAll
+                    | Operation::RendererRemoveIndexAll
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported index reset operation".into(),
+            ));
+        }
+        if let GitInfoOperation::DeleteInitialHead { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererDeleteInitialHead { .. })
+        {
+            return Err(AppError::BadArgs(
+                "unsupported initial HEAD deletion".into(),
+            ));
+        }
+        if let GitInfoOperation::UpdateIndex { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererUpdateIndex { .. })
+        {
+            return Err(AppError::BadArgs(
+                "unsupported index update operation".into(),
             ));
         }
         if let GitInfoOperation::ResetSubmodules { operation, .. } = &request.operation
@@ -1209,6 +1279,34 @@ impl Backend {
                                 if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 repo.execute(operation).await
                             }
+                            GitInfoOperation::CheckoutIndex { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::ResetIndex { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::UpdateIndex { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::DeleteInitialHead { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
                             GitInfoOperation::ResetSubmodules { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
@@ -1464,6 +1562,15 @@ esac
 
     #[test]
     fn scoped_copilot_admission_fences_account_and_cancellation() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(scoped_copilot_admission_fences_account_and_cancellation_inner)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn scoped_copilot_admission_fences_account_and_cancellation_inner() {
         use desktop_backend::{AccountAssignment, StoredAccount};
         let root =
             std::env::temp_dir().join(format!("desktop-wry-copilot-{}", uuid::Uuid::new_v4()));
@@ -1535,6 +1642,60 @@ esac
         backend.cancel(&[json!({"request_id":id})]).unwrap();
         assert!(
             matches!(backend.read(job), Err(AppError::Coded { code, .. }) if code == "cancelled")
+        );
+        let git = |arguments: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["add", "--", "selected.txt"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "initial",
+        ]);
+        git(&["mv", "--", "selected.txt", "renamed.txt"]);
+        fs::write(root.join("renamed.txt"), b"changed line\n").unwrap();
+        fs::write(root.join("selected.txt"), b"replacement\n").unwrap();
+        git(&["reset", "--quiet", "HEAD", "--", "."]);
+        let diff = backend.read(backend.admit_copilot(vec![json!({"repository_path":root,"operation":{"method":"copilot_commit_diff_detail","path":"renamed.txt","original_path":"selected.txt"}})]).unwrap()).unwrap();
+        let lines: Vec<_> = diff["hunks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|hunk| hunk["lines"].as_array().unwrap())
+            .filter(|line| line["kind"] != "context")
+            .map(|line| line["id"].clone())
+            .collect();
+        let stage = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"select_renamed_diff","path":"renamed.txt","original_path":"selected.txt","basis":diff["basis"],"lines":lines}}})]).unwrap();
+        assert_eq!(backend.read(stage).unwrap()["code"], 0);
+        assert_eq!(git(&["show", ":renamed.txt"]), b"changed line\n");
+        assert!(
+            !Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["cat-file", "-e", ":selected.txt"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert_eq!(
+            fs::read(root.join("selected.txt")).unwrap(),
+            b"replacement\n"
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -2225,6 +2386,64 @@ esac
                 .success()
         );
         let backend = Backend::new(16).unwrap();
+        fs::write(root.join("file"), b"changed").unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["add", "--", "file"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let reset = backend.admit_git_info(vec![json!({"operation":{"type":"reset_index","repository_path":root,"operation":{"method":"renderer_reset_index","paths":["file"]}}})]).unwrap();
+        assert_eq!(backend.read(reset).unwrap()["code"], 0);
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"changed");
+        let update_index = backend.admit_git_info(vec![json!({"operation":{"type":"update_index","repository_path":root,"operation":{"method":"renderer_update_index","paths":["file"],"force_remove":false}}})]).unwrap();
+        assert_eq!(backend.read(update_index).unwrap()["code"], 0);
+        assert_eq!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["show", ":file"])
+                .output()
+                .unwrap()
+                .stdout,
+            b"changed"
+        );
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"update_index","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
+        let unstage = backend.admit_git_info(vec![json!({"operation":{"type":"reset_index","repository_path":root,"operation":{"method":"renderer_unstage_all"}}})]).unwrap();
+        assert_eq!(backend.read(unstage).unwrap()["code"], 0);
+        let checkout = backend.admit_git_info(vec![json!({"operation":{"type":"checkout_index","repository_path":root,"operation":{"method":"renderer_checkout_index","paths":["file"]}}})]).unwrap();
+        assert_eq!(backend.read(checkout).unwrap()["code"], 0);
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"hello\0world");
+        fs::remove_file(root.join("file")).unwrap();
+        let checkout_head = backend.admit_git_info(vec![json!({"operation":{"type":"checkout_index","repository_path":root,"operation":{"method":"renderer_checkout_head_paths","paths":["file"]}}})]).unwrap();
+        assert_eq!(backend.read(checkout_head).unwrap()["code"], 0);
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"hello\0world");
+        let remove = backend.admit_git_info(vec![json!({"operation":{"type":"reset_index","repository_path":root,"operation":{"method":"renderer_remove_index_all"}}})]).unwrap();
+        assert_eq!(backend.read(remove).unwrap()["code"], 0);
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["ls-files"])
+                .output()
+                .unwrap()
+                .stdout
+                .is_empty()
+        );
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"hello\0world");
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["add", "--", "file"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"checkout_index","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
         let head = Command::new("git")
             .arg("-C")
             .arg(&root)
@@ -2392,6 +2611,8 @@ esac
         let empty_operation = json!({"method":"selected_commit_preview","paths":[],"remove_paths":[],"partial_selections":[],"allow_empty":true,"amend_head":null,"expected_head":null});
         let empty_review = backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":empty_operation}})]).unwrap()).unwrap();
         assert_eq!(empty_review["review"]["staged_count"], 0);
+        let verify = backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":{"method":"verify_selected_index","tree":empty_review["tree"],"head":empty_review["head"],"branch":empty_review["branch"]}}})]).unwrap();
+        assert_eq!(backend.read(verify).unwrap()["matches"], true);
         assert_eq!(first, preview().unwrap());
         assert_eq!(first["review"]["staged_count"], 1);
         assert_eq!(
@@ -2436,6 +2657,10 @@ esac
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"commit_checkpoint","repository_path":root,"operation":{"method":"stage","paths":["selected"]}}})]).is_err());
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":{"method":"stage","paths":["selected"]}}})]).is_err());
+        let delete = backend.admit_git_info(vec![json!({"operation":{"type":"delete_initial_head","repository_path":root,"operation":{"method":"renderer_delete_initial_head","expected_oid":head}}})]).unwrap();
+        assert_eq!(backend.read(delete).unwrap()["code"], 0);
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"hello\0world");
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"delete_initial_head","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2510,6 +2735,29 @@ esac
         assert!(
             reviewed(json!({"method":"renderer_working_diff","path":"../outside","base":"empty"}))
                 .is_err()
+        );
+        let diff =
+            reviewed(json!({"method":"diff_detail","path":"first-only","staged":false})).unwrap();
+        let stage = reviewed(json!({"method":"select_diff","path":"first-only","staged":false,"basis":diff["basis"],"lines":[diff["hunks"][0]["lines"][0]["id"]]})).unwrap();
+        assert_eq!(stage["code"], 0);
+        assert_eq!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&first)
+                .args(["show", ":first-only"])
+                .output()
+                .unwrap()
+                .stdout,
+            b"test"
+        );
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&first)
+                .args(["rm", "--cached", "-q", "--", "first-only"])
+                .status()
+                .unwrap()
+                .success()
         );
         let diff =
             reviewed(json!({"method":"diff_detail","path":"first-only","staged":false})).unwrap();

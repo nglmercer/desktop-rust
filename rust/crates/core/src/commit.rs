@@ -15,6 +15,150 @@ const LARGE_BLOB_LIMIT: u64 = 100 * 1024 * 1024;
 mod trailer_tests {
     use super::*;
     #[tokio::test]
+    async fn reviewed_tree_verification_observes_index_and_head_without_changing_index() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-review-tree-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        std::fs::write(root.join("file"), b"before\n").unwrap();
+        git(&["add", "file"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "first",
+        ]);
+        std::fs::write(root.join("file"), b"after\n").unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let review = repo
+            .selected_commit_preview_with_empty(
+                vec![GitPath::Text("file".into())],
+                vec![],
+                vec![],
+                false,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let tree = review["tree"].as_str().unwrap();
+        let head = review["head"].as_str();
+        let branch = review["branch"].as_str();
+        let index = std::fs::read(root.join(".git/index")).unwrap();
+        assert_eq!(
+            repo.verify_selected_index(tree, head, branch)
+                .await
+                .unwrap()["matches"],
+            false
+        );
+        assert_eq!(std::fs::read(root.join(".git/index")).unwrap(), index);
+        git(&["add", "file"]);
+        let index = std::fs::read(root.join(".git/index")).unwrap();
+        assert_eq!(
+            repo.verify_selected_index(tree, head, branch)
+                .await
+                .unwrap()["matches"],
+            true
+        );
+        assert_eq!(std::fs::read(root.join(".git/index")).unwrap(), index);
+        git(&["checkout", "-qb", "other"]);
+        assert_eq!(
+            repo.verify_selected_index(tree, head, branch)
+                .await
+                .unwrap()["matches"],
+            false
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn initial_head_deletion_requires_the_selected_root_commit() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-initial-delete-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        std::fs::write(root.join("file"), "content").unwrap();
+        git(&["add", "file"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "first",
+        ]);
+        let first = git(&["rev-parse", "HEAD"]);
+        let branch = git(&["symbolic-ref", "HEAD"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "second",
+        ]);
+        let second = git(&["rev-parse", "HEAD"]);
+        let repo = Repository::open(&root).await.unwrap();
+        assert!(repo.renderer_delete_initial_head(&second).await.is_err());
+        assert_ne!(
+            repo.renderer_delete_initial_head(&first).await.unwrap()["code"],
+            0
+        );
+        assert_eq!(git(&["rev-parse", "HEAD"]), second);
+        git(&["reset", "--hard", &first]);
+        assert_eq!(
+            repo.renderer_delete_initial_head(&first).await.unwrap()["code"],
+            0
+        );
+        assert_eq!(git(&["symbolic-ref", "HEAD"]), branch);
+        assert_eq!(std::fs::read(root.join("file")).unwrap(), b"content");
+        assert!(
+            !std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["rev-parse", "--verify", "HEAD"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn annotated_tag_preserves_empty_message_and_validates_target() {
         let root = std::env::temp_dir().join(format!("desktop-tag-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
@@ -235,6 +379,98 @@ mod trailer_tests {
 }
 
 impl Repository {
+    /// Observe whether the live index and HEAD still match the reviewed tree.
+    pub(crate) async fn verify_selected_index(
+        &self,
+        tree: &str,
+        head: Option<&str>,
+        branch: Option<&str>,
+    ) -> Result<Value> {
+        let oid = |s: &str| matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit());
+        anyhow::ensure!(
+            oid(tree) && head.is_none_or(oid),
+            "Invalid reviewed object ID"
+        );
+        anyhow::ensure!(
+            branch.is_none_or(|value| value.starts_with("refs/heads/")
+                && !value.contains(['\0', '\n', '\r'])
+                && value.len() <= 4096),
+            "Invalid reviewed branch"
+        );
+        let current = || async {
+            let head = self
+                .run(&args(&["rev-parse", "--verify", "--quiet", "HEAD"]))
+                .await?;
+            let branch = self
+                .run(&args(&["symbolic-ref", "--quiet", "HEAD"]))
+                .await?;
+            anyhow::ensure!(
+                matches!(head.code, 0 | 1) && matches!(branch.code, 0 | 1),
+                "Cannot inspect HEAD"
+            );
+            Ok::<_, anyhow::Error>((
+                if head.code == 0 {
+                    Some(String::from_utf8(head.stdout)?.trim().to_owned())
+                } else {
+                    None
+                },
+                if branch.code == 0 {
+                    Some(String::from_utf8(branch.stdout)?.trim().to_owned())
+                } else {
+                    None
+                },
+            ))
+        };
+        let before = current().await?;
+        if before.0.as_deref() != head || before.1.as_deref() != branch {
+            return Ok(json!({"matches":false}));
+        }
+        let actual = self.live_index_tree().await?;
+        let after = current().await?;
+        Ok(json!({"matches": before == after && actual == tree}))
+    }
+
+    /// Delete the selected initial commit only if it is still HEAD.
+    pub(crate) async fn renderer_delete_initial_head(&self, expected_oid: &str) -> Result<Value> {
+        anyhow::ensure!(
+            matches!(expected_oid.len(), 40 | 64)
+                && expected_oid.bytes().all(|b| b.is_ascii_hexdigit()),
+            "Invalid expected commit ID"
+        );
+        let parents = self
+            .run(&args(&[
+                "rev-list",
+                "--parents",
+                "-n",
+                "1",
+                "--end-of-options",
+                expected_oid,
+                "--",
+            ]))
+            .await?;
+        anyhow::ensure!(parents.code == 0, "Cannot read selected commit");
+        let fields: Vec<_> = parents
+            .stdout
+            .split(|b| b.is_ascii_whitespace())
+            .filter(|v| !v.is_empty())
+            .collect();
+        anyhow::ensure!(
+            fields.len() == 1 && fields[0].eq_ignore_ascii_case(expected_oid.as_bytes()),
+            "Selected commit is not an initial commit"
+        );
+        let output = self
+            .run(&args(&[
+                "update-ref",
+                "-d",
+                "-m",
+                "Reverting first commit",
+                "HEAD",
+                expected_oid,
+            ]))
+            .await?;
+        Ok(serde_json::to_value(output.text())?)
+    }
+
     /// Match the renderer's merge-base behavior without accepting Git options.
     pub(crate) async fn merge_base(&self, first: &str, second: &str) -> Result<Value> {
         for revision in [first, second] {

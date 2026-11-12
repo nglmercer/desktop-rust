@@ -7,8 +7,17 @@ use crate::{
     process,
 };
 use anyhow::{Context, Result};
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::{
+    ambient_authority,
+    fs::{Dir, OpenOptions},
+};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    io::{Read, Seek, SeekFrom},
+    path::Path,
+};
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -111,31 +120,60 @@ impl Repository {
         hash_length: usize,
         verify_lfs_pointers: bool,
     ) -> Result<()> {
+        let parent = Dir::open_ambient_dir(
+            directory
+                .parent()
+                .context("backup directory has no parent")?,
+            ambient_authority(),
+        )?;
+        let backup = parent.open_dir_nofollow(
+            directory
+                .file_name()
+                .context("backup directory has no name")?,
+        )?;
         for object in objects {
             validate_oid(&object.oid, hash_length)?;
-            let path = directory.join(format!("object-{}", object.oid));
+            let mut options = OpenOptions::new();
+            options.read(true).follow(FollowSymlinks::No);
+            #[cfg(unix)]
+            {
+                use cap_std::fs::OpenOptionsExt;
+                options.custom_flags(libc::O_NONBLOCK);
+            }
+            let mut file = backup
+                .open_with(format!("object-{}", object.oid), &options)?
+                .into_std();
+            anyhow::ensure!(
+                file.metadata()?.is_file(),
+                "saved index blob must be a regular file"
+            );
             let state = cancellation::blocking({
-                let path = path.clone();
-                move || work::copy_state(fs::File::open(path)?, None)
+                let file = file.try_clone()?;
+                move || work::copy_state(file, None)
             })
             .await?;
             anyhow::ensure!(
                 state.size == object.size && state.sha256 == object.sha256,
                 "saved index blob was changed; undo data retained"
             );
-            if verify_lfs_pointers
-                && object.size < 1024
-                && let Some(pointer) =
-                    lfs::pointer(&fs::read(&path)?).filter(|pointer| pointer.size != 0)
-            {
-                anyhow::ensure!(
-                    lfs.contains(&pointer) || unavailable_lfs.contains(&pointer),
-                    "saved LFS payload is missing from the undo record"
-                );
+            file.seek(SeekFrom::Start(0))?;
+            if verify_lfs_pointers && object.size < 1024 {
+                let mut bytes = Vec::new();
+                file.by_ref().take(1024).read_to_end(&mut bytes)?;
+                if let Some(pointer) = lfs::pointer(&bytes).filter(|pointer| pointer.size != 0) {
+                    anyhow::ensure!(
+                        lfs.contains(&pointer) || unavailable_lfs.contains(&pointer),
+                        "saved LFS payload is missing from the undo record"
+                    );
+                }
+                file.seek(SeekFrom::Start(0))?;
             }
-            let mut command = args(&["hash-object", "-w", "--no-filters", "--"]);
-            command.push(path.into_os_string());
-            let restored = self.run(&command).await?;
+            let restored = process::git_from_file(
+                &self.path,
+                &args(&["hash-object", "-w", "--no-filters", "--stdin"]),
+                file,
+            )
+            .await?;
             anyhow::ensure!(
                 restored.code == 0,
                 "cannot restore saved index blob: {}",
@@ -164,6 +202,44 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn git_reads_the_open_backup_if_its_path_is_replaced() {
+        let root = std::env::temp_dir().join(format!("desktop-open-blob-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .arg("init")
+                .arg("-q")
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let path = root.join("backup");
+        fs::write(&path, b"original content\n").unwrap();
+        let file = fs::File::open(&path).unwrap();
+        fs::rename(&path, root.join("original")).unwrap();
+        fs::write(&path, b"replacement content\n").unwrap();
+        let result = process::git_from_file(
+            &root,
+            &args(&["hash-object", "-w", "--no-filters", "--stdin"]),
+            file,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.code, 0);
+        let oid = std::str::from_utf8(&result.stdout).unwrap().trim();
+        let object = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["cat-file", "blob", oid])
+            .output()
+            .unwrap();
+        assert!(object.status.success());
+        assert_eq!(object.stdout, b"original content\n");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn retained_blobs_survive_pruning_and_corruption_is_rejected() {
         let root =
@@ -260,6 +336,21 @@ mod tests {
         )
         .await
         .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let saved = backup.join(format!("object-{oid}"));
+            let moved = backup.join("moved-object");
+            fs::rename(&saved, &moved).unwrap();
+            symlink(&moved, &saved).unwrap();
+            assert!(
+                repo.restore_index_objects(&backup, &objects, &lfs, &unavailable, oid.len(), true)
+                    .await
+                    .is_err()
+            );
+            fs::remove_file(&saved).unwrap();
+            fs::rename(&moved, &saved).unwrap();
+        }
         fs::write(backup.join(format!("object-{oid}")), b"tampered").unwrap();
         assert!(
             repo.restore_index_objects(&backup, &objects, &lfs, &unavailable, oid.len(), true)

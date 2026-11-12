@@ -4,6 +4,92 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 impl Repository {
+    /// Stage literal paths, or remove them even when a new file exists there.
+    pub(crate) async fn renderer_update_index(
+        &self,
+        paths: Vec<GitPath>,
+        force_remove: bool,
+    ) -> Result<Value> {
+        let input = index_paths_input(paths)?;
+        let mut command = args(&["update-index", "--add", "--remove"]);
+        if force_remove {
+            command.push("--force-remove".into());
+        }
+        command.extend(args(&["--replace", "-z", "--stdin"]));
+        let output = process::update_index(&self.path, &command, input).await?;
+        Ok(serde_json::to_value(output.text())?)
+    }
+
+    /// Restore selected paths from HEAD into both the index and worktree.
+    pub(crate) async fn renderer_checkout_head_paths(&self, paths: Vec<GitPath>) -> Result<Value> {
+        let output = if paths.is_empty() {
+            process::run_checkout(
+                &self.path,
+                &args(&["--literal-pathspecs", "checkout", "--quiet", "HEAD", "--"]),
+            )
+            .await?
+        } else {
+            process::update_index(
+                &self.path,
+                &args(&[
+                    "--literal-pathspecs",
+                    "checkout",
+                    "--quiet",
+                    "HEAD",
+                    "--pathspec-from-file=-",
+                    "--pathspec-file-nul",
+                ]),
+                index_paths_input(paths)?,
+            )
+            .await?
+        };
+        Ok(serde_json::to_value(output.text())?)
+    }
+
+    /// Remove index entries while preserving all working-tree files.
+    pub(crate) async fn renderer_remove_index_all(&self) -> Result<Value> {
+        let output = self
+            .run(&args(&["rm", "--cached", "-r", "-f", "-q", "."]))
+            .await?;
+        Ok(serde_json::to_value(output.text())?)
+    }
+
+    /// Reset the complete index, including in an unborn repository.
+    pub(crate) async fn renderer_unstage_all(&self) -> Result<Value> {
+        let output = self.run(&args(&["reset", "--quiet", "--", "."])).await?;
+        Ok(serde_json::to_value(output.text())?)
+    }
+
+    /// Reset selected literal index paths to HEAD without touching the worktree.
+    pub(crate) async fn renderer_reset_index(&self, paths: Vec<GitPath>) -> Result<Value> {
+        let input = index_paths_input(paths)?;
+        let output = process::update_index(
+            &self.path,
+            &args(&[
+                "--literal-pathspecs",
+                "reset",
+                "HEAD",
+                "--pathspec-from-file=-",
+                "--pathspec-file-nul",
+            ]),
+            input,
+        )
+        .await?;
+        Ok(serde_json::to_value(output.text())?)
+    }
+
+    /// Restore literal index entries selected by the renderer's discard workflow.
+    pub(crate) async fn renderer_checkout_index(&self, paths: Vec<GitPath>) -> Result<Value> {
+        let input = index_paths_input(paths)?;
+        let output = process::update_index(
+            &self.path,
+            &args(&["checkout-index", "-f", "-u", "-q", "--stdin", "-z"]),
+            input,
+        )
+        .await?;
+        Ok(serde_json::to_value(output.text())?)
+    }
+
     /// Initialize and update nested submodules after a checkout.
     pub(crate) async fn renderer_update_submodules(
         &self,
@@ -229,6 +315,21 @@ impl Repository {
     }
 }
 
+fn index_paths_input(paths: Vec<GitPath>) -> Result<Vec<u8>> {
+    anyhow::ensure!(
+        !paths.is_empty() && paths.len() <= 4096,
+        "invalid index selection"
+    );
+    let mut input = Vec::new();
+    for path in paths {
+        let path = validate_path(path)?;
+        input.extend_from_slice(path.as_encoded_bytes());
+        input.push(0);
+        anyhow::ensure!(input.len() <= 60_000, "index selection is too large");
+    }
+    Ok(input)
+}
+
 fn submodule_display_link(value: &str) -> Option<String> {
     let identity = crate::RepositoryIdentity::from_url(value).ok()?;
     Some(format!(
@@ -240,6 +341,158 @@ fn submodule_display_link(value: &str) -> Option<String> {
 #[cfg(test)]
 mod display_url_tests {
     use super::submodule_display_link;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reset_index_preserves_worktree_and_other_staged_paths() {
+        use std::{fs, process::Command};
+        let root =
+            std::env::temp_dir().join(format!("desktop-reset-index-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q"]);
+        fs::write(root.join("one\nspace"), "one").unwrap();
+        fs::write(root.join("other"), "other").unwrap();
+        git(&["add", "--", "one\nspace", "other"]);
+        let repo = crate::Repository::open(&root).await.unwrap();
+        assert_eq!(repo.renderer_unstage_all().await.unwrap()["code"], 0);
+        assert!(git(&["ls-files"]).is_empty());
+        assert_eq!(fs::read(root.join("one\nspace")).unwrap(), b"one");
+        git(&["add", "--", "one\nspace", "other"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "initial",
+        ]);
+        fs::remove_file(root.join("one\nspace")).unwrap();
+        assert_eq!(
+            repo.renderer_checkout_head_paths(vec![crate::GitPath::Text("one\nspace".into())])
+                .await
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(fs::read(root.join("one\nspace")).unwrap(), b"one");
+        fs::write(root.join("one\nspace"), "changed").unwrap();
+        fs::write(root.join("other"), "changed").unwrap();
+        assert_eq!(
+            repo.renderer_checkout_head_paths(vec![]).await.unwrap()["code"],
+            0
+        );
+        assert_eq!(fs::read(root.join("other")).unwrap(), b"changed");
+        git(&["add", "--", "one\nspace", "other"]);
+        assert_eq!(
+            repo.renderer_reset_index(vec![crate::GitPath::Text("one\nspace".into())])
+                .await
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(git(&["show", ":one\nspace"]), b"one");
+        assert_eq!(git(&["show", ":other"]), b"changed");
+        assert_eq!(fs::read(root.join("one\nspace")).unwrap(), b"changed");
+        assert_eq!(repo.renderer_unstage_all().await.unwrap()["code"], 0);
+        assert_eq!(git(&["show", ":other"]), b"other");
+        assert_eq!(fs::read(root.join("other")).unwrap(), b"changed");
+        fs::rename(root.join("one\nspace"), root.join("renamed")).unwrap();
+        fs::write(root.join("one\nspace"), "replacement").unwrap();
+        assert_eq!(
+            repo.renderer_update_index(vec![crate::GitPath::Text("one\nspace".into())], true)
+                .await
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            repo.renderer_update_index(vec![crate::GitPath::Text("renamed".into())], false)
+                .await
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(git(&["show", ":renamed"]), b"changed");
+        assert_eq!(fs::read(root.join("one\nspace")).unwrap(), b"replacement");
+        assert!(
+            !Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["ls-files", "--error-unmatch", "--", "one\nspace"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert!(
+            repo.renderer_update_index(vec![crate::GitPath::Text("../outside".into())], false)
+                .await
+                .is_err()
+        );
+        assert_eq!(repo.renderer_remove_index_all().await.unwrap()["code"], 0);
+        assert!(git(&["ls-files"]).is_empty());
+        assert_eq!(fs::read(root.join("other")).unwrap(), b"changed");
+        assert_ne!(repo.renderer_remove_index_all().await.unwrap()["code"], 0);
+        assert!(
+            repo.renderer_reset_index(vec![crate::GitPath::Text("../outside".into())])
+                .await
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn checkout_index_restores_only_literal_selected_paths() {
+        use std::{fs, process::Command};
+        let root =
+            std::env::temp_dir().join(format!("desktop-checkout-index-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        fs::write(root.join("one space"), "one").unwrap();
+        fs::write(root.join("other"), "other").unwrap();
+        git(&["add", "--", "one space", "other"]);
+        fs::write(root.join("one space"), "changed").unwrap();
+        fs::write(root.join("other"), "changed").unwrap();
+        let repo = crate::Repository::open(&root).await.unwrap();
+        let paths = vec![
+            crate::GitPath::Text("one space".into()),
+            crate::GitPath::Text("missing".into()),
+        ];
+        let output = repo.renderer_checkout_index(paths).await.unwrap();
+        assert!(output["code"] == 0 || output["code"] == 1);
+        assert_eq!(fs::read(root.join("one space")).unwrap(), b"one");
+        assert_eq!(fs::read(root.join("other")).unwrap(), b"changed");
+        assert!(
+            repo.renderer_checkout_index(vec![crate::GitPath::Text("../outside".into())])
+                .await
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn renderer_status_matches_git_for_initialized_and_uninitialized_submodules() {

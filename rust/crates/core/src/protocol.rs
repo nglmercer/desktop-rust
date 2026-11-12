@@ -423,6 +423,29 @@ pub enum Operation {
         dry_run: bool,
     },
     Submodules,
+    RendererCheckoutIndex {
+        paths: Vec<GitPath>,
+    },
+    RendererCheckoutHeadPaths {
+        paths: Vec<GitPath>,
+    },
+    RendererResetIndex {
+        paths: Vec<GitPath>,
+    },
+    RendererUpdateIndex {
+        paths: Vec<GitPath>,
+        force_remove: bool,
+    },
+    RendererUnstageAll,
+    RendererRemoveIndexAll,
+    RendererDeleteInitialHead {
+        expected_oid: String,
+    },
+    VerifySelectedIndex {
+        tree: String,
+        head: Option<String>,
+        branch: Option<String>,
+    },
     RendererSubmoduleStatus,
     RendererResetSubmodules {
         paths: Vec<GitPath>,
@@ -480,6 +503,14 @@ pub enum Operation {
         staged: bool,
         basis: String,
         lines: Vec<usize>,
+    },
+    SelectRenamedDiff {
+        path: GitPath,
+        original_path: GitPath,
+        basis: String,
+        lines: Vec<usize>,
+        #[serde(default)]
+        preserve_source: bool,
     },
     DiscardPreview {
         path: GitPath,
