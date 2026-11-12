@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from support.fixture import BINARY
 from support.lfs import cached, pointer
 from support.process import alive
-from repository_accounts import Accounts, ALICE, BOB, ENV, NAMED, OTHER, NONE, EFFECTIVE, call, clean
+from support.accounts import Accounts, ALICE, BOB, ENV, NAMED, OTHER, NONE, EFFECTIVE, call, clean
 from support.repository_context import private, stop, wait_for
 
 

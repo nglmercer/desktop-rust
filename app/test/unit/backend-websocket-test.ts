@@ -151,6 +151,7 @@ describe('WebSocket backend transport', () => {
     const pending = value.copilotGenerateForRepository('/repo-a', {
       account: { host: 'github.com', login: 'Alice', id: 42 },
       paths: ['selected.txt'],
+      remove_paths: ['old-name.txt'],
     })
     expect(socket.sent[1]).toEqual({
       id: 1,
@@ -167,6 +168,7 @@ describe('WebSocket backend transport', () => {
       repository_id: 'repo-a-id',
       account: { host: 'github.com', login: 'Alice', id: 42 },
       paths: ['selected.txt'],
+      remove_paths: ['old-name.txt'],
     })
     socket.message({
       id: 2,

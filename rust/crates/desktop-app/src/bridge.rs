@@ -187,7 +187,7 @@ impl Bridge {
                 self.admit_rpc(id, channel, args, body.len())
             }
             Ok(Incoming::Send { channel, args }) => self.admit_send(channel, args, body.len()),
-            Err(error) => tracing::warn!(%error, body = %truncate(body), "malformed IPC frame"),
+            Err(_) => tracing::warn!(bytes = body.len(), "malformed IPC frame"),
         }
     }
 
@@ -736,15 +736,6 @@ fn mime_for(path: &str) -> &'static str {
         "md" | "txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
-}
-
-fn truncate(value: &str) -> &str {
-    let end = value
-        .char_indices()
-        .nth(200)
-        .map(|(i, _)| i)
-        .unwrap_or(value.len());
-    &value[..end]
 }
 
 /// Serialize a JSON value so it can be embedded in a JavaScript expression

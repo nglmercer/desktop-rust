@@ -57,12 +57,38 @@ export interface IAssistedCommitSelectionSource {
 
 interface IRestoredSelection {
   readonly text: string | null
+  readonly displayedDiff?: ITextDiff | ILargeTextDiff
   readonly head: IAssistedCommitHead
   readonly version: string
 }
 
+/** Compare the actual line-selection coordinates, including newline state. */
+export function sameSelectionDiff(
+  left: ITextDiff | ILargeTextDiff,
+  right: ITextDiff | ILargeTextDiff
+): boolean {
+  return (
+    left.text === right.text &&
+    left.hunks.length === right.hunks.length &&
+    left.hunks.every((hunk, index) => {
+      const other = right.hunks[index]
+      return (
+        hunk.unifiedDiffStart === other.unifiedDiffStart &&
+        hunk.header.oldStartLine === other.header.oldStartLine &&
+        hunk.header.oldLineCount === other.header.oldLineCount &&
+        hunk.header.newStartLine === other.header.newStartLine &&
+        hunk.header.newLineCount === other.header.newLineCount &&
+        hunk.lines.length === other.lines.length &&
+        hunk.lines.every((line, i) => line.equals(other.lines[i]))
+      )
+    })
+  )
+}
+
 interface ISelectionBasis {
   readonly text: string | null
+  /** Exact displayed lines, including newline markers, for native consumers. */
+  readonly displayedDiff?: ITextDiff | ILargeTextDiff
   readonly sourceSelectionType:
     | DiffSelectionType.All
     | DiffSelectionType.Partial
@@ -117,7 +143,9 @@ export class AssistedCommitSelection {
         authority === undefined ||
         diff === null ||
         (diff.kind !== DiffType.Text && diff.kind !== DiffType.LargeText) ||
-        diff.text !== authority.text
+        diff.text !== authority.text ||
+        (authority.displayedDiff !== undefined &&
+          !sameSelectionDiff(authority.displayedDiff, diff))
       ) {
         throw new AssistedCommitError(
           'selection-changed',
@@ -215,6 +243,9 @@ export class AssistedCommitSelection {
             }
             const basis =
               retained?.text ?? this.restored.get(file.selection)?.text
+            const reviewedDiff =
+              retained?.displayedDiff ??
+              this.restored.get(file.selection)?.displayedDiff
             const diff = await this.getRecoveryDiff(repository, file)
             if (
               basis === undefined ||
@@ -222,7 +253,9 @@ export class AssistedCommitSelection {
               diff === null ||
               (diff.kind !== DiffType.Text &&
                 diff.kind !== DiffType.LargeText) ||
-              diff.text !== basis
+              diff.text !== basis ||
+              (reviewedDiff !== undefined &&
+                !sameSelectionDiff(reviewedDiff, diff))
             ) {
               throw new AssistedCommitError(
                 'selection-changed',
@@ -269,7 +302,11 @@ export class AssistedCommitSelection {
     this.assertCapturedHead(run, head)
     const bases = new Map<
       DiffSelection,
-      { readonly index: number; readonly text: string | null }
+      {
+        readonly index: number
+        readonly text: string | null
+        readonly displayedDiff?: ITextDiff | ILargeTextDiff
+      }
     >()
     for (const [index, file] of run.request.files.entries()) {
       if (file.selection.getSelectionType() === DiffSelectionType.Partial) {
@@ -277,18 +314,26 @@ export class AssistedCommitSelection {
         const originalText =
           this.bases.get(file.selection)?.text ??
           this.restored.get(file.selection)?.text
+        const reviewedDiff =
+          this.bases.get(file.selection)?.displayedDiff ??
+          this.restored.get(file.selection)?.displayedDiff
         if (
           diff === null ||
           (diff.kind !== DiffType.Text && diff.kind !== DiffType.LargeText) ||
           originalText === undefined ||
-          originalText !== diff.text
+          originalText !== diff.text ||
+          (reviewedDiff !== undefined && !sameSelectionDiff(reviewedDiff, diff))
         ) {
           throw new AssistedCommitError(
             'selection-changed',
             'The original partial diff could not be verified. Review and reselect current changes.'
           )
         }
-        bases.set(file.selection, { index, text: diff.text })
+        bases.set(file.selection, {
+          index,
+          text: diff.text,
+          displayedDiff: diff,
+        })
       } else {
         bases.set(file.selection, { index, text: null })
       }
@@ -308,6 +353,7 @@ export class AssistedCommitSelection {
     for (const [selection, basis] of bases) {
       this.restored.set(selection, {
         text: basis.text,
+        displayedDiff: basis.displayedDiff,
         head: latestHead,
         version: latestVersions[basis.index],
       })
@@ -333,7 +379,7 @@ export class AssistedCommitSelection {
         canonical.kind === DiffType.LargeText) &&
       (displayed.kind === DiffType.Text ||
         displayed.kind === DiffType.LargeText) &&
-      canonical.text === displayed.text
+      sameSelectionDiff(canonical, displayed)
     ) {
       return canonical
     }
@@ -414,7 +460,11 @@ export class AssistedCommitSelection {
     const files: WorkingDirectoryFileChange[] = []
     const bases = new Map<
       DiffSelection,
-      { readonly index: number; readonly text: string | null }
+      {
+        readonly index: number
+        readonly text: string | null
+        readonly displayedDiff?: ITextDiff | ILargeTextDiff
+      }
     >()
     for (const file of current.changesState.workingDirectory.files) {
       const previous = original.get(file.id)
@@ -442,9 +492,16 @@ export class AssistedCommitSelection {
           (diff.kind === DiffType.Text || diff.kind === DiffType.LargeText)
             ? diff.text
             : null
+        const retained = this.bases.get(previous.selection)
         if (
           previous.selection.getSelectionType() === DiffSelectionType.Partial &&
-          (text === null || text !== this.bases.get(previous.selection)?.text)
+          (text === null ||
+            text !== retained?.text ||
+            (diff !== null &&
+              (diff.kind === DiffType.Text ||
+                diff.kind === DiffType.LargeText) &&
+              retained?.displayedDiff !== undefined &&
+              !sameSelectionDiff(retained.displayedDiff, diff)))
         ) {
           files.push(file.withIncludeAll(false))
           needsReview = true
@@ -455,6 +512,11 @@ export class AssistedCommitSelection {
             selected => selected.id === file.id
           ),
           text,
+          displayedDiff:
+            diff !== null &&
+            (diff.kind === DiffType.Text || diff.kind === DiffType.LargeText)
+              ? diff
+              : undefined,
         })
         files.push(file.withSelection(previous.selection))
       } else if (
@@ -484,6 +546,7 @@ export class AssistedCommitSelection {
               selected => selected.id === file.id
             ),
             text: diff.text,
+            displayedDiff: diff,
           })
           files.push(file.withSelection(reconciled.selection))
           needsReview ||= reconciled.needsReview
@@ -524,6 +587,7 @@ export class AssistedCommitSelection {
     for (const [selection, basis] of bases) {
       this.restored.set(selection, {
         text: basis.text,
+        displayedDiff: basis.displayedDiff,
         head: latestHead,
         version: latestVersions[basis.index],
       })
@@ -580,21 +644,25 @@ export class AssistedCommitSelection {
     const state = this.cache.get(repository).changesState
     const displayed = state.selection
     const current = state.workingDirectory.findFileWithID(file.id)
-    const basis =
+    const displayedDiff =
       displayed.kind === ChangesSelectionKind.WorkingDirectory &&
       displayed.selectedFileIDs.length === 1 &&
       displayed.selectedFileIDs[0] === file.id &&
       displayed.diff !== null &&
       (displayed.diff.kind === DiffType.Text ||
         displayed.diff.kind === DiffType.LargeText)
-        ? displayed.diff.text
+        ? displayed.diff
         : current === null
         ? undefined
-        : this.bases.get(current.selection)?.text
+        : this.bases.get(current.selection)?.displayedDiff
+    const basis =
+      displayedDiff?.text ??
+      (current === null ? undefined : this.bases.get(current.selection)?.text)
     const type = diffSelection.getSelectionType()
     if (type !== DiffSelectionType.None) {
       this.bases.set(diffSelection, {
         text: basis ?? null,
+        displayedDiff,
         sourceSelectionType: type,
       })
     } else {

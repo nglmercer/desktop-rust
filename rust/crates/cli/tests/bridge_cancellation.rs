@@ -301,10 +301,22 @@ async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
     )
     .unwrap();
     fs::write(f.repo.join("deleted.txt"), "deleted selected file\n").unwrap();
+    fs::write(
+        f.repo.join("rename-old.txt"),
+        format!("rename old\n{}old tail\n", "context\n".repeat(10)),
+    )
+    .unwrap();
     fs::write(f.repo.join(":(glob)*.txt"), "literal before\n").unwrap();
     f.repo_git(&["add", "--all"]);
     f.repo_git(&["commit", "-qm", "initial"]);
     let amend_head = f.repo_git(&["rev-parse", "HEAD"]).trim().to_owned();
+    fs::rename(f.repo.join("rename-old.txt"), f.repo.join("rename-new.txt")).unwrap();
+    fs::write(
+        f.repo.join("rename-new.txt"),
+        format!("rename new\n{}new tail\n", "context\n".repeat(10)),
+    )
+    .unwrap();
+    fs::write(f.repo.join("rename-old.txt"), "unselected replacement\n").unwrap();
     fs::remove_file(f.repo.join("deleted.txt")).unwrap();
     fs::write(f.repo.join(":(glob)*.txt"), "literal after\n").unwrap();
     fs::write(f.repo.join("file.txt"), "changed\n").unwrap();
@@ -469,6 +481,51 @@ async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
     assert!(prompt.contains("+changed"));
     assert!(!prompt.contains("unstaged private text"));
     assert!(!prompt.contains("excluded staged text"));
+    client.send(json!({"id":32,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":["file.txt"], "model":"auto", "reasoning_effort":"low", "provider":{"type":"openai", "baseUrl":"https://provider.example/v1", "wireApi":"responses", "apiKey":"synthetic-provider-secret"}})).await;
+    let byok = client.receive().await;
+    assert_eq!(byok["result"]["summary"], "feat: offline response");
+    assert!(!byok.to_string().contains("synthetic-provider-secret"));
+    let byok_config: Value =
+        serde_json::from_slice(&fs::read(f.root.join("copilot-session-config")).unwrap()).unwrap();
+    assert_eq!(byok_config["model"], "byok-auto");
+    assert_eq!(byok_config["provider"]["wireModel"], "auto");
+    assert_eq!(
+        byok_config["provider"]["apiKey"],
+        "synthetic-provider-secret"
+    );
+    assert_eq!(byok_config["provider"]["wireApi"], "responses");
+    assert_eq!(byok_config["enableFileHooks"], false);
+    assert_eq!(byok_config["enableConfigDiscovery"], false);
+    assert_eq!(byok_config["enableSkills"], false);
+    client.send(json!({"id":33,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":["file.txt"], "provider":{"type":"openai", "baseUrl":"http://remote.example", "apiKey":"synthetic-provider-secret"}})).await;
+    let invalid_provider = client.receive().await;
+    assert!(invalid_provider["error"].is_string());
+    assert!(
+        !invalid_provider
+            .to_string()
+            .contains("synthetic-provider-secret")
+    );
+    let expected_ref = f.repo_git(&["symbolic-ref", "HEAD"]).trim().to_owned();
+    client.send(json!({"id":35,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":["file.txt"], "expected_head":{"ref":expected_ref,"sha":amend_head}})).await;
+    assert_eq!(
+        client.receive().await["result"]["basis"],
+        "working_tree_diff"
+    );
+    client.send(json!({"id":36,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":["file.txt"], "expected_head":{"ref":"refs/heads/different","sha":amend_head}})).await;
+    let wrong_branch = client.receive().await;
+    assert!(
+        wrong_branch["error"]
+            .as_str()
+            .unwrap()
+            .contains("HEAD or branch changed")
+    );
+    client.send(json!({"id":37,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":["file.txt"], "expected_head":{"ref":expected_ref,"sha":null}})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("HEAD or branch changed")
+    );
     fs::write(f.root.join("bad-copilot-output"), b"bad").unwrap();
     client
         .send(json!({"id":27,"method":"copilot_generate_commit_message", "paths":["file.txt"]}))
@@ -498,6 +555,39 @@ async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
     assert!(working_prompt.contains("+literal after"));
     assert!(!working_prompt.contains("excluded staged text"));
     assert!(!working_prompt.contains("excluded directory"));
+    assert_eq!(fs::read(f.repo.join(".git/index")).unwrap(), before);
+    client.send(json!({"id":28,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":["rename-new.txt"], "remove_paths":["rename-old.txt"]})).await;
+    assert_eq!(
+        client.receive().await["result"]["basis"],
+        "working_tree_diff"
+    );
+    let rename_prompt = fs::read_to_string(f.root.join("copilot-prompt")).unwrap();
+    assert!(rename_prompt.contains("rename-old.txt") && rename_prompt.contains("rename-new.txt"));
+    assert!(!rename_prompt.contains("unselected replacement"));
+    assert_eq!(fs::read(f.repo.join(".git/index")).unwrap(), before);
+    client.send(json!({"id":29,"method":"copilot_generate_commit_message", "source":"staged", "remove_paths":["rename-old.txt"]})).await;
+    assert!(client.receive().await["error"].is_string());
+    client.send(json!({"id":30,"method":"copilot_commit_diff_detail", "path":"rename-new.txt", "original_path":"rename-old.txt"})).await;
+    let rename_view = client.receive().await["result"].clone();
+    let rename_lines: Vec<Value> = rename_view["hunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|hunk| hunk["lines"].as_array().unwrap())
+        .filter(|line| line["text"] == "rename old" || line["text"] == "rename new")
+        .map(|line| line["id"].clone())
+        .collect();
+    assert_eq!(rename_lines.len(), 2);
+    client.send(json!({"id":31,"method":"copilot_generate_commit_message", "source":"working_tree", "partial_selections":[{"path":"rename-new.txt", "original_path":"rename-old.txt", "basis":rename_view["basis"], "lines":rename_lines}]})).await;
+    assert_eq!(
+        client.receive().await["result"]["basis"],
+        "working_tree_diff"
+    );
+    let partial_rename = fs::read_to_string(f.root.join("copilot-prompt")).unwrap();
+    assert!(partial_rename.contains("+rename new"));
+    assert!(
+        !partial_rename.contains("+new tail") && !partial_rename.contains("unselected replacement")
+    );
     assert_eq!(fs::read(f.repo.join(".git/index")).unwrap(), before);
     client
         .send(json!({"id":19,"method":"copilot_commit_diff_detail","path":"partial.txt"}))

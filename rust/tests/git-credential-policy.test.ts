@@ -1,0 +1,429 @@
+// @vitest-environment node
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { afterAll, beforeAll, describe, it } from 'vitest'
+import {
+  ALICE,
+  BINARY,
+  BOB,
+  EFFECTIVE,
+  NONE,
+  OTHER,
+  clean,
+  privateFile,
+} from './fixtures/accounts'
+import { Credentials } from './fixtures/credentials'
+
+describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
+  'Git credential policy',
+  () => {
+    let suite: Credentials
+    beforeAll(async () => {
+      suite = new Credentials()
+      await suite.start()
+    }, 150_000)
+    afterAll(async () => {
+      if (suite) await suite.close()
+    })
+    it('limits rewritten destinations and rejects multiple push destinations', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('credential-destinations')
+      suite.assign(repo)
+      const original = `${suite.service.url}/fork/repo.git`
+      repo.git(
+        'remote',
+        'set-url',
+        'origin',
+        'saved-account-alias:fork/repo.git'
+      )
+      repo.git(
+        'config',
+        `url.${suite.service.url}/.insteadOf`,
+        'saved-account-alias:'
+      )
+      suite.clearTransport()
+      assert.equal(suite.rpc(repo, 'fetch', { remote: 'origin' }).code, 0)
+      suite.assertActor()
+      repo.git('remote', 'set-url', 'origin', original)
+      repo.git('remote', 'set-url', '--add', '--push', 'origin', original)
+      repo.git(
+        'remote',
+        'set-url',
+        '--add',
+        '--push',
+        'origin',
+        `${suite.service.url}/other/repo.git`
+      )
+      suite.clearTransport()
+      suite.rpc(
+        repo,
+        'push',
+        { remote: 'origin', branch: 'main' },
+        { fail: true }
+      )
+      assert.ok(
+        !suite.service
+          .records()
+          .some(
+            row =>
+              String(row.path).startsWith('/other/repo.git') &&
+              row.actor === 'alicecase'
+          )
+      )
+      assert.ok(!existsSync(suite.nativeLog))
+      suite.assertPrivateStorage(repo)
+    }, 90_000)
+    it('rejects conflicting authorization headers while preserving unrelated headers', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('credential-header-conflicts')
+      suite.assign(repo)
+      const header = `Authorization: Bearer ${BOB}`
+      const rejected = (): void => {
+        const stored = readFileSync(suite.registry)
+        const before = suite.evidence(repo)
+        suite.clearTransport()
+        suite.rpc(repo, 'fetch', { remote: 'origin' }, { fail: true })
+        assert.ok(!suite.service.records().some(row => row.actor !== null))
+        assert.ok(!existsSync(suite.nativeLog))
+        assert.deepEqual(readFileSync(suite.registry), stored)
+        assert.deepEqual(suite.evidence(repo), before)
+      }
+      for (const key of [
+        'http.extraHeader',
+        `http.${suite.service.url}.extraHeader`,
+        `http.${suite.service.url}/fork/repo.git.extraHeader`,
+      ]) {
+        repo.git('config', key, header)
+        try {
+          rejected()
+        } finally {
+          repo.git('config', '--unset-all', key)
+        }
+      }
+      Object.assign(suite.env, {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: `http.${suite.service.url}.extraHeader`,
+        GIT_CONFIG_VALUE_0: header,
+      })
+      try {
+        rejected()
+      } finally {
+        for (const key of [
+          'GIT_CONFIG_COUNT',
+          'GIT_CONFIG_KEY_0',
+          'GIT_CONFIG_VALUE_0',
+        ])
+          delete suite.env[key]
+      }
+      const key = 'http.https://unrelated.invalid.extraHeader'
+      repo.git('config', key, header)
+      try {
+        const stored = readFileSync(suite.registry)
+        const configured = readFileSync(path.join(repo.root, '.git', 'config'))
+        suite.clearTransport()
+        assert.equal(suite.rpc(repo, 'fetch', { remote: 'origin' }).code, 0)
+        suite.assertActor()
+        assert.equal(repo.git('config', '--get', key).toString().trim(), header)
+        assert.deepEqual(readFileSync(suite.registry), stored)
+        assert.deepEqual(
+          readFileSync(path.join(repo.root, '.git', 'config')),
+          configured
+        )
+      } finally {
+        repo.git('config', '--unset-all', key)
+      }
+      suite.assertPrivateStorage(repo)
+    }, 90_000)
+    it('uses native effective and SSH credentials without leaking assigned credentials', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('native-credential-preservation')
+      suite.assign(repo, EFFECTIVE)
+      suite.service.update({
+        allowed: {
+          ...suite.service.control.allowed,
+          '/fork/repo.git': 'bobcase',
+        },
+      })
+      suite.clearTransport()
+      assert.equal(suite.rpc(repo, 'fetch', { remote: 'origin' }).code, 0)
+      const rows = suite.service.records().filter(row => row.actor !== null)
+      assert.ok(rows.length && rows.every(row => row.actor === 'bobcase'))
+      assert.ok(
+        suite.records(suite.nativeLog).some(row => row.action === 'get')
+      )
+      suite.assign(repo)
+      const log = path.join(suite.root, 'native-ssh.jsonl')
+      const ssh = path.join(suite.root, 'bin', 'ssh')
+      writeFileSync(
+        ssh,
+        '#!/bin/sh\nexec "$ACCOUNT_NODE" "$CREDENTIALS_SSH_FIXTURE" "$@"\n',
+        { mode: 0o700 }
+      )
+      Object.assign(suite.env, {
+        GIT_SSH: ssh,
+        GIT_SSH_VARIANT: 'ssh',
+        CREDENTIALS_SSH_FIXTURE: path.resolve(
+          'rust/tests/fixtures/native-ssh.ts'
+        ),
+        CREDENTIALS_SSH_LOG: log,
+        CREDENTIALS_SSH_REPO: path.join(
+          suite.service.projects,
+          'fork/repo.git'
+        ),
+      })
+      repo.git(
+        'remote',
+        'add',
+        'native-ssh',
+        `ssh://git@${suite.service.host}/fork/repo.git`
+      )
+      suite.clearTransport()
+      try {
+        assert.equal(suite.rpc(repo, 'fetch', { remote: 'native-ssh' }).code, 0)
+      } finally {
+        delete suite.env.GIT_SSH
+        delete suite.env.GIT_SSH_VARIANT
+      }
+      const calls = suite.records(log)
+      assert.ok(
+        calls.length &&
+          calls.every(row => row.argv_clean && row.alice_environment_clean)
+      )
+      assert.ok(!suite.service.records().some(row => row.actor !== null))
+      assert.ok(!existsSync(suite.nativeLog))
+      suite.assertPrivateStorage(repo)
+    }, 90_000)
+    it('revokes pending credential leases when account, remote, registration, or cancellation changes', async () => {
+      for (const change of ['account', 'source', 'forget', 'cancel']) {
+        suite.configure({ host: suite.service.host })
+        const repo = suite.seed(`credential-revoke-${change}`)
+        suite.assign(repo)
+        suite.clearTransport()
+        rmSync(suite.gateStarted, { force: true })
+        rmSync(suite.gateRelease, { force: true })
+        privateFile(suite.control, JSON.stringify({ gate: 'fetch' }))
+        const child = spawn(
+          BINARY,
+          ['--config', suite.registry, '-C', repo.root, 'repo', '-'],
+          { env: suite.env }
+        )
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', chunk => {
+          stdout += chunk.toString()
+        })
+        child.stderr.on('data', chunk => {
+          stderr += chunk.toString()
+        })
+        const exited = new Promise<number | null>((resolve, reject) => {
+          child.once('error', reject)
+          child.once('exit', resolve)
+        })
+        child.stdin.end(JSON.stringify({ method: 'fetch', remote: 'origin' }))
+        try {
+          const deadline = Date.now() + 25_000
+          while (!existsSync(suite.gateStarted) && Date.now() < deadline)
+            await new Promise(resolve => setTimeout(resolve, 20))
+          assert.ok(
+            existsSync(suite.gateStarted),
+            'Git did not reach the operation gate'
+          )
+          if (change === 'account') suite.assign(repo, NONE)
+          else if (change === 'source')
+            repo.git(
+              'remote',
+              'set-url',
+              'origin',
+              `${suite.service.url}/other/repo.git`
+            )
+          else if (change === 'forget')
+            suite.cli(['repositories', 'forget', repo.root])
+          else child.kill('SIGINT')
+          const stored = readFileSync(suite.registry)
+          const before = suite.evidence(repo)
+          if (change !== 'cancel') writeFileSync(suite.gateRelease, 'release')
+          const code = await Promise.race([
+            exited,
+            new Promise<never>((_, reject) => {
+              const timer = setTimeout(
+                () => reject(new Error('Credential operation did not stop')),
+                15_000
+              )
+              timer.unref()
+            }),
+          ])
+          clean(stdout)
+          clean(stderr)
+          assert.notEqual(code, 0, change)
+          assert.ok(!suite.service.records().some(row => row.actor !== null))
+          assert.ok(!existsSync(suite.nativeLog))
+          assert.deepEqual(readFileSync(suite.registry), stored)
+          assert.deepEqual(suite.evidence(repo), before)
+        } finally {
+          writeFileSync(suite.gateRelease, 'release')
+          privateFile(suite.control, '{}')
+          if (child.exitCode === null && child.signalCode === null)
+            child.kill('SIGKILL')
+        }
+        suite.assertPrivateStorage(repo)
+      }
+    }, 120_000)
+
+    it('restricts helper protocol inputs and prevents submodules borrowing the parent lease', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('credential-protocol')
+      suite.assign(repo)
+      const childPath = path.join(repo.root, 'child')
+      repo.git(
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        '-q',
+        path.join(suite.service.projects, 'fork/repo.git'),
+        'child'
+      )
+      const child = repo.at(childPath)
+      child.git(
+        'remote',
+        'set-url',
+        'origin',
+        `${suite.service.url}/fork/repo.git`
+      )
+      repo.git('add', '--all')
+      repo.git('commit', '-qm', 'submodule')
+      const control = path.join(suite.root, 'credential-probes.json')
+      const output = path.join(suite.root, 'credential-probes-result.json')
+      const base = `protocol=https\nhost=${suite.service.host}\n`
+      const valid = [
+        `${base}path=fork/repo.git\n\n`,
+        `${base}path=fork/repo\n\n`,
+        `${base}path=fork/repo.git/info/lfs\n\n`,
+        `${base}path=fork/repo.git\n\n`.replaceAll('\n', '\r\n'),
+      ]
+      const invalid = [
+        ['host-only', `${base}\n`],
+        ['other-repository', `${base}path=other/repo.git\n\n`],
+        ['repository-prefix', `${base}path=fork/repo-other.git\n\n`],
+        ['lfs-prefix', `${base}path=fork/repo.git/info/lfs-evil\n\n`],
+        [
+          'lfs-extra',
+          `${base}path=fork/repo.git/info/lfs/objects/arbitrary\n\n`,
+        ],
+        ['encoded-separator', `${base}path=fork/repo%2fother.git\n\n`],
+        ['encoded-backslash', `${base}path=fork/repo%5cother.git\n\n`],
+        ['encoded-dotdot', `${base}path=fork/%2e%2e\n\n`],
+      ]
+      const rawInvalid = [
+        [
+          'wrong-port',
+          'protocol=https\nhost=127.0.0.1:1\npath=fork/repo.git\n\n',
+        ],
+        [
+          'http',
+          `protocol=http\nhost=${suite.service.host}\npath=fork/repo.git\n\n`,
+        ],
+        ['duplicate-protocol', `protocol=https\n${valid[0]}`],
+        ['duplicate-host', `host=${suite.service.host}\n${valid[0]}`],
+        ['duplicate-path', `path=fork/repo.git\n${valid[0]}`],
+        ['carriage-return', `${base}path=fork/re\rpo.git\n\n`],
+        ['nul', `${base}path=fork/repo.git\0\n\n`],
+        ['oversize', `${base}path=${'x'.repeat(70_000)}\n\n`],
+      ]
+      privateFile(
+        control,
+        JSON.stringify({
+          valid,
+          invalid,
+          rawInvalid,
+          child: childPath,
+          output,
+          scenario: suite.scenario,
+          host: suite.service.host,
+        })
+      )
+      const hook = path.join(repo.root, '.git', 'hooks', 'pre-push')
+      writeFileSync(
+        hook,
+        '#!/bin/sh\nexec "$ACCOUNT_NODE" "$CREDENTIALS_PROBE_FIXTURE"\n',
+        { mode: 0o700 }
+      )
+      Object.assign(suite.env, {
+        CREDENTIALS_PROBE_CONTROL: control,
+        CREDENTIALS_PROBE_FIXTURE: path.resolve(
+          'rust/tests/fixtures/credential-probe.ts'
+        ),
+      })
+      const stored = readFileSync(suite.registry)
+      const globalBefore = readFileSync(suite.globalConfig)
+      suite.clearTransport()
+      const result = suite.rpc(repo, 'push', {
+        remote: 'origin',
+        branch: 'main',
+      })
+      const rows: Array<{ ok: boolean }> = existsSync(output)
+        ? JSON.parse(readFileSync(output, 'utf8'))
+        : []
+      assert.equal(result.code, 0)
+      assert.ok(rows.length && rows.every(row => row.ok), JSON.stringify(rows))
+      assert.deepEqual(readFileSync(suite.registry), stored)
+      assert.deepEqual(readFileSync(suite.globalConfig), globalBefore)
+      suite.assertActor()
+      suite.assertPrivateStorage(repo)
+      suite.cli(['repositories', 'add', childPath])
+      suite.assign(child, OTHER)
+      suite.service.update({
+        allowed: {
+          ...suite.service.control.allowed,
+          '/fork/repo.git': 'bobcase',
+        },
+      })
+      suite.clearTransport()
+      assert.equal(suite.rpc(child, 'fetch', { remote: 'origin' }).code, 0)
+      suite.assertActor('bobcase')
+    }, 120_000)
+
+    it('validates staged and committed LFS configuration without changing the index', () => {
+      const bad = `[lfs]\n url = https://embedded:${ALICE}@${suite.service.host}/fork/repo.git/info/lfs\n`
+      const safe = `[lfs]\n url = ${suite.service.url}/fork/repo.git/info/lfs\n`
+      for (const working of [false, true])
+        for (const source of ['index', 'head']) {
+          suite.configure({ host: suite.service.host })
+          const repo = suite.seed(`credential-lfsconfig-${working}-${source}`)
+          suite.assign(repo)
+          const configuration = path.join(repo.root, '.lfsconfig')
+          writeFileSync(configuration, bad)
+          repo.git('add', '--', '.lfsconfig')
+          if (source === 'head') {
+            repo.git('commit', '-qm', 'malicious fixture LFS configuration')
+            repo.git('rm', '--cached', '-q', '--', '.lfsconfig')
+          }
+          if (working) writeFileSync(configuration, safe)
+          else rmSync(configuration)
+          const stored = readFileSync(suite.registry)
+          const before = suite.evidence(repo)
+          const index = readFileSync(path.join(repo.root, '.git', 'index'))
+          suite.clearTransport()
+          if (working) {
+            assert.equal(suite.rpc(repo, 'fetch', { remote: 'origin' }).code, 0)
+            suite.assertActor()
+            assert.equal(readFileSync(configuration, 'utf8'), safe)
+            assert.deepEqual(
+              readFileSync(path.join(repo.root, '.git', 'index')),
+              index
+            )
+            suite.assertPrivateStorage(repo)
+          } else {
+            suite.rpc(repo, 'fetch', { remote: 'origin' }, { fail: true })
+            assert.ok(!suite.service.records().some(row => row.actor !== null))
+            assert.ok(!existsSync(suite.nativeLog))
+            assert.deepEqual(suite.evidence(repo), before)
+            assert.ok(!existsSync(configuration))
+          }
+          assert.deepEqual(readFileSync(suite.registry), stored)
+        }
+    }, 120_000)
+  }
+)

@@ -628,11 +628,15 @@ impl Repository {
             Operation::CopilotCloseSession { session_id } => {
                 return self.copilot_close_session(&session_id).await;
             }
-            Operation::CopilotCommitDiffDetail { path } => {
-                return self.copilot_commit_diff_detail(path).await;
+            Operation::CopilotCommitDiffDetail {
+                path,
+                original_path,
+            } => {
+                return self.copilot_commit_diff_detail(path, original_path).await;
             }
             Operation::CopilotGenerateCommitMessage {
                 paths,
+                remove_paths,
                 system_prompt,
                 source,
                 partial_selections,
@@ -642,6 +646,8 @@ impl Repository {
                 model,
                 reasoning_effort,
                 timeout_ms,
+                provider,
+                expected_head,
             } => {
                 return self
                     .copilot_generate_commit(
@@ -651,11 +657,14 @@ impl Repository {
                         partial_selections,
                         amend_head,
                         copilot_bridge::CopilotCommitOptions {
+                            remove_paths,
+                            provider: provider.map(|value| *value),
+                            expected_head: expected_head.map(|value| *value),
                             model,
                             reasoning_effort,
                             timeout_ms,
                             rule_descriptions,
-                            account,
+                            account: account.map(|value| *value),
                         },
                     )
                     .await;

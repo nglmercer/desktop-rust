@@ -9,7 +9,7 @@ import {
   AssistedCommitError,
   readAssistedCommitHead,
 } from '../git/assisted-commit'
-import { AssistedCommitSelection } from './selection'
+import { AssistedCommitSelection, sameSelectionDiff } from './selection'
 import { AssistedCommitState } from './state'
 import { IAssistedCommitRun } from './types'
 import { verifyRepositoryGitSpawnFence } from '../git/repository-operation'
@@ -112,6 +112,7 @@ export async function updateWorkingDirectorySelectionDiff(
       DiffSelectionType.Partial && !engineOwnsSelection
       ? {
           text: basis?.text ?? null,
+          displayedDiff: basis?.displayedDiff,
           sourceSelectionType: DiffSelectionType.Partial,
         }
       : undefined)
@@ -145,7 +146,10 @@ export async function updateWorkingDirectorySelectionDiff(
         canonical.kind !== DiffType.LargeText) ||
       (diff.kind !== DiffType.Text && diff.kind !== DiffType.LargeText) ||
       canonical.text !== retainedBasis.text ||
-      diff.text !== retainedBasis.text
+      diff.text !== retainedBasis.text ||
+      (retainedBasis.displayedDiff !== undefined &&
+        (!sameSelectionDiff(retainedBasis.displayedDiff, canonical) ||
+          !sameSelectionDiff(retainedBasis.displayedDiff, diff)))
     ) {
       return {
         kind: 'invalid',
@@ -170,7 +174,10 @@ export async function updateWorkingDirectorySelectionDiff(
           canonical.kind !== DiffType.LargeText) ||
         (diff.kind !== DiffType.Text && diff.kind !== DiffType.LargeText) ||
         canonical.text !== basis.text ||
-        diff.text !== basis.text
+        diff.text !== basis.text ||
+        (basis.displayedDiff !== undefined &&
+          (!sameSelectionDiff(basis.displayedDiff, canonical) ||
+            !sameSelectionDiff(basis.displayedDiff, diff)))
       ) {
         return {
           kind: 'invalid',

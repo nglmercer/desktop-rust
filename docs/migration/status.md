@@ -39,8 +39,8 @@
 
 | Capacidad | Consumidor | Backend actual | Destino | Contrato | Estado | Evidencia | Pendiente |
 |---|---|---|---|---|---|---|---|
-| Autoridad de cuentas, asignación por repo | `accounts-store`, `sign-in-store`, `token-store`, `credential-sessions` | `core/src/accounts.rs`, `git_credentials/*`, `github*.rs`; shell `SecureStore`/`storage/*` | `core/src/accounts.rs` unificado | identidad endpoint/login/ID, `basis`, OAuth/Enterprise/`gh`/device-flow | **implementado** parcial | `repository_accounts.py` (offline), `git_credentials.py`, `github.py` PASS | `SecretStore` nativo por plataforma, imágenes autenticadas sin token a React, broker Git+API único, aislamiento por identidad |
-| Proveedor `gh` vs `GitHub API` | Git ops, PR/issues | `core/src/github.rs`, `github_api.rs`, `execute_github` vs `api/client.rs` + `http.ts` | `core/src/github*` + broker | cancelación/timeout/proxy/TLS/paginación/rate-limit | **implementado** parcial | `github.py`, `github_cli.py`, `github_create.py` suites offline | Migrar `http.ts`/`api.ts` (incl. Copilot) a Rust |
+| Autoridad de cuentas, asignación por repo | `accounts-store`, `sign-in-store`, `token-store`, `credential-sessions` | `core/src/accounts.rs`, `git_credentials/*`, `github*.rs`; shell `SecureStore`/`storage/*` | `core/src/accounts.rs` unificado | identidad endpoint/login/ID, `basis`, OAuth/Enterprise/`gh`/device-flow | **implementado** parcial | `repository-accounts.test.ts` y `account_raw_paths.rs` (offline), `git_credentials.py` | `SecretStore` nativo por plataforma, imágenes autenticadas sin token a React, broker Git+API único, aislamiento por identidad |
+| Proveedor `gh` vs `GitHub API` | Git ops, PR/issues | `core/src/github.rs`, `github_api.rs`, `execute_github` vs `api/client.rs` + `http.ts` | `core/src/github*` + broker | cancelación/timeout/proxy/TLS/paginación/rate-limit | **implementado** parcial | `github-cli.test.ts`, `github-adapter.test.ts`, `github-create.test.ts` (offline) | Migrar `http.ts`/`api.ts` (incl. Copilot) a Rust |
 
 ## Familias de dominio (Fase 4) — resumen
 
@@ -103,4 +103,6 @@ python3 rust/tests/copilot_backend.py PASS  (Fase 5 — probe/session/message/co
 python3 rust/tests/lfs_operations.py — bloqueado sin git-lfs local (CI lo instala)
 ```
 
-Para el resto de suites ver `.github/workflows/rust.yml` (41 scripts `rust/tests/*.py` headless + `app_smoke.rs` GUI).
+Las rutas Python del bloque son evidencia histórica; varias ya fueron
+reemplazadas. Para las verificaciones actuales, incluidas las dos suites Python
+restantes y `app_smoke.rs` para GUI, ver `.github/workflows/rust.yml`.

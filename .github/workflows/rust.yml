@@ -140,10 +140,13 @@ jobs:
         run: git lfs version
       - name: Check repository and GitHub services offline
         run: |
-          python3 rust/tests/repository_accounts.py
+          DESKTOP_TEST_BRANCH_RULES=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/branch-name-rules.test.ts
+          DESKTOP_TEST_ACCOUNTS=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/repository-accounts.test.ts
+          DESKTOP_TEST_PR_CREATE=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/github-create.test.ts
+          node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/git-http-fixture.test.ts
+          DESKTOP_TEST_GIT_CREDS=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/git-credentials.test.ts
+          DESKTOP_TEST_GIT_CREDS=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/git-credential-policy.test.ts
           python3 rust/tests/git_credentials.py
-          python3 rust/tests/branch_name_rules.py
-          python3 rust/tests/github_create.py
           python3 rust/tests/github_checkout_tracking.py
 
   native:

@@ -44,20 +44,34 @@ export interface ICopilotAccount {
 }
 
 export interface ICopilotCommitOptions {
+  readonly remove_paths?: ReadonlyArray<BackendGitPath>
   readonly paths?: ReadonlyArray<BackendGitPath>
   readonly system_prompt?: string
   readonly source?: 'staged' | 'working_tree'
   readonly partial_selections?: ReadonlyArray<{
     readonly path: BackendGitPath
+    readonly original_path?: BackendGitPath
     readonly basis: string
     readonly lines: ReadonlyArray<number>
   }>
   readonly amend_head?: string
+  readonly expected_head?: {
+    readonly ref: string | null
+    readonly sha: string | null
+  }
   readonly rule_descriptions?: ReadonlyArray<string>
   readonly account?: ICopilotAccount
   readonly model?: string
   readonly reasoning_effort?: 'low' | 'medium' | 'high' | 'xhigh'
   readonly timeout_ms?: number
+  readonly provider?: {
+    readonly type: 'openai' | 'azure' | 'anthropic'
+    readonly baseUrl: string
+    readonly wireApi?: 'completions' | 'responses'
+    readonly apiKey?: string
+    readonly bearerToken?: string
+    readonly azure?: { readonly apiVersion: string }
+  }
 }
 
 export interface ICopilotCommitDiff {
@@ -1443,12 +1457,16 @@ export class BackendClient {
   async copilotCommitDiffForRepository(
     repositoryPath: string,
     path: BackendGitPath,
-    options: BackendRequestOptions = {}
+    options: BackendRequestOptions = {},
+    originalPath?: BackendGitPath
   ): Promise<ICopilotCommitDiff> {
     const result = await this.repositoryCopilot(
       repositoryPath,
       'copilot_commit_diff_detail',
-      { path },
+      {
+        path,
+        ...(originalPath === undefined ? {} : { original_path: originalPath }),
+      },
       options
     )
     if (!isCopilotCommitDiff(result)) {
@@ -1504,15 +1522,18 @@ export class BackendClient {
       'copilot_generate_commit_message',
       {
         paths: opts.paths ?? [],
+        remove_paths: opts.remove_paths,
         system_prompt: opts.system_prompt,
         source: opts.source,
         partial_selections: opts.partial_selections,
         amend_head: opts.amend_head,
+        expected_head: opts.expected_head,
         rule_descriptions: opts.rule_descriptions,
         account: opts.account,
         model: opts.model,
         reasoning_effort: opts.reasoning_effort,
         timeout_ms: opts.timeout_ms,
+        provider: opts.provider,
       },
       requestOptions
     )

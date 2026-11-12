@@ -197,16 +197,29 @@ describe('backend Copilot session cleanup', () => {
     const client = new BackendClient()
     await client.copilotGenerateForRepository('/repo-a', {
       paths: ['selected.txt'],
+      remove_paths: ['old-name.txt'],
       source: 'working_tree',
       partial_selections: [
-        { path: 'partial.txt', basis: 'reviewed', lines: [1, 2] },
+        {
+          path: 'partial.txt',
+          original_path: 'old-partial.txt',
+          basis: 'reviewed',
+          lines: [1, 2],
+        },
       ],
       amend_head: 'abc123',
+      expected_head: { ref: 'refs/heads/main', sha: 'abc123' },
       rule_descriptions: ['Include an issue number'],
       account: { host: 'github.com', login: 'AliceCase', id: 42 },
       model: 'selected-model',
       reasoning_effort: 'high',
       timeout_ms: 10000,
+      provider: {
+        type: 'azure',
+        baseUrl: 'https://example.invalid',
+        bearerToken: 'synthetic-provider-token',
+        azure: { apiVersion: '2025-01-01' },
+      },
     })
     expect(invoke).toHaveBeenCalledWith(
       'desktop.backend.copilot',
@@ -215,16 +228,29 @@ describe('backend Copilot session cleanup', () => {
         operation: {
           method: 'copilot_generate_commit_message',
           paths: ['selected.txt'],
+          remove_paths: ['old-name.txt'],
           source: 'working_tree',
           partial_selections: [
-            { path: 'partial.txt', basis: 'reviewed', lines: [1, 2] },
+            {
+              path: 'partial.txt',
+              original_path: 'old-partial.txt',
+              basis: 'reviewed',
+              lines: [1, 2],
+            },
           ],
           amend_head: 'abc123',
+          expected_head: { ref: 'refs/heads/main', sha: 'abc123' },
           rule_descriptions: ['Include an issue number'],
           account: { host: 'github.com', login: 'AliceCase', id: 42 },
           model: 'selected-model',
           reasoning_effort: 'high',
           timeout_ms: 10000,
+          provider: {
+            type: 'azure',
+            baseUrl: 'https://example.invalid',
+            bearerToken: 'synthetic-provider-token',
+            azure: { apiVersion: '2025-01-01' },
+          },
         },
         request_id: expect.any(String),
         deadline_ms: 170000,
@@ -246,7 +272,12 @@ describe('backend Copilot session cleanup', () => {
     })
     const client = new BackendClient()
     await expect(
-      client.copilotCommitDiffForRepository('/repo-a', { bytes: [102, 255] })
+      client.copilotCommitDiffForRepository(
+        '/repo-a',
+        { bytes: [102, 255] },
+        {},
+        'old-file'
+      )
     ).resolves.toMatchObject({ basis: 'reviewed' })
     expect(invoke).toHaveBeenCalledWith(
       'desktop.backend.copilot',
@@ -255,6 +286,7 @@ describe('backend Copilot session cleanup', () => {
         operation: {
           method: 'copilot_commit_diff_detail',
           path: { bytes: [102, 255] },
+          original_path: 'old-file',
         },
         request_id: expect.any(String),
         deadline_ms: 170000,

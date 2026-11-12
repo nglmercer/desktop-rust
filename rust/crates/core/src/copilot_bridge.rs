@@ -9,11 +9,17 @@ use tokio::io::AsyncReadExt;
 use crate::Repository;
 use crate::cancellation::Cancellation;
 use crate::copilot::{CopilotCapability, RuntimeInfo, probe};
-use crate::protocol::{CopilotAccount, CopilotDiffSource, CopilotLineSelection, GitPath};
+use crate::protocol::{
+    CopilotAccount, CopilotDiffSource, CopilotExpectedHead, CopilotLineSelection, CopilotProvider,
+    GitPath,
+};
 
 pub(crate) const MAX_NATIVE_SESSIONS: usize = 32;
 
 pub(crate) struct CopilotCommitOptions {
+    pub remove_paths: Vec<GitPath>,
+    pub provider: Option<CopilotProvider>,
+    pub expected_head: Option<CopilotExpectedHead>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub timeout_ms: Option<u64>,
@@ -25,6 +31,67 @@ pub(crate) struct CopilotCommitOptions {
 pub(crate) struct CopilotSessionContext<'a> {
     pub system_message: Option<&'a str>,
     pub host: Option<&'a str>,
+    pub provider: Option<&'a CopilotProvider>,
+}
+
+fn validate_provider(provider: &CopilotProvider) -> Result<()> {
+    anyhow::ensure!(
+        matches!(
+            provider.provider_type.as_str(),
+            "openai" | "azure" | "anthropic"
+        ),
+        "invalid Copilot provider type"
+    );
+    anyhow::ensure!(
+        provider
+            .wire_api
+            .as_deref()
+            .is_none_or(|api| matches!(api, "completions" | "responses")),
+        "invalid Copilot provider wire API"
+    );
+    anyhow::ensure!(
+        provider.base_url.len() <= 4096 && !provider.base_url.chars().any(char::is_control),
+        "invalid Copilot provider endpoint"
+    );
+    let endpoint = url::Url::parse(&provider.base_url)
+        .map_err(|_| anyhow::anyhow!("invalid Copilot provider endpoint"))?;
+    let local = match endpoint.host() {
+        Some(url::Host::Domain(host)) => host == "localhost",
+        Some(url::Host::Ipv4(host)) => host.is_loopback(),
+        Some(url::Host::Ipv6(host)) => host.is_loopback(),
+        None => false,
+    };
+    anyhow::ensure!(
+        endpoint.scheme() == "https" && endpoint.host().is_some()
+            || endpoint.scheme() == "http" && local,
+        "Copilot provider endpoint must use HTTPS or local HTTP"
+    );
+    anyhow::ensure!(
+        provider.api_key.is_none() || provider.bearer_token.is_none(),
+        "choose only one Copilot provider credential"
+    );
+    for secret in [
+        provider.api_key.as_deref(),
+        provider.bearer_token.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        anyhow::ensure!(
+            !secret.is_empty() && secret.len() <= 16_384 && !secret.chars().any(char::is_control),
+            "invalid Copilot provider credential"
+        );
+    }
+    if let Some(azure) = &provider.azure {
+        anyhow::ensure!(
+            provider.provider_type == "azure"
+                && !azure.api_version.is_empty()
+                && azure.api_version.len() <= 256
+                && !azure.api_version.chars().any(char::is_control),
+            "invalid Copilot provider Azure configuration"
+        );
+    }
+    Ok(())
 }
 
 fn validate_model_options(model: Option<&str>, effort: Option<&str>) -> Result<()> {
@@ -266,8 +333,14 @@ impl Repository {
         reasoning_effort: Option<String>,
         account: Option<CopilotAccount>,
     ) -> Result<Value> {
-        self.copilot_create_session_with_system(model, reasoning_effort, None, account.as_ref())
-            .await
+        self.copilot_create_session_with_system(
+            model,
+            reasoning_effort,
+            None,
+            account.as_ref(),
+            None,
+        )
+        .await
     }
 
     async fn copilot_create_session_with_system(
@@ -276,6 +349,7 @@ impl Repository {
         reasoning_effort: Option<String>,
         system_message: Option<&str>,
         account: Option<&CopilotAccount>,
+        provider: Option<&CopilotProvider>,
     ) -> Result<Value> {
         Cancellation::current().check()?;
         validate_model_options(model.as_deref(), reasoning_effort.as_deref())?;
@@ -297,6 +371,7 @@ impl Repository {
                 CopilotSessionContext {
                     system_message,
                     host: host.as_deref(),
+                    provider,
                 },
             )
             .await?;
@@ -343,6 +418,7 @@ impl Repository {
                 commit_system_message: context.system_message,
                 account_basis: account_basis.to_owned(),
                 host: context.host,
+                provider: context.provider,
             },
             permit,
         )
@@ -461,6 +537,9 @@ impl Repository {
     ) -> Result<Value> {
         Cancellation::current().check()?;
         let CopilotCommitOptions {
+            remove_paths,
+            provider,
+            expected_head,
             model,
             reasoning_effort,
             timeout_ms,
@@ -468,6 +547,9 @@ impl Repository {
             account,
         } = options;
         validate_model_options(model.as_deref(), reasoning_effort.as_deref())?;
+        if let Some(provider) = &provider {
+            validate_provider(provider)?;
+        }
         let rules = commit_rule_descriptions(rule_descriptions)?;
         anyhow::ensure!(
             system_prompt
@@ -494,8 +576,11 @@ impl Repository {
         let (diff, basis) = match source {
             CopilotDiffSource::Staged => {
                 anyhow::ensure!(
-                    partial_selections.is_empty() && amend_head.is_none(),
-                    "line selection and amend require the working-tree source"
+                    partial_selections.is_empty()
+                        && amend_head.is_none()
+                        && remove_paths.is_empty()
+                        && expected_head.is_none(),
+                    "line selection, removed paths and amend require the working-tree source"
                 );
                 let mut command = crate::args(&[
                     "diff",
@@ -513,8 +598,14 @@ impl Repository {
                 (result.stdout, "staged_diff")
             }
             CopilotDiffSource::WorkingTree => (
-                self.selected_worktree_patch(paths, partial_selections, amend_head.as_deref())
-                    .await?,
+                self.selected_worktree_patch(
+                    paths,
+                    remove_paths,
+                    partial_selections,
+                    amend_head.as_deref(),
+                    expected_head.as_ref(),
+                )
+                .await?,
                 "working_tree_diff",
             ),
         };
@@ -560,6 +651,7 @@ impl Repository {
                 reasoning_effort,
                 Some(&system),
                 account.as_ref(),
+                provider.as_ref(),
             )
             .await?;
         let session_id = handle
@@ -593,6 +685,41 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
+
+    #[test]
+    fn custom_provider_validation_limits_plaintext_and_redacts_credentials() {
+        let mut provider: CopilotProvider = serde_json::from_value(serde_json::json!({
+            "type":"openai", "baseUrl":"https://provider.example/v1", "apiKey":"private-provider-key"
+        })).unwrap();
+        assert!(validate_provider(&provider).is_ok());
+        assert!(!format!("{provider:?}").contains("private-provider-key"));
+        for url in [
+            "http://localhost:1234/v1",
+            "http://127.1.2.3:8080",
+            "http://[::1]:8080",
+        ] {
+            provider.base_url = url.into();
+            assert!(validate_provider(&provider).is_ok(), "{url}");
+        }
+        for url in ["http://remote.example/v1", "https://", "file:///etc/passwd"] {
+            provider.base_url = url.into();
+            assert!(validate_provider(&provider).is_err(), "{url}");
+        }
+        provider.base_url = "https://provider.example".into();
+        provider.bearer_token = Some("second-secret".into());
+        assert!(
+            !validate_provider(&provider)
+                .unwrap_err()
+                .to_string()
+                .contains("secret")
+        );
+        assert!(
+            serde_json::from_value::<CopilotProvider>(serde_json::json!({
+                "type":"openai", "baseUrl":"https://example.com", "apiKeyCommand":"not allowed"
+            }))
+            .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn host_selected_runtime_is_used_for_repository_probe() {

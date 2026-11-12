@@ -73,6 +73,7 @@ describe('assisted selection ownership', () => {
     const selections = new AssistedCommitSelection(cache, () => false)
     const independent = new AssistedCommitSelection(cache, () => false)
     selections.recordLineSelection(repository, selected, mask)
+    assert.strictEqual(selections.getBasis(mask)?.displayedDiff, diff)
     const beforeHead = await tip(repository)
     const beforeIndex = await readFile(await indexPath(repository))
     const versions = await selections.verifyRequested(repository, [selected])

@@ -22,6 +22,8 @@ pub enum CopilotDiffSource {
 #[serde(deny_unknown_fields)]
 pub struct CopilotLineSelection {
     pub path: GitPath,
+    #[serde(default)]
+    pub original_path: Option<GitPath>,
     pub basis: String,
     pub lines: Vec<usize>,
 }
@@ -33,6 +35,44 @@ pub struct CopilotAccount {
     pub host: String,
     pub login: String,
     pub id: u64,
+}
+
+/// Branch and commit retained with a restored selection.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CopilotExpectedHead {
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    pub sha: Option<String>,
+}
+
+/// Static custom-provider settings. Credentials must not appear in Debug output.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CopilotProvider {
+    #[serde(rename = "type")]
+    pub provider_type: String,
+    pub base_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wire_api: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearer_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub azure: Option<CopilotProviderAzure>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CopilotProviderAzure {
+    pub api_version: String,
+}
+
+impl std::fmt::Debug for CopilotProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CopilotProvider([redacted])")
+    }
 }
 
 /// Inputs explicitly reviewed before publishing a local repository.
@@ -522,10 +562,14 @@ pub enum Operation {
     },
     CopilotCommitDiffDetail {
         path: GitPath,
+        #[serde(default)]
+        original_path: Option<GitPath>,
     },
     CopilotGenerateCommitMessage {
         #[serde(default)]
         paths: Vec<GitPath>,
+        #[serde(default)]
+        remove_paths: Vec<GitPath>,
         #[serde(default)]
         system_prompt: Option<String>,
         #[serde(default)]
@@ -537,13 +581,17 @@ pub enum Operation {
         #[serde(default)]
         rule_descriptions: Vec<String>,
         #[serde(default)]
-        account: Option<CopilotAccount>,
+        account: Option<Box<CopilotAccount>>,
         #[serde(default)]
         model: Option<String>,
         #[serde(default)]
         reasoning_effort: Option<String>,
         #[serde(default)]
         timeout_ms: Option<u64>,
+        #[serde(default)]
+        provider: Option<Box<CopilotProvider>>,
+        #[serde(default)]
+        expected_head: Option<Box<CopilotExpectedHead>>,
     },
 }
 

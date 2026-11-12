@@ -180,13 +180,25 @@ impl Repository {
     }
 
     /// Preview selectable changes against HEAD regardless of the live index.
-    pub(crate) async fn copilot_commit_diff_detail(&self, path: GitPath) -> Result<Value> {
+    pub(crate) async fn copilot_commit_diff_detail(
+        &self,
+        path: GitPath,
+        original_path: Option<GitPath>,
+    ) -> Result<Value> {
         let path = normalized_selection_path(path)?;
+        let original_path = original_path.map(normalized_selection_path).transpose()?;
         let scratch = Scratch::new(&self.index_path().await?)?;
         let (head, branch) = self.snapshot_head_index(&scratch).await?;
         let original = read_index(&scratch.alternate_index)?;
         let (view, _, _) = self
-            .capture_diff(&path, false, &original, &scratch, true)
+            .capture_diff(
+                &path,
+                false,
+                &original,
+                &scratch,
+                true,
+                original_path.as_deref(),
+            )
             .await?;
         self.ensure_snapshot_head(&head, &branch).await?;
         Ok(serde_json::to_value(view)?)
@@ -197,14 +209,34 @@ impl Repository {
     pub(crate) async fn selected_worktree_patch(
         &self,
         paths: Vec<GitPath>,
+        remove_paths: Vec<GitPath>,
         partial: Vec<crate::CopilotLineSelection>,
         amend_head: Option<&str>,
+        expected_head: Option<&crate::protocol::CopilotExpectedHead>,
     ) -> Result<Vec<u8>> {
         anyhow::ensure!(
-            !paths.is_empty() || !partial.is_empty() || amend_head.is_some(),
+            !paths.is_empty()
+                || !remove_paths.is_empty()
+                || !partial.is_empty()
+                || amend_head.is_some(),
             "select at least one working-tree file"
         );
         let mut path_bytes = Vec::new();
+        let mut remove_bytes = Vec::new();
+        let mut removed_names = HashSet::new();
+        for path in remove_paths {
+            let path = normalized_selection_path(path)?;
+            anyhow::ensure!(
+                removed_names.insert(path.as_encoded_bytes().to_vec()),
+                "removed paths must not repeat"
+            );
+            remove_bytes.extend_from_slice(path.as_encoded_bytes());
+            remove_bytes.push(0);
+            anyhow::ensure!(
+                remove_bytes.len() <= 1024 * 1024,
+                "removed paths are too large"
+            );
+        }
         let mut names = HashSet::new();
         for path in paths {
             let path = normalized_selection_path(path)?;
@@ -228,6 +260,18 @@ impl Repository {
         }
         let scratch = Scratch::new(&self.index_path().await?)?;
         let (head, branch) = self.snapshot_head_index(&scratch).await?;
+        if let Some(expected) = expected_head {
+            let oid = (head.code == 0)
+                .then(|| std::str::from_utf8(&head.stdout).map(str::trim))
+                .transpose()?;
+            let reference = (branch.code == 0)
+                .then(|| std::str::from_utf8(&branch.stdout).map(str::trim))
+                .transpose()?;
+            anyhow::ensure!(
+                expected.sha.as_deref() == oid && expected.reference.as_deref() == reference,
+                "HEAD or branch changed since selection was restored; review selected changes"
+            );
+        }
         let head_oid = std::str::from_utf8(&head.stdout)?.trim();
         let parent = if let Some(expected) = amend_head {
             anyhow::ensure!(
@@ -249,28 +293,70 @@ impl Repository {
         };
         let original = read_index(&scratch.alternate_index)?;
         let mut instructions = Vec::new();
-        for selection in partial {
-            let path = normalized_selection_path(selection.path)?;
-            anyhow::ensure!(
-                names.insert(path.as_encoded_bytes().to_vec()),
-                "selected paths must not overlap"
-            );
-            anyhow::ensure!(
-                !selection.lines.is_empty(),
-                "select at least one changed line"
-            );
+        let partial = partial
+            .into_iter()
+            .map(|selection| {
+                let path = normalized_selection_path(selection.path)?;
+                anyhow::ensure!(
+                    names.insert(path.as_encoded_bytes().to_vec()),
+                    "selected paths must not overlap"
+                );
+                Ok((
+                    path,
+                    selection
+                        .original_path
+                        .map(normalized_selection_path)
+                        .transpose()?,
+                    selection.basis,
+                    selection.lines,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let partial_names: HashSet<_> = partial
+            .iter()
+            .map(|(path, _, _, _)| path.as_encoded_bytes().to_vec())
+            .collect();
+        let mut rename_sources = HashSet::new();
+        for (path, original_path, basis, lines) in partial {
+            if let Some(source) = original_path.as_deref() {
+                anyhow::ensure!(
+                    !partial_names.contains(source.as_encoded_bytes())
+                        && rename_sources.insert(source.as_encoded_bytes().to_vec()),
+                    "rename source overlaps another selection"
+                );
+                // A recreated source is excluded unless it was selected as a
+                // separate file. Never leak it into the generated prompt.
+                if !names.contains(source.as_encoded_bytes())
+                    && removed_names.insert(source.as_encoded_bytes().to_vec())
+                {
+                    remove_bytes.extend_from_slice(source.as_encoded_bytes());
+                    remove_bytes.push(0);
+                    anyhow::ensure!(
+                        remove_bytes.len() <= 1024 * 1024,
+                        "removed paths are too large"
+                    );
+                }
+            }
+            anyhow::ensure!(!lines.is_empty(), "select at least one changed line");
             let (view, before, after) = self
-                .capture_diff(&path, false, &original, &scratch, true)
+                .capture_diff(
+                    &path,
+                    false,
+                    &original,
+                    &scratch,
+                    true,
+                    original_path.as_deref(),
+                )
                 .await?;
             anyhow::ensure!(
                 view.can_select,
                 "This diff does not support line selection; use whole-file staging"
             );
             anyhow::ensure!(
-                view.basis == selection.basis,
+                view.basis == basis,
                 "File or HEAD changed; reload the diff and select lines again"
             );
-            let selected: HashSet<_> = selection.lines.into_iter().collect();
+            let selected: HashSet<_> = lines.into_iter().collect();
             let valid: HashSet<_> = view
                 .hunks
                 .iter()
@@ -312,6 +398,19 @@ impl Repository {
             anyhow::ensure!(
                 instructions.len() <= 1024 * 1024,
                 "selected paths are too large"
+            );
+        }
+        if !remove_bytes.is_empty() {
+            let removed = process::run_git(
+                &self.path,
+                &args(&["update-index", "--force-remove", "-z", "--stdin"]),
+                Some(remove_bytes),
+                Some(&scratch.alternate_index),
+            )
+            .await?;
+            anyhow::ensure!(
+                removed.code == 0,
+                "cannot snapshot removed working-tree files"
             );
         }
         if !path_bytes.is_empty() {
@@ -370,7 +469,7 @@ impl Repository {
         let scratch = Scratch::new(&self.index_path().await?)?;
         let index_before = read_index(&scratch.index_path)?;
         let (view, _, _) = self
-            .capture_diff(&path, staged, &index_before, &scratch, false)
+            .capture_diff(&path, staged, &index_before, &scratch, false, None)
             .await?;
         if read_index(&scratch.index_path)? != index_before {
             bail!("Index changed while loading diff; reload the file");
@@ -394,7 +493,7 @@ impl Repository {
         let original = read_index(&index_path)?;
         let scratch = Scratch::new(&index_path)?;
         let (view, before, after) = self
-            .capture_diff(&path, staged, &original, &scratch, false)
+            .capture_diff(&path, staged, &original, &scratch, false, None)
             .await?;
         if !view.can_select {
             bail!("This diff does not support line selection; use whole-file staging");
@@ -481,7 +580,7 @@ impl Repository {
         let original = read_index(&index_path)?;
         let scratch = Scratch::new(&index_path)?;
         let (view, before, after) = self
-            .capture_diff(path, false, &original, &scratch, false)
+            .capture_diff(path, false, &original, &scratch, false, None)
             .await?;
         if view.basis != basis {
             bail!("File, attributes, or index changed; reload the diff");
@@ -616,6 +715,7 @@ impl Repository {
         original_index: &Option<Vec<u8>>,
         scratch: &Scratch,
         head_index: bool,
+        original_path: Option<&OsStr>,
     ) -> Result<(View, Side, Side)> {
         // ls-files excludes ignored metadata and traversals through symlink directories.
         let mut allowed = args(&[
@@ -643,7 +743,19 @@ impl Repository {
                 head_index.then_some(scratch.alternate_index.as_path()),
             )
             .await?;
-        let mut before = if staged {
+        let mut before = if let Some(source) = original_path {
+            anyhow::ensure!(
+                head_index && !staged && source != path,
+                "invalid rename source"
+            );
+            anyhow::ensure!(
+                !self.head_side(path).await?.exists(),
+                "rename destination already exists in HEAD"
+            );
+            let side = self.head_side(source).await?;
+            anyhow::ensure!(side.exists(), "rename source is not tracked in HEAD");
+            side
+        } else if staged {
             let renamed = self
                 .run(&args(&[
                     "diff",
@@ -767,6 +879,7 @@ impl Repository {
             attributes.stdout.as_slice(),
             conversion.stdout.as_slice(),
             path.as_encoded_bytes(),
+            original_path.map_or(b"".as_slice(), OsStr::as_encoded_bytes),
             &[u8::from(staged)],
             original_index.as_deref().unwrap_or_default(),
             before.bytes.as_slice(),
@@ -1623,25 +1736,34 @@ mod tests {
         let index = fs::read(root.join(".git/index")).unwrap();
         let repo = Repository::open(&root).await.unwrap();
         let patch = repo
-            .selected_worktree_patch(vec![GitPath::Text("selected".into())], vec![], None)
+            .selected_worktree_patch(
+                vec![GitPath::Text("selected".into())],
+                vec![],
+                vec![],
+                None,
+                None,
+            )
             .await
             .unwrap();
         let patch = String::from_utf8(patch).unwrap();
         assert!(patch.contains("+selected content"));
         assert!(!patch.contains("unrelated staged content"));
         let preview = repo
-            .copilot_commit_diff_detail(GitPath::Text("selected".into()))
+            .copilot_commit_diff_detail(GitPath::Text("selected".into()), None)
             .await
             .unwrap();
         let first_line = preview["hunks"][0]["lines"][0]["id"].as_u64().unwrap() as usize;
         let partial = repo
             .selected_worktree_patch(
                 vec![],
+                vec![],
                 vec![crate::CopilotLineSelection {
                     path: GitPath::Text("selected".into()),
+                    original_path: None,
                     basis: preview["basis"].as_str().unwrap().to_owned(),
                     lines: vec![first_line],
                 }],
+                None,
                 None,
             )
             .await
@@ -1649,6 +1771,180 @@ mod tests {
         let partial = String::from_utf8(partial).unwrap();
         assert!(partial.contains("+selected content"));
         assert!(!partial.contains("excluded content"));
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn selected_rename_removes_old_path_even_if_it_was_recreated() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-selected-rename-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        fs::write(root.join("old"), b"original\n").unwrap();
+        git(&["add", "--", "old"]);
+        git(&["commit", "-qm", "initial"]);
+        git(&["mv", "--", "old", "new"]);
+        fs::write(root.join("old"), b"replacement\n").unwrap();
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let output = |arguments: &[&str]| {
+            let result = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(result.status.success());
+            String::from_utf8(result.stdout).unwrap().trim().to_owned()
+        };
+        let expected = crate::protocol::CopilotExpectedHead {
+            reference: Some(output(&["symbolic-ref", "HEAD"])),
+            sha: Some(output(&["rev-parse", "HEAD"])),
+        };
+        let other_branch = crate::protocol::CopilotExpectedHead {
+            reference: Some("refs/heads/other".into()),
+            sha: expected.sha.clone(),
+        };
+        assert!(
+            repo.selected_worktree_patch(
+                vec![GitPath::Text("new".into())],
+                vec![GitPath::Text("old".into())],
+                vec![],
+                None,
+                Some(&other_branch)
+            )
+            .await
+            .is_err()
+        );
+        let patch = repo
+            .selected_worktree_patch(
+                vec![GitPath::Text("new".into())],
+                vec![GitPath::Text("old".into())],
+                vec![],
+                None,
+                Some(&expected),
+            )
+            .await
+            .unwrap();
+        let patch = String::from_utf8(patch).unwrap();
+        assert!(patch.contains("rename from old"), "{patch}");
+        assert!(patch.contains("rename to new"), "{patch}");
+        assert!(!patch.contains("replacement"), "{patch}");
+        let both = repo
+            .selected_worktree_patch(
+                vec![GitPath::Text("new".into()), GitPath::Text("old".into())],
+                vec![GitPath::Text("old".into())],
+                vec![],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(String::from_utf8(both).unwrap().contains("+replacement"));
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn partial_rename_uses_head_source_and_excludes_unselected_recreated_file() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-partial-rename-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        let base = format!("old-first\n{}old-last\n", "context\n".repeat(10));
+        fs::write(root.join("old"), &base).unwrap();
+        fs::write(root.join("other"), &base).unwrap();
+        git(&["add", "--all"]);
+        git(&["commit", "-qm", "initial"]);
+        git(&["mv", "--", "old", "new"]);
+        fs::write(
+            root.join("new"),
+            format!("new-first\n{}new-last\n", "context\n".repeat(10)),
+        )
+        .unwrap();
+        fs::write(root.join("old"), b"private replacement\n").unwrap();
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let destination = || GitPath::Text("new".into());
+        let source = || GitPath::Text("old".into());
+        let view = repo
+            .copilot_commit_diff_detail(destination(), Some(source()))
+            .await
+            .unwrap();
+        let ids: Vec<usize> = view["hunks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|hunk| hunk["lines"].as_array().unwrap())
+            .filter(|line| line["text"] == "old-first" || line["text"] == "new-first")
+            .map(|line| line["id"].as_u64().unwrap() as usize)
+            .collect();
+        assert_eq!(ids.len(), 2);
+        let alternate = repo
+            .copilot_commit_diff_detail(destination(), Some(GitPath::Text("other".into())))
+            .await
+            .unwrap();
+        assert_ne!(view["basis"], alternate["basis"]);
+        let selection = || crate::CopilotLineSelection {
+            path: destination(),
+            original_path: Some(source()),
+            basis: view["basis"].as_str().unwrap().into(),
+            lines: ids.clone(),
+        };
+        let patch = repo
+            .selected_worktree_patch(vec![], vec![], vec![selection()], None, None)
+            .await
+            .unwrap();
+        let patch = String::from_utf8(patch).unwrap();
+        assert!(patch.contains("+new-first"), "{patch}");
+        assert!(!patch.contains("+new-last"), "{patch}");
+        assert!(!patch.contains("private replacement"), "{patch}");
+        let patch = repo
+            .selected_worktree_patch(vec![source()], vec![], vec![selection()], None, None)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8(patch)
+                .unwrap()
+                .contains("+private replacement")
+        );
+        fs::write(root.join("new"), b"changed since preview\n").unwrap();
+        assert!(
+            repo.selected_worktree_patch(vec![], vec![], vec![selection()], None, None)
+                .await
+                .is_err()
+        );
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
         fs::remove_dir_all(root).unwrap();
     }

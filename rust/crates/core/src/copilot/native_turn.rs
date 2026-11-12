@@ -194,7 +194,7 @@ async fn turn_rpc(
 ) -> Result<Value> {
     let session = uuid::Uuid::new_v4().to_string();
     validate_prompt(&session, prompt)?;
-    open_session_rpc(reader, writer, &session, model, None, None).await?;
+    open_session_rpc(reader, writer, &session, model, None, None, None).await?;
     send_message_rpc(reader, writer, &session, model, prompt).await
 }
 
@@ -216,25 +216,41 @@ async fn open_session_rpc(
     model: &str,
     reasoning_effort: Option<&str>,
     commit_system_message: Option<&str>,
+    provider: Option<&crate::protocol::CopilotProvider>,
 ) -> Result<()> {
     let version = match connect_rpc(reader, writer).await? {
         Some(version) => version,
         None => ping_rpc(reader, writer).await?,
     };
     check_protocol_version(version)?;
+    let wire_model = if provider.is_some() && model == "auto" {
+        "byok-auto"
+    } else {
+        model
+    };
     let mut params = json!({
-        "sessionId":session, "model":model, "requestPermission":false,
+        "sessionId":session, "model":wire_model, "requestPermission":false,
         "requestUserInput":false, "envValueMode":"direct",
         "includeSubAgentStreamingEvents":true
     });
     if let Some(effort) = reasoning_effort {
         params["reasoningEffort"] = json!(effort);
     }
+    if let Some(provider) = provider {
+        let mut provider = serde_json::to_value(provider)?;
+        if model == "auto" {
+            provider["wireModel"] = json!(model);
+        }
+        params["provider"] = provider;
+    }
     if let Some(message) = commit_system_message {
         params["systemMessage"] = json!({"mode":"append", "content":message});
         params["availableTools"] = json!([]);
         params["enableSessionStore"] = json!(false);
         params["clientName"] = json!("github/desktop:commit-message-generation");
+        params["enableFileHooks"] = json!(false);
+        params["enableConfigDiscovery"] = json!(false);
+        params["enableSkills"] = json!(false);
     }
     let created = request(reader, writer, 2, "session.create", params, None).await?;
     let created = required_reply(created, "session.create")?;
@@ -321,6 +337,7 @@ pub(crate) struct SessionOptions<'a> {
     pub commit_system_message: Option<&'a str>,
     pub account_basis: String,
     pub host: Option<&'a str>,
+    pub provider: Option<&'a crate::protocol::CopilotProvider>,
 }
 
 impl NativeSession {
@@ -391,6 +408,7 @@ impl NativeSession {
                 &session.model,
                 options.reasoning_effort,
                 options.commit_system_message,
+                options.provider,
             ),
         ))
         .await?
@@ -798,6 +816,7 @@ mod tests {
             "session-1",
             "chosen-model",
             Some("high"),
+            None,
             None,
         )
         .await

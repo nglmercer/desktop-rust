@@ -15,6 +15,32 @@ describe('Copilot generation during backend migration', () => {
     vi.restoreAllMocks()
   })
 
+  it('resolves the selected built-in model and its supported effort for Rust', async () => {
+    const account = new Account(
+      'octocat',
+      'https://api.github.com',
+      'token',
+      [],
+      '',
+      1,
+      'Octocat'
+    )
+    const accounts = {
+      onDidUpdate: vi.fn(),
+      getAll: vi.fn(async () => [account]),
+    }
+    const store = new CopilotStore(accounts as never)
+    vi.spyOn(store as any, 'getCachedModels').mockResolvedValue([
+      { id: 'selected-model', supportedReasoningEfforts: ['high', 'medium'] },
+    ])
+    await expect(
+      store.resolveCommitMessageModel(account, {
+        kind: 'copilot',
+        modelId: 'selected-model',
+      })
+    ).resolves.toEqual({ modelId: 'selected-model', reasoningEffort: 'medium' })
+  })
+
   it('retains the selected account, repository and provider when Wry is present', async () => {
     const invoke = vi.fn(async () => {
       throw new Error('unexpected backend call')

@@ -34,8 +34,15 @@ import type {
 import {
   CommitMessageGenerationCancelledError,
   getCopilotAccountCacheKey,
+  getCopilotGHHost,
+  getCleanedEnforcedRuleDescriptions,
   migrateCopilotModelSelectionsToAccounts,
 } from './copilot-store'
+import { backend } from '../../backend/client'
+import {
+  getReviewedCopilotLines,
+  getWholeFileCopilotSelection,
+} from '../copilot/commit-selection'
 import {
   IBYOKProvider,
   loadBYOKProviders,
@@ -7594,32 +7601,191 @@ export class AppStore extends TypedBaseStore<IAppState> {
         const commitToAmend =
           this.repositoryStateCache.get(repository)?.commitToAmend?.sha ??
           undefined
-        const diff = await getFilesDiffText(
-          repository,
-          filesSelected,
-          commitToAmend ? `${commitToAmend}^` : undefined
+        const sdkEnabled = enableCopilotSdkCommitMessageGeneration(account)
+        const partialFiles = filesSelected.filter(
+          file =>
+            file.selection.getSelectionType() === DiffSelectionType.Partial
         )
-        if (!diff) {
-          return false
+        const partialBases = partialFiles.map(
+          file =>
+            this.assistedCommits.selections.getBasis(file.selection)
+              ?.displayedDiff ??
+            this.assistedCommits.selections.getRestored(file.selection)
+              ?.displayedDiff
+        )
+        const selection = getWholeFileCopilotSelection(
+          filesSelected.filter(
+            file =>
+              file.selection.getSelectionType() !== DiffSelectionType.Partial
+          )
+        )
+        const useNative =
+          sdkEnabled &&
+          selection !== null &&
+          backend().transportKind !== 'none' &&
+          partialFiles.every(
+            (file, index) =>
+              file.status.kind !== AppFileStatusKind.Conflicted &&
+              file.status.submoduleStatus === undefined &&
+              partialBases[index] !== undefined
+          )
+        const request = sdkEnabled
+          ? await this.resolveCopilotModelRequest(
+              this.getSelectedCopilotModels(account)[
+                'commit-message-generation'
+              ] ?? null
+            )
+          : null
+        const rules =
+          this.repositoryStateCache
+            .get(repository)
+            ?.changesState.currentRepoRulesInfo?.commitMessagePatterns.getRules() ??
+          []
+
+        let response: { readonly title: string; readonly description: string }
+        if (useNative && selection !== null) {
+          if (
+            selection.paths.length === 0 &&
+            selection.removePaths.length === 0 &&
+            partialFiles.length === 0 &&
+            !commitToAmend
+          ) {
+            return false
+          }
+          const restored = filesSelected
+            .filter(
+              file =>
+                file.selection.getSelectionType() !== DiffSelectionType.None
+            )
+            .map(file =>
+              this.assistedCommits.selections.getRestored(file.selection)
+            )
+            .filter(value => value !== undefined)
+          const expectedHead = restored[0]?.head
+          if (expectedHead !== undefined) {
+            if (
+              restored.some(
+                value =>
+                  value.head.ref !== expectedHead.ref ||
+                  value.head.sha !== expectedHead.sha
+              )
+            ) {
+              throw new Error(
+                'Restored selections belong to different repository states. Review and reselect the changes.'
+              )
+            }
+          }
+          const model =
+            request?.kind === 'byok'
+              ? {
+                  modelId: request.modelId,
+                  reasoningEffort: request.reasoningEffort,
+                }
+              : await this.copilotStore.resolveCommitMessageModel(
+                  account,
+                  request,
+                  signal
+                )
+          const partialSelections = []
+          for (const [index, file] of partialFiles.entries()) {
+            const displayed = partialBases[index]
+            if (displayed === undefined) {
+              throw new Error(
+                'The selected diff is no longer available. Review and reselect its lines.'
+              )
+            }
+            const preview = await backend().copilotCommitDiffForRepository(
+              repository.path,
+              file.path,
+              { signal },
+              file.status.kind === AppFileStatusKind.Renamed
+                ? file.status.oldPath
+                : undefined
+            )
+            partialSelections.push({
+              path: file.path,
+              ...(file.status.kind === AppFileStatusKind.Renamed
+                ? { original_path: file.status.oldPath }
+                : {}),
+              basis: preview.basis,
+              lines: getReviewedCopilotLines(file, displayed, preview),
+            })
+          }
+          if (expectedHead !== undefined) {
+            await this.assistedCommits.selections.verifyRestored(
+              repository,
+              filesSelected
+            )
+          }
+          const result = await backend().copilotGenerateForRepository(
+            repository.path,
+            {
+              source: 'working_tree',
+              paths: selection.paths,
+              remove_paths: selection.removePaths,
+              partial_selections: partialSelections,
+              amend_head: commitToAmend,
+              ...(expectedHead === undefined
+                ? {}
+                : { expected_head: expectedHead }),
+              rule_descriptions: getCleanedEnforcedRuleDescriptions(rules),
+              account: {
+                host: getCopilotGHHost(account) ?? 'github.com',
+                login: account.login,
+                id: account.id,
+              },
+              model: model.modelId,
+              reasoning_effort: model.reasoningEffort,
+              ...(request?.kind === 'byok'
+                ? {
+                    timeout_ms:
+                      request.timeoutMs === undefined
+                        ? undefined
+                        : Math.ceil(request.timeoutMs),
+                    provider: {
+                      type: request.provider.type ?? 'openai',
+                      baseUrl: request.provider.baseUrl,
+                      wireApi: request.provider.wireApi,
+                      apiKey: request.provider.apiKey,
+                      bearerToken: request.provider.bearerToken,
+                      ...(request.provider.azure?.apiVersion === undefined
+                        ? {}
+                        : {
+                            azure: {
+                              apiVersion: request.provider.azure.apiVersion,
+                            },
+                          }),
+                    },
+                  }
+                : {}),
+            },
+            { signal }
+          )
+          response = { title: result.summary, description: result.description }
+        } else {
+          const diff = await getFilesDiffText(
+            repository,
+            filesSelected,
+            commitToAmend ? `${commitToAmend}^` : undefined
+          )
+          if (!diff) {
+            return false
+          }
+          response = sdkEnabled
+            ? await this.copilotStore.generateCommitMessage(
+                account,
+                diff,
+                repository.path,
+                request,
+                rules,
+                signal
+              )
+            : await API.fromAccount(account).getDiffChangesCommitMessage(diff)
         }
 
-        const response = enableCopilotSdkCommitMessageGeneration(account)
-          ? await this.copilotStore.generateCommitMessage(
-              account,
-              diff,
-              repository.path,
-              await this.resolveCopilotModelRequest(
-                this.getSelectedCopilotModels(account)[
-                  'commit-message-generation'
-                ] ?? null
-              ),
-              this.repositoryStateCache
-                .get(repository)
-                ?.changesState.currentRepoRulesInfo?.commitMessagePatterns.getRules() ??
-                [],
-              signal
-            )
-          : await API.fromAccount(account).getDiffChangesCommitMessage(diff)
+        if (signal.aborted) {
+          return false
+        }
 
         this._setCommitMessage(repository, {
           summary: response.title,
@@ -7630,7 +7796,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
         this.statsStore.increment('generateCommitMessageCount')
       } catch (e) {
-        if (e instanceof CommitMessageGenerationCancelledError) {
+        if (
+          signal.aborted ||
+          e instanceof CommitMessageGenerationCancelledError
+        ) {
           return false
         }
 

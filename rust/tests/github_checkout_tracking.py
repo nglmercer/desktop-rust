@@ -9,7 +9,7 @@ import tempfile
 
 from support.fixture import BINARY
 from git_credentials import Credentials, HttpsGit, optional_tool, read_records
-from repository_accounts import clean
+from support.accounts import clean
 from support.lfs import cached, pointer
 import hashlib
 from support.repository_context import private, stop, wait_for

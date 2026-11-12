@@ -1344,26 +1344,13 @@ export class CopilotStore extends BaseStore {
         timeoutMs = request.timeoutMs
       }
     } else {
-      const requestedModelId =
-        request?.kind === 'copilot' ? request.modelId : null
-      const cachedModels = await awaitCancellableCopilotOperation(
-        () => this.getCachedModels(account),
-        {
-          signal,
-          cancellationError: () => new CommitMessageGenerationCancelledError(),
-        }
+      const resolved = await this.resolveCommitMessageModel(
+        account,
+        request,
+        signal
       )
-      throwIfCancelled()
-      const resolvedModel = requestedModelId
-        ? cachedModels.find(m => m.id === requestedModelId) ?? null
-        : getPreferredDefaultModel(cachedModels)
-
-      // Use the resolved model's ID, the raw string ID the caller passed, or
-      // the default model as a last resort.
-      modelId = resolvedModel?.id ?? requestedModelId ?? DefaultCopilotModel
-      reasoningEffort = resolvedModel
-        ? getLowestReasoningEffort(resolvedModel)
-        : getDefaultReasoningEffortForModel(modelId)
+      modelId = resolved.modelId
+      reasoningEffort = resolved.reasoningEffort
     }
 
     let client: CopilotClient | null = null
@@ -1461,6 +1448,41 @@ export class CopilotStore extends BaseStore {
       if (client !== null) {
         this.stopClient(client)
       }
+    }
+  }
+
+  /** Resolve a built-in model using the same defaults as SDK generation. */
+  public async resolveCommitMessageModel(
+    account: Account,
+    request:
+      | Extract<CopilotModelRequest, { readonly kind: 'copilot' }>
+      | null
+      | undefined,
+    signal?: AbortSignal
+  ): Promise<{
+    readonly modelId: string
+    readonly reasoningEffort: ReasoningEffort | undefined
+  }> {
+    const requestedModelId = request?.modelId ?? null
+    const cachedModels = await awaitCancellableCopilotOperation(
+      () => this.getCachedModels(account),
+      {
+        signal,
+        cancellationError: () => new CommitMessageGenerationCancelledError(),
+      }
+    )
+    if (signal?.aborted) {
+      throw new CommitMessageGenerationCancelledError()
+    }
+    const resolvedModel = requestedModelId
+      ? cachedModels.find(m => m.id === requestedModelId) ?? null
+      : getPreferredDefaultModel(cachedModels)
+    const modelId = resolvedModel?.id ?? requestedModelId ?? DefaultCopilotModel
+    return {
+      modelId,
+      reasoningEffort: resolvedModel
+        ? getLowestReasoningEffort(resolvedModel)
+        : getDefaultReasoningEffortForModel(modelId),
     }
   }
 

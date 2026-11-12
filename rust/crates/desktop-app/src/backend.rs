@@ -138,7 +138,9 @@ impl Backend {
         let [value]: [Value; 1] = args
             .try_into()
             .map_err(|_| AppError::BadArgs("Copilot requires exactly one request".into()))?;
-        let request: CopilotRequest = serde_json::from_value(value)?;
+        // Serde diagnostics may contain malformed credential values.
+        let request: CopilotRequest = serde_json::from_value(value)
+            .map_err(|_| AppError::BadArgs("invalid Copilot request".into()))?;
         if !Path::new(&request.repository_path).is_absolute() {
             return Err(AppError::BadArgs("repository path must be absolute".into()));
         }
@@ -656,6 +658,14 @@ esac
                     .admit_copilot(vec![json!({"repository_path":root,"operation":operation})])
                     .is_err()
             );
+        }
+        let malformed = backend.admit_copilot(vec![json!({"repository_path":root,"operation":{
+            "method":"copilot_generate_commit_message", "account":{"host":"github.com","login":"alice","id":1},
+            "provider":{"type":"azure","baseUrl":"https://provider.example","azure":"synthetic-private-credential"}
+        }})]);
+        match malformed {
+            Ok(_) => panic!("malformed provider was accepted"),
+            Err(error) => assert!(!error.to_string().contains("synthetic-private-credential")),
         }
         let job = backend.admit_copilot(vec![json!({"repository_path":root,"operation":{"method":"copilot_generate_commit_message","account":{"host":"github.com","login":"alice","id":1},"source":"working_tree","paths":["selected.txt"]}})]).unwrap();
         assert!(

@@ -9,5 +9,28 @@
     "strict": true,
     "noEmit": true
   },
-  "files": ["github-cli.test.ts", "github-adapter.test.ts", "fixtures/gh.ts"]
+  "files": [
+    "github-cli.test.ts",
+    "github-adapter.test.ts",
+    "branch-name-rules.test.ts",
+    "repository-accounts.test.ts",
+    "github-create.test.ts",
+    "git-http-fixture.test.ts",
+    "git-credentials.test.ts",
+    "git-credential-policy.test.ts",
+    "fixtures/gh.ts",
+    "fixtures/branch-rules-gh.ts",
+    "fixtures/accounts.ts",
+    "fixtures/account-bridge.ts",
+    "fixtures/account-gh.ts",
+    "fixtures/creation.ts",
+    "fixtures/creation-gh.ts",
+    "fixtures/creation-api-worker.ts",
+    "fixtures/git-http.ts",
+    "fixtures/git-http-worker.ts",
+    "fixtures/credentials.ts",
+    "fixtures/native-credential-helper.ts",
+    "fixtures/native-ssh.ts",
+    "fixtures/credential-probe.ts"
+  ]
 }

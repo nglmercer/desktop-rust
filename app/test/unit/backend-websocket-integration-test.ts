@@ -1,5 +1,10 @@
 // @vitest-environment node
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import {
+  execFileSync,
+  spawn,
+  spawnSync,
+  type ChildProcess,
+} from 'node:child_process'
 import {
   mkdtemp,
   mkdir,
@@ -16,6 +21,17 @@ import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BackendClient } from '../../src/backend/client'
+import { getReviewedCopilotLines } from '../../src/lib/copilot/commit-selection'
+import { DiffParser } from '../../src/lib/diff-parser'
+import {
+  DiffSelection,
+  DiffSelectionType,
+  DiffType,
+} from '../../src/models/diff'
+import {
+  AppFileStatusKind,
+  WorkingDirectoryFileChange,
+} from '../../src/models/status'
 
 const enabled = process.env.DESKTOP_TEST_BRIDGE === '1'
 interface IDom {
@@ -188,6 +204,32 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         root_id: string
       }
       await writeFile(path.join(firstRepository, 'untracked'), 'new file')
+      const rawDiff = spawnSync(
+        'git',
+        ['diff', '--no-index', '--', '/dev/null', 'untracked'],
+        { cwd: firstRepository, encoding: 'utf8' }
+      )
+      expect(rawDiff.status).toBe(1)
+      const parsed = new DiffParser().parse(rawDiff.stdout)
+      const displayed = {
+        kind: DiffType.Text as const,
+        text: parsed.contents,
+        hunks: parsed.hunks,
+        maxLineNumber: parsed.maxLineNumber,
+        hasHiddenBidiChars: parsed.hasHiddenBidiChars,
+      }
+      const file = new WorkingDirectoryFileChange(
+        'untracked',
+        { kind: AppFileStatusKind.Untracked },
+        DiffSelection.fromInitialSelection(
+          DiffSelectionType.None
+        ).withLineSelection(1, true)
+      )
+      const preview = await bounded(
+        client.copilotCommitDiffForRepository(firstRepository, file.path)
+      )
+      expect(preview.path).toEqual({ bytes: [...Buffer.from(file.path)] })
+      expect(getReviewedCopilotLines(file, displayed, preview)).toEqual([0])
       await writeFile(
         path.join(firstRepository, '.git', 'SQUASH_MSG'),
         'squash'

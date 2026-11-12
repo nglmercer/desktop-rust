@@ -64,22 +64,46 @@ index remains intact. A separate HEAD-based preview provides a basis and line
 IDs for partial selections, including when that file has unrelated staged
 changes. Amend requests must name the current HEAD and compare against its
 parent. Git's normal clean filters may write objects or filter-managed data.
-Provider options, renderer wiring and live-service validation remain open, so
-this is not yet a complete replacement for the renderer flow.
+Remaining selection cases and live-service validation remain open, so this is
+not yet a complete replacement for the renderer flow.
 
 The Wry host now admits repository-scoped Copilot diff previews and commit
 generation through a bounded cancellable queue. Generation requires an
 explicit GitHub account, uses the host's repository-account registry, and
 resolves the host-selected runtime package. WebSocket callers bind the request
-to the requested repository before dispatch. The UI still needs to call these
-scoped operations and map its selections and account settings to them.
+to the requested repository before dispatch. For built-in models and whole-file
+selections, the renderer now calls these scoped operations with the chosen
+account, model and rules. Rename sources and deleted paths are removed from the
+private snapshot, including when a rename source has been recreated. The
+renderer also maps reviewed partial lines, including partial renames, to a
+fresh Rust preview, rejecting changed hunks, line content or missing-newline
+markers. A partial rename compares against its HEAD source; if the displayed
+index-based diff differs, generation asks for review. A recreated source is
+excluded unless separately selected. Selections without a retained display
+basis still use the previous renderer flow. Restored selections retain their
+verified hunks and are checked against their original branch and HEAD before
+the Rust snapshot is used. Built-in and configured custom
+providers both use the Rust session on the new path; provider credentials pass
+through the local backend to the runtime, and their Debug representation is
+redacted. The new UI path has not yet been verified against the live service.
+
+The offline branch-name rules integration suite now runs in Vitest with a
+TypeScript GitHub CLI fixture. It retains checks for fixed reads, token pinning,
+pagination, policy and mutation fences, cancellation, and private diagnostics;
+the former Python suite has been removed. Repository-account scenarios also
+run in Vitest, with native byte-path coverage in Rust; the Python account test
+entry point has been retired. The assigned pull-request creation suite also
+runs in Vitest against the installed GitHub CLI and a local TLS proxy; its
+duplicate, privacy, race and cancellation checks replace the Python test.
+Two Python integration suites and their shared helpers remain to be migrated.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository
 rules and the selected diff in separate untrusted blocks. It validates the
 model's JSON title and description instead of treating the response as a
 plain first line. Assigned-account sessions pin the verified GitHub host as
-well as its credential; renderer account selection still needs integration.
+well as its credential. The whole-file renderer path passes the chosen account;
+the corresponding GitHub CLI account must be available to the Rust host.
 
 Copilot sessions now use the Rust runtime client by default; the Node SDK turn
 wrapper and the temporary opt-in flag have been removed. Sessions persist for
@@ -1200,6 +1224,11 @@ The remaining credential and pull-request integration suites use the Rust
 `crates/cli/examples/git_credentials_wrapper.rs` fixture to instrument Git.
 It executes the real Git process, limits diagnostics to a fixed command
 vocabulary, and reads its synthetic credentials from a private fixture file.
+The TypeScript Git HTTP fixture now exercises real smart HTTP, authenticated
+LFS object transfers, rejection, and request gates; the Python credential and
+checkout suites remain until their scenarios have been ported and verified.
+The first credential scenarios also run in Vitest against the Rust Git wrapper,
+covering assigned and disabled accounts, fetch/push/pull, and error redaction.
 
 Validation passed the all-feature workspace build, warning-free Clippy and all
 26 Rust tests. Standalone frontend formatting/type checking/build and all 48
