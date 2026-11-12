@@ -369,9 +369,10 @@ completion progress rather than intermediate Git/LFS updates, and the native
 environment does not yet reproduce Electron's OS proxy discovery.
 Submodule operations do not inherit a parent repository's assigned-account
 credential grant; private submodules need their own credential support.
-Discard dispatch now boxes its larger async futures after the bridge worker's
-default stack overflowed during a real selected-line discard. The bridge test
-exercises discard and undo on the default runtime stack.
+Discard dispatch boxes its larger async futures, and the WebSocket Tokio workers
+and Wry repository executor reserve 8 MiB stacks after a default worker stack
+overflowed during selected-line discard. Integration tests exercise discard and
+undo through both the WebSocket bridge and the Wry repository executor.
 On Wry, branch enumeration, tracking, merged-branch and points-at reads now
 surface Rust failures instead of retrying through the deprecated Git adapter.
 The non-Rust Electron fallback remains available when no Rust transport is active.
@@ -482,7 +483,7 @@ and output limits.
 These are partial replacement evidence, not a full parity certification.
 
 The authenticated WebSocket pull-request checkout regression runs on the
-normal Tokio worker stack. Its nested checkout review is polled in a separate
+configured Tokio worker stack. Its nested checkout review is polled in a separate
 task that retains the request cancellation and credential scope; cancellation
 and task cleanup have Rust unit coverage.
 

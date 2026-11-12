@@ -62,6 +62,22 @@ const CONTROL_CAPACITY: usize = 256;
 const SYNC_CAPACITY: usize = 8;
 const SYNC_BYTES: usize = 64 * 1024;
 
+// Repository requests poll nested async Git and recovery operations on the
+// executor thread through Backend::read's runtime.block_on.
+pub(crate) fn repository_executor(
+    workers: usize,
+    capacity: usize,
+    byte_capacity: usize,
+) -> std::io::Result<Executor> {
+    Executor::with_stack_size(
+        "desktop-io-long",
+        workers,
+        capacity,
+        byte_capacity,
+        8 * 1024 * 1024,
+    )
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum Incoming {
@@ -119,8 +135,7 @@ impl Bridge {
             limits.queued_requests,
             limits.queued_bytes,
         )?;
-        let long = Executor::new(
-            "desktop-io-long",
+        let long = repository_executor(
             limits.long_workers,
             limits.queued_requests,
             limits.queued_bytes,

@@ -2666,14 +2666,24 @@ esac
 
     #[test]
     fn reads_the_requested_repository_and_rejects_mutations() {
-        // This integration fixture exercises many request shapes in one test;
-        // its debug-build stack frame exceeds Rust's default test-thread stack.
-        std::thread::Builder::new()
-            .stack_size(8 * 1024 * 1024)
-            .spawn(reads_the_requested_repository_and_rejects_mutations_inner)
-            .unwrap()
-            .join()
+        // Exercise the same executor used by Wry repository requests, including
+        // selected-line discard and undo, rather than a custom test thread.
+        let executor = crate::bridge::repository_executor(1, 1, 1024).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let task = desktop_core::io::executor::Task::new(
+            0,
+            std::time::Instant::now() + std::time::Duration::from_secs(120),
+            move |outcome| {
+                assert_eq!(outcome, desktop_core::io::executor::Outcome::Run);
+                reads_the_requested_repository_and_rejects_mutations_inner();
+                sender.send(()).unwrap();
+            },
+        );
+        assert!(executor.submit(task).is_ok());
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(120))
             .unwrap();
+        executor.close();
     }
 
     fn reads_the_requested_repository_and_rejects_mutations_inner() {

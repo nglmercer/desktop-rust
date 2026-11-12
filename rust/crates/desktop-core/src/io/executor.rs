@@ -100,6 +100,27 @@ impl Executor {
         capacity: usize,
         byte_capacity: usize,
     ) -> std::io::Result<Self> {
+        Self::start(name, workers, capacity, byte_capacity, None)
+    }
+
+    /// Start workers with a specified stack reservation for deep workflows.
+    pub fn with_stack_size(
+        name: &'static str,
+        workers: usize,
+        capacity: usize,
+        byte_capacity: usize,
+        stack_size: usize,
+    ) -> std::io::Result<Self> {
+        Self::start(name, workers, capacity, byte_capacity, Some(stack_size))
+    }
+
+    fn start(
+        name: &'static str,
+        workers: usize,
+        capacity: usize,
+        byte_capacity: usize,
+        stack_size: Option<usize>,
+    ) -> std::io::Result<Self> {
         let queue = Arc::new((
             Mutex::new(Queue {
                 items: VecDeque::new(),
@@ -113,9 +134,11 @@ impl Executor {
         for index in 0..workers {
             let queue = queue.clone();
             let counters = counters.clone();
-            std::thread::Builder::new()
-                .name(format!("{name}-{index}"))
-                .spawn(move || worker(&queue, &counters))?;
+            let mut builder = std::thread::Builder::new().name(format!("{name}-{index}"));
+            if let Some(stack_size) = stack_size {
+                builder = builder.stack_size(stack_size);
+            }
+            builder.spawn(move || worker(&queue, &counters))?;
         }
         Ok(Self {
             name,
