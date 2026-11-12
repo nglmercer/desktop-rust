@@ -166,7 +166,6 @@ pub async fn run_commit(path: &Path, args: &[OsString]) -> Result<RawOutput> {
 /// Run a commit against a private index while preserving Git's normal hook
 /// pathspec environment. The caller owns index/ref reconciliation and must
 /// not treat a successful process exit as proof that publication is durable.
-#[allow(dead_code)]
 pub(crate) async fn run_commit_with_index(
     path: &Path,
     args: &[OsString],

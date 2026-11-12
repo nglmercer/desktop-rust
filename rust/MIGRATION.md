@@ -327,8 +327,14 @@ substitute for durable recovery; a rejected hook can leave the index changed.
 A private-index commit runner now preserves Git's normal hook environment and
 accepts the commit message on stdin. A real Git test combines it with the
 reference fence: a hook's unreviewed index change is rejected, while a valid
-commit succeeds without modifying the live index. It is not wired into the
-renderer: durable publication state and index reconciliation remain required.
+commit succeeds without modifying the live index. An internal publication
+prototype records intent before invoking Git, verifies the reference receipt
+and tree, records the published OID, then installs the resulting private index
+under the live index lock. A real Git test covers a hook that changes the tree
+and a successful commit with preexisting staged changes. Interrupted and
+completed checkpoints are retained and cannot be forgotten by the preparation
+cleanup operation. The prototype is not exposed to the renderer: guarded
+recovery for interrupted publication and hook reporting remain required.
 Split-index backup and restore is now shared infrastructure for commit recovery
 and the existing discard journal. Restoring a missing shared index uses an
 atomic hard link and refuses to overwrite a concurrently created conflicting

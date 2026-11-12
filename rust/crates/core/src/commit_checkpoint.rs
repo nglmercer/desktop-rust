@@ -56,6 +56,8 @@ struct Checkpoint {
     tree: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parents: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    published_oid: Option<String>,
     objects: Vec<SavedObject>,
     lfs: Vec<LfsObject>,
     shared: Vec<SharedIndex>,
@@ -75,6 +77,17 @@ impl Drop for CheckpointUse {
 struct Preparing {
     path: PathBuf,
     retain: bool,
+}
+struct PrivateCommitIndex {
+    path: PathBuf,
+    retain: bool,
+}
+impl Drop for PrivateCommitIndex {
+    fn drop(&mut self) {
+        if !self.retain {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 impl Drop for Preparing {
     fn drop(&mut self) {
@@ -148,7 +161,10 @@ fn read_checkpoint(base: &Path, id: &str, repository_id: &str) -> Result<Checkpo
         record.version == 1
             && record.id == id
             && record.repository_id == repository_id
-            && record.state == "prepared"
+            && matches!(
+                record.state.as_str(),
+                "prepared" | "publishing" | "published" | "complete"
+            )
             && record.basis.len() == 64
             && record.basis.bytes().all(|b| b.is_ascii_hexdigit()),
         "invalid commit checkpoint manifest"
@@ -168,7 +184,35 @@ fn read_checkpoint(base: &Path, id: &str, repository_id: &str) -> Result<Checkpo
         }
         _ => anyhow::bail!("incomplete commit checkpoint publication metadata"),
     }
+    anyhow::ensure!(
+        match record.state.as_str() {
+            "prepared" | "publishing" => record.published_oid.is_none(),
+            "published" | "complete" => record.published_oid.as_ref().is_some_and(|oid| {
+                record
+                    .tree
+                    .as_ref()
+                    .is_some_and(|tree| oid.len() == tree.len())
+                    && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }),
+            _ => false,
+        },
+        "invalid commit checkpoint publication state"
+    );
     Ok(record)
+}
+
+fn write_checkpoint(base: &Path, record: &Checkpoint) -> Result<()> {
+    let directory = base.join(&record.id);
+    let temporary = directory.join(format!("manifest-{}.tmp", uuid::Uuid::new_v4()));
+    let bytes = serde_json::to_vec(record)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= MANIFEST_LIMIT,
+        "commit checkpoint is too large"
+    );
+    work::private_write(&temporary, &bytes)?;
+    fs::rename(&temporary, directory.join("manifest.json"))?;
+    sync_directory(&directory)?;
+    Ok(())
 }
 fn index_entries(bytes: &[u8]) -> Result<Vec<(String, String)>> {
     anyhow::ensure!(
@@ -637,6 +681,7 @@ impl Repository {
             selected_index: hash(&snapshot.index),
             tree: Some(tree),
             parents: Some(parents),
+            published_oid: None,
             objects,
             lfs,
             shared,
@@ -658,6 +703,185 @@ impl Repository {
         Ok(json!({"id": id, "state":"prepared", "basis":basis}))
     }
 
+    /// Publish through a private index. This is kept internal until recovery
+    /// and renderer hook reporting are available for interrupted operations.
+    #[allow(dead_code)]
+    async fn publish_selected_checkpoint(
+        &self,
+        id: &str,
+        message: String,
+        no_verify: bool,
+        sign_off: bool,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            !message.trim().is_empty() && !message.contains('\0') && message.len() <= 1024 * 1024,
+            "invalid commit message"
+        );
+        let base = self.checkpoint_directory().await?;
+        read_checkpoint(&base, id, &self.id())?;
+        let lock_path = base.join(id).join(".use.lock");
+        let _use_lock = CheckpointUse {
+            file: Some(work::private_file(&lock_path).context("commit checkpoint is in use")?),
+            path: lock_path,
+        };
+        let mut record = read_checkpoint(&base, id, &self.id())?;
+        anyhow::ensure!(
+            record.state == "prepared",
+            "commit checkpoint requires recovery"
+        );
+        let request = record
+            .request
+            .clone()
+            .context("prepare this checkpoint again")?;
+        let tree = record
+            .tree
+            .clone()
+            .context("prepare this checkpoint again")?;
+        let parents = record
+            .parents
+            .clone()
+            .context("prepare this checkpoint again")?;
+        let mut transaction = IndexTransaction::begin(&self.index_path().await?)?;
+        let inspection = self.inspect_commit_checkpoint(id).await?;
+        anyhow::ensure!(
+            [
+                "head_matches",
+                "branch_matches",
+                "index_matches",
+                "operation_matches"
+            ]
+            .iter()
+            .all(|field| inspection[*field] == true),
+            "Index, HEAD, branch or repository operation changed; review again"
+        );
+        let (snapshot, review) = self
+            .capture_selected_commit_review(
+                request.paths.clone(),
+                request.remove_paths.clone(),
+                request.partial.clone(),
+                request.allow_empty,
+                request.amend_head.as_deref(),
+                request.expected_head.as_ref(),
+            )
+            .await?;
+        anyhow::ensure!(
+            review["basis"].as_str() == Some(record.basis.as_str())
+                && review["tree"].as_str() == Some(tree.as_str())
+                && hash(&snapshot.index) == record.selected_index
+                && self
+                    .reviewed_commit_parents(record.head.as_deref(), request.amend_head.is_some())
+                    .await?
+                    == parents,
+            "Selected commit changed; review again"
+        );
+        let parent_refs: Vec<&str> = parents.iter().map(String::as_str).collect();
+        let guard = self
+            .commit_reference_guard(
+                record.branch.as_deref(),
+                record.head.as_deref(),
+                &parent_refs,
+                &tree,
+                tree.len(),
+            )
+            .await?;
+        let private_index = base.join(id).join("index.commit");
+        work::private_write(&private_index, &snapshot.index)?;
+        let mut private_index_cleanup = PrivateCommitIndex {
+            path: private_index.clone(),
+            retain: false,
+        };
+        Cancellation::current().check()?;
+        let git_directory = self.git_directory().await?;
+        let operation =
+            cancellation::blocking(move || crate::discard::operation_certificate(&git_directory))
+                .await?;
+        anyhow::ensure!(
+            operation == record.operation
+                && read_index(&self.index_path().await?)?.as_deref().map(hash)
+                    == record.original_index
+                && serde_json::to_vec(&read_checkpoint(&base, id, &self.id())?)?
+                    == serde_json::to_vec(&record)?,
+            "Checkpoint, index or repository operation changed; review again"
+        );
+        record.state = "publishing".into();
+        private_index_cleanup.retain = true;
+        write_checkpoint(&base, &record)?;
+        let mut command = guard.configuration().to_vec();
+        command.extend(args(&["commit", "-F", "-"]));
+        if request.amend_head.is_some() {
+            command.push("--amend".into());
+        }
+        if request.allow_empty {
+            command.push("--allow-empty".into());
+        }
+        if no_verify {
+            command.push("--no-verify".into());
+        }
+        if sign_off {
+            command.push("--signoff".into());
+        }
+        let output = process::run_commit_with_index(
+            &self.path,
+            &command,
+            message.into_bytes(),
+            &private_index,
+        )
+        .await
+        .with_context(|| format!("Commit checkpoint {id} requires inspection"))?;
+        anyhow::ensure!(
+            output.code == 0,
+            "Git commit failed; checkpoint {id} requires inspection: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let published = guard
+            .prepared_oid()?
+            .context("Commit reference receipt is missing; checkpoint requires inspection")?;
+        let head = self
+            .run(&args(&["rev-parse", "--verify", "--quiet", "HEAD"]))
+            .await?;
+        let branch = self
+            .run(&args(&["symbolic-ref", "--quiet", "HEAD"]))
+            .await?;
+        let current_branch = if branch.code == 0 {
+            Some(std::str::from_utf8(&branch.stdout)?.trim())
+        } else {
+            None
+        };
+        anyhow::ensure!(
+            head.code == 0
+                && std::str::from_utf8(&head.stdout)?.trim() == published
+                && matches!(branch.code, 0 | 1)
+                && current_branch == record.branch.as_deref(),
+            "Commit reference changed; checkpoint {id} requires inspection"
+        );
+        let checked_tree = process::run_git(
+            &self.path,
+            &args(&["write-tree"]),
+            None,
+            Some(&private_index),
+        )
+        .await?;
+        anyhow::ensure!(
+            checked_tree.code == 0 && std::str::from_utf8(&checked_tree.stdout)?.trim() == tree,
+            "Commit index changed after publication; checkpoint {id} requires inspection"
+        );
+        let final_index =
+            read_index(&private_index)?.context("private commit index disappeared")?;
+        anyhow::ensure!(
+            read_index(&self.index_path().await?)?.as_deref().map(hash) == record.original_index,
+            "Original index changed; checkpoint {id} requires inspection"
+        );
+        record.state = "published".into();
+        record.published_oid = Some(published.clone());
+        write_checkpoint(&base, &record)?;
+        transaction
+            .commit(&final_index)
+            .with_context(|| format!("Commit checkpoint {id} requires inspection"))?;
+        record.state = "complete".into();
+        write_checkpoint(&base, &record)?;
+        Ok(json!({"id": id, "state": "complete", "oid": published}))
+    }
+
     /// Recapture the selection as an observation, not a publication authorization.
     pub(crate) async fn revalidate_commit_checkpoint(&self, id: &str) -> Result<Value> {
         let base = self.checkpoint_directory().await?;
@@ -668,6 +892,10 @@ impl Repository {
             path,
         };
         let record = read_checkpoint(&base, id, &self.id())?;
+        anyhow::ensure!(
+            record.state == "prepared",
+            "commit checkpoint requires recovery"
+        );
         let manifest = serde_json::to_vec(&record)?;
         let request = record
             .request
@@ -821,6 +1049,136 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn private_publication_journals_failures_and_installs_reviewed_index() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("desktop-commit-publish-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("file"), b"initial\n").unwrap();
+        git(&["add", "file"]);
+        git(&["commit", "-qm", "initial"]);
+        let head = git(&["rev-parse", "HEAD"]);
+        fs::write(root.join("file"), b"original staged\n").unwrap();
+        git(&["add", "file"]);
+        let original_index = fs::read(root.join(".git/index")).unwrap();
+        fs::write(root.join("file"), b"reviewed\n").unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let selection = || vec![GitPath::Text("file".into())];
+        let preview = repo
+            .selected_commit_preview_with_empty(selection(), vec![], vec![], false, None, None)
+            .await
+            .unwrap();
+        let first = repo
+            .prepare_selected_commit(
+                selection(),
+                vec![],
+                vec![],
+                false,
+                None,
+                None,
+                preview["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        let first_id = first["id"].as_str().unwrap();
+        let hook = root.join(".git/hooks/pre-commit");
+        fs::write(
+            &hook,
+            "#!/bin/sh\nprintf 'unreviewed\\n' > file\ngit add -- file\n",
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+        let failure = repo
+            .publish_selected_checkpoint(first_id, "message\n".into(), false, false)
+            .await
+            .unwrap_err();
+        if failure.to_string().contains("does not support") {
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        assert!(
+            failure.to_string().contains("requires inspection"),
+            "{failure:#}"
+        );
+        assert!(
+            failure
+                .to_string()
+                .contains("Commit tree differs from review")
+        );
+        assert_eq!(git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        assert_eq!(
+            repo.inspect_commit_checkpoint(first_id).await.unwrap()["state"],
+            "publishing"
+        );
+        assert!(repo.forget_commit_checkpoint(first_id).await.is_err());
+        assert!(repo.revalidate_commit_checkpoint(first_id).await.is_err());
+
+        fs::remove_file(hook).unwrap();
+        fs::write(root.join("file"), b"reviewed\n").unwrap();
+        let preview = repo
+            .selected_commit_preview_with_empty(selection(), vec![], vec![], false, None, None)
+            .await
+            .unwrap();
+        let second = repo
+            .prepare_selected_commit(
+                selection(),
+                vec![],
+                vec![],
+                false,
+                None,
+                None,
+                preview["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        let id = second["id"].as_str().unwrap();
+        let result = repo
+            .publish_selected_checkpoint(id, "message\n".into(), false, false)
+            .await
+            .unwrap();
+        assert_eq!(result["state"], "complete");
+        assert_eq!(git(&["rev-parse", "HEAD"]), result["oid"].as_str().unwrap());
+        assert_eq!(git(&["show", "HEAD:file"]), "reviewed");
+        assert_eq!(git(&["show", ":file"]), "reviewed");
+        assert_eq!(
+            fs::read(
+                root.join(".git")
+                    .join(DIRECTORY)
+                    .join(id)
+                    .join("index.before")
+            )
+            .unwrap(),
+            original_index
+        );
+        assert_eq!(
+            repo.inspect_commit_checkpoint(id).await.unwrap()["state"],
+            "complete"
+        );
+        assert!(repo.forget_commit_checkpoint(id).await.is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn checkpoint_records_all_merge_parents_for_amend() {
         let root =
