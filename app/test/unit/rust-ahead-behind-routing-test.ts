@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const mocks = vi.hoisted(() => ({
   transport: 'wry',
@@ -28,7 +32,6 @@ import {
   getAheadBehind,
   getCommitsInRange,
 } from '../../src/lib/git/rev-list'
-import { GitError } from 'dugite'
 import type { Repository } from '../../src/models/repository'
 const repository = { path: '/repo-a' } as Repository
 
@@ -81,14 +84,11 @@ describe('Rust ahead/behind lookup', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('uses existing Git behavior when the Rust read fails', async () => {
-    mocks.aheadBehind.mockRejectedValue(new Error('unavailable'))
-    mocks.git.mockResolvedValue({ stdout: '2\t4\n', gitError: null })
-    await expect(getAheadBehind(repository, 'topic...main')).resolves.toEqual({
-      ahead: 2,
-      behind: 4,
-    })
-    expect(mocks.git).toHaveBeenCalledOnce()
+  it('propagates Rust read errors without invoking the legacy Git runner', async () => {
+    const error = new Error('unavailable')
+    mocks.aheadBehind.mockRejectedValue(error)
+    await expect(getAheadBehind(repository, 'topic...main')).rejects.toBe(error)
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('propagates lease errors without retrying', async () => {
@@ -129,18 +129,19 @@ describe('Rust revision and merge history', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('preserves rebase order and the existing one-line parser', async () => {
+  it('preserves rebase order for SHA-1 and SHA-256 object IDs', async () => {
     const first = 'a'.repeat(40)
     const second = 'b'.repeat(40)
     mocks.revisions.mockResolvedValue(
       `${first} first summary\n${second} second summary\n${'c'.repeat(
         64
-      )} ignored sha256\n`
+      )} sha256 summary\n`
     )
     await expect(getCommitsInRange(repository, 'base..topic')).resolves.toEqual(
       [
         { sha: first, summary: 'first summary' },
         { sha: second, summary: 'second summary' },
+        { sha: 'c'.repeat(64), summary: 'sha256 summary' },
       ]
     )
     expect(mocks.revisions).toHaveBeenCalledWith('/repo-a', 'base..topic')
@@ -153,12 +154,67 @@ describe('Rust revision and merge history', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('uses the legacy invalid revision result after a Rust error', async () => {
-    mocks.revisions.mockRejectedValue(new Error('invalid revision'))
-    mocks.git.mockResolvedValue({ gitError: GitError.BadRevision, stdout: '' })
-    await expect(
-      getCommitsInRange(repository, 'missing..topic')
-    ).resolves.toBeNull()
+  it('parses a real SHA-256 Git revision list', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'desktop-sha256-history-'))
+    try {
+      execFileSync('git', ['init', '--object-format=sha256', '-q', directory])
+      execFileSync('git', [
+        '-C',
+        directory,
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.invalid',
+        'commit',
+        '--allow-empty',
+        '-m',
+        'first commit',
+      ])
+      const sha = execFileSync('git', ['-C', directory, 'rev-parse', 'HEAD'], {
+        encoding: 'utf8',
+      }).trim()
+      const output = execFileSync(
+        'git',
+        [
+          '-C',
+          directory,
+          'rev-list',
+          '--reverse',
+          '--oneline',
+          '--no-abbrev-commit',
+          '--end-of-options',
+          'HEAD',
+          '--',
+        ],
+        { encoding: 'utf8' }
+      )
+      mocks.revisions.mockResolvedValue(output)
+      await expect(getCommitsInRange(repository, 'HEAD')).resolves.toEqual([
+        { sha, summary: 'first commit' },
+      ])
+      expect(sha).toHaveLength(64)
+      expect(mocks.git).not.toHaveBeenCalled()
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('propagates revision read errors without invoking the legacy Git runner', async () => {
+    const error = new Error('revision read failed')
+    mocks.revisions.mockRejectedValue(error)
+    await expect(getCommitsInRange(repository, 'missing..topic')).rejects.toBe(
+      error
+    )
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('propagates merge history errors without invoking the legacy Git runner', async () => {
+    const error = new Error('merge history read failed')
+    mocks.hasMerge.mockRejectedValue(error)
+    await expect(doMergeCommitsExistAfterCommit(repository, null)).rejects.toBe(
+      error
+    )
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('uses the right revision for merge detection and preserves false', async () => {

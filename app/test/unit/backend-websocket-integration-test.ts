@@ -21,7 +21,7 @@ import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BackendClient } from '../../src/backend/client'
-import { getReviewedCopilotLines } from '../../src/lib/copilot/commit-selection'
+import { getReviewedCopilotLines, getReviewedDiffLines } from '../../src/lib/copilot/commit-selection'
 import { DiffParser } from '../../src/lib/diff-parser'
 import {
   DiffSelection,
@@ -222,11 +222,39 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await bounded(
         client.request('init_repository', { path: firstRepository })
       )
+      await client.selectBrowserRepository(null)
+      expect(await client.snapshot()).toBeNull()
+      await expect(client.repositoryStatusContext(firstRepository)).rejects.toMatchObject({ code: 'repository_changed' })
+      await client.selectBrowserRepository(firstRepository)
+      await writeFile(path.join(firstRepository, 'staged\nname'), 'staged')
+      execFileSync('git', ['-C', firstRepository, 'add', '--', 'staged\nname'])
+      await expect(client.repositoryIndexChanges(firstRepository)).resolves.toEqual([{ path: 'staged\nname', status: 'A' }])
+      execFileSync('git', ['-C', firstRepository, 'rm', '--cached', '-q', '--', 'staged\nname'])
+      await unlink(path.join(firstRepository, 'staged\nname'))
+      const invalidName = Buffer.concat([Buffer.from(`${firstRepository}/`), Buffer.from([0xff])])
+      await writeFile(invalidName, 'staged')
+      execFileSync('git', ['-C', firstRepository, 'add', '-A'])
+      await expect(client.repositoryIndexChanges(firstRepository)).rejects.toMatchObject({ code: 'unsupported_path' })
+      execFileSync('git', ['-C', firstRepository, 'rm', '--cached', '-r', '-q', '--', '.'])
+      await unlink(invalidName)
       const initialSelection = await client.snapshot()
       const existingFolder = path.join(directory, 'existing folder')
       await mkdir(existingFolder)
       await writeFile(path.join(existingFolder, 'keep.txt'), 'existing content')
       await client.initializeDesktopRepository(existingFolder, 'trunk')
+      expect(await client.repositoryGitIgnore(existingFolder, { type: 'read' })).toBeNull()
+      await client.repositoryGitIgnore(existingFolder, { type: 'save', text: 'first' })
+      await client.repositoryGitIgnore(existingFolder, { type: 'append', text: 'second' })
+      expect(await client.repositoryGitIgnore(existingFolder, { type: 'read' })).toBe('first\r\nsecond\r\n')
+      await client.repositoryGitIgnore(existingFolder, { type: 'save', text: '' })
+      expect(await client.repositoryGitIgnore(existingFolder, { type: 'read' })).toBeNull()
+      await symlink(path.join(directory, 'keep-outside'), path.join(existingFolder, '.gitignore'))
+      await writeFile(path.join(directory, 'keep-outside'), 'untouched')
+      await expect(client.repositoryGitIgnore(existingFolder, { type: 'read' })).rejects.toThrow()
+      await expect(client.repositoryGitIgnore(existingFolder, { type: 'save', text: 'bad' })).rejects.toThrow()
+      expect(await readFile(path.join(directory, 'keep-outside'), 'utf8')).toBe('untouched')
+      await unlink(path.join(existingFolder, '.gitignore'))
+      expect(await client.snapshot()).toEqual(initialSelection)
       expect(await readFile(path.join(existingFolder, 'keep.txt'), 'utf8')).toBe('existing content')
       expect(await readFile(path.join(existingFolder, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/trunk\n')
       expect(await client.repositorySafeFetchRemotes(existingFolder)).toEqual([])
@@ -410,6 +438,9 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         '-m',
         'initial',
       ])
+      const encodedCommit = await client.repositoryRendererCommit(firstRepository, 'HEAD')
+      expect(Buffer.from(encodedCommit!, 'base64').toString('utf8')).toContain('initial')
+      await expect(client.repositoryRendererCommit(firstRepository, 'missing')).resolves.toBeNull()
       const firstSnapshot = (await bounded(client.snapshot())) as {
         root_id: string
       }
@@ -440,6 +471,30 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       )
       expect(preview.path).toEqual({ bytes: [...Buffer.from(file.path)] })
       expect(getReviewedCopilotLines(file, displayed, preview)).toEqual([0])
+      const working = await client.repositoryWorkingDiff(firstRepository, file.path)
+      const selectedLines = getReviewedDiffLines(file.path, file.selection, displayed, working, 'stale')
+      const undoId = await client.repositoryDiscardSelection(firstRepository, file.path, { basis: working.basis, lines: selectedLines })
+      expect(await client.repositoryDiscardHistory(firstRepository)).toEqual(expect.arrayContaining([expect.objectContaining({ id: undoId, state: 'applied', files: ['untracked'] })]))
+      await expect(readFile(path.join(firstRepository, 'untracked'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await client.undoRepositoryDiscard(firstRepository, undoId)
+      expect(await client.repositoryDiscardHistory(firstRepository)).toEqual(expect.arrayContaining([expect.objectContaining({ id: undoId, state: 'undone' })]))
+      await client.forgetRepositoryDiscard(firstRepository, undoId)
+      expect(await client.repositoryDiscardHistory(firstRepository)).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: undoId })]))
+      expect(await readFile(path.join(firstRepository, 'untracked'), 'utf8')).toBe('new file')
+      await writeFile(path.join(firstRepository, 'untracked'), 'newer content')
+      await expect(client.repositoryDiscardSelection(firstRepository, file.path, { basis: working.basis, lines: selectedLines })).rejects.toThrow()
+      expect(await readFile(path.join(firstRepository, 'untracked'), 'utf8')).toBe('newer content')
+      await writeFile(path.join(firstRepository, 'untracked'), 'new file')
+      await writeFile(path.join(firstRepository, 'another-untracked'), 'another file')
+      const batchReview = await client.repositoryDiscardBatchPreview(firstRepository, ['untracked', 'another-untracked'])
+      expect(batchReview.files).toEqual(['untracked', 'another-untracked'])
+      const batchUndo = await client.repositoryDiscardBatch(firstRepository, ['untracked', 'another-untracked'], batchReview.basis)
+      await expect(readFile(path.join(firstRepository, 'untracked'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(path.join(firstRepository, 'another-untracked'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await client.undoRepositoryDiscard(firstRepository, batchUndo)
+      expect(await readFile(path.join(firstRepository, 'untracked'), 'utf8')).toBe('new file')
+      expect(await readFile(path.join(firstRepository, 'another-untracked'), 'utf8')).toBe('another file')
+      await unlink(path.join(firstRepository, 'another-untracked'))
       await writeFile(
         path.join(firstRepository, '.git', 'SQUASH_MSG'),
         'squash'
@@ -684,6 +739,9 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await bounded(
         client.request('init_repository', { path: secondRepository })
       )
+      await expect(client.repositoryDiscardHistory(firstRepository)).rejects.toMatchObject({ code: 'repository_changed' })
+      await expect(client.undoRepositoryDiscard(firstRepository, undoId)).rejects.toMatchObject({ code: 'repository_changed', retryable: false })
+      await expect(client.forgetRepositoryDiscard(firstRepository, undoId)).rejects.toMatchObject({ code: 'repository_changed', retryable: false })
       await expect(
         client.repositoryGitIdentityValue(firstRepository, 'user.name', true)
       ).rejects.toMatchObject({ code: 'repository_changed' })

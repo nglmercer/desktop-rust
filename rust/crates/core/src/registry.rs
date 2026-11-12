@@ -379,6 +379,14 @@ impl Registry {
         })
     }
 
+    /// Clear only the current selection; saved repositories and accounts remain.
+    pub fn clear_selection(&self) -> Result<SavedRepositories> {
+        self.update(|data| {
+            data.selected = None;
+            Ok(())
+        })
+    }
+
     /// Select a previously bound record without recreating a forgotten path.
     pub fn select_record(&self, id: &str, expected_path: &Path) -> Result<SavedRepositoryRecord> {
         let mut selected = None;

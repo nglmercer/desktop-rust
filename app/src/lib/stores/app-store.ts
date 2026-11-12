@@ -39,6 +39,8 @@ import {
   migrateCopilotModelSelectionsToAccounts,
 } from './copilot-store'
 import { backend } from '../../backend/client'
+import { RepositorySelectionQueue } from '../../backend/repository-selection'
+import { discardBatchWithoutDialog, discardReviewedSelection } from '../git/reviewed-discard'
 import {
   getReviewedCopilotLines,
   getWholeFileCopilotSelection,
@@ -637,6 +639,14 @@ const selectedCopilotModelsByAccountKey = 'selected-copilot-models-by-account'
 export const showChangesFilterDefault = true
 
 export class AppStore extends TypedBaseStore<IAppState> {
+  private readonly browserRepositorySelection = new RepositorySelectionQueue(async path => {
+    if (path === null) {
+      await backend().selectBrowserRepository(null)
+      return
+    }
+    const type = await getRepositoryType(path)
+    await backend().selectBrowserRepository(type.kind === 'regular' ? type.topLevelWorkingDirectory : null)
+  })
   private readonly gitStoreCache: GitStoreCache
   private readonly assistedCommits: AssistedCommitCoordinator
 
@@ -2346,6 +2356,15 @@ export class AppStore extends TypedBaseStore<IAppState> {
   public async _selectRepository(
     repository: Repository | CloningRepository | null
   ): Promise<Repository | null> {
+    if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
+      try {
+        const current = await this.browserRepositorySelection.select(repository instanceof Repository ? repository.path : null)
+        if (!current) return null
+      } catch (error) {
+        this.emitError(error)
+        return null
+      }
+    }
     const previouslySelectedRepository = this.selectedRepository
     if (
       !(previouslySelectedRepository instanceof Repository) ||
@@ -6629,7 +6648,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
   public async _discardChanges(
     repository: Repository,
     files: ReadonlyArray<WorkingDirectoryFileChange>,
-    moveToTrash: boolean = true
+    moveToTrash: boolean = true,
+    reviewBasis?: string
   ) {
     this.assistedCommits.state.assertAvailable(repository)
     const paths = [
@@ -6645,7 +6665,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const guard = (index: number): Promise<void> =>
       index === paths.length
         ? withRepositoryGitOperation(repository.path, 'mutation', () =>
-            this.discardChangesCore(repository, files, moveToTrash)
+            this.discardChangesCore(repository, files, moveToTrash, reviewBasis)
           )
         : this.assistedCommits.state.withDestruction(paths[index], () =>
             guard(index + 1)
@@ -6656,8 +6676,22 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private async discardChangesCore(
     repository: Repository,
     files: ReadonlyArray<WorkingDirectoryFileChange>,
-    moveToTrash: boolean = true
+    moveToTrash: boolean = true,
+    reviewBasis?: string
   ) {
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      try {
+        const paths = files.map(file => file.path)
+        const undoId = reviewBasis === undefined
+          ? await discardBatchWithoutDialog(repository, paths)
+          : await backend().repositoryDiscardBatch(repository.path, paths, reviewBasis)
+        this.showDiscardUndoBanner(repository, undoId)
+        await this._refreshRepository(repository)
+      } catch (error) {
+        this.emitError(error)
+      }
+      return
+    }
     const gitStore = this.gitStoreCache.get(repository)
 
     const { askForConfirmationOnDiscardChangesPermanently } = this.getState()
@@ -6707,10 +6741,60 @@ export class AppStore extends TypedBaseStore<IAppState> {
     diff: ITextDiff,
     selection: DiffSelection
   ) {
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      try {
+        const undoId = await discardReviewedSelection(repository, filePath, diff, selection)
+        if (undoId !== null) {
+          this.showDiscardUndoBanner(repository, undoId)
+        }
+        await this._refreshRepository(repository)
+      } catch (error) {
+        this.emitError(error)
+      }
+      return
+    }
     const gitStore = this.gitStoreCache.get(repository)
     await gitStore.discardChangesFromSelection(filePath, diff, selection)
 
     return this._refreshRepository(repository)
+  }
+
+  private showDiscardUndoBanner(repository: Repository, undoId: string): void {
+    const onUndo = () => {
+      void this._undoRepositoryDiscard(repository, undoId).catch(error => {
+        this.emitError(error)
+        this._setBanner({ type: BannerType.DiscardedSelection, undoId, onUndo })
+      })
+    }
+    this._setBanner({ type: BannerType.DiscardedSelection, undoId, onUndo })
+  }
+
+  public async _undoRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+    this.assistedCommits.state.assertAvailable(repository)
+    await this.assistedCommits.state.withDestruction(repository.path, () =>
+      withRepositoryGitOperation(repository.path, 'mutation', async () => {
+        this.assistedCommits.state.assertAvailable(repository)
+        await backend().undoRepositoryDiscard(repository.path, undoId)
+      })
+    )
+    try {
+      await this._refreshRepository(repository)
+    } catch (error) {
+      this.emitError(error)
+    }
+  }
+
+  public async _forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+    this.assistedCommits.state.assertAvailable(repository)
+    await this.assistedCommits.state.withDestruction(repository.path, () =>
+      withRepositoryGitOperation(repository.path, 'mutation', async () => {
+        this.assistedCommits.state.assertAvailable(repository)
+        await backend().forgetRepositoryDiscard(repository.path, undoId)
+      })
+    )
+    if (this.currentBanner?.type === BannerType.DiscardedSelection && this.currentBanner.undoId === undoId) {
+      this._clearBanner(BannerType.DiscardedSelection)
+    }
   }
 
   public async _startAmendingRepository(

@@ -988,9 +988,10 @@ export class Dispatcher {
   public discardChanges(
     repository: Repository,
     files: ReadonlyArray<WorkingDirectoryFileChange>,
-    moveToTrash: boolean = true
+    moveToTrash: boolean = true,
+    reviewBasis?: string
   ): Promise<void> {
-    return this.appStore._discardChanges(repository, files, moveToTrash)
+    return this.appStore._discardChanges(repository, files, moveToTrash, reviewBasis)
   }
 
   /** Discard the changes from the given diff selection. */
@@ -1006,6 +1007,14 @@ export class Dispatcher {
       diff,
       selection
     )
+  }
+
+  public undoRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+    return this.appStore._undoRepositoryDiscard(repository, undoId)
+  }
+
+  public forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+    return this.appStore._forgetRepositoryDiscard(repository, undoId)
   }
 
   /** Start amending the most recent commit. */

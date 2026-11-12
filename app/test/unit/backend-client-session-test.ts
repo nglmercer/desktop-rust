@@ -313,6 +313,81 @@ describe('backend Copilot session cleanup', () => {
     ).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('rejects unrepresentable or malformed staged paths before discard', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => [
+      { status: 'A', path: { bytes: [97, 10, 98] } },
+    ])
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryIndexChanges('/repo-a')).resolves.toEqual([{ status: 'A', path: 'a\nb' }])
+    invoke.mockResolvedValueOnce([{ status: 'M', path: { bytes: [0xef, 0xbb, 0xbf, 97] } }])
+    await expect(client.repositoryIndexChanges('/repo-a')).resolves.toEqual([{ status: 'M', path: '\ufeffa' }])
+    invoke.mockResolvedValueOnce([{ status: 'A', path: { bytes: [255] } }])
+    await expect(client.repositoryIndexChanges('/repo-a')).rejects.toMatchObject({ code: 'unsupported_path' })
+    invoke.mockResolvedValueOnce([{ status: 'R', path: 'old' }])
+    await expect(client.repositoryIndexChanges('/repo-a')).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce([{ status: 'A', path: 'same' }, { status: 'D', path: 'same' }])
+    await expect(client.repositoryIndexChanges('/repo-a')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('uses certified native discard and returns its undo capability', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => null)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const selection = { basis: 'diff-basis', lines: [1] }
+    const id = '12345678-1234-1234-1234-123456789abc'
+    invoke.mockResolvedValueOnce({ basis: 'a'.repeat(64) }).mockResolvedValueOnce({ code: 0, undo_id: id }).mockResolvedValueOnce({ code: 0 })
+    await expect(client.repositoryDiscardSelection('/repo-a', 'file', selection)).resolves.toBe(id)
+    await client.undoRepositoryDiscard('/repo-a', id)
+    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo-a', operation: { method: 'discard_preview', path: 'file', scope: 'working_tree', selection } } }))
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo-a', operation: { method: 'discard', path: 'file', scope: 'working_tree', selection, basis: 'a'.repeat(64) } } }))
+    expect(invoke).toHaveBeenNthCalledWith(3, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo-a', operation: { method: 'undo_discard', undo_id: id } } }))
+  })
+
+  it('never submits a discard with an invalid preview', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ basis: 'bad' }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryDiscardSelection('/repo-a', 'file', { basis: 'diff-basis', lines: [1] })).rejects.toMatchObject({ code: 'invalid_response' })
+    expect(invoke).toHaveBeenCalledOnce()
+  })
+
+  it('does not replay an interrupted backup deletion', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => { throw { code: 'cancelled', message: 'interrupted', retryable: true } })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const id = '12345678-1234-1234-1234-123456789abc'
+    await expect(client.forgetRepositoryDiscard('/repo-a', id)).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect recovery history') })
+    expect(invoke).toHaveBeenCalledOnce()
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo-a', operation: { method: 'forget_discard', undo_id: id } } }))
+  })
+
+  it('validates and submits a reviewed multi-file discard', async () => {
+    const id = '12345678-1234-1234-1234-123456789abc'
+    const invoke = vi.fn(async (): Promise<unknown> => null)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    invoke.mockResolvedValueOnce({ basis: 'b'.repeat(64), files: [{ path: 'new' }, { path: { bytes: [111, 108, 100] } }] }).mockResolvedValueOnce({ code: 0, undo_id: id })
+    const review = await client.repositoryDiscardBatchPreview('/repo', ['new'])
+    expect(review).toEqual({ basis: 'b'.repeat(64), files: ['new', 'old'] })
+    await expect(client.repositoryDiscardBatch('/repo', ['new'], review.basis)).resolves.toBe(id)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo', operation: { method: 'discard_batch', paths: ['new'], basis: 'b'.repeat(64) } } }))
+    invoke.mockResolvedValueOnce({ basis: 'b'.repeat(64), files: [{ path: 'other' }] })
+    await expect(client.repositoryDiscardBatchPreview('/repo', ['new'])).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('validates discard history before presenting recovery actions', async () => {
+    const id = '12345678-1234-1234-1234-123456789abc'
+    const invoke = vi.fn(async (): Promise<unknown> => [{ id, state: 'prepared', created_ns: 1_700_000_000_000_000_000, purpose: 'discard', files: [{ display_path: 'file' }], lfs_payloads_unavailable: 0 }])
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryDiscardHistory('/repo-a')).resolves.toEqual([{ id, state: 'prepared', createdMs: 1_700_000_000_000, purpose: 'discard', files: ['file'], unavailableLfs: 0 }])
+    invoke.mockResolvedValueOnce([{ id, state: 'invalid', created_ns: 0, error: 'private data' }])
+    await expect(client.repositoryDiscardHistory('/repo-a')).resolves.toEqual([{ id, state: 'invalid', createdMs: 0, purpose: 'unknown', files: [], unavailableLfs: 0 }])
+    invoke.mockResolvedValueOnce([{ id, state: 'applied', created_ns: 0, purpose: 'discard', files: [{ display_path: 4 }], lfs_payloads_unavailable: 0 }])
+    await expect(client.repositoryDiscardHistory('/repo-a')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('validates ahead and behind counts', async () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ ahead: 3, behind: 2 })

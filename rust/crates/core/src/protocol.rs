@@ -291,6 +291,10 @@ pub enum Operation {
         role: GitIdentityRole,
     },
     GitDescription,
+    IndexChanges,
+    RendererCommit {
+        revision: String,
+    },
     SafeFetchRemotes,
     ManageRemote {
         action: crate::ManagedRemoteAction,
@@ -301,6 +305,9 @@ pub enum Operation {
     WriteCreationFile {
         kind: CreationFile,
         contents: String,
+    },
+    GitIgnore {
+        action: crate::GitIgnoreAction,
     },
     GitReadSetting {
         key: crate::GitReadSettingKey,
@@ -404,6 +411,13 @@ pub enum Operation {
         #[serde(default)]
         scope: DiscardScope,
         selection: Option<DiscardSelection>,
+        basis: String,
+    },
+    DiscardBatchPreview {
+        paths: Vec<GitPath>,
+    },
+    DiscardBatch {
+        paths: Vec<GitPath>,
         basis: String,
     },
     ListDiscards,

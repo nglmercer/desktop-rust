@@ -1,5 +1,7 @@
 import { git } from './core'
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Possible statuses of an entry in Git, see the git diff-index
@@ -79,6 +81,16 @@ export const NullTreeSHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 export async function getIndexChanges(
   repository: Repository
 ): Promise<Map<string, NoRenameIndexStatus>> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryIndexChanges(repository.path)
+    const entries =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+    return new Map(
+      entries.map(entry => [entry.path, getNoRenameIndexStatus(entry.status)])
+    )
+  }
   const args = ['diff-index', '--cached', '--name-status', '--no-renames', '-z']
 
   let result = await git(

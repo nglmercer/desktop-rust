@@ -91,6 +91,14 @@ enum GitInfoOperation {
         kind: desktop_backend::CreationFile,
         contents: String,
     },
+    GitIgnore {
+        repository_path: String,
+        action: desktop_backend::GitIgnoreAction,
+    },
+    ReviewedDiscard {
+        repository_path: String,
+        operation: Operation,
+    },
     InitialCommit {
         repository_path: String,
         paths: Vec<desktop_backend::GitPath>,
@@ -166,6 +174,8 @@ enum ReadMethod {
     Snapshot,
     Status,
     StatusDetailed,
+    IndexChanges,
+    RendererCommit,
     StatusContext,
     StatusConflictDetails,
     BranchEnumeration,
@@ -279,6 +289,12 @@ impl Backend {
         | GitInfoOperation::WriteCreationFile {
             repository_path, ..
         }
+        | GitInfoOperation::GitIgnore {
+            repository_path, ..
+        }
+        | GitInfoOperation::ReviewedDiscard {
+            repository_path, ..
+        }
         | GitInfoOperation::InitialCommit {
             repository_path, ..
         }
@@ -291,6 +307,31 @@ impl Backend {
             && !Path::new(repository_path).is_absolute()
         {
             return Err(AppError::BadArgs("repository path must be absolute".into()));
+        }
+        if let GitInfoOperation::ReviewedDiscard { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::DiffDetail { staged: false, .. }
+                    | Operation::DiscardPreview {
+                        scope: desktop_backend::DiscardScope::WorkingTree,
+                        selection: Some(_),
+                        ..
+                    }
+                    | Operation::Discard {
+                        scope: desktop_backend::DiscardScope::WorkingTree,
+                        selection: Some(_),
+                        ..
+                    }
+                    | Operation::ListDiscards
+                    | Operation::DiscardBatchPreview { .. }
+                    | Operation::DiscardBatch { .. }
+                    | Operation::UndoDiscard { .. }
+                    | Operation::ForgetDiscard { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported reviewed discard operation".into(),
+            ));
         }
         let duration = request.deadline_ms.unwrap_or(60_000);
         if !(1..=60_000).contains(&duration) {
@@ -586,6 +627,25 @@ impl Backend {
                         include_untracked: request.include_untracked.unwrap_or(true),
                     }
                 }
+                ReadMethod::IndexChanges
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::IndexChanges
+                }
+                ReadMethod::RendererCommit
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none() =>
+                {
+                    Operation::RendererCommit {
+                        revision: request
+                            .commitish
+                            .ok_or_else(|| AppError::BadArgs("commitish is required".into()))?,
+                    }
+                }
                 ReadMethod::StatusContext
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()
@@ -773,6 +833,24 @@ impl Backend {
             job.operation,
             BackendOperation::GitInfo(GitInfoOperation::ManageRemote { .. })
         );
+        let gitignore_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::GitIgnore {
+                action: desktop_backend::GitIgnoreAction::Save { .. }
+                    | desktop_backend::GitIgnoreAction::Append { .. },
+                ..
+            })
+        );
+        let discard_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::ReviewedDiscard {
+                operation: Operation::Discard { .. }
+                    | Operation::DiscardBatch { .. }
+                    | Operation::UndoDiscard { .. }
+                    | Operation::ForgetDiscard { .. },
+                ..
+            })
+        );
         let initialization = matches!(
             job.operation,
             BackendOperation::GitInfo(GitInfoOperation::InitializeRepository { .. })
@@ -823,6 +901,18 @@ impl Backend {
                                     return Err(AppError::msg("select a repository root, not a nested path"));
                                 }
                                 repo.execute(Operation::WriteCreationFile { kind, contents }).await
+                            }
+                            GitInfoOperation::GitIgnore { repository_path, action } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                repo.execute(Operation::GitIgnore { action }).await
+                            }
+                            GitInfoOperation::ReviewedDiscard { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                repo.execute(operation).await
                             }
                             GitInfoOperation::InitialCommit { repository_path, paths } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
@@ -881,11 +971,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         }))
@@ -1710,6 +1800,102 @@ esac
         }
         fs::write(first.join("first-only"), "test").unwrap();
         let backend = Backend::new(16).unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&first)
+                .args(["add", "--", "first-only"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":first,"method":"index_changes"})
+                ])
+                .unwrap(),
+            json!([{"status":"A","path":{"bytes":b"first-only"}}])
+        );
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&first)
+                .args(["rm", "--cached", "-q", "--", "first-only"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(backend.admit(vec![json!({"repository_path":first,"method":"index_changes","include_untracked":true})]).is_err());
+        let reviewed = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":first,"operation":operation}})]).unwrap())
+        };
+        let diff =
+            reviewed(json!({"method":"diff_detail","path":"first-only","staged":false})).unwrap();
+        let selection = json!({"basis":diff["basis"],"lines":[diff["hunks"][0]["lines"][0]["id"]]});
+        let preview = reviewed(json!({"method":"discard_preview","path":"first-only","scope":"working_tree","selection":selection})).unwrap();
+        let result = reviewed(json!({"method":"discard","path":"first-only","scope":"working_tree","selection":selection,"basis":preview["basis"]})).unwrap();
+        let records = reviewed(json!({"method":"list_discards"})).unwrap();
+        assert!(
+            records
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["id"] == result["undo_id"] && entry["state"] == "applied")
+        );
+        assert!(!first.join("first-only").exists());
+        let manifest_path = first
+            .join(".git/desktop-undo")
+            .join(result["undo_id"].as_str().unwrap())
+            .join("manifest.json");
+        let mut manifest: Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["state"] = json!("prepared");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert!(reviewed(json!({"method":"forget_discard","undo_id":result["undo_id"]})).is_err());
+        assert!(manifest_path.exists());
+        manifest["state"] = json!("applied");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        reviewed(json!({"method":"undo_discard","undo_id":result["undo_id"]})).unwrap();
+        assert_eq!(
+            fs::read_to_string(first.join("first-only")).unwrap(),
+            "test"
+        );
+        fs::write(first.join("batch-extra"), "extra").unwrap();
+        let batch = json!(["first-only", "batch-extra"]);
+        let batch_preview =
+            reviewed(json!({"method":"discard_batch_preview","paths":batch})).unwrap();
+        assert_eq!(batch_preview["files"].as_array().unwrap().len(), 2);
+        let batch_result = reviewed(
+            json!({"method":"discard_batch","paths":batch,"basis":batch_preview["basis"]}),
+        )
+        .unwrap();
+        assert!(!first.join("first-only").exists());
+        assert!(!first.join("batch-extra").exists());
+        reviewed(json!({"method":"undo_discard","undo_id":batch_result["undo_id"]})).unwrap();
+        assert_eq!(
+            fs::read_to_string(first.join("first-only")).unwrap(),
+            "test"
+        );
+        assert_eq!(
+            fs::read_to_string(first.join("batch-extra")).unwrap(),
+            "extra"
+        );
+        fs::remove_file(first.join("batch-extra")).unwrap();
+        reviewed(json!({"method":"forget_discard","undo_id":batch_result["undo_id"]})).unwrap();
+        reviewed(json!({"method":"forget_discard","undo_id":result["undo_id"]})).unwrap();
+        assert!(
+            reviewed(json!({"method":"list_discards"}))
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            fs::read_to_string(first.join("first-only")).unwrap(),
+            "test"
+        );
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":first,"operation":{"method":"stage","paths":["first-only"]}}})]).is_err());
         let destination = root.join("existing folder");
         fs::create_dir(&destination).unwrap();
         fs::write(destination.join("keep.txt"), "keep").unwrap();
@@ -1888,6 +2074,29 @@ esac
         let creation = |path: &Path, kind: &str, contents: &str| {
             backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"write_creation_file","repository_path":path,"kind":kind,"contents":contents}})]).unwrap())
         };
+        let gitignore = |action: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"git_ignore","repository_path":destination,"action":action}})]).unwrap())
+        };
+        for (key, value) in [("core.autocrlf", "true"), ("core.safecrlf", "false")] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&destination)
+                    .args(["config", "--local", key, value])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        assert_eq!(gitignore(json!({"type":"read"})).unwrap(), Value::Null);
+        gitignore(json!({"type":"save","text":"first\n"})).unwrap();
+        gitignore(json!({"type":"append","text":"second\n"})).unwrap();
+        assert_eq!(
+            gitignore(json!({"type":"read"})).unwrap(),
+            json!("first\nsecond\n")
+        );
+        gitignore(json!({"type":"save","text":""})).unwrap();
+        assert_eq!(gitignore(json!({"type":"read"})).unwrap(), Value::Null);
         assert_eq!(
             creation(&destination, "readme", "hello 🦀\n").unwrap(),
             Value::Null
@@ -1973,6 +2182,9 @@ esac
         assert!(initial_commit(&destination.join("nested"), json!(["README.md"])).is_err());
         let result = initial_commit(&destination, json!(["README.md", ".gitattributes"])).unwrap();
         assert_eq!(result["code"], 0);
+        let commit = backend.read_args(vec![json!({"repository_path":destination,"method":"renderer_commit","commitish":"HEAD"})]).unwrap();
+        assert!(commit.as_str().is_some_and(|value| !value.is_empty()));
+        assert_eq!(backend.read_args(vec![json!({"repository_path":destination,"method":"renderer_commit","commitish":"missing"})]).unwrap(), Value::Null);
         assert!(initial_commit(&destination, json!(["keep.txt"])).is_err());
         let tree = Command::new("git")
             .arg("-C")

@@ -348,6 +348,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::Detach { .. }
             | Operation::CreateBranch { .. }
             | Operation::Discard { .. }
+            | Operation::DiscardBatch { .. }
             | Operation::UndoDiscard { .. }
             | Operation::Merge { .. }
             | Operation::MergeAbort

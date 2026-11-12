@@ -15,6 +15,8 @@ import { IStatusResult } from '../git'
 import { AssistedCommitError } from '../git/assisted-commit'
 import {
   getAssistedCommitProtectedPaths,
+  requireRepositoryGitAsyncOwnership,
+  supportsRepositoryGitAsyncOwnership,
   isRepositoryGitPaused,
   protectAssistedCommitResources,
   withRepositoryGitErrorPropagation,
@@ -473,7 +475,16 @@ export class AssistedCommitReaders {
     if (status === null) {
       return null
     }
-    await getAssistedCommitProtectedPaths(repository.path)
+    if (supportsRepositoryGitAsyncOwnership()) {
+      await getAssistedCommitProtectedPaths(repository.path)
+    } else if (
+      assistedRun !== undefined ||
+      this.state.cache.get(repository).changesState.workingDirectory.files.some(file =>
+        this.selections.hasRestored(file.selection)
+      )
+    ) {
+      requireRepositoryGitAsyncOwnership()
+    }
     try {
       await this.selections.verifyRestored(repository)
     } catch (error) {

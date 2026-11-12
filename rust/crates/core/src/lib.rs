@@ -47,6 +47,8 @@ pub use refs::symbolic_ref;
 mod repository_discovery;
 pub use repository_discovery::{repository_type, trust_repository};
 mod creation;
+mod gitignore;
+pub use gitignore::GitIgnoreAction;
 mod preferences;
 mod publish;
 mod publish_origin;
@@ -333,6 +335,8 @@ impl Repository {
 
             Operation::GitSettings { scope } => return git_settings(&self.path, scope).await,
             Operation::GitDescription => return self.git_description().await,
+            Operation::IndexChanges => return self.index_changes().await,
+            Operation::RendererCommit { revision } => return self.renderer_commit(&revision).await,
             Operation::SafeFetchRemotes => return self.safe_fetch_remotes().await,
             Operation::ManageRemote { action } => return self.manage_remote(action).await,
             Operation::SetGitDescription { description } => {
@@ -341,6 +345,7 @@ impl Repository {
             Operation::WriteCreationFile { kind, contents } => {
                 return self.write_creation_file(kind, contents).await;
             }
+            Operation::GitIgnore { action } => return self.gitignore(action).await,
             Operation::GitReadSetting {
                 key,
                 only_local,
@@ -631,6 +636,12 @@ impl Repository {
                 scope,
                 selection,
             } => return self.discard_preview(path, scope, selection).await,
+            Operation::DiscardBatchPreview { paths } => {
+                return self.discard_batch_preview(paths).await;
+            }
+            Operation::DiscardBatch { paths, basis } => {
+                return self.discard_batch(paths, &basis).await;
+            }
             Operation::Discard {
                 path,
                 scope,
@@ -797,10 +808,13 @@ impl Repository {
             | GitIdentityValue { .. }
             | GitEffectiveIdentity { .. }
             | GitDescription
+            | IndexChanges
+            | RendererCommit { .. }
             | SafeFetchRemotes
             | ManageRemote { .. }
             | SetGitDescription { .. }
             | WriteCreationFile { .. }
+            | GitIgnore { .. }
             | GitReadSetting { .. }
             | SetGitSetting { .. }
             | Worktrees
@@ -834,6 +848,8 @@ impl Repository {
             | DiffDetail { .. }
             | SelectDiff { .. }
             | DiscardPreview { .. }
+            | DiscardBatchPreview { .. }
+            | DiscardBatch { .. }
             | Discard { .. }
             | ListDiscards
             | ForgetDiscard { .. }

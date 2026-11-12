@@ -1,9 +1,10 @@
 import * as Path from 'path'
 import * as FS from 'fs'
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import { getConfigValue } from './config'
 import { lstat, open, type FileHandle } from 'fs/promises'
 import { isErrnoException } from '../errno-exception'
+import { backend } from '../../backend/client'
 
 const symbolicLinkErrorMessage =
   'Cannot use a symbolic link as the root .gitignore file'
@@ -81,6 +82,11 @@ async function openExistingGitIgnore(
 export async function readGitIgnoreAtRoot(
   repository: Repository
 ): Promise<string | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().repositoryGitIgnore(Path.resolve(repository.path), {
+      type: 'read',
+    })
+  }
   const ignorePath = Path.join(repository.path, '.gitignore')
   const file = await openExistingGitIgnore(ignorePath, FS.constants.O_RDONLY)
 
@@ -105,6 +111,13 @@ export async function saveGitIgnore(
   repository: Repository,
   text: string
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().repositoryGitIgnore(Path.resolve(repository.path), {
+      type: 'save',
+      text,
+    })
+    return
+  }
   const ignorePath = Path.join(repository.path, '.gitignore')
 
   if (text === '') {
@@ -139,12 +152,20 @@ export async function appendIgnoreRule(
   repository: Repository,
   patterns: string | string[]
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().repositoryGitIgnore(Path.resolve(repository.path), {
+      type: 'append',
+      text: Array.isArray(patterns) ? patterns.join('\n') : patterns,
+    })
+    return
+  }
   const text = (await readGitIgnoreAtRoot(repository)) || ''
 
   const currentContents = await formatGitIgnoreContents(text, repository)
 
-  const newPatternText =
-    patterns instanceof Array ? patterns.join('\n') : patterns
+  const newPatternText = Array.isArray(patterns)
+    ? patterns.join('\n')
+    : patterns
   const newText = await formatGitIgnoreContents(
     `${currentContents}${newPatternText}`,
     repository
@@ -162,7 +183,7 @@ export async function appendIgnoreFile(
   repository: Repository,
   filePath: string | string[]
 ): Promise<void> {
-  if (filePath instanceof Array) {
+  if (Array.isArray(filePath)) {
     const escapedFilePaths = filePath.map(path =>
       escapeGitSpecialCharacters(path)
     )
@@ -176,7 +197,7 @@ export async function appendIgnoreFile(
 
 /** Escapes a string from special characters used in a gitignore file */
 export function escapeGitSpecialCharacters(pattern: string): string {
-  const specialCharacters = /[\[\]!\*\#\?]/g
+  const specialCharacters = /[[\]!*#?]/g
 
   return pattern.replaceAll(specialCharacters, match => {
     return '\\' + match
@@ -204,7 +225,7 @@ async function formatGitIgnoreContents(
   const autocrlf = await getConfigValue(repository, 'core.autocrlf')
   const safecrlf = await getConfigValue(repository, 'core.safecrlf')
 
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<string>(resolve => {
     if (autocrlf === 'true' && safecrlf === 'true') {
       // based off https://stackoverflow.com/a/141069/1363815
       const normalizedText = text.replace(/\r\n|\n\r|\n|\r/g, '\r\n')

@@ -1,13 +1,14 @@
-import { BackendGitPath, ICopilotCommitDiff } from '../../backend/client'
+import type { BackendGitPath, ICopilotCommitDiff } from '../../backend/client'
 import {
   DiffLineType,
   DiffSelectionType,
-  ILargeTextDiff,
-  ITextDiff,
+  type DiffSelection,
+  type ILargeTextDiff,
+  type ITextDiff,
 } from '../../models/diff'
 import {
   AppFileStatusKind,
-  WorkingDirectoryFileChange,
+  type WorkingDirectoryFileChange,
 } from '../../models/status'
 
 /** Translate whole-file selections to the private Rust index snapshot. */
@@ -59,12 +60,26 @@ export function getReviewedCopilotLines(
   displayed: ITextDiff | ILargeTextDiff,
   preview: ICopilotCommitDiff
 ): ReadonlyArray<number> {
-  const stale = () =>
-    new Error(
-      'The selected diff changed. Review and reselect its lines before generating a commit message.'
-    )
+  return getReviewedDiffLines(
+    file.path,
+    file.selection,
+    displayed,
+    preview,
+    'The selected diff changed. Review and reselect its lines before generating a commit message.'
+  )
+}
+
+/** Verify every displayed line against a native diff before using its IDs. */
+export function getReviewedDiffLines(
+  path: string,
+  selection: DiffSelection,
+  displayed: ITextDiff | ILargeTextDiff,
+  preview: ICopilotCommitDiff,
+  staleMessage: string
+): ReadonlyArray<number> {
+  const stale = () => new Error(staleMessage)
   if (
-    !matchesPath(preview.path, file.path) ||
+    !matchesPath(preview.path, path) ||
     !preview.can_select ||
     preview.hunks.length !== displayed.hunks.length
   ) {
@@ -90,10 +105,10 @@ export function getReviewedCopilotLines(
         line.type === DiffLineType.Add
           ? 'added'
           : line.type === DiffLineType.Delete
-          ? 'deleted'
-          : line.type === DiffLineType.Context
-          ? 'context'
-          : null
+            ? 'deleted'
+            : line.type === DiffLineType.Context
+              ? 'context'
+              : null
       if (
         kind === null ||
         kind !== next.kind ||
@@ -108,7 +123,7 @@ export function getReviewedCopilotLines(
       ids.add(next.id)
       if (
         kind !== 'context' &&
-        file.selection.isSelected(hunk.unifiedDiffStart + index + 1)
+        selection.isSelected(hunk.unifiedDiffStart + index + 1)
       ) {
         selected.push(next.id)
       }

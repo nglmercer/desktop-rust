@@ -360,6 +360,10 @@ enum ManagementOperation {
         kind: desktop_core::CreationFile,
         contents: String,
     },
+    RepositoryGitIgnore {
+        path: desktop_core::GitPath,
+        action: desktop_core::GitIgnoreAction,
+    },
     ReadRepositoryCreationStatus {
         path: desktop_core::GitPath,
         action: CreationStatusAction,
@@ -389,6 +393,7 @@ enum ManagementOperation {
     SelectRepository {
         path: desktop_core::GitPath,
     },
+    ClearRepository,
     OpenWorktree {
         path: desktop_core::GitPath,
     },
@@ -610,6 +615,7 @@ async fn execute(
             | ManageRepositoryRemote { .. }
             | SetRepositoryDescription { .. }
             | WriteRepositoryCreationFile { .. }
+            | RepositoryGitIgnore { .. }
             | ReadRepositoryCreationStatus { .. }
             | CreateInitialCommit { .. }),
         ) => {
@@ -660,6 +666,7 @@ async fn execute(
                     kind,
                     contents,
                 } => (path, Operation::WriteCreationFile { kind, contents }),
+                RepositoryGitIgnore { path, action } => (path, Operation::GitIgnore { action }),
                 ReadRepositoryCreationStatus { path, action } => (
                     path,
                     match action {
@@ -718,6 +725,18 @@ async fn execute(
                 Some(repo) if canonical == repo.path() => serde_json::json!({"root_id":repo.id()}),
                 _ => serde_json::Value::Null,
             })
+        }
+        ApplicationOperation::Management(ClearRepository) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "Cannot clear a repository-bound request"
+            );
+            let mut current = cancellation::wait(state.repo.lock()).await?;
+            let registry = registry.clone();
+            cancellation::blocking(move || registry.clear_selection()).await?;
+            *current = None;
+            state.changes.send_replace(serde_json::Value::Null);
+            Ok(serde_json::Value::Null)
         }
         ApplicationOperation::Management(ForgetRepository { path }) => {
             cancellation::blocking(move || {

@@ -200,7 +200,46 @@ embedded frontend smoke test confirms the renderer still mounts against the
 authenticated bridge. This does not establish assisted-commit parity.
 Symbolic-ref reads for the current branch, remote default branches and branch
 pruning use Rust on both transports, including detached and missing refs.
+The staged-index comparison used by the legacy discard orchestration also uses
+a typed Rust read for Wry and WebSocket. It handles unborn branches, SHA-256,
+renames as separate additions and deletions, and unmerged paths. Filenames are
+byte-preserving over the bridge; the current string-based renderer refuses
+invalid UTF-8 before continuing. The rest of that discard path still has
+legacy callers and is not yet replaced by this read.
+Whole-file discards in the main renderer use a single Rust batch journal on
+Wry and WebSocket. The confirmation shows every affected path, including a
+staged rename's source, and the backend rechecks the reviewed file, index and
+HEAD certificate before publication. Users who disabled confirmation still
+receive a safety stop if an additional path would be affected. The native
+workflow keeps recovery data in Recovery history rather than system Trash;
+submodule discards remain unsupported. A single undo record covers the batch
+and can recover an interrupted prefix.
+Selected-line discard from the main renderer uses Rust's working-diff
+certificate and journaled discard on Wry and WebSocket. It compares displayed
+hunks and lines before using native line IDs, refuses stale or unsupported
+diffs, and offers an immediate Undo banner. Undo records remain durable; the
+main renderer also provides a repository-scoped recovery history after the
+banner is dismissed, including interrupted records and guarded restore. A
+display based on HEAD may differ from the index-based working diff when staged
+changes exist; these selections require review. Completed recovery backups can
+be deleted from the history view after explicit confirmation; interrupted and
+unreadable records cannot be deleted there. The Rust operation independently
+rejects deletion of interrupted records. Backup export and an automatic
+retention policy remain outstanding.
+The root `.gitignore` editor and sidebar ignore actions now use Rust reads,
+saves and appends on both transports. They retain the existing Git line-ending
+rules, refuse symlink targets, and serialize app edits across repository handles.
+Requests are bounded; a cancelled write may have completed and should be
+inspected before retry. Concurrent edits by external programs are not locked.
 Repository persistence and Electron fallback paths still have legacy callers.
+WebSocket repository selection is serialized and binds the selected path to
+the Rust registry before refreshing the renderer. The status refresh obtains
+its current commit through a typed Rust read. A Chromium integration test
+adds a repository and displays its changes through the authenticated bridge;
+this does not establish parity for the remaining repository workflows. In the
+browser, assisted-commit path discovery is skipped only when no assisted run or
+restored selection exists, because that runtime cannot safely propagate the
+ownership context required for an assisted transaction.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository
@@ -275,9 +314,10 @@ constitute a complete browser status workflow.
 
 The rebase-order revision list, ahead/behind and merge-commit presence checks
 also execute as scoped Wry and WebSocket Rust reads. Missing revisions retain
-the renderer's null result, while other errors remain failures. The renderer
-retains its existing one-line parser and native Git fallback, so these reads
-alone do not complete history or rebase migration.
+the renderer's null result, while other errors remain failures without retrying
+through the legacy runner on either Rust transport. The renderer's one-line
+parser accepts both SHA-1 and SHA-256 object IDs. Electron retains the legacy
+path, and these reads alone do not complete history or rebase migration.
 
 ## Current evidence
 
@@ -339,7 +379,7 @@ comparison. Both React panels now share one `panels.js` bundle, replacing the
 earlier single-panel scaffolding artifact.
 
 The remaining diff gap includes arbitrary filters/LFS extensions, large-file
-streaming and virtualization, batch/submodule discard, complete history
+streaming and virtualization, submodule discard, complete history
 search/compare UX, remaining image formats/rendering validation, and the
 remaining conflict/undo and native integration workflows. Legacy diff/apply code
 is retained until those semantics and their callers are replaced; typed partial
@@ -388,9 +428,10 @@ these presentation components does not certify complete parity.
 Rust now implements reviewed whole-file discard from HEAD (working file plus
 selected index entries), working-only restore from the index, and selected-line
 discard that preserves staged changes. Staged renames include both paths. The
-CLI, authenticated WebSocket protocol and React review/undo panel share these
-operations. Undo IDs have their own `undo_id` field, avoiding collision with RPC
-request IDs; the complete client/server test covers that wire contract.
+CLI and authenticated WebSocket protocol expose these operations, and the main
+renderer now uses the reviewed selected-line path. Undo IDs have their own
+`undo_id` field, avoiding collision with RPC request IDs. Earlier references to
+a standalone React review/undo panel describe a frontend no longer in the tree.
 
 Plans certify raw file bytes, permissions, HEAD, index and restored output.
 Whole-file filter output and backups stream to disk beyond the preview limit.
@@ -417,7 +458,7 @@ stale roots; the complete client test runs discard/undo against the actual Rust
 server.
 
 This replaces the common discard path, not all legacy trash/platform and patch
-semantics. Multiple-file batches, submodule reset/discard, reftable ref fencing,
+semantics. Submodule reset/discard, reftable ref fencing,
 arbitrary-filter/LFS-extension line selection, backup export/retention policy,
 ownership/ACL and full native filesystem behavior still need
 implementation/audit. Legacy apply/store/shell callers remain until those
@@ -1909,14 +1950,14 @@ app's models/stores/UI/platform integrations also require audit.
 | `description.ts`                     | Partial: reads and creation-time writes use Rust with worktree and symlink handling; Electron fallback remains                                                                                                    |
 | `diff.ts`                            | Partial: structured working/history/conflict previews, ordinary LFS payloads and selection implemented; larger/custom-filter/image workflows pending                                                              |
 | `diff-check.ts`                      | Partial: native marker diagnostics and explicit consent for edited-resolution staging; other callers/status propagation pending                                                                                   |
-| `diff-index.ts`                      | Pending semantic audit and replacement                                                                                                                                                                            |
+| `diff-index.ts`                      | Partial: staged index comparison uses Rust on Wry and WebSocket; Electron fallback and the surrounding discard workflow remain                                                                                      |
 | `environment.ts`                     | Pending semantic audit and replacement                                                                                                                                                                            |
 | `fetch.ts`                           | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `file-version-fence.ts`              | Pending semantic audit and replacement                                                                                                                                                                            |
 | `for-each-ref.ts`                    | Pending semantic audit and replacement                                                                                                                                                                            |
 | `format-patch.ts`                    | Pending semantic audit and replacement                                                                                                                                                                            |
 | `git-delimiter-parser.ts`            | Pending semantic audit and replacement                                                                                                                                                                            |
-| `gitignore.ts`                       | Pending semantic audit and replacement                                                                                                                                                                            |
+| `gitignore.ts`                       | Partial: root ignore file reads and edits use Rust for Wry and WebSocket; Electron fallback and external-editor concurrency remain                                                                                 |
 | `index.ts`                           | Pending semantic audit and replacement                                                                                                                                                                            |
 | `init.ts`                            | Partial; new-repository initialization and registry covered offline                                                                                                                                               |
 | `interpret-trailers.ts`              | Pure parsing moved/shared; Rust history uses Git trailer parsing; merge-trailer semantics pending                                                                                                                 |

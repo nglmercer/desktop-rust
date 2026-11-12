@@ -43,7 +43,7 @@ impl Repository {
     }
 }
 
-fn write_file(root: &Path, kind: CreationFile, contents: &[u8]) -> Result<()> {
+pub(crate) fn write_file(root: &Path, kind: CreationFile, contents: &[u8]) -> Result<()> {
     let directory = Dir::open_ambient_dir(root, ambient_authority())?;
     let name = kind.name();
     let preserve_existing = matches!(kind, CreationFile::GitAttributes);

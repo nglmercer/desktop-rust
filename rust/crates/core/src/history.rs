@@ -1,6 +1,7 @@
 //! Stable, paginated history and byte-preserving committed file lists.
 use crate::{GitPath, Repository, args, process};
 use anyhow::{Context, Result, bail};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -26,6 +27,26 @@ pub(crate) struct Commit {
 }
 
 impl Repository {
+    /// Return the renderer's exact one-commit Git log format without exposing
+    /// a generic command interface. The existing parser keeps Git's encoding,
+    /// trailer, short-hash and decoration semantics.
+    pub(crate) async fn renderer_commit(&self, revision: &str) -> Result<Value> {
+        anyhow::ensure!(
+            !revision.is_empty() && revision.len() <= 4096 && !revision.contains('\0'),
+            "invalid commit revision"
+        );
+        let output = self.run(&args(&[
+            "log", "--date=raw", "--max-count=1", "-z",
+            "--format=%H%x00%h%x00%s%x00%b%x00%an <%ae> %ad%x00%cn <%ce> %cd%x00%P%x00%(trailers:unfold,only)%x00%D",
+            "--no-show-signature", "--no-color", "--end-of-options", revision, "--",
+        ])).await?;
+        if output.code == 128 {
+            return Ok(Value::Null);
+        }
+        ensure(&output)?;
+        Ok(json!(STANDARD.encode(output.stdout)))
+    }
+
     /// Match the renderer's rebase-order `rev-list` output exactly; the
     /// renderer's parser owns its existing commit-ID and summary semantics.
     pub(crate) async fn revision_list(&self, range: &str) -> Result<Value> {

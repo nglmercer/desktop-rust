@@ -2,6 +2,47 @@ use crate::{DetailedStatusRecord, FileChange, GitPath, Repository, Snapshot, arg
 use anyhow::{Context, Result, bail};
 
 impl Repository {
+    /// Compare the index to HEAD (or Git's empty tree on an unborn branch).
+    /// NUL records keep filenames unambiguous and byte-exact.
+    pub(crate) async fn index_changes(&self) -> Result<serde_json::Value> {
+        let output = self
+            .run(&args(&[
+                "diff",
+                "--cached",
+                "--name-status",
+                "--no-renames",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-color",
+                "-z",
+                "--",
+            ]))
+            .await?;
+        if output.code != 0 {
+            bail!(
+                "Could not compare the index with HEAD: {}",
+                output.text().stderr
+            );
+        }
+        let mut fields = output.stdout.split(|byte| *byte == 0);
+        let mut entries = Vec::new();
+        loop {
+            let status = fields.next().context("truncated index status")?;
+            if status.is_empty() {
+                anyhow::ensure!(fields.next().is_none(), "malformed index status terminator");
+                break;
+            }
+            anyhow::ensure!(
+                matches!(status, b"A" | b"D" | b"M" | b"T" | b"U" | b"X"),
+                "unknown index status"
+            );
+            let path = fields.next().context("missing index path")?;
+            anyhow::ensure!(!path.is_empty(), "empty index path");
+            entries.push(serde_json::json!({"status":std::str::from_utf8(status)?,"path":GitPath::Bytes { bytes: path.to_vec() }}));
+        }
+        Ok(serde_json::json!(entries))
+    }
+
     /// Preserve the renderer's Git-based conflict-marker and binary detection.
     pub(crate) async fn status_conflict_details(
         &self,
@@ -300,6 +341,117 @@ mod tests {
     #[test]
     fn rejects_truncated_rename() {
         assert!(parse_status(b"R  new\0").is_err());
+    }
+
+    #[tokio::test]
+    async fn index_changes_compare_staged_files_in_sha1_and_sha256_repositories() {
+        use std::{fs, process::Command};
+        for format in ["sha1", "sha256"] {
+            let root = std::env::temp_dir()
+                .join(format!("desktop-index-{format}-{}", uuid::Uuid::new_v4()));
+            fs::create_dir_all(&root).unwrap();
+            let git = |argv: &[&str]| {
+                let output = Command::new("git")
+                    .current_dir(&root)
+                    .args(argv)
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env("GIT_CONFIG_GLOBAL", root.join("none"))
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_WORK_TREE")
+                    .env_remove("GIT_INDEX_FILE")
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "git {argv:?}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            };
+            git(&[
+                "init",
+                "-q",
+                "-b",
+                "main",
+                &format!("--object-format={format}"),
+            ]);
+            let repo = Repository::open(&root).await.unwrap();
+            assert_eq!(repo.index_changes().await.unwrap(), json!([]));
+            fs::write(root.join("old\nname"), "base").unwrap();
+            git(&["add", "--", "old\nname"]);
+            assert_eq!(
+                repo.index_changes().await.unwrap(),
+                json!([{"status":"A","path":{"bytes":b"old\nname"}}])
+            );
+            git(&[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "initial",
+            ]);
+            git(&["mv", "--", "old\nname", "new\nname"]);
+            let changes = repo.index_changes().await.unwrap();
+            assert_eq!(
+                changes,
+                json!([
+                    {"status":"A","path":{"bytes":b"new\nname"}},
+                    {"status":"D","path":{"bytes":b"old\nname"}}
+                ])
+            );
+            git(&["reset", "--hard", "-q", "HEAD"]);
+            git(&["switch", "-q", "-c", "side"]);
+            fs::write(root.join("old\nname"), "side\n").unwrap();
+            git(&["add", "--", "old\nname"]);
+            git(&[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "side",
+            ]);
+            git(&["switch", "-q", "main"]);
+            fs::write(root.join("old\nname"), "main\n").unwrap();
+            git(&["add", "--", "old\nname"]);
+            git(&[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "main",
+            ]);
+            let merge = Command::new("git")
+                .current_dir(&root)
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "merge",
+                    "side",
+                ])
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", root.join("none"))
+                .output()
+                .unwrap();
+            assert!(!merge.status.success());
+            assert_eq!(
+                repo.index_changes().await.unwrap(),
+                json!([{"status":"U","path":{"bytes":b"old\nname"}}])
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

@@ -518,6 +518,98 @@ fn discard_and_undo_preserve_reviewed_data() {
 }
 
 #[test]
+fn batch_discard_reviews_all_files_and_recovers_an_interrupted_publication() {
+    let f = Fixture::new();
+    for (name, text) in [
+        ("a", "base a\n"),
+        ("b", "base b\n"),
+        ("old", "rename base\n"),
+        ("other", "base other\n"),
+    ] {
+        fs::write(f.repo.join(name), text).unwrap();
+    }
+    f.commit();
+    fs::write(f.repo.join("a"), "staged a\n").unwrap();
+    f.git(&["add", "a"]);
+    fs::write(f.repo.join("a"), "working a\n").unwrap();
+    fs::write(f.repo.join("b"), "working b\n").unwrap();
+    fs::write(f.repo.join("other"), "unrelated staged\n").unwrap();
+    f.git(&["add", "other"]);
+    f.git(&["mv", "old", "new"]);
+    fs::write(f.repo.join("old"), "recreated source\n").unwrap();
+    fs::write(f.repo.join("extra"), "untracked\n").unwrap();
+    fs::write(f.repo.join("untouched"), "leave me\n").unwrap();
+    let paths = json!(["a", "b", "new", "extra"]);
+    let cached_before = f.git(&[
+        "diff",
+        "--cached",
+        "--raw",
+        "--no-abbrev",
+        "--no-renames",
+        "-z",
+    ]);
+    let plan = f.rpc("discard_batch_preview", json!({"paths":paths}));
+    let affected: Vec<_> = plan["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["display_path"].as_str().unwrap())
+        .collect();
+    assert_eq!(affected, ["a", "b", "new", "old", "extra"]);
+    fs::write(f.repo.join("b"), "changed after review\n").unwrap();
+    f.rpc_raw(
+        "discard_batch",
+        json!({"paths":paths,"basis":plan["basis"]}),
+        true,
+    );
+    assert_eq!(fs::read(f.repo.join("a")).unwrap(), b"working a\n");
+    assert_eq!(fs::read(f.repo.join("old")).unwrap(), b"recreated source\n");
+    fs::write(f.repo.join("b"), "working b\n").unwrap();
+    let plan = f.rpc("discard_batch_preview", json!({"paths":paths}));
+    let result = f.rpc(
+        "discard_batch",
+        json!({"paths":paths,"basis":plan["basis"]}),
+    );
+    let id = result["undo_id"].as_str().unwrap();
+    assert_eq!(fs::read(f.repo.join("a")).unwrap(), b"base a\n");
+    assert_eq!(fs::read(f.repo.join("b")).unwrap(), b"base b\n");
+    assert_eq!(fs::read(f.repo.join("old")).unwrap(), b"rename base\n");
+    assert!(!f.repo.join("new").exists());
+    assert!(!f.repo.join("extra").exists());
+    assert_eq!(fs::read(f.repo.join("untouched")).unwrap(), b"leave me\n");
+    assert_eq!(f.indexed("other"), b"unrelated staged\n");
+    // Simulate a crash after some paths have already been restored.
+    let manifest_path = f
+        .repo
+        .join(".git/desktop-undo")
+        .join(id)
+        .join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["state"] = json!("prepared");
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    fs::write(f.repo.join("a"), "working a\n").unwrap();
+    f.undo(id, false);
+    assert_eq!(fs::read(f.repo.join("a")).unwrap(), b"working a\n");
+    assert_eq!(fs::read(f.repo.join("b")).unwrap(), b"working b\n");
+    assert_eq!(fs::read(f.repo.join("old")).unwrap(), b"recreated source\n");
+    assert_eq!(fs::read(f.repo.join("new")).unwrap(), b"rename base\n");
+    assert_eq!(fs::read(f.repo.join("extra")).unwrap(), b"untracked\n");
+    assert_eq!(
+        f.git(&[
+            "diff",
+            "--cached",
+            "--raw",
+            "--no-abbrev",
+            "--no-renames",
+            "-z"
+        ]),
+        cached_before
+    );
+    f.rpc_raw("discard_batch_preview", json!({"paths":["a","a"]}), true);
+    f.rpc_raw("discard_batch_preview", json!({"paths":[]}), true);
+}
+
+#[test]
 fn unborn_index_and_intent_to_add_can_be_undone() {
     let f = Fixture::new();
     let new = f.repo.join("new");

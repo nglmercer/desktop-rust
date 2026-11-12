@@ -18,6 +18,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct IndexEntry {
@@ -273,33 +275,59 @@ impl Repository {
 
     async fn prepare_discard(
         &self,
-        path: GitPath,
+        requested: Vec<GitPath>,
         scope: DiscardScope,
         selection: Option<DiscardSelection>,
     ) -> Result<Plan> {
-        let path = work::checked_path(path)?;
         anyhow::ensure!(
-            selection.is_none() || scope == DiscardScope::WorkingTree,
-            "selected lines only discard working changes"
+            !requested.is_empty() && requested.len() <= 4096,
+            "Select between 1 and 4096 files"
+        );
+        anyhow::ensure!(
+            selection.is_none() || scope == DiscardScope::WorkingTree && requested.len() == 1,
+            "selected lines require one working-tree file"
         );
         let snapshot = self.snapshot().await?;
-        let changed = snapshot
+        let visible: std::collections::HashMap<_, _> = snapshot
             .files
             .iter()
-            .find(|change| {
-                work::checked_path(change.path.clone()).is_ok_and(|candidate| candidate == path)
+            .filter_map(|change| {
+                work::checked_path(change.path.clone())
+                    .ok()
+                    .map(|path| (path, change))
             })
-            .context("file has no visible changes to discard")?;
-        let mut paths = vec![path];
-        if scope == DiscardScope::AllChanges
-            && changed.index == 'R'
-            && let Some(original) = &changed.original_path
-        {
-            let original = work::checked_path(original.clone())?;
-            if !paths.contains(&original) {
-                paths.push(original);
+            .collect();
+        let mut paths = Vec::new();
+        let mut selected = std::collections::HashSet::new();
+        let mut affected = std::collections::HashSet::new();
+        let mut path_bytes = 0usize;
+        for path in requested {
+            let path = work::checked_path(path)?;
+            path_bytes = path_bytes.saturating_add(path.as_encoded_bytes().len());
+            anyhow::ensure!(path_bytes <= 1024 * 1024, "Selected paths exceed 1 MiB");
+            anyhow::ensure!(
+                selected.insert(path.clone()),
+                "Selected paths must not repeat"
+            );
+            let changed = visible
+                .get(&path)
+                .context("file has no visible changes to discard")?;
+            if affected.insert(path.clone()) {
+                paths.push(path);
+            }
+            if scope == DiscardScope::AllChanges
+                && changed.index == 'R'
+                && let Some(original) = &changed.original_path
+            {
+                let original = work::checked_path(original.clone())?;
+                if affected.insert(original.clone()) {
+                    path_bytes = path_bytes.saturating_add(original.as_encoded_bytes().len());
+                    anyhow::ensure!(path_bytes <= 1024 * 1024, "Affected paths exceed 1 MiB");
+                    paths.push(original);
+                }
             }
         }
+        anyhow::ensure!(paths.len() <= 8192, "Too many affected paths");
         let index_path = self.index_path().await?;
         let original_index = read_index(&index_path)?;
         let head = self.head_oid().await?;
@@ -449,7 +477,7 @@ impl Repository {
         } else {
             (None, None)
         };
-        Ok(Plan {
+        let plan = Plan {
             record: Record {
                 purpose: Purpose::Discard,
                 unavailable_lfs: Vec::new(),
@@ -474,7 +502,12 @@ impl Repository {
             replacement_index,
             basis,
             space,
-        })
+        };
+        anyhow::ensure!(
+            serde_json::to_vec_pretty(&plan.record)?.len() <= MAX_MANIFEST_BYTES,
+            "Recovery manifest exceeds 1 MiB; select fewer files"
+        );
+        Ok(plan)
     }
 
     async fn save_index_objects(
@@ -1124,7 +1157,7 @@ impl Repository {
         scope: DiscardScope,
         selection: Option<DiscardSelection>,
     ) -> Result<Value> {
-        let plan = self.prepare_discard(path, scope, selection).await?;
+        let plan = self.prepare_discard(vec![path], scope, selection).await?;
         Ok(
             json!({"basis":plan.basis,"scope":scope,"files":display_changes(&plan.record.changes),"index_changes":plan.replacement_index.is_some(),"undo_requires_unchanged_index":plan.record.exact_before.is_some(),"backup_bytes":plan.record.changes.iter().map(|change|change.before.size).sum::<u64>()+plan.record.objects.iter().map(|object|object.size).sum::<u64>()+plan.record.shared.iter().map(|index|index.size).sum::<u64>()+plan.record.lfs.iter().map(|object|object.size).sum::<u64>()}),
         )
@@ -1140,10 +1173,34 @@ impl Repository {
         let index_path = self.index_path().await?;
         let transaction = IndexTransaction::begin(&index_path)?;
         let references = self.lock_discard_refs().await?;
-        let plan = self.prepare_discard(path, scope, selection).await?;
+        let plan = self.prepare_discard(vec![path], scope, selection).await?;
         anyhow::ensure!(
             plan.basis == basis,
             "File, index, HEAD, or restore filters changed; review discard again"
+        );
+        self.publish_plan(plan, transaction, references, index_path)
+            .await
+    }
+
+    pub(crate) async fn discard_batch_preview(&self, paths: Vec<GitPath>) -> Result<Value> {
+        let plan = self
+            .prepare_discard(paths, DiscardScope::AllChanges, None)
+            .await?;
+        Ok(
+            json!({"basis":plan.basis,"files":display_changes(&plan.record.changes),"index_changes":plan.replacement_index.is_some(),"backup_bytes":plan.record.changes.iter().map(|change| change.before.size).sum::<u64>() + plan.record.objects.iter().map(|object| object.size).sum::<u64>() + plan.record.shared.iter().map(|index| index.size).sum::<u64>() + plan.record.lfs.iter().map(|object| object.size).sum::<u64>()}),
+        )
+    }
+
+    pub(crate) async fn discard_batch(&self, paths: Vec<GitPath>, basis: &str) -> Result<Value> {
+        let index_path = self.index_path().await?;
+        let transaction = IndexTransaction::begin(&index_path)?;
+        let references = self.lock_discard_refs().await?;
+        let plan = self
+            .prepare_discard(paths, DiscardScope::AllChanges, None)
+            .await?;
+        anyhow::ensure!(
+            plan.basis == basis,
+            "Files, index, HEAD, or restore filters changed; review discard again"
         );
         self.publish_plan(plan, transaction, references, index_path)
             .await
@@ -1460,8 +1517,13 @@ fn sync_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 fn write_record(directory: &Path, record: &Record) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(record)?;
+    anyhow::ensure!(
+        bytes.len() <= MAX_MANIFEST_BYTES,
+        "Recovery manifest exceeds 1 MiB; select fewer files"
+    );
     let temporary = directory.join(format!("manifest-{}.tmp", uuid::Uuid::new_v4()));
-    work::private_write(&temporary, &serde_json::to_vec_pretty(record)?)?;
+    work::private_write(&temporary, &bytes)?;
     fs::rename(&temporary, directory.join("manifest.json"))?;
     sync_directory(directory)
 }
@@ -1472,10 +1534,10 @@ fn read_record(directory: &Path, id: &str) -> Result<Record> {
     );
     let mut bytes = Vec::new();
     fs::File::open(directory.join("manifest.json"))?
-        .take(1024 * 1024 + 1)
+        .take(MAX_MANIFEST_BYTES as u64 + 1)
         .read_to_end(&mut bytes)?;
     anyhow::ensure!(
-        bytes.len() <= 1024 * 1024,
+        bytes.len() <= MAX_MANIFEST_BYTES,
         "undo manifest exceeds size limit"
     );
     let record: Record = serde_json::from_slice(&bytes)?;
@@ -1484,7 +1546,12 @@ fn read_record(directory: &Path, id: &str) -> Result<Record> {
             && record.id == id
             && matches!(record.hash_length, 40 | 64)
             && !record.changes.is_empty()
-            && record.changes.len() <= 2,
+            && record.changes.len()
+                <= if record.purpose == Purpose::Discard {
+                    8192
+                } else {
+                    2
+                },
         "unsupported undo record"
     );
     anyhow::ensure!(
@@ -1502,8 +1569,12 @@ fn read_record(directory: &Path, id: &str) -> Result<Record> {
     for object in record.lfs.iter().chain(&record.unavailable_lfs) {
         object.validate()?;
     }
+    let mut paths = std::collections::HashSet::new();
     for change in &record.changes {
-        work::checked_path(change.path.clone())?;
+        anyhow::ensure!(
+            paths.insert(work::checked_path(change.path.clone())?),
+            "duplicate path in undo record"
+        );
         anyhow::ensure!(
             !change.skip_working
                 || record.purpose == Purpose::ConflictStage && change.before == change.after
@@ -1548,6 +1619,58 @@ impl Drop for RefLock {
 }
 fn checksum(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod batch_journal_tests {
+    use super::*;
+
+    fn record() -> Record {
+        let absent = FileState::absent();
+        Record {
+            purpose: Purpose::Discard,
+            unavailable_lfs: vec![],
+            version: 2,
+            id: uuid::Uuid::new_v4().to_string(),
+            repository_id: "test".into(),
+            created_ns: 0,
+            state: "prepared".into(),
+            head: None,
+            branch: None,
+            scope: DiscardScope::AllChanges,
+            changes: vec![Change {
+                skip_working: false,
+                path: GitPath::Text("file".into()),
+                before: absent.clone(),
+                after: absent,
+                before_index: vec![],
+                after_index: vec![],
+            }],
+            hash_length: 40,
+            exact_before: None,
+            exact_after: None,
+            objects: vec![],
+            lfs: vec![],
+            shared: vec![],
+            operation: None,
+        }
+    }
+
+    #[test]
+    fn refuses_oversized_or_duplicate_recovery_records() {
+        let dir =
+            std::env::temp_dir().join(format!("desktop-batch-record-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let mut oversized = record();
+        oversized.operation = Some("x".repeat(MAX_MANIFEST_BYTES));
+        assert!(write_record(&dir, &oversized).is_err());
+        assert!(!dir.join("manifest.json").exists());
+        let mut duplicate = record();
+        duplicate.changes.push(duplicate.changes[0].clone());
+        write_record(&dir, &duplicate).unwrap();
+        assert!(read_record(&dir, &duplicate.id).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 struct AlternateIndex(PathBuf);

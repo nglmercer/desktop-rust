@@ -79,6 +79,11 @@ export function requireRepositoryGitAsyncOwnership(): void {
   }
 }
 
+/** The legacy assisted transaction cannot run when async ownership is absent. */
+export function supportsRepositoryGitAsyncOwnership(): boolean {
+  return contexts.supportsAsyncPropagation
+}
+
 function pendingOperation(
   kind: 'read' | 'mutation' = 'read'
 ): IRepositoryOperation {

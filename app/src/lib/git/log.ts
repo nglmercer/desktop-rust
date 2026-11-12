@@ -15,6 +15,8 @@ import { parseRawUnfoldedTrailers } from './interpret-trailers'
 import { createLogParser } from './git-delimiter-parser'
 import { forceUnwrap } from '../fatal-error'
 import assert from 'assert'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 // File mode 160000 is used by git specifically for submodules:
 // https://github.com/git/git/blob/v2.37.3/cache.h#L62-L69
@@ -117,14 +119,7 @@ const isCopyOrRename = (
 /**
  * Get the repository's commits using `revisionRange` and limited to `limit`
  */
-export async function getCommits(
-  repository: Repository,
-  revisionRange?: string,
-  limit?: number,
-  skip?: number,
-  additionalArgs: ReadonlyArray<string> = []
-): Promise<ReadonlyArray<Commit>> {
-  const { formatArgs, parse } = createLogParser({
+const commitLogParser = createLogParser({
     sha: '%H', // SHA
     shortSha: '%h', // short SHA
     summary: '%s', // summary
@@ -137,7 +132,16 @@ export async function getCommits(
     parents: '%P', // parent SHAs,
     trailers: '%(trailers:unfold,only)',
     refs: '%D',
-  })
+})
+
+export async function getCommits(
+  repository: Repository,
+  revisionRange?: string,
+  limit?: number,
+  skip?: number,
+  additionalArgs: ReadonlyArray<string> = []
+): Promise<ReadonlyArray<Commit>> {
+  const { formatArgs } = commitLogParser
 
   const args = ['log', '--date=raw']
 
@@ -179,8 +183,11 @@ export async function getCommits(
     return new Array<Commit>()
   }
 
-  const parsed = parse(result.stdout)
+  return parseCommitLog(result.stdout)
+}
 
+function parseCommitLog(stdout: Buffer): ReadonlyArray<Commit> {
+  const parsed = commitLogParser.parse(stdout)
   return parsed.map(commit => {
     // Ref is of the format: (HEAD -> master, tag: some-tag-name, tag: some-other-tag,with-a-comma, origin/master, origin/HEAD)
     // Refs are comma separated, but some like tags can also contain commas in the name, so we split on the pattern ", " and then
@@ -345,6 +352,14 @@ export async function getCommit(
   repository: Repository,
   ref: string
 ): Promise<Commit | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryRendererCommit(repository.path, ref)
+    const encoded = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    if (encoded === null) return null
+    return parseCommitLog(Buffer.from(encoded, 'base64'))[0] ?? null
+  }
   const commits = await getCommits(repository, ref, 1)
   if (commits.length < 1) {
     return null
