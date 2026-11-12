@@ -12,6 +12,8 @@ import { IRemote } from '../../models/remote'
 import { Progress } from '../../models/progress'
 import { join, resolve } from 'path'
 import { readFile } from 'fs/promises'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Update submodules after a git operation.
@@ -35,6 +37,20 @@ export async function updateSubmodulesAfterOperation<T extends Progress>(
   targetOrRemote: string,
   allowFileProtocol: boolean
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const progress = (description: string, value: number) => progressCallback?.({
+      kind: progressKind,
+      title,
+      description,
+      value,
+      ...(progressKind === 'checkout' ? { target: targetOrRemote } : { remote: targetOrRemote }),
+    } as T)
+    progress('Updating submodules', 0)
+    await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().repositoryUpdateSubmodules(repository.path, allowFileProtocol), true)
+    progress('Submodules updated', 1)
+    return
+  }
   const opts: IGitStringExecutionOptions = {
     env: await envForRemoteOperation(
       getFallbackUrlForProxyResolve(repository, remote)
@@ -127,6 +143,13 @@ export async function updateSubmodulesAfterOperation<T extends Progress>(
 export async function listSubmodules(
   repository: Repository
 ): Promise<ReadonlyArray<SubmoduleEntry>> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositorySubmoduleStatus(repository.path)
+    const stdout = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    return parseSubmoduleStatus(stdout)
+  }
   const [submodulesFile, submodulesDir] = await Promise.all([
     pathExists(join(repository.path, '.gitmodules')),
     pathExists(join(repository.path, '.git', 'modules')),
@@ -167,6 +190,10 @@ export async function listSubmodules(
     return []
   }
 
+  return parseSubmoduleStatus(stdout)
+}
+
+function parseSubmoduleStatus(stdout: string): ReadonlyArray<SubmoduleEntry> {
   const submodules = new Array<SubmoduleEntry>()
 
   // entries are of the format:
@@ -202,6 +229,11 @@ export async function resetSubmodulePaths(
 ): Promise<void> {
   if (paths.length === 0) {
     return
+  }
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().repositoryResetSubmodules(repository.path, paths), true)
   }
 
   await git(

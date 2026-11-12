@@ -48,38 +48,29 @@ export async function getBranches(
   }
 
   if (backend().transportKind === 'wry') {
-    const migrated = await withRepositoryGitOperation(
+    return withRepositoryGitOperation(
       repository.path,
       'read',
       async () => {
-        try {
-          const branches = await backend().repositoryBranches(
-            repository.path,
-            prefixes
-          )
-          return branches.map(
-            branch =>
-              new Branch(
-                branch.name,
-                branch.upstream,
-                { sha: branch.oid },
-                branch.ref.startsWith('refs/heads')
-                  ? BranchType.Local
-                  : BranchType.Remote,
-                branch.ref
-              )
-          )
-        } catch (error) {
-          log.warn(
-            'Rust branch enumeration failed; retrying with the existing Git path',
-            error
-          )
-          return undefined
-        }
+        const branches = await backend().repositoryBranches(
+          repository.path,
+          prefixes
+        )
+        return branches.map(
+          branch =>
+            new Branch(
+              branch.name,
+              branch.upstream,
+              { sha: branch.oid },
+              branch.ref.startsWith('refs/heads')
+                ? BranchType.Local
+                : BranchType.Remote,
+              branch.ref
+            )
+        )
       },
       true
     )
-    if (migrated !== undefined) return migrated
   }
 
   // TODO: use expectedErrors here to handle a specific error
@@ -157,35 +148,26 @@ export async function getBranchesDifferingFromUpstream(
   }
 
   if (backend().transportKind === 'wry') {
-    const migrated = await withRepositoryGitOperation(
+    return withRepositoryGitOperation(
       repository.path,
       'read',
       async () => {
-        try {
-          const branches = await backend().repositoryBranches(
-            repository.path,
-            prefixes
-          )
-          return trackingBranches(
-            branches.map(branch => ({
-              fullName: branch.ref,
-              sha: branch.oid,
-              upstream: branch.upstream_ref ?? '',
-              symref: '',
-              head: branch.current ? '*' : ' ',
-            }))
-          )
-        } catch (error) {
-          log.warn(
-            'Rust branch tracking read failed; retrying with the existing Git path',
-            error
-          )
-          return undefined
-        }
+        const branches = await backend().repositoryBranches(
+          repository.path,
+          prefixes
+        )
+        return trackingBranches(
+          branches.map(branch => ({
+            fullName: branch.ref,
+            sha: branch.oid,
+            upstream: branch.upstream_ref ?? '',
+            symref: '',
+            head: branch.current ? '*' : ' ',
+          }))
+        )
       },
       true
     )
-    if (migrated !== undefined) return migrated
   }
 
   const result = await git(

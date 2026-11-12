@@ -15,6 +15,154 @@ const LARGE_BLOB_LIMIT: u64 = 100 * 1024 * 1024;
 mod trailer_tests {
     use super::*;
     #[tokio::test]
+    async fn annotated_tag_preserves_empty_message_and_validates_target() {
+        let root = std::env::temp_dir().join(format!("desktop-tag-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "tag.gpgSign", "false"]);
+        git(&["commit", "--allow-empty", "-qm", "initial"]);
+        let head = git(&["rev-parse", "HEAD"]);
+        let repo = Repository::open(&root).await.unwrap();
+        let created = repo
+            .execute(crate::Operation::TagCreateAnnotated {
+                name: "release/topic".into(),
+                target: head.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(created["code"], 0);
+        assert_eq!(git(&["cat-file", "-t", "refs/tags/release/topic"]), "tag");
+        assert_eq!(git(&["rev-parse", "refs/tags/release/topic^{}"]), head);
+        assert!(
+            repo.execute(crate::Operation::TagCreateAnnotated {
+                name: "-bad".into(),
+                target: head.clone()
+            })
+            .await
+            .is_err()
+        );
+        assert!(
+            repo.execute(crate::Operation::TagCreateAnnotated {
+                name: "other".into(),
+                target: "--bad".into()
+            })
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            repo.execute(crate::Operation::TagCreateAnnotated {
+                name: "symbolic".into(),
+                target: "HEAD".into()
+            })
+            .await
+            .unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            repo.execute(crate::Operation::TagDelete {
+                name: "symbolic".into()
+            })
+            .await
+            .unwrap()["code"],
+            0
+        );
+        let deleted = repo
+            .execute(crate::Operation::TagDelete {
+                name: "release/topic".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(deleted["code"], 0);
+        assert_eq!(git(&["tag", "--list"]), "");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn merge_preview_reports_clean_conflicts_and_unrelated_histories() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-merge-preview-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |command: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(command)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        std::fs::write(root.join("file"), "base\n").unwrap();
+        git(&["add", "file"]);
+        git(&["commit", "-qm", "base"]);
+        let base = git(&["rev-parse", "HEAD"]);
+        std::fs::write(root.join("file"), "ours\n").unwrap();
+        git(&["commit", "-qam", "ours"]);
+        let ours = git(&["rev-parse", "HEAD"]);
+        git(&["checkout", "-q", "--detach", &base]);
+        std::fs::write(root.join("file"), "theirs\n").unwrap();
+        git(&["commit", "-qam", "theirs"]);
+        let theirs = git(&["rev-parse", "HEAD"]);
+        let tree = git(&["rev-parse", "HEAD^{tree}"]);
+        let unrelated = git(&["commit-tree", &tree, "-m", "unrelated"]);
+        let index = std::fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        assert_eq!(repo.merge_base(&ours, &theirs).await.unwrap(), json!(base));
+        assert_eq!(repo.merge_base("HEAD", &ours).await.unwrap(), json!(base));
+        assert_eq!(
+            repo.merge_base(&ours, &unrelated).await.unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            repo.merge_base("missing", &ours).await.unwrap(),
+            Value::Null
+        );
+        assert_eq!(repo.merge_base("--all", &ours).await.unwrap(), Value::Null);
+        assert!(repo.merge_base("", &ours).await.is_err());
+        assert_eq!(
+            repo.merge_tree_preview(&base, &ours).await.unwrap(),
+            json!({"kind":"clean"})
+        );
+        assert_eq!(
+            repo.merge_tree_preview(&ours, &theirs).await.unwrap(),
+            json!({"kind":"conflicts","conflicted_files":1})
+        );
+        assert_eq!(
+            repo.merge_tree_preview(&ours, &unrelated).await.unwrap(),
+            json!({"kind":"invalid"})
+        );
+        assert!(repo.merge_tree_preview("--bad", &theirs).await.is_err());
+        assert!(
+            repo.merge_tree_preview(&"f".repeat(40), &theirs)
+                .await
+                .is_err()
+        );
+        assert_eq!(std::fs::read(root.join(".git/index")).unwrap(), index);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
     async fn preserves_git_trailer_configuration_and_parse_semantics() {
         let root = std::env::temp_dir().join(format!("desktop-trailers-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
@@ -87,6 +235,84 @@ mod trailer_tests {
 }
 
 impl Repository {
+    /// Match the renderer's merge-base behavior without accepting Git options.
+    pub(crate) async fn merge_base(&self, first: &str, second: &str) -> Result<Value> {
+        for revision in [first, second] {
+            anyhow::ensure!(
+                !revision.is_empty() && revision.len() <= 4096 && !revision.contains('\0'),
+                "invalid merge-base revision"
+            );
+        }
+        let output = self
+            .run(&args(&["merge-base", "--", first, second]))
+            .await?;
+        if matches!(output.code, 1 | 128) {
+            return Ok(Value::Null);
+        }
+        let output = checked(output)?;
+        let oid = std::str::from_utf8(&output.stdout)?.trim();
+        anyhow::ensure!(
+            matches!(oid.len(), 40 | 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "invalid merge-base result"
+        );
+        Ok(json!(oid))
+    }
+
+    /// Compute mergeability for immutable commit IDs without touching the index.
+    pub(crate) async fn merge_tree_preview(&self, ours: &str, theirs: &str) -> Result<Value> {
+        let valid = |oid: &str| {
+            matches!(oid.len(), 40 | 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+        };
+        anyhow::ensure!(
+            valid(ours) && valid(theirs) && ours.len() == theirs.len(),
+            "invalid merge commit IDs"
+        );
+        let base = self.run(&args(&["merge-base", "--", ours, theirs])).await?;
+        if base.code == 1 && base.stdout.is_empty() && base.stderr.is_empty() {
+            return Ok(json!({"kind": "invalid"}));
+        }
+        checked(base)?;
+        let output = self
+            .run(&args(&[
+                "merge-tree",
+                "--write-tree",
+                "--name-only",
+                "--no-messages",
+                "-z",
+                ours,
+                theirs,
+            ]))
+            .await?;
+        anyhow::ensure!(
+            matches!(output.code, 0 | 1),
+            "merge-tree failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        anyhow::ensure!(
+            output.stdout.last() == Some(&0),
+            "invalid merge-tree result"
+        );
+        let count = output
+            .stdout
+            .iter()
+            .filter(|byte| **byte == 0)
+            .count()
+            .saturating_sub(1);
+        if count == 0 {
+            anyhow::ensure!(
+                output.code == 0,
+                "merge-tree reported a conflict without paths"
+            );
+            Ok(json!({"kind": "clean"}))
+        } else {
+            anyhow::ensure!(
+                output.code == 1,
+                "merge-tree returned unexpected conflict paths"
+            );
+            Ok(json!({"kind": "conflicts", "conflicted_files": count}))
+        }
+    }
+
     /// Preserve Git's configured trailer placement, duplication and commands.
     pub(crate) async fn interpret_trailers(
         &self,

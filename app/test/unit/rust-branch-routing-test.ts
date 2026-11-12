@@ -95,20 +95,16 @@ describe('Rust branch enumeration', () => {
     ])
   })
 
-  it('passes an explicit prefix and falls back on Rust read errors', async () => {
-    mocks.branches.mockRejectedValue(new Error('unavailable'))
-    mocks.git.mockResolvedValue({
-      stdout: '\0refs/remotes/origin/topic\0origin/topic\0\0abc\0\0\n',
-      gitError: null,
-    })
-    const branches = await getBranches(repository, 'refs/remotes/origin/')
+  it('passes an explicit prefix and propagates Rust read errors', async () => {
+    const failure = new Error('unavailable')
+    mocks.branches.mockRejectedValue(failure)
+    await expect(getBranches(repository, 'refs/remotes/origin/')).rejects.toBe(
+      failure
+    )
     expect(mocks.branches).toHaveBeenCalledWith('/repo-a', [
       'refs/remotes/origin/',
     ])
-    expect(branches).toMatchObject([
-      { name: 'origin/topic', type: BranchType.Remote },
-    ])
-    expect(mocks.git).toHaveBeenCalledOnce()
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('propagates read lease failures without falling back', async () => {
@@ -195,25 +191,12 @@ describe('Rust branch enumeration', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('preserves legacy tracking behavior when the Rust read fails', async () => {
-    mocks.branches.mockRejectedValue(new Error('unavailable'))
-    mocks.git.mockResolvedValue({
-      stdout:
-        '\0refs/heads/topic\0local\0refs/remotes/origin/topic\0\0 \0\n' +
-        '\0refs/remotes/origin/HEAD\0remote\0\0refs/remotes/origin/topic\0 \0\n' +
-        '\0refs/remotes/origin/topic\0remote\0\0\0 \0\n',
-      gitError: null,
-    })
-    await expect(getBranchesDifferingFromUpstream(repository)).resolves.toEqual(
-      [
-        {
-          ref: 'refs/heads/topic',
-          sha: 'local',
-          upstreamRef: 'refs/remotes/origin/topic',
-          upstreamSha: 'remote',
-        },
-      ]
+  it('propagates tracking read failures without falling back', async () => {
+    const failure = new Error('unavailable')
+    mocks.branches.mockRejectedValue(failure)
+    await expect(getBranchesDifferingFromUpstream(repository)).rejects.toBe(
+      failure
     )
-    expect(mocks.git).toHaveBeenCalledOnce()
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 })

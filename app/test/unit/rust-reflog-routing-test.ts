@@ -45,18 +45,25 @@ describe.each(['wry', 'ws'])('Rust reflog reads via %s', transport => {
   })
   it('preserves the newest checkout date per branch and propagates errors', async () => {
     const after = new Date('2024-01-01T00:00:00.000Z')
-    mocks.checkouts.mockResolvedValueOnce([
-      `${'a'.repeat(40)} HEAD@{2024-02-03 10:00:00 +0000} checkout: moving from main to topic`,
-      `${'b'.repeat(64)} HEAD@{2024-02-02 10:00:00 +0000} checkout: moving from topic to another`,
-      `${'c'.repeat(40)} HEAD@{2024-02-01 10:00:00 +0000} checkout: moving from another to topic`,
-    ].join('\n')).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('history unavailable'))
-    expect([...await getBranchCheckouts(repository, after)]).toEqual([
+    mocks.checkouts
+      .mockResolvedValueOnce(
+        [
+          `${'a'.repeat(40)} HEAD@{2024-02-03 10:00:00 +0000} checkout: moving from main to topic`,
+          `${'b'.repeat(64)} HEAD@{2024-02-02 10:00:00 +0000} checkout: moving from topic to another`,
+          `${'c'.repeat(40)} HEAD@{2024-02-01 10:00:00 +0000} checkout: moving from another to topic`,
+        ].join('\n')
+      )
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce(new Error('history unavailable'))
+    expect([...(await getBranchCheckouts(repository, after))]).toEqual([
       ['topic', new Date('2024-02-03T10:00:00Z')],
       ['another', new Date('2024-02-02T10:00:00Z')],
     ])
     expect(mocks.checkouts).toHaveBeenCalledWith('/repo', after)
     expect((await getBranchCheckouts(repository, after)).size).toBe(0)
-    await expect(getBranchCheckouts(repository, after)).rejects.toThrow('history unavailable')
+    await expect(getBranchCheckouts(repository, after)).rejects.toThrow(
+      'history unavailable'
+    )
     expect(mocks.git).not.toHaveBeenCalled()
   })
   it('preserves stash entries, counts, empty reflogs, and errors', async () => {

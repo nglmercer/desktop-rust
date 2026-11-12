@@ -1,7 +1,5 @@
 import { git } from './core'
-import { Repository } from '../../models/repository'
-import { IRemote } from '../../models/remote'
-import { envForRemoteOperation } from './environment'
+import type { Repository } from '../../models/repository'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -17,6 +15,19 @@ export async function createTag(
   name: string,
   targetCommitSha: string
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().mutateRepositoryTag(repository.path, {
+          method: 'tag_create_annotated',
+          name,
+          target: targetCommitSha,
+        }),
+      true
+    )
+  }
   const args = ['tag', '-a', '-m', '', name, targetCommitSha]
 
   await git(args, repository.path, 'createTag')
@@ -32,6 +43,18 @@ export async function deleteTag(
   repository: Repository,
   name: string
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().mutateRepositoryTag(repository.path, {
+          method: 'tag_delete',
+          name,
+        }),
+      true
+    )
+  }
   const args = ['tag', '-d', name]
 
   await git(args, repository.path, 'deleteTag')
@@ -48,13 +71,19 @@ export async function getAllTags(
   let stdout: string
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     const read = () => backend().repositoryRendererTagRefs(repository.path)
-    stdout = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+    stdout =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
   } else {
-    const tags = await git(['show-ref', '--tags', '-d'], repository.path, 'getAllTags', {
-      successExitCodes: new Set([0, 1]),
-    })
+    const tags = await git(
+      ['show-ref', '--tags', '-d'],
+      repository.path,
+      'getAllTags',
+      {
+        successExitCodes: new Set([0, 1]),
+      }
+    )
     stdout = tags.stdout
   }
 
@@ -82,63 +111,4 @@ export async function getAllTags(
     })
 
   return new Map(tagsArray)
-}
-
-/**
- * Fetches the tags that will get pushed to the remote repository (it does a network request).
- *
- * @param repository  - The repository in which to check for unpushed tags
- * @param account     - The account to use when authenticating with the remote
- * @param remote      - The remote to check for unpushed tags
- * @param branchName  - The branch that will be used on the push command
- */
-export async function fetchTagsToPush(
-  repository: Repository,
-  remote: IRemote,
-  branchName: string
-): Promise<ReadonlyArray<string>> {
-  const args = [
-    'push',
-    '--follow-tags',
-    '--dry-run',
-    '--no-verify',
-    '--porcelain',
-    '--',
-    remote.name,
-    branchName,
-  ]
-
-  const result = await git(args, repository.path, 'fetchTagsToPush', {
-    env: await envForRemoteOperation(remote.url),
-    successExitCodes: new Set([0, 1, 128]),
-  })
-
-  if (result.exitCode !== 0 && result.exitCode !== 1) {
-    // Only when the exit code of git is 0 or 1, its stdout is parseable.
-    // In other cases, we just rethrow the error so our memoization layer
-    // doesn't cache it indefinitely.
-    throw result.gitError
-  }
-
-  const lines = result.stdout.split('\n')
-  let currentLine = 1
-  const unpushedTags = []
-
-  // the last line of this porcelain command is always 'Done'
-  while (currentLine < lines.length && lines[currentLine] !== 'Done') {
-    const line = lines[currentLine]
-    const parts = line.split('\t')
-
-    if (parts[0] === '*' && parts[2] === '[new tag]') {
-      const [tagName] = parts[1].split(':')
-
-      if (tagName !== undefined) {
-        unpushedTags.push(tagName.replace(/^refs\/tags\//, ''))
-      }
-    }
-
-    currentLine++
-  }
-
-  return unpushedTags
 }

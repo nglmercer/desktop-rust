@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   backendStatus: vi.fn(),
   context: vi.fn(),
   conflicts: vi.fn(),
+  repositoryType: vi.fn(),
   git: vi.fn(),
   scope: vi.fn(
     async (_path: string, _kind: string, action: () => Promise<unknown>) =>
@@ -18,6 +19,7 @@ vi.mock('../../src/backend/client', () => ({
     detailedRepositoryStatus: mocks.backendStatus,
     repositoryStatusContext: mocks.context,
     repositoryConflictDetails: mocks.conflicts,
+    repositoryType: mocks.repositoryType,
   }),
 }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
@@ -49,6 +51,7 @@ describe('Rust status integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.transport = 'wry'
+    mocks.repositoryType.mockResolvedValue({ kind: 'regular' })
     mocks.context.mockResolvedValue({
       mergeHeadFound: false,
       squashMsgFound: false,
@@ -231,15 +234,47 @@ describe('Rust status integration', () => {
     })
   })
 
-  it('uses the existing Git path when the bounded Rust read is unavailable', async () => {
-    mocks.backendStatus.mockRejectedValue(new Error('status output too large'))
-    mocks.git.mockResolvedValue({
-      stdout: Buffer.from('# branch.head main\0? file\0'),
-      exitCode: 0,
+  it('propagates bounded status failures for existing repositories', async () => {
+    const failure = new Error('status output too large')
+    mocks.backendStatus.mockRejectedValueOnce(failure)
+    await expect(getStatus(repository)).rejects.toBe(failure)
+    expect(mocks.repositoryType).toHaveBeenCalledWith('/repo-a')
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it.each(['missing', 'bare'])(
+    'returns null for a %s repository on non-strict reads',
+    async kind => {
+      mocks.backendStatus.mockRejectedValueOnce(new Error('not a working tree'))
+      mocks.repositoryType.mockResolvedValueOnce({ kind })
+      await expect(getStatus(repository)).resolves.toBeNull()
+      expect(mocks.git).not.toHaveBeenCalled()
+    }
+  )
+
+  it('does not mask cancellation as a missing repository', async () => {
+    const failure = Object.assign(new Error('cancelled'), {
+      code: 'cancelled',
     })
-    const status = await getStatus(repository)
-    expect(mocks.git).toHaveBeenCalledOnce()
-    expect(status?.workingDirectory.files[0].path).toBe('file')
+    mocks.backendStatus.mockRejectedValueOnce(failure)
+    await expect(getStatus(repository)).rejects.toBe(failure)
+    expect(mocks.repositoryType).not.toHaveBeenCalled()
+  })
+
+  it('propagates non-strict context and conflict errors without a legacy retry', async () => {
+    const failure = new Error('backend unavailable')
+    mocks.backendStatus.mockResolvedValue([])
+    mocks.context.mockRejectedValueOnce(failure)
+    await expect(getStatus(repository)).rejects.toBe(failure)
+    mocks.context.mockResolvedValueOnce({
+      mergeHeadFound: true,
+      squashMsgFound: false,
+      isCherryPickingHeadFound: false,
+      rebaseInternalState: null,
+    })
+    mocks.conflicts.mockRejectedValueOnce(failure)
+    await expect(getStatus(repository)).rejects.toBe(failure)
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('uses Rust for strict status reads required during repository creation', async () => {

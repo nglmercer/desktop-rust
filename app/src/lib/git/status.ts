@@ -228,15 +228,13 @@ export async function getStatus(
     '-z',
   ]
 
-  let parsed: ReturnType<typeof parsePorcelainStatus> | undefined
-  let usedRustStatus = false
+  let parsed: ReturnType<typeof parsePorcelainStatus> | null | undefined
   if (backend().transportKind === 'ws') {
     parsed = statusItemsFromBackend(
       await (forCreation
         ? backend().detailedRepositoryStatus(repository.path, includeUntracked, {}, true)
         : backend().detailedRepositoryStatus(repository.path, includeUntracked))
     )
-    usedRustStatus = true
   }
   if (backend().transportKind === 'wry') {
     parsed = await withRepositoryGitOperation(
@@ -251,18 +249,20 @@ export async function getStatus(
           return statusItemsFromBackend(records)
         } catch (error) {
           if (rejectOnError) throw error
-          // Missing repositories and oversized reads still use the legacy
-          // path so its existing error and output-size behavior is preserved.
-          log.warn(
-            'Rust status read failed; retrying with the existing Git path',
-            error
-          )
-          return undefined
+          if (
+            error instanceof Error &&
+            'code' in error &&
+            (error.code === 'cancelled' || error.code === 'timeout')
+          ) {
+            throw error
+          }
+          const type = await backend().repositoryType(repository.path)
+          if (type.kind === 'missing' || type.kind === 'bare') return null
+          throw error
         }
       },
       true
     )
-    usedRustStatus = parsed !== undefined
   }
   if (parsed === undefined) {
     const { stdout, exitCode } = await git(args, repository.path, 'getStatus', {
@@ -278,6 +278,7 @@ export async function getStatus(
     }
     parsed = parsePorcelainStatus(stdout)
   }
+  if (parsed === null) return null
   const headers = parsed.filter(isStatusHeader)
   const entries = parsed.filter(isStatusEntry)
 
@@ -289,22 +290,11 @@ export async function getStatus(
     context = forCreation
       ? await backend().repositoryStatusContext(repository.path, true)
       : await backend().repositoryStatusContext(repository.path)
-  } else if (transport === 'wry' && usedRustStatus) {
+  } else if (transport === 'wry') {
     context = await withRepositoryGitOperation(
       repository.path,
       'read',
-      async () => {
-        try {
-          return await backend().repositoryStatusContext(repository.path)
-        } catch (error) {
-          if (rejectOnError) throw error
-          log.warn(
-            'Rust status context read failed; retrying with the existing shell path',
-            error
-          )
-          return undefined
-        }
-      },
+      () => backend().repositoryStatusContext(repository.path),
       true
     )
   }
@@ -327,33 +317,17 @@ export async function getStatus(
       rebaseInternalState,
       forCreation
     )
-  } else if (
-    transport === 'wry' &&
-    usedRustStatus &&
-    (mergeHeadFound ||
-      rebaseInternalState !== null ||
-      conflictedFilesInIndex.length > 0)
-  ) {
+  } else if (transport === 'wry') {
     conflictDetails = await withRepositoryGitOperation(
       repository.path,
       'read',
-      async () => {
-        try {
-          return await getBridgeConflictDetails(
-            repository,
-            mergeHeadFound,
-            conflictedFilesInIndex,
-            rebaseInternalState
-          )
-        } catch (error) {
-          if (rejectOnError) throw error
-          log.warn(
-            'Rust conflict details read failed; retrying with the existing Git path',
-            error
-          )
-          return undefined
-        }
-      },
+      () =>
+        getBridgeConflictDetails(
+          repository,
+          mergeHeadFound,
+          conflictedFilesInIndex,
+          rebaseInternalState
+        ),
       true
     )
   }

@@ -338,9 +338,16 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::LfsTransfer { .. }
             | Operation::LfsCheckout { .. }
             | Operation::Commit { .. }
+            | Operation::TagCreateAnnotated { .. }
             | Operation::SelectedCommitPreview { .. }
             | Operation::PrepareSelectedCommit { .. }
+            | Operation::RevalidateCommitCheckpoint { .. }
             | Operation::InterpretTrailers { .. }
+            | Operation::MergeTreePreview { .. }
+            | Operation::MergeBase { .. }
+            | Operation::RendererSubmoduleStatus
+            | Operation::RendererResetSubmodules { .. }
+            | Operation::RendererUpdateSubmodules { .. }
             | Operation::InitialCommit { .. }
             | Operation::ManageRemote { .. }
             | Operation::Stage { .. }

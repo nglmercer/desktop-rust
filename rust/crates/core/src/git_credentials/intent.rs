@@ -136,7 +136,11 @@ async fn collect_operation(
             requests.push((remote, Direction::Fetch));
             source_request(repository, &mut requests).await?;
         }
-        Operation::SubmoduleAdd { .. } | Operation::SubmoduleUpdate { .. } => {
+        Operation::SubmoduleAdd { .. }
+        | Operation::SubmoduleUpdate { .. }
+        | Operation::RendererSubmoduleStatus
+        | Operation::RendererResetSubmodules { .. }
+        | Operation::RendererUpdateSubmodules { .. } => {
             return Ok(Vec::new());
         }
         // Hooks, filters and partial-clone object reads may invoke nested Git.
@@ -733,6 +737,63 @@ fn append_unique(endpoints: &mut Vec<Endpoint>, endpoint: Endpoint) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn renderer_submodule_operations_do_not_grant_parent_credentials() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-submodule-intent-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/owner/repo.git",
+        ]);
+        let repository = Repository::open(&root).await.unwrap();
+        assert!(
+            !collect_operation(
+                &repository,
+                &Operation::Fetch {
+                    remote: "origin".into()
+                },
+                "github.com"
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
+        for operation in [
+            Operation::RendererSubmoduleStatus,
+            Operation::RendererResetSubmodules {
+                paths: vec![crate::GitPath::Text("child".into())],
+            },
+            Operation::RendererUpdateSubmodules {
+                allow_file_protocol: false,
+            },
+        ] {
+            assert!(
+                collect_operation(&repository, &operation, "github.com")
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn only_the_exact_assigned_web_origin_can_create_a_grant() {

@@ -134,6 +134,8 @@ describe.each(['ws', 'wry'])('Rust commit lookup over %s', transport => {
         ['annotated', 'c'.repeat(40)],
       ])
     )
+    mocks.tags.mockResolvedValueOnce('')
+    expect(await getAllTags(repository)).toEqual(new Map())
     expect(mocks.git).not.toHaveBeenCalled()
   })
 })

@@ -4,6 +4,57 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 impl Repository {
+    /// Initialize and update nested submodules after a checkout.
+    pub(crate) async fn renderer_update_submodules(
+        &self,
+        allow_file_protocol: bool,
+    ) -> Result<Value> {
+        let mut command = Vec::new();
+        if allow_file_protocol {
+            command.extend(args(&["-c", "protocol.file.allow=always"]));
+        }
+        command.extend(args(&["submodule", "update", "--init", "--recursive"]));
+        Ok(serde_json::to_value(self.run(&command).await?.text())?)
+    }
+
+    /// Reset only the selected literal submodule paths; do not initialize others.
+    pub(crate) async fn renderer_reset_submodules(&self, paths: Vec<GitPath>) -> Result<Value> {
+        anyhow::ensure!(
+            !paths.is_empty() && paths.len() <= 4096,
+            "select between 1 and 4096 submodules"
+        );
+        let mut command = args(&[
+            "--literal-pathspecs",
+            "submodule",
+            "update",
+            "--recursive",
+            "--force",
+            "--",
+        ]);
+        let mut size = 0usize;
+        let mut unique = std::collections::HashSet::new();
+        for path in paths {
+            let path = validate_path(path)?;
+            size = size.saturating_add(path.as_encoded_bytes().len());
+            anyhow::ensure!(
+                size <= 60_000 && unique.insert(path.clone()),
+                "invalid submodule selection"
+            );
+            command.push(path);
+        }
+        Ok(serde_json::to_value(self.run(&command).await?.text())?)
+    }
+
+    /// Match the renderer's top-level `git submodule status` output.
+    pub(crate) async fn renderer_submodule_status(&self) -> Result<Value> {
+        let output = self.run(&args(&["submodule", "status", "--"])).await?;
+        match output.code {
+            0 => Ok(json!(String::from_utf8_lossy(&output.stdout))),
+            128 => Ok(json!("")),
+            _ => bail!("{}", output.text().stderr),
+        }
+    }
+
     /// Read a submodule's local URL as a credential-free repository link.
     pub(crate) async fn submodule_display_url(&self, path: GitPath) -> Result<Value> {
         let path = validate_path(path)?;
@@ -189,6 +240,201 @@ fn submodule_display_link(value: &str) -> Option<String> {
 #[cfg(test)]
 mod display_url_tests {
     use super::submodule_display_link;
+
+    #[tokio::test]
+    async fn renderer_status_matches_git_for_initialized_and_uninitialized_submodules() {
+        use std::{fs, process::Command};
+        let root =
+            std::env::temp_dir().join(format!("desktop-submodule-status-{}", uuid::Uuid::new_v4()));
+        let source = root.join("source");
+        let parent = root.join("parent");
+        let leaf = root.join("leaf");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir(&parent).unwrap();
+        fs::create_dir(&leaf).unwrap();
+        let git = |cwd: &std::path::Path, args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        git(&leaf, &["init", "-q"]);
+        fs::write(leaf.join("leaf-file"), "nested\n").unwrap();
+        git(&leaf, &["add", "leaf-file"]);
+        git(
+            &leaf,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qm",
+                "leaf",
+            ],
+        );
+        git(&source, &["init", "-q"]);
+        fs::write(source.join("tracked"), "original\n").unwrap();
+        git(&source, &["add", "tracked"]);
+        git(
+            &source,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                leaf.to_str().unwrap(),
+                "nested",
+            ],
+        );
+        git(
+            &source,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "initial",
+            ],
+        );
+        git(&parent, &["init", "-q"]);
+        git(
+            &parent,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                source.to_str().unwrap(),
+                "with space",
+            ],
+        );
+        let repo = crate::Repository::open(&parent).await.unwrap();
+        assert_eq!(
+            repo.renderer_submodule_status().await.unwrap(),
+            git(&parent, &["submodule", "status", "--"])
+        );
+        #[cfg(unix)]
+        {
+            git(
+                &parent,
+                &[
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    "-q",
+                    source.to_str().unwrap(),
+                    "selected-module",
+                ],
+            );
+            git(
+                &parent,
+                &[
+                    "--literal-pathspecs",
+                    "mv",
+                    "--",
+                    "selected-module",
+                    "*-module",
+                ],
+            );
+            fs::write(parent.join("*-module/tracked"), "selected change\n").unwrap();
+            fs::write(parent.join("with space/tracked"), "other change\n").unwrap();
+            let result = repo
+                .renderer_reset_submodules(vec![crate::GitPath::Text("*-module".into())])
+                .await
+                .unwrap();
+            assert_eq!(result["code"], 0);
+            assert_eq!(
+                fs::read(parent.join("*-module/tracked")).unwrap(),
+                b"original\n"
+            );
+            assert_eq!(
+                fs::read(parent.join("with space/tracked")).unwrap(),
+                b"other change\n"
+            );
+            assert!(
+                repo.renderer_reset_submodules(vec![crate::GitPath::Text("../outside".into())])
+                    .await
+                    .is_err()
+            );
+        }
+        git(&parent, &["submodule", "deinit", "-f", "--", "with space"]);
+        assert_eq!(
+            repo.renderer_submodule_status().await.unwrap(),
+            git(&parent, &["submodule", "status", "--"])
+        );
+        assert_eq!(
+            repo.renderer_reset_submodules(vec![crate::GitPath::Text("with space".into())])
+                .await
+                .unwrap()["code"],
+            0
+        );
+        assert!(!parent.join("with space/.git").exists());
+        assert_eq!(
+            repo.renderer_update_submodules(true).await.unwrap()["code"],
+            0
+        );
+        assert!(parent.join("with space/.git").exists());
+        assert_eq!(
+            fs::read(parent.join("with space/tracked")).unwrap(),
+            b"original\n"
+        );
+        git(&parent, &["add", "--", ".gitmodules"]);
+        git(
+            &parent,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qm",
+                "add submodules",
+            ],
+        );
+        let fresh = root.join("fresh");
+        git(
+            &root,
+            &[
+                "clone",
+                "-q",
+                parent.to_str().unwrap(),
+                fresh.to_str().unwrap(),
+            ],
+        );
+        git(&fresh, &["config", "protocol.file.allow", "never"]);
+        let fresh_repo = crate::Repository::open(&fresh).await.unwrap();
+        let denied = fresh_repo.renderer_update_submodules(false).await.unwrap();
+        assert_ne!(denied["code"], 0);
+        assert!(!fresh.join("with space/.git").exists());
+        assert_eq!(
+            fresh_repo.renderer_update_submodules(true).await.unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            fs::read(fresh.join("with space/tracked")).unwrap(),
+            b"original\n"
+        );
+        assert_eq!(
+            fs::read(fresh.join("with space/nested/leaf-file")).unwrap(),
+            b"nested\n"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn display_links_exclude_private_transport_data() {

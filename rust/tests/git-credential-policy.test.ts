@@ -392,6 +392,47 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       suite.assertActor('bobcase')
     }, 120_000)
 
+    it('does not lend the parent account to renderer submodule updates', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('renderer-submodule-credentials')
+      suite.assign(repo)
+      repo.git(
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        '-q',
+        path.join(suite.service.projects, 'fork/repo.git'),
+        'child'
+      )
+      repo.git('submodule', 'deinit', '-f', '--', 'child')
+      rmSync(path.join(repo.root, '.git', 'modules', 'child'), {
+        recursive: true,
+        force: true,
+      })
+      repo.git(
+        'config',
+        '-f',
+        '.gitmodules',
+        'submodule.child.url',
+        `${suite.service.url}/fork/repo.git`
+      )
+      suite.clearTransport()
+      const result = suite.rpc(
+        repo,
+        'renderer_update_submodules',
+        { allow_file_protocol: false },
+        { fail: true }
+      )
+      assert.match(
+        String(result.stderr || result.stdout),
+        /credentials refused/i
+      )
+      assert.ok(!suite.service.records().some(row => row.actor !== null))
+      assert.ok(!existsSync(suite.nativeLog))
+      suite.assertPrivateStorage(repo)
+    }, 120_000)
+
     it('passes the scoped credential and caller configuration into reference transaction hooks', () => {
       suite.configure({ host: suite.service.host })
       const repo = suite.seed('reference-hook-credentials')

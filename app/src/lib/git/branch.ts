@@ -163,27 +163,18 @@ export async function getBranchesPointedAt(
     return branches === null ? null : Array.from(branches)
   }
   if (backend().transportKind === 'wry') {
-    const migrated = await withRepositoryGitOperation(
+    return withRepositoryGitOperation(
       repository.path,
       'read',
       async () => {
-        try {
-          const branches = await backend().branchesPointingAt(
-            repository.path,
-            commitish
-          )
-          return branches === null ? null : Array.from(branches)
-        } catch (error) {
-          log.warn(
-            'Rust branch lookup failed; retrying with the existing Git path',
-            error
-          )
-          return undefined
-        }
+        const branches = await backend().branchesPointingAt(
+          repository.path,
+          commitish
+        )
+        return branches === null ? null : Array.from(branches)
       },
       true
     )
-    if (migrated !== undefined) return migrated
   }
   const args = [
     'branch',
@@ -233,31 +224,22 @@ export async function getMergedBranches(
     )
   }
   if (backend().transportKind === 'wry') {
-    const migrated = await withRepositoryGitOperation(
+    return withRepositoryGitOperation(
       repository.path,
       'read',
       async () => {
-        try {
-          const branches = await backend().mergedRepositoryBranches(
-            repository.path,
-            branchName
-          )
-          return new Map(
-            branches
-              .filter(branch => branch.ref !== canonicalBranchRef)
-              .map(branch => [branch.ref, branch.oid])
-          )
-        } catch (error) {
-          log.warn(
-            'Rust merged branch lookup failed; retrying with the existing Git path',
-            error
-          )
-          return undefined
-        }
+        const branches = await backend().mergedRepositoryBranches(
+          repository.path,
+          branchName
+        )
+        return new Map(
+          branches
+            .filter(branch => branch.ref !== canonicalBranchRef)
+            .map(branch => [branch.ref, branch.oid])
+        )
       },
       true
     )
-    if (migrated !== undefined) return migrated
   }
   const { formatArgs, parse } = createForEachRefParser({
     sha: '%(objectname)',

@@ -115,11 +115,17 @@ impl Repository {
         &self,
         include_untracked: bool,
     ) -> Result<Vec<DetailedStatusRecord>> {
-        let mut command = args(&["status", "--branch", "--porcelain=2", "-z"]);
+        let mut command = args(&[
+            "--no-optional-locks",
+            "status",
+            "--branch",
+            "--porcelain=2",
+            "-z",
+        ]);
         if include_untracked {
             command.push("--untracked-files=all".into());
         }
-        let output = self.run(&command).await?;
+        let output = crate::process::run_status(&self.path, &command).await?;
         if output.code != 0 {
             bail!("{}", output.text().stderr);
         }
@@ -559,6 +565,43 @@ mod tests {
                 .iter()
                 .any(|item| item["path"]["bytes"] == json!(b"untracked/"))
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn detailed_status_handles_more_than_two_mebibytes() {
+        use std::{fs, process::Command};
+        let root =
+            std::env::temp_dir().join(format!("desktop-status-large-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .arg("init")
+                .arg("-q")
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let padding = "x".repeat(228);
+        for index in 0..9_200 {
+            fs::write(root.join(format!("{index:05}-{padding}")), b"").unwrap();
+        }
+        let repo = Repository::open(&root).await.unwrap();
+        let records = repo.detailed_status(true).await.unwrap();
+        let entries = records
+            .iter()
+            .filter(|record| {
+                matches!(
+                    record,
+                    DetailedStatusRecord::Entry {
+                        entry_kind: '?',
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(entries, 9_200);
         fs::remove_dir_all(root).unwrap();
     }
 }

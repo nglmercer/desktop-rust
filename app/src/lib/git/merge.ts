@@ -4,6 +4,8 @@ import { GitError } from 'dugite'
 import { Repository } from '../../models/repository'
 import { pathExists } from '../path-exists'
 import { createMultiOperationTerminalOutputCallback } from './multi-operation-terminal-output'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 export enum MergeResult {
   /** The merge completed successfully */
@@ -103,6 +105,12 @@ export async function getMergeBase(
   firstCommitish: string,
   secondCommitish: string
 ): Promise<string | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryMergeBase(repository.path, firstCommitish, secondCommitish)
+    return backend().transportKind === 'wry'
+      ? withRepositoryGitOperation(repository.path, 'read', read, true)
+      : read()
+  }
   const process = await git(
     ['merge-base', '--', firstCommitish, secondCommitish],
     repository.path,

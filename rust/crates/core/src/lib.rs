@@ -290,6 +290,12 @@ impl Repository {
         }
         match operation {
             Operation::CommitPreview => return self.commit_preview().await,
+            Operation::MergeBase { first, second } => {
+                return self.merge_base(&first, &second).await;
+            }
+            Operation::MergeTreePreview { ours, theirs } => {
+                return self.merge_tree_preview(&ours, &theirs).await;
+            }
             Operation::InterpretTrailers {
                 message,
                 parse,
@@ -344,6 +350,9 @@ impl Repository {
             Operation::InspectCommitCheckpoint { checkpoint_id } => {
                 return self.inspect_commit_checkpoint(&checkpoint_id).await;
             }
+            Operation::RevalidateCommitCheckpoint { checkpoint_id } => {
+                return self.revalidate_commit_checkpoint(&checkpoint_id).await;
+            }
             Operation::ForgetCommitCheckpoint { checkpoint_id } => {
                 return self.forget_commit_checkpoint(&checkpoint_id).await;
             }
@@ -378,6 +387,15 @@ impl Repository {
                 skip_smudge,
             } => return lfs_install(&self.path, scope, force, skip_repo, skip_smudge).await,
             Operation::Submodules => return self.submodules().await,
+            Operation::RendererSubmoduleStatus => return self.renderer_submodule_status().await,
+            Operation::RendererResetSubmodules { paths } => {
+                return self.renderer_reset_submodules(paths).await;
+            }
+            Operation::RendererUpdateSubmodules {
+                allow_file_protocol,
+            } => {
+                return self.renderer_update_submodules(allow_file_protocol).await;
+            }
             Operation::SubmoduleDisplayUrl { path } => {
                 return self.submodule_display_url(path).await;
             }
@@ -756,22 +774,24 @@ impl Repository {
                 path,
                 scope,
                 selection,
-            } => return self.discard_preview(path, scope, selection).await,
+            } => return Box::pin(self.discard_preview(path, scope, selection)).await,
             Operation::DiscardBatchPreview { paths } => {
-                return self.discard_batch_preview(paths).await;
+                return Box::pin(self.discard_batch_preview(paths)).await;
             }
             Operation::DiscardBatch { paths, basis } => {
-                return self.discard_batch(paths, &basis).await;
+                return Box::pin(self.discard_batch(paths, &basis)).await;
             }
             Operation::Discard {
                 path,
                 scope,
                 selection,
                 basis,
-            } => return self.discard(path, scope, selection, &basis).await,
+            } => return Box::pin(self.discard(path, scope, selection, &basis)).await,
             Operation::ForgetDiscard { undo_id } => return self.forget_discard(&undo_id).await,
             Operation::ListDiscards => return self.list_discards().await,
-            Operation::UndoDiscard { undo_id } => return self.undo_discard(&undo_id).await,
+            Operation::UndoDiscard { undo_id } => {
+                return Box::pin(self.undo_discard(&undo_id)).await;
+            }
             Operation::DiffDetail { path, staged } => return self.diff_detail(path, staged).await,
             Operation::SelectDiff {
                 path,
@@ -938,6 +958,8 @@ impl Repository {
             | RendererTagRefs
             | RendererCommitChanges { .. }
             | RendererLargeFiles { .. }
+            | MergeBase { .. }
+            | MergeTreePreview { .. }
             | InterpretTrailers { .. }
             | RendererCommitDiff { .. }
             | RendererWorkingDiff { .. }
@@ -955,6 +977,9 @@ impl Repository {
             | WorktreeMove { .. }
             | WorktreeLock { .. } => unreachable!("handled by execute"),
             Submodules
+            | RendererSubmoduleStatus
+            | RendererResetSubmodules { .. }
+            | RendererUpdateSubmodules { .. }
             | SubmoduleDisplayUrl { .. }
             | SubmoduleUpdate { .. }
             | SubmoduleSync { .. }
@@ -1057,6 +1082,7 @@ impl Repository {
             | PrepareSelectedCommit { .. }
             | ListCommitCheckpoints
             | InspectCommitCheckpoint { .. }
+            | RevalidateCommitCheckpoint { .. }
             | ForgetCommitCheckpoint { .. }
             | InitialCommit { .. } => {
                 unreachable!("handled by execute")
@@ -1127,6 +1153,15 @@ impl Repository {
                     .resolve_commit(target.as_deref().unwrap_or("HEAD"))
                     .await?;
                 args(&["tag", "--", &name, &target])
+            }
+            TagCreateAnnotated { name, target } => {
+                self.validate_tag(&name).await?;
+                anyhow::ensure!(
+                    !target.is_empty() && target.len() <= 4096 && !target.contains('\0'),
+                    "invalid target commit"
+                );
+                let target = self.resolve_commit(&target).await?;
+                args(&["tag", "-a", "-m", "", "--", &name, &target])
             }
             TagDelete { name } => {
                 self.validate_tag(&name).await?;

@@ -121,6 +121,30 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    MergeTreePreview {
+        repository_path: String,
+        operation: Operation,
+    },
+    MergeBase {
+        repository_path: String,
+        operation: Operation,
+    },
+    SubmoduleStatus {
+        repository_path: String,
+        operation: Operation,
+    },
+    ResetSubmodules {
+        repository_path: String,
+        operation: Operation,
+    },
+    UpdateSubmodules {
+        repository_path: String,
+        operation: Operation,
+    },
+    TagMutation {
+        repository_path: String,
+        operation: Operation,
+    },
     InitialCommit {
         repository_path: String,
         paths: Vec<desktop_backend::GitPath>,
@@ -339,6 +363,24 @@ impl Backend {
         | GitInfoOperation::InterpretTrailers {
             repository_path, ..
         }
+        | GitInfoOperation::MergeTreePreview {
+            repository_path, ..
+        }
+        | GitInfoOperation::MergeBase {
+            repository_path, ..
+        }
+        | GitInfoOperation::SubmoduleStatus {
+            repository_path, ..
+        }
+        | GitInfoOperation::ResetSubmodules {
+            repository_path, ..
+        }
+        | GitInfoOperation::UpdateSubmodules {
+            repository_path, ..
+        }
+        | GitInfoOperation::TagMutation {
+            repository_path, ..
+        }
         | GitInfoOperation::InitialCommit {
             repository_path, ..
         }
@@ -393,6 +435,7 @@ impl Backend {
                 Operation::PrepareSelectedCommit { .. }
                     | Operation::ListCommitCheckpoints
                     | Operation::InspectCommitCheckpoint { .. }
+                    | Operation::RevalidateCommitCheckpoint { .. }
                     | Operation::ForgetCommitCheckpoint { .. }
             )
         {
@@ -404,6 +447,47 @@ impl Backend {
             && !matches!(operation, Operation::InterpretTrailers { .. })
         {
             return Err(AppError::BadArgs("unsupported trailer operation".into()));
+        }
+        if let GitInfoOperation::MergeTreePreview { operation, .. } = &request.operation
+            && !matches!(operation, Operation::MergeTreePreview { .. })
+        {
+            return Err(AppError::BadArgs(
+                "unsupported merge preview operation".into(),
+            ));
+        }
+        if let GitInfoOperation::MergeBase { operation, .. } = &request.operation
+            && !matches!(operation, Operation::MergeBase { .. })
+        {
+            return Err(AppError::BadArgs("unsupported merge-base operation".into()));
+        }
+        if let GitInfoOperation::SubmoduleStatus { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererSubmoduleStatus)
+        {
+            return Err(AppError::BadArgs(
+                "unsupported submodule status operation".into(),
+            ));
+        }
+        if let GitInfoOperation::ResetSubmodules { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererResetSubmodules { .. })
+        {
+            return Err(AppError::BadArgs(
+                "unsupported submodule reset operation".into(),
+            ));
+        }
+        if let GitInfoOperation::UpdateSubmodules { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererUpdateSubmodules { .. })
+        {
+            return Err(AppError::BadArgs(
+                "unsupported submodule update operation".into(),
+            ));
+        }
+        if let GitInfoOperation::TagMutation { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::TagCreateAnnotated { .. } | Operation::TagDelete { .. }
+            )
+        {
+            return Err(AppError::BadArgs("unsupported tag operation".into()));
         }
         let duration = request.deadline_ms.unwrap_or(60_000);
         if !(1..=60_000).contains(&duration) {
@@ -1104,6 +1188,48 @@ impl Backend {
                                 if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 repo.execute(operation).await
                             }
+                            GitInfoOperation::MergeTreePreview { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::MergeBase { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::SubmoduleStatus { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::ResetSubmodules { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::UpdateSubmodules { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::TagMutation { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
                             GitInfoOperation::InitialCommit { repository_path, paths } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
@@ -1731,6 +1857,41 @@ esac
     }
 
     #[test]
+    fn reads_large_status_through_wry() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-wry-large-status-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let padding = "x".repeat(228);
+        for index in 0..9_200 {
+            fs::write(root.join(format!("{index:05}-{padding}")), b"").unwrap();
+        }
+        let backend = Backend::new(16).unwrap();
+        let records = backend
+            .read_args(vec![
+                json!({"repository_path":root,"method":"status_detailed","include_untracked":true}),
+            ])
+            .unwrap();
+        assert_eq!(
+            records
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry["entry_kind"] == "?")
+                .count(),
+            9_200
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn enumerates_disambiguated_branches_and_respects_prefixes() {
         let root =
             std::env::temp_dir().join(format!("desktop-wry-branches-{}", uuid::Uuid::new_v4()));
@@ -1777,7 +1938,7 @@ esac
         git(&["config", "branch.topic.remote", "origin"]);
         git(&["config", "branch.topic.merge", "refs/heads/topic"]);
         let backend = Backend::new(16).unwrap();
-        let outside = root.join("outside");
+        let outside = root.with_extension("outside");
         fs::create_dir(&outside).unwrap();
         assert_eq!(
             backend
@@ -1968,6 +2129,7 @@ esac
             false
         );
         assert!(backend.read_args(vec![json!({"repository_path":root, "method":"branch_enumeration", "include_untracked":true})]).is_err());
+        fs::remove_dir_all(outside).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2063,6 +2225,72 @@ esac
                 .success()
         );
         let backend = Backend::new(16).unwrap();
+        let head = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8(head.stdout).unwrap().trim().to_owned();
+        assert_eq!(backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"submodule_status","repository_path":root,"operation":{"method":"renderer_submodule_status"}}})]).unwrap()).unwrap(), "");
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"submodule_status","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
+        let reset = backend.admit_git_info(vec![json!({"operation":{"type":"reset_submodules","repository_path":root,"operation":{"method":"renderer_reset_submodules","paths":["../outside"]}}})]).unwrap();
+        assert!(backend.read(reset).is_err());
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"reset_submodules","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
+        let update = backend.admit_git_info(vec![json!({"operation":{"type":"update_submodules","repository_path":root,"operation":{"method":"renderer_update_submodules","allow_file_protocol":false}}})]).unwrap();
+        assert_eq!(backend.read(update).unwrap()["code"], 0);
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"update_submodules","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
+        for setting in [
+            "user.name=Wry Test",
+            "user.email=wry@example.invalid",
+            "tag.gpgSign=false",
+        ] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args([
+                        "config",
+                        setting.split_once('=').unwrap().0,
+                        setting.split_once('=').unwrap().1
+                    ])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let tag = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"tag_mutation","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        assert_eq!(
+            tag(json!({"method":"tag_create_annotated","name":"typed-tag","target":"HEAD"}))
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["cat-file", "-t", "refs/tags/typed-tag"])
+                .output()
+                .unwrap()
+                .stdout,
+            b"tag\n"
+        );
+        assert_eq!(
+            tag(json!({"method":"tag_delete","name":"typed-tag"})).unwrap()["code"],
+            0
+        );
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"tag_mutation","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
+        let base = |first: &str, second: &str| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"merge_base","repository_path":root,"operation":{"method":"merge_base","first":first,"second":second}}})]).unwrap())
+        };
+        assert_eq!(base("HEAD", "HEAD").unwrap(), json!(head));
+        assert_eq!(base("missing", "HEAD").unwrap(), Value::Null);
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"merge_base","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
+        let preview = backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"merge_tree_preview","repository_path":root,"operation":{"method":"merge_tree_preview","ours":head,"theirs":head}}})]).unwrap()).unwrap();
+        assert_eq!(preview, json!({"kind":"clean"}));
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"merge_tree_preview","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
         let blob = |revision: &str, path: &str| {
             backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_blob_prefix","revision":revision,"path":path,"length":5}}})]).unwrap())
         };
@@ -2190,6 +2418,17 @@ esac
             checkpoint(json!({"method":"inspect_commit_checkpoint","checkpoint_id":id})).unwrap();
         assert_eq!(inspection["recorded_files_verified"], true);
         assert_eq!(inspection["index_matches"], true);
+        assert_eq!(
+            checkpoint(json!({"method":"revalidate_commit_checkpoint","checkpoint_id":id}))
+                .unwrap()["matches"],
+            true
+        );
+        fs::write(root.join("selected"), b"changed after checkpoint\n").unwrap();
+        assert_eq!(
+            checkpoint(json!({"method":"revalidate_commit_checkpoint","checkpoint_id":id}))
+                .unwrap()["matches"],
+            false
+        );
         assert_eq!(
             checkpoint(json!({"method":"forget_commit_checkpoint","checkpoint_id":id})).unwrap()["forgotten"],
             true

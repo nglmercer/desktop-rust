@@ -95,19 +95,13 @@ describe('Rust branch queries', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('falls back to legacy Git on a backend failure', async () => {
-    mocks.merged.mockRejectedValue(new Error('unavailable'))
-    mocks.git.mockResolvedValue({
-      stdout: '\0a\0refs/heads/main\0\n\0b\0refs/heads/topic\0\n',
-    })
-    expect(await getMergedBranches(repository, 'main')).toEqual(
-      new Map([['refs/heads/topic', 'b']])
-    )
-    mocks.pointed.mockRejectedValue(new Error('unavailable'))
-    mocks.git.mockResolvedValue({ stdout: 'main\n', exitCode: 0 })
-    await expect(getBranchesPointedAt(repository, 'HEAD')).resolves.toEqual([
-      'main',
-    ])
+  it('propagates backend failures without falling back', async () => {
+    const error = new Error('unavailable')
+    mocks.merged.mockRejectedValue(error)
+    await expect(getMergedBranches(repository, 'main')).rejects.toBe(error)
+    mocks.pointed.mockRejectedValue(error)
+    await expect(getBranchesPointedAt(repository, 'HEAD')).rejects.toBe(error)
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('does not bypass a rejected repository lease', async () => {

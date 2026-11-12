@@ -28,6 +28,17 @@ use std::{
 const DIRECTORY: &str = "desktop-commit-checkpoints";
 const MANIFEST_LIMIT: u64 = 1024 * 1024;
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SelectedRequest {
+    paths: Vec<GitPath>,
+    remove_paths: Vec<GitPath>,
+    partial: Vec<CopilotLineSelection>,
+    allow_empty: bool,
+    amend_head: Option<String>,
+    expected_head: Option<CopilotExpectedHead>,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Checkpoint {
@@ -44,6 +55,18 @@ struct Checkpoint {
     objects: Vec<SavedObject>,
     lfs: Vec<LfsObject>,
     shared: Vec<SharedIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    request: Option<SelectedRequest>,
+}
+struct CheckpointUse {
+    path: PathBuf,
+    file: Option<fs::File>,
+}
+impl Drop for CheckpointUse {
+    fn drop(&mut self) {
+        drop(self.file.take());
+        let _ = fs::remove_file(&self.path);
+    }
 }
 struct Preparing {
     path: PathBuf,
@@ -440,6 +463,14 @@ impl Repository {
             basis.len() == 64 && basis.bytes().all(|b| b.is_ascii_hexdigit()),
             "invalid selected commit basis"
         );
+        let request = SelectedRequest {
+            paths: paths.clone(),
+            remove_paths: remove_paths.clone(),
+            partial: partial.clone(),
+            allow_empty,
+            amend_head: amend_head.map(str::to_owned),
+            expected_head: expected_head.cloned(),
+        };
         let index_path = self.index_path().await?;
         let _index_lock = IndexTransaction::begin(&index_path)?;
         let (snapshot, review) = self
@@ -545,6 +576,7 @@ impl Repository {
             objects,
             lfs,
             shared,
+            request: Some(request),
         };
         let manifest = serde_json::to_vec(&record)?;
         anyhow::ensure!(
@@ -560,6 +592,54 @@ impl Repository {
         sync_directory(&base)
             .with_context(|| format!("Commit checkpoint {id} may require inspection"))?;
         Ok(json!({"id": id, "state":"prepared", "basis":basis}))
+    }
+
+    /// Recapture the selection as an observation, not a publication authorization.
+    pub(crate) async fn revalidate_commit_checkpoint(&self, id: &str) -> Result<Value> {
+        let base = self.checkpoint_directory().await?;
+        read_checkpoint(&base, id, &self.id())?;
+        let path = base.join(id).join(".use.lock");
+        let _use_lock = CheckpointUse {
+            file: Some(work::private_file(&path).context("commit checkpoint is in use")?),
+            path,
+        };
+        let record = read_checkpoint(&base, id, &self.id())?;
+        let manifest = serde_json::to_vec(&record)?;
+        let request = record
+            .request
+            .clone()
+            .context("Checkpoint does not contain its selected request; prepare it again")?;
+        let index_path = self.index_path().await?;
+        let _index_lock = IndexTransaction::begin(&index_path)?;
+        let inspection = self.inspect_commit_checkpoint(id).await?;
+        let unchanged = [
+            "head_matches",
+            "branch_matches",
+            "index_matches",
+            "operation_matches",
+        ]
+        .iter()
+        .all(|field| inspection[*field] == true);
+        let matches = if unchanged {
+            let (_, review) = self
+                .capture_selected_commit_review(
+                    request.paths,
+                    request.remove_paths,
+                    request.partial,
+                    request.allow_empty,
+                    request.amend_head.as_deref(),
+                    request.expected_head.as_ref(),
+                )
+                .await?;
+            review["basis"].as_str() == Some(record.basis.as_str())
+        } else {
+            false
+        };
+        anyhow::ensure!(
+            serde_json::to_vec(&read_checkpoint(&base, id, &self.id())?)? == manifest,
+            "commit checkpoint changed during revalidation"
+        );
+        Ok(json!({"id": id, "basis": record.basis, "matches": matches}))
     }
 
     pub(crate) async fn list_commit_checkpoints(&self) -> Result<Value> {
@@ -755,6 +835,29 @@ mod tests {
         ] {
             assert_eq!(inspection[field], true, "{field}");
         }
+        let checked = repo.revalidate_commit_checkpoint(id).await.unwrap();
+        assert_eq!(checked["matches"], true);
+        assert_eq!(checked["basis"], basis);
+        fs::write(root.join("file"), b"changed after checkpoint\n").unwrap();
+        assert_eq!(
+            repo.revalidate_commit_checkpoint(id).await.unwrap()["matches"],
+            false
+        );
+        fs::write(root.join("file"), b"selected worktree\n").unwrap();
+        let manifest_path = base.join(id).join("manifest.json");
+        let current_manifest = fs::read(&manifest_path).unwrap();
+        let mut old_manifest: Value = serde_json::from_slice(&current_manifest).unwrap();
+        old_manifest.as_object_mut().unwrap().remove("request");
+        fs::write(&manifest_path, serde_json::to_vec(&old_manifest).unwrap()).unwrap();
+        assert!(repo.inspect_commit_checkpoint(id).await.is_ok());
+        assert!(repo.revalidate_commit_checkpoint(id).await.is_err());
+        assert!(!base.join(id).join(".use.lock").exists());
+        fs::write(&manifest_path, current_manifest).unwrap();
+        let live_lock = root.join(".git/index.lock");
+        fs::write(&live_lock, b"other git operation").unwrap();
+        assert!(repo.revalidate_commit_checkpoint(id).await.is_err());
+        assert!(!base.join(id).join(".use.lock").exists());
+        fs::remove_file(live_lock).unwrap();
         #[cfg(unix)]
         {
             git(&["config", "core.fsmonitor", "touch checkpoint-fsmonitor-ran"]);
@@ -823,6 +926,7 @@ mod tests {
         let lock = base.join(id).join(".use.lock");
         fs::write(&lock, b"other operation").unwrap();
         assert!(repo.forget_commit_checkpoint(id).await.is_err());
+        assert!(repo.revalidate_commit_checkpoint(id).await.is_err());
         fs::remove_file(lock).unwrap();
         let manifest = base.join(id).join("manifest.json");
         let original_manifest = fs::read(&manifest).unwrap();

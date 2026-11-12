@@ -1930,6 +1930,13 @@ export class BackendClient {
     return value as unknown as CommitCheckpointInspection
   }
 
+  async revalidateCommitCheckpoint(repositoryPath: string, id: string): Promise<{ readonly basis: string; readonly matches: boolean }> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint ID', retryable: false })
+    const value = await this.commitCheckpointRequest(repositoryPath, { method: 'revalidate_commit_checkpoint', checkpoint_id: id })
+    if (!isRecord(value) || value.id !== id || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || typeof value.matches !== 'boolean') throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint revalidation', retryable: false })
+    return { basis: value.basis, matches: value.matches }
+  }
+
   async repositoryInterpretTrailers(repositoryPath: string, message: string, trailers: ReadonlyArray<{ readonly token: string; readonly value: string }>, parse: boolean, unfold: boolean): Promise<string> {
     const operation = { method: 'interpret_trailers', message, trailers, parse, unfold }
     const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
@@ -1939,6 +1946,85 @@ export class BackendClient {
       : await this.repositoryRead(repositoryPath, operation.method, operation)
     if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid Git trailer response', retryable: false })
     return value
+  }
+
+  async repositorySubmoduleStatus(repositoryPath: string): Promise<string> {
+    const operation = { method: 'renderer_submodule_status' }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'submodule_status', repository_path: repositoryPath, operation } })
+      : await this.repositoryRead(repositoryPath, operation.method, operation)
+    if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid submodule status response', retryable: false })
+    return value
+  }
+
+  async repositoryResetSubmodules(repositoryPath: string, paths: ReadonlyArray<string>): Promise<void> {
+    if (paths.length === 0 || paths.length > 4096 || new Set(paths).size !== paths.length) throw new BackendError({ code: 'invalid_request', message: 'Select distinct submodule paths', retryable: false })
+    const operation = { method: 'renderer_reset_submodules', paths }
+    const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
+    if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Submodule selection exceeds the request limit', retryable: false })
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'reset_submodules', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the selected submodules before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Submodule reset outcome is uncertain; inspect the selected submodules', retryable: false })
+    if (value.code !== 0) throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Submodule reset failed'}; inspect the selected submodules`, retryable: false })
+  }
+
+  async repositoryUpdateSubmodules(repositoryPath: string, allowFileProtocol: boolean): Promise<void> {
+    const operation = { method: 'renderer_update_submodules', allow_file_protocol: allowFileProtocol }
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'update_submodules', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect submodules before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Submodule update outcome is uncertain; inspect submodules', retryable: false })
+    if (value.code !== 0) throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Submodule update failed'}; inspect submodules`, retryable: false })
+  }
+
+  async repositoryMergeBase(repositoryPath: string, first: string, second: string): Promise<string | null> {
+    if ([first, second].some(revision => revision.length === 0 || revision.length > 4096 || revision.includes('\0'))) throw new BackendError({ code: 'invalid_request', message: 'Invalid merge-base revision', retryable: false })
+    const operation = { method: 'merge_base', first, second }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'merge_base', repository_path: repositoryPath, operation } })
+      : await this.repositoryRead(repositoryPath, operation.method, operation)
+    if (value !== null && (typeof value !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value))) throw new BackendError({ code: 'invalid_response', message: 'Invalid merge-base result', retryable: false })
+    return value as string | null
+  }
+
+  async repositoryMergeTreePreview(repositoryPath: string, ours: string, theirs: string): Promise<{ readonly kind: 'clean' | 'invalid' } | { readonly kind: 'conflicts'; readonly conflictedFiles: number }> {
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i
+    if (!oid.test(ours) || !oid.test(theirs) || ours.length !== theirs.length) throw new BackendError({ code: 'invalid_request', message: 'Invalid merge commit IDs', retryable: false })
+    const operation = { method: 'merge_tree_preview', ours, theirs }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'merge_tree_preview', repository_path: repositoryPath, operation } })
+      : await this.repositoryRead(repositoryPath, operation.method, operation)
+    if (isRecord(value) && (value.kind === 'clean' || value.kind === 'invalid')) return { kind: value.kind }
+    if (isRecord(value) && value.kind === 'conflicts' && typeof value.conflicted_files === 'number' && Number.isSafeInteger(value.conflicted_files) && value.conflicted_files > 0 && value.conflicted_files <= 1_000_000) return { kind: 'conflicts', conflictedFiles: value.conflicted_files }
+    throw new BackendError({ code: 'invalid_response', message: 'Invalid merge preview response', retryable: false })
+  }
+
+  async mutateRepositoryTag(repositoryPath: string, operation: { readonly method: 'tag_create_annotated'; readonly name: string; readonly target: string } | { readonly method: 'tag_delete'; readonly name: string }): Promise<void> {
+    if (operation.name.length === 0 || operation.name.length > 4096 || operation.name.includes('\0') || (operation.method === 'tag_create_annotated' && (operation.target.length === 0 || operation.target.length > 4096 || operation.target.includes('\0')))) throw new BackendError({ code: 'invalid_request', message: 'Invalid tag request', retryable: false })
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'tag_mutation', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect tags before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stdout !== 'string' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Tag operation outcome is uncertain; inspect tags before retrying', retryable: false })
+    if (value.code !== 0) throw new BackendError({ code: 'git_error', message: value.stderr || 'Git tag operation failed', retryable: false })
   }
 
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {

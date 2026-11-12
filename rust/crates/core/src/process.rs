@@ -55,6 +55,13 @@ pub async fn run_git(
     run_command(path, command, args, input, 2 * 1024 * 1024, None).await
 }
 
+/// Status lists can be much larger than ordinary command responses. Keep a
+/// separate bound so a large worktree does not weaken limits for other Git
+/// operations or trigger the legacy status fallback.
+pub(crate) async fn run_status(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    run_command(path, git_command(None), args, None, 16 * 1024 * 1024, None).await
+}
+
 /// Inspect an index using an isolated, temporary Git directory. Never inherit
 /// repository or configuration overrides that could redirect the probe or run
 /// a configured fsmonitor command.

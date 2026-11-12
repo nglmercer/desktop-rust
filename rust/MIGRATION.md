@@ -339,13 +339,53 @@ Checkpoint inspection verifies the recorded index, blob, LFS and shared-index
 files, including Git blob object IDs, and reports observed HEAD, branch, index
 and operation matches. It compares the saved indexes' complete blob sets
 against the retained objects in an isolated Git directory, including when the
-live shared index has been pruned. It does not revalidate working-tree
-selections and cannot authorize publication. Preparation rejects sparse-index
+live shared index has been pruned. Checkpoint revalidation separately recaptures
+the stored selection under the index lock and compares the review basis. This
+can run Git clean filters and write Git objects; it is an observation and cannot
+authorize later publication without a transaction and reference guard. Older
+checkpoints without a stored selection can be inspected but must be prepared
+again for revalidation. A process interruption can leave a checkpoint use lock
+that requires manual investigation before removal. Preparation rejects sparse-index
 tree entries until their dependencies can be retained and verified.
 Commit-message trailer parsing and merging now use Git through typed Rust
 operations on both transports, retaining repository trailer configuration and
 configured trailer commands. Requests with an explicit isolated Git
 environment still use the legacy path until that environment is migrated.
+Mergeability previews use typed Rust operations on both transports and preserve
+Git's clean, conflicting and unrelated-history outcomes. Git may write merge
+objects and invoke configured merge drivers; the live index is not replaced.
+Merge-base reads used by conflict context and branch comparison also use Rust
+on both transports, retaining null results for missing or unrelated histories.
+Top-level submodule status reads and selected-path resets use Rust on both
+transports while retaining Git's status parsing and literal-path reset behavior.
+Reset failures may leave selected submodules partially updated; the caller is
+told to inspect them before retrying. Checkout's submodule update also uses
+Rust and honors explicit file-protocol permission. The UI receives start and
+completion progress rather than intermediate Git/LFS updates, and the native
+environment does not yet reproduce Electron's OS proxy discovery.
+Submodule operations do not inherit a parent repository's assigned-account
+credential grant; private submodules need their own credential support.
+Discard dispatch now boxes its larger async futures after the bridge worker's
+default stack overflowed during a real selected-line discard. The bridge test
+exercises discard and undo on the default runtime stack.
+On Wry, branch enumeration, tracking, merged-branch and points-at reads now
+surface Rust failures instead of retrying through the deprecated Git adapter.
+The non-Rust Electron fallback remains available when no Rust transport is active.
+Wry status, operation context and conflict details likewise use Rust without a
+legacy retry. Non-strict status reads return null when Rust classifies the
+directory as missing or bare; failures for existing working trees propagate.
+Detailed status has a 16 MiB Git-output bound, separate from the 2 MiB bound
+for ordinary commands. Larger outputs still fail rather than returning a
+partial status; serialized byte arrays can require substantially more memory.
+The renderer's local tag creation and deletion use Rust on both transports.
+Creation retains annotated, empty-message tags and Git's signing configuration;
+an interrupted request requires inspecting tags before retrying. The unused
+remote tag push-discovery helper was removed; the Electron fallback remains.
+Tag behavior tests now use Vitest routing and a real Rust bridge instead of the
+legacy Node-only tag suite.
+The Biome CI check now includes the tag and merge-preview modules and their
+Vitest routing tests. Its file list is still partial; repository-wide
+ESLint/Prettier replacement and Electron packaging remain open.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository
@@ -2060,8 +2100,8 @@ app's models/stores/UI/platform integrations also require audit.
 | `environment.ts`                     | Pending semantic audit and replacement                                                                                                                                                                            |
 | `fetch.ts`                           | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `file-version-fence.ts`              | Pending semantic audit and replacement                                                                                                                                                                            |
-| `for-each-ref.ts`                    | Pending semantic audit and replacement                                                                                                                                                                            |
-| `format-patch.ts`                    | Pending semantic audit and replacement                                                                                                                                                                            |
+| `for-each-ref.ts`                    | Branch and tracking enumeration use typed Rust reads on Wry and WebSocket; Electron fallback remains                                                                                                              |
+| `format-patch.ts`                    | Removed: the Git helper had no production callers; the separate selected-line patch formatter remains in use                                                                                                      |
 | `git-delimiter-parser.ts`            | Pending semantic audit and replacement                                                                                                                                                                            |
 | `gitignore.ts`                       | Partial: root ignore file reads and edits use Rust for Wry and WebSocket; Electron fallback and external-editor concurrency remain                                                                                 |
 | `index.ts`                           | Pending semantic audit and replacement                                                                                                                                                                            |
@@ -2070,7 +2110,7 @@ app's models/stores/UI/platform integrations also require audit.
 | `lfs.ts`                             | Partial: typed setup/attributes, payload journaling/previews and ordinary text selection implemented; typed transfers/tracking implemented; legacy callers, extensions and platform audit pending                 |
 | `log.ts`                             | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `merge.ts`                           | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
-| `merge-tree.ts`                      | Pending semantic audit and replacement                                                                                                                                                                            |
+| `merge-tree.ts`                      | Mergeability uses typed Rust previews on both transports; Electron fallback remains                                                                                                                               |
 | `multi-operation-terminal-output.ts` | Pending semantic audit and replacement                                                                                                                                                                            |
 | `owned-file-lock.ts`                 | Pending semantic audit and replacement                                                                                                                                                                            |
 | `pull.ts`                            | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |

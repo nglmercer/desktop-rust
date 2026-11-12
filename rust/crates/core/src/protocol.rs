@@ -332,6 +332,14 @@ pub enum Operation {
     RendererLargeFiles {
         paths: Vec<GitPath>,
     },
+    MergeBase {
+        first: String,
+        second: String,
+    },
+    MergeTreePreview {
+        ours: String,
+        theirs: String,
+    },
     InterpretTrailers {
         message: String,
         #[serde(default)]
@@ -415,6 +423,13 @@ pub enum Operation {
         dry_run: bool,
     },
     Submodules,
+    RendererSubmoduleStatus,
+    RendererResetSubmodules {
+        paths: Vec<GitPath>,
+    },
+    RendererUpdateSubmodules {
+        allow_file_protocol: bool,
+    },
     SubmoduleDisplayUrl {
         path: GitPath,
     },
@@ -527,6 +542,9 @@ pub enum Operation {
     },
     ListCommitCheckpoints,
     InspectCommitCheckpoint {
+        checkpoint_id: String,
+    },
+    RevalidateCommitCheckpoint {
         checkpoint_id: String,
     },
     ForgetCommitCheckpoint {
@@ -676,6 +694,10 @@ pub enum Operation {
     TagCreate {
         name: String,
         target: Option<String>,
+    },
+    TagCreateAnnotated {
+        name: String,
+        target: String,
     },
     TagDelete {
         name: String,
