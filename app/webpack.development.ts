@@ -10,7 +10,6 @@ const config: webpack.Configuration = {
 
 const mainConfig = merge({}, common.main, config)
 const cliConfig = merge({}, common.cli, config)
-const highlighterConfig = merge({}, common.highlighter, config)
 
 const getRendererEntryPoint = () => {
   const entry = common.renderer.entry as webpack.EntryObject
@@ -87,10 +86,4 @@ const crashConfig = merge({}, common.crash, config, {
 })
 
 // eslint-disable-next-line no-restricted-syntax
-export default [
-  mainConfig,
-  rendererConfig,
-  crashConfig,
-  cliConfig,
-  highlighterConfig,
-]
+export default [mainConfig, rendererConfig, crashConfig, cliConfig]

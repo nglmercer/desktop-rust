@@ -278,6 +278,11 @@ pub enum Operation {
         #[serde(default)]
         scope: crate::ConfigScope,
     },
+    GitIdentityValue {
+        key: String,
+        #[serde(default)]
+        only_local: bool,
+    },
     SetGitSetting {
         #[serde(default)]
         scope: crate::ConfigScope,

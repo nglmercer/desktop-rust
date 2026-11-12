@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const listeners = vi.hoisted(
   () => new Map<string, Set<(...args: unknown[]) => void>>()
 )
+const request = vi.hoisted(() => vi.fn(async () => ({ code: 0 })))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
     transportKind: 'ws',
     capabilities: () => ({ cancel: true, max_pending: 32 }),
     waitReady: async () => ({ ready: true }),
+    request,
     subscribe: (event: string, listener: (...args: unknown[]) => void) => {
       const set = listeners.get(event) ?? new Set()
       set.add(listener)
@@ -18,6 +20,7 @@ vi.mock('../../src/backend/client', () => ({
 }))
 
 interface IShim {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(event: string, listener: (...args: unknown[]) => void): IShim
   removeListener(event: string, listener: (...args: unknown[]) => void): IShim
   removeAllListeners(event?: string): IShim
@@ -26,10 +29,39 @@ interface IShim {
 afterEach(() => {
   Reflect.deleteProperty(window, '__desktop')
   listeners.clear()
+  request.mockClear()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   vi.resetModules()
 })
 
 describe('loopback bridge event shim', () => {
+  it('answers browser window queries locally and keeps typed operations on the bridge', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true }))
+    )
+    await import('../../src/web/electron-shim-loader')
+    const shim = Reflect.get(window, '__desktop') as IShim
+    await expect(
+      shim.invoke('get-current-window-state')
+    ).resolves.toBeUndefined()
+    await expect(
+      shim.invoke('get-current-window-zoom-factor')
+    ).resolves.toBeUndefined()
+    await expect(shim.invoke('get-app-path')).resolves.toBe('/__desktop_app__')
+    await expect(shim.invoke('is-window-focused')).resolves.toBe(true)
+    await expect(shim.invoke('should-use-dark-colors')).resolves.toBe(true)
+    expect(window.matchMedia).toHaveBeenCalledWith(
+      '(prefers-color-scheme: dark)'
+    )
+    expect(request).not.toHaveBeenCalled()
+    await expect(
+      shim.invoke('desktop.backend.path_exists', { path: '/tmp' })
+    ).resolves.toEqual({ code: 0 })
+    expect(request).toHaveBeenCalledWith('path_exists', { path: '/tmp' })
+  })
   it('delivers subscriptions and removes exactly the requested listeners', async () => {
     await import('../../src/web/electron-shim-loader')
     const shim = Reflect.get(window, '__desktop') as IShim

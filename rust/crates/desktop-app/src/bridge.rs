@@ -151,7 +151,10 @@ impl Bridge {
 
     /// The executor that serves `channel`.
     fn executor_for(&self, channel: &str) -> &Executor {
-        if matches!(channel, "desktop.backend.read" | "desktop.backend.copilot") {
+        if matches!(
+            channel,
+            "desktop.backend.read" | "desktop.backend.copilot" | "desktop.backend.git_info"
+        ) {
             return &self.long;
         }
         if !desktop_core::io::handles(channel) {
@@ -198,12 +201,14 @@ impl Bridge {
         let backend = self.backend.clone();
         let job = if matches!(
             channel.as_str(),
-            "desktop.backend.read" | "desktop.backend.copilot"
+            "desktop.backend.read" | "desktop.backend.copilot" | "desktop.backend.git_info"
         ) {
             let admission = if channel == "desktop.backend.read" {
                 backend.admit(args.clone())
-            } else {
+            } else if channel == "desktop.backend.copilot" {
                 backend.admit_copilot(args.clone())
+            } else {
+                backend.admit_git_info(args.clone())
             };
             match admission {
                 Ok(job) => Some(job),
@@ -403,12 +408,14 @@ impl Bridge {
             let outcome_channel = channel.clone();
             let job = if matches!(
                 channel.as_str(),
-                "desktop.backend.read" | "desktop.backend.copilot"
+                "desktop.backend.read" | "desktop.backend.copilot" | "desktop.backend.git_info"
             ) {
                 let admission = if channel == "desktop.backend.read" {
                     backend.admit(message.args.clone())
-                } else {
+                } else if channel == "desktop.backend.copilot" {
                     backend.admit_copilot(message.args.clone())
+                } else {
+                    backend.admit_git_info(message.args.clone())
                 };
                 match admission {
                     Ok(job) => Some(job),
@@ -459,7 +466,10 @@ impl Bridge {
 
 fn queue_deadline(channel: &str) -> Instant {
     Instant::now()
-        + if matches!(channel, "desktop.backend.read" | "desktop.backend.copilot") {
+        + if matches!(
+            channel,
+            "desktop.backend.read" | "desktop.backend.copilot" | "desktop.backend.git_info"
+        ) {
             READ_QUEUE_DEADLINE
         } else {
             RPC_DEADLINE
@@ -475,7 +485,10 @@ fn run_channel(
     args: Vec<Value>,
     job: Option<crate::backend::ReadJob>,
 ) -> RpcResult {
-    let result = if matches!(channel, "desktop.backend.read" | "desktop.backend.copilot") {
+    let result = if matches!(
+        channel,
+        "desktop.backend.read" | "desktop.backend.copilot" | "desktop.backend.git_info"
+    ) {
         backend.read(job.expect("backend operation must be admitted"))
     } else {
         app.invoke(channel, args)

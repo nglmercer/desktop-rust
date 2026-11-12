@@ -282,6 +282,7 @@ class WryTransport {
       opts.accountId !== undefined ||
       (method !== 'read' &&
         method !== 'copilot' &&
+        method !== 'git_info' &&
         (opts.signal !== undefined || opts.deadlineMs !== undefined))
     ) {
       throw new BackendError({
@@ -291,7 +292,7 @@ class WryTransport {
       })
     }
     const channel = `desktop.backend.${method}`
-    if (method === 'read' || method === 'copilot') {
+    if (method === 'read' || method === 'copilot' || method === 'git_info') {
       if (opts.signal && !this.capabilities().cancel) {
         throw new BackendError({
           code: 'unsupported',
@@ -299,8 +300,8 @@ class WryTransport {
           retryable: false,
         })
       }
-      const maximum = method === 'read' ? 60_000 : 330_000
-      const deadline = opts.deadlineMs ?? (method === 'read' ? 60_000 : 170_000)
+      const maximum = method === 'copilot' ? 330_000 : 60_000
+      const deadline = opts.deadlineMs ?? (method === 'copilot' ? 170_000 : 60_000)
       if (!Number.isInteger(deadline) || deadline < 1 || deadline > maximum) {
         throw new BackendError({
           code: 'invalid_request',
@@ -309,6 +310,13 @@ class WryTransport {
         })
       }
       const requestId = randomUUID()
+      const identityWrite =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        (params.operation.type === 'set' ||
+          params.operation.type === 'set_repository' ||
+          params.operation.type === 'unset_repository')
       return new Promise((resolve, reject) => {
         let settled = false
         let timer: ReturnType<typeof setTimeout>
@@ -328,15 +336,32 @@ class WryTransport {
                 new BackendError({
                   code,
                   message,
-                  retryable: method === 'read',
+                  retryable:
+                    method === 'read' ||
+                    (method === 'git_info' &&
+                      isRecord(params) &&
+                      isRecord(params.operation) &&
+                      (params.operation.type === 'read' || params.operation.type === 'version' || params.operation.type === 'lfs_status')),
                 })
               )
             }
           })
-        const abort = () => cancel('cancelled', 'Backend operation cancelled')
+        const abort = () =>
+          cancel(
+            'cancelled',
+            identityWrite
+              ? 'Git identity update cancelled; inspect Git settings before retrying'
+              : 'Backend operation cancelled'
+          )
         opts.signal?.addEventListener('abort', abort, { once: true })
         timer = setTimeout(
-          () => cancel('ETIMEDOUT', 'Backend operation timed out'),
+          () =>
+            cancel(
+              'ETIMEDOUT',
+              identityWrite
+                ? 'Git identity update timed out; inspect Git settings before retrying'
+                : 'Backend operation timed out'
+            ),
           deadline
         )
         try {
@@ -1028,6 +1053,76 @@ export class BackendClient {
         retryable: false,
       })
     }
+  }
+
+  /** Read the installed Git version through the Rust host. */
+  async gitVersion(): Promise<string> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'version' } })
+      : await this.request('git_version', {})
+    if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid Git version response', retryable: false })
+    }
+    return value
+  }
+
+  /** Check Git LFS availability without invoking a renderer process shim. */
+  async lfsAvailable(): Promise<boolean> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'lfs_status' } })
+      : await this.request('lfs_tool_status', {})
+    if (!isRecord(value) || typeof value.available !== 'boolean') {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid Git LFS status response', retryable: false })
+    }
+    return value.available
+  }
+
+  /** Install the global LFS filters through the Rust host. */
+  async installGlobalLfsFilters(force: boolean): Promise<void> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'lfs_install', force } })
+      : await this.request('lfs_install', { scope: 'global', force, skip_repo: true, skip_smudge: false })
+    if (typeof value !== 'string') {
+      throw new BackendError({ code: 'lfs_install_failed', message: 'Git LFS global filter installation failed', retryable: false })
+    }
+  }
+
+  /** Read a repository's local or inherited Git identity through Rust. */
+  async repositoryGitIdentityValue(
+    repositoryPath: string,
+    key: 'user.name' | 'user.email',
+    onlyLocal: boolean
+  ): Promise<string | null> {
+    const value = await this.repositoryRead(repositoryPath, 'git_identity_value', {
+      key,
+      only_local: onlyLocal,
+    })
+    if (value !== null && typeof value !== 'string') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid repository Git identity response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  /** Update or remove one local identity field for the intended repository. */
+  async setRepositoryGitIdentityValue(
+    repositoryPath: string,
+    key: 'user.name' | 'user.email',
+    value: string | null
+  ): Promise<void> {
+    if (this.transport === 'wry') {
+      const operation = value === null
+        ? { type: 'unset_repository', repository_path: repositoryPath, key }
+        : { type: 'set_repository', repository_path: repositoryPath, key, value }
+      await this.wry!.request('git_info', { operation }, {})
+      return
+    }
+    await this.repositoryRead(repositoryPath, 'set_git_setting', {
+      scope: 'local', key, value,
+    })
   }
 
   /** Classify a directory before it has been selected as a repository. */

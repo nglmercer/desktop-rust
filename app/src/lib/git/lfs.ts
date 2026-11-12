@@ -1,5 +1,6 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
+import { backend } from '../../backend/client'
 
 interface ILFSTrackOutput {
   readonly patterns: ReadonlyArray<{
@@ -15,6 +16,13 @@ let lfsAvailable: Promise<boolean> | undefined
  * is an unknown command. Checked once per run.
  */
 export function isLFSAvailable(): Promise<boolean> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    lfsAvailable ??= backend().lfsAvailable().catch(error => {
+      lfsAvailable = undefined
+      throw error
+    })
+    return lfsAvailable
+  }
   lfsAvailable ??= git(['lfs', 'version'], __dirname, 'isLFSAvailable', {
     successExitCodes: new Set([0, 1, 127]),
   }).then(
@@ -28,6 +36,11 @@ export function isLFSAvailable(): Promise<boolean> {
 export async function installGlobalLFSFilters(force: boolean): Promise<void> {
   if (!(await isLFSAvailable())) {
     log.warn('Git LFS is not installed, skipping global LFS filter setup')
+    return
+  }
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().installGlobalLfsFilters(force)
     return
   }
 

@@ -3,7 +3,7 @@
 The offline GitHub CLI adapter integration suite now runs in Vitest using a
 TypeScript `gh` fixture. It retains the CLI and authenticated WebSocket checks,
 including request bodies, invalid input, process failures, and redaction. The
-corresponding Python suite has been removed; other Python suites remain.
+corresponding Python suite has been removed.
 
 The requested end state is a Rust implementation with a complete headless CLI,
 GitHub CLI integration, reusable web UI over localhost/WebSocket on Termux, and
@@ -43,10 +43,39 @@ implementations indefinitely is not the final architecture.
 No gate is satisfied by CLI passthrough alone, source counts, or the existence
 of a replacement file. Legacy removal requires runtime evidence of replacement.
 
+The Electron highlighter now uses the same Vite worker build as the Rust UI;
+the other Electron entries still use Webpack. A Vitest check executes the
+generated worker and verifies that its output does not remove adjacent bundles.
+The local full Electron development compile exhausted the Node heap in the
+remaining Webpack stage, so the complete Electron build remains unverified.
+
 The loopback WebSocket client is tested against the Rust bridge for login,
 events, cancellation and reconnect. The browser entry currently returns 503:
 the React renderer still needs its shell-only dependencies replaced before it
 can be served as a functional browser UI.
+An opt-in `desktop-cli` feature, `embedded-ui`, now embeds the output of
+`pnpm vite:build` and serves it over the loopback bridge. Build it with
+`cargo build -p desktop-cli --features embedded-ui --locked` after building the
+renderer. The default build retains the 503 until browser workflow parity is
+verified; the feature is an integration path, not a completed browser product.
+In an isolated browser probe, the Vite renderer mounted through a temporary
+asset proxy and an authenticated real bridge. Browser window state, focus,
+theme and app-resource path queries are now answered locally, and the welcome
+screen reads and writes global Git identity through the typed bridge. A failed
+or partially completed identity save keeps the setup form open for review.
+The Wry shell also exposes bounded, cancellable global identity operations for
+the same two keys without requiring a selected repository; interrupted writes
+report an uncertain outcome and must be checked before retrying.
+Repository identity reads now use Git's local-only or inherited lookup through
+both transports. WebSocket requests bind to the selected repository before the
+read, and reject a selection change instead of querying a different repository.
+Repository identity writes and removals are scoped to the requested repository;
+WebSocket mutations use the same binding. Repeated removal is idempotent, and a
+cancelled write requires checking Git settings before retry.
+This probe does not
+establish full browser workflow parity or enable the production entry. In the
+empty-repository probe, those identity reads no longer invoked the legacy Git
+process shim; external telemetry and changelog requests still failed.
 
 The Rust bridge integration tests exercise Copilot session creation, a message,
 commit-message generation and cancellation against an offline simulated native
@@ -95,7 +124,8 @@ run in Vitest, with native byte-path coverage in Rust; the Python account test
 entry point has been retired. The assigned pull-request creation suite also
 runs in Vitest against the installed GitHub CLI and a local TLS proxy; its
 duplicate, privacy, race and cancellation checks replace the Python test.
-Two Python integration suites and their shared helpers remain to be migrated.
+The Git credential and pull-request checkout tracking suites now run in Vitest
+against real local HTTPS Git and Git LFS services.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository
@@ -1217,18 +1247,16 @@ A full localhost journey exercises actual UI/WebSocket/native Git setup.
 The same Rust integration suite also exercises repository-context reads and
 preferences, provider validation and redaction, storage safety, linked
 worktrees, repository relocation, native ref formats, and concurrent refresh
-and cancellation. The remaining Python service suites temporarily share their
-fixture from `tests/support/repository_context.py`.
+and cancellation.
 
-The remaining credential and pull-request integration suites use the Rust
+The credential and pull-request integration suites use the Rust
 `crates/cli/examples/git_credentials_wrapper.rs` fixture to instrument Git.
 It executes the real Git process, limits diagnostics to a fixed command
 vocabulary, and reads its synthetic credentials from a private fixture file.
 The TypeScript Git HTTP fixture now exercises real smart HTTP, authenticated
-LFS object transfers, rejection, and request gates; the Python credential and
-checkout suites remain until their scenarios have been ported and verified.
-The first credential scenarios also run in Vitest against the Rust Git wrapper,
-covering assigned and disabled accounts, fetch/push/pull, and error redaction.
+LFS object transfers, rejection, and request gates. Vitest covers assigned and
+disabled accounts, fetch/push/pull, credential helper scoping, error redaction,
+pull-request tracking, races, and native Git LFS descendant cleanup.
 
 Validation passed the all-feature workspace build, warning-free Clippy and all
 26 Rust tests. Standalone frontend formatting/type checking/build and all 48
@@ -1494,8 +1522,8 @@ then cancels the CLI: exit 130, all three observed children terminated, no alias
 or native log retained, and unrelated refs/index/config/registry/files and prior
 cached objects unchanged.
 
-The native fixture compiles a small C instrumentation wrapper when a compiler is
-available, with Python fallback. It preserves opaque argv/stdin/exit/signals and
+The native fixture uses a Rust instrumentation wrapper. It preserves opaque
+argv/stdin/exit/signals and
 asserts credential-free Git argv/environment plus explicit deterministic gates.
 Its separate tools-only checks passed malformed/nested controls, concurrent log
 rows, native byte paths, signals and the bounded gate timeout. Instrumented new

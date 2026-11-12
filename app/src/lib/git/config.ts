@@ -3,6 +3,7 @@ import { Repository } from '../../models/repository'
 import { isAbsolute, normalize } from 'path'
 import { realpath } from 'fs/promises'
 import { backend } from '../../backend/client'
+import { isRecord } from '../is-record'
 
 /**
  * Look up a config value by name in the repository.
@@ -17,6 +18,13 @@ export function getConfigValue(
   name: string,
   onlyLocal: boolean = false
 ): Promise<string | null> {
+  if (
+    (name === 'user.name' || name === 'user.email') &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    return backend().repositoryGitIdentityValue(repository.path, name, onlyLocal)
+  }
   return getConfigValueInPath(name, repository.path, onlyLocal)
 }
 
@@ -27,6 +35,27 @@ export function getGlobalConfigValue(
     HOME: string
   }
 ): Promise<string | null> {
+  if (
+    env === undefined &&
+    (name === 'user.name' || name === 'user.email') &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    const client = backend()
+    return (client.transportKind === 'wry'
+      ? client.request('git_info', { operation: { type: 'read' } })
+      : client.request('git_settings', { scope: 'global' }))
+      .then(result => {
+        if (!isRecord(result) || result.scope !== 'global' || !isRecord(result.values)) {
+          throw new Error('Invalid global Git settings response')
+        }
+        const value = result.values[name]
+        if (value !== null && typeof value !== 'string') {
+          throw new Error('Invalid global Git identity value')
+        }
+        return value
+      })
+  }
   return getConfigValueInPath(name, null, false, undefined, env)
 }
 
@@ -149,6 +178,15 @@ export async function setConfigValue(
     HOME: string
   }
 ): Promise<void> {
+  if (
+    env === undefined &&
+    (name === 'user.name' || name === 'user.email') &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    await backend().setRepositoryGitIdentityValue(repository.path, name, value)
+    return
+  }
   return setConfigValueInPath(name, value, repository.path, env)
 }
 
@@ -160,6 +198,22 @@ export async function setGlobalConfigValue(
     HOME: string
   }
 ): Promise<void> {
+  if (
+    env === undefined &&
+    (name === 'user.name' || name === 'user.email') &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    const client = backend()
+    if (client.transportKind === 'wry') {
+      await client.request('git_info', {
+        operation: { type: 'set', key: name, value },
+      })
+    } else {
+      await client.request('set_git_setting', { scope: 'global', key: name, value })
+    }
+    return
+  }
   return setConfigValueInPath(name, value, null, env)
 }
 
@@ -261,6 +315,15 @@ export async function removeConfigValue(
     HOME: string
   }
 ): Promise<void> {
+  if (
+    env === undefined &&
+    (name === 'user.name' || name === 'user.email') &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    await backend().setRepositoryGitIdentityValue(repository.path, name, null)
+    return
+  }
   return removeConfigValueInPath(name, repository.path, env)
 }
 

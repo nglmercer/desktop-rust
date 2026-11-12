@@ -5,8 +5,7 @@ import merge from 'webpack-merge'
 import { getReplacements } from './app-info'
 import { getDistArchitecture } from '../script/dist-info'
 import { getKoffiWebpackConfig } from '../script/webpack-koffi'
-
-export const externals = ['7zip']
+import { packagedExternals } from './build-externals'
 
 const outputDir = 'out'
 export const replacements = getReplacements()
@@ -15,7 +14,7 @@ const commonConfig: webpack.Configuration = {
   optimization: {
     emitOnErrors: false,
   },
-  externals: externals,
+  externals: packagedExternals,
   output: {
     filename: '[name].js',
     path: path.resolve(__dirname, '..', outputDir),
@@ -147,79 +146,3 @@ export const cli = merge({}, commonConfig, {
     ),
   ],
 })
-
-export const highlighter = merge({}, commonConfig, {
-  entry: { highlighter: path.resolve(__dirname, 'src/highlighter/index') },
-  output: {
-    library: {
-      name: '[name]',
-      type: 'var',
-    },
-    chunkFilename: 'highlighter/[name].js',
-  },
-  optimization: {
-    chunkIds: 'named',
-    splitChunks: {
-      cacheGroups: {
-        modes: {
-          enforce: true,
-          name: (mod: any) => {
-            const builtInMode =
-              /node_modules[\\\/]codemirror[\\\/]mode[\\\/](\w+)[\\\/]/i.exec(
-                mod.resource
-              )
-            if (builtInMode) {
-              return `mode/${builtInMode[1]}`
-            }
-            const external =
-              /node_modules[\\\/]codemirror-mode-(\w+)[\\\/]/i.exec(
-                mod.resource
-              )
-            if (external) {
-              return `ext/${external[1]}`
-            }
-            return 'common'
-          },
-        },
-      },
-    },
-  },
-  target: 'webworker',
-  plugins: [
-    new webpack.DefinePlugin(
-      Object.assign({}, replacements, {
-        __PROCESS_KIND__: JSON.stringify('highlighter'),
-      })
-    ),
-  ],
-  resolve: {
-    // We don't want to bundle all of CodeMirror in the highlighter. A web
-    // worker doesn't have access to the DOM and most of CodeMirror's core
-    // code is useless to us in that context. So instead we use this super
-    // nifty subset of codemirror that defines the minimal context needed
-    // to run a mode inside of node. Now, we're not running in node
-    // but CodeMirror doesn't have to know about that.
-    alias: {
-      codemirror$: 'codemirror/addon/runmode/runmode.node.js',
-      '../lib/codemirror$': '../addon/runmode/runmode.node.js',
-      '../../lib/codemirror$': '../../addon/runmode/runmode.node.js',
-      '../../addon/runmode/runmode$': '../../addon/runmode/runmode.node.js',
-    },
-  },
-})
-
-highlighter.module!.rules = [
-  {
-    test: /\.ts$/,
-    include: path.resolve(__dirname, 'src/highlighter'),
-    use: [
-      {
-        loader: 'ts-loader',
-        options: {
-          configFile: path.resolve(__dirname, 'src/highlighter/tsconfig.json'),
-        },
-      },
-    ],
-    exclude: /node_modules/,
-  },
-]

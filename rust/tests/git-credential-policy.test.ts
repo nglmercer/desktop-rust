@@ -1,7 +1,13 @@
 // @vitest-environment node
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, it } from 'vitest'
 import {
@@ -12,6 +18,7 @@ import {
   NONE,
   OTHER,
   clean,
+  object,
   privateFile,
 } from './fixtures/accounts'
 import { Credentials } from './fixtures/credentials'
@@ -384,6 +391,100 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       assert.equal(suite.rpc(child, 'fetch', { remote: 'origin' }).code, 0)
       suite.assertActor('bobcase')
     }, 120_000)
+
+    it('passes the scoped credential and caller configuration into reference transaction hooks', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('reference-hook-credentials')
+      suite.assign(repo)
+      const sentinel = 'synthetic-private-caller-configuration'
+      suite.update({ fixture_secret: sentinel })
+      const inherited = suite.env.GIT_CONFIG_PARAMETERS
+      suite.env.GIT_CONFIG_PARAMETERS = `'desktop.fixtureSecret=${sentinel}'`
+      const output = path.join(suite.root, 'reference-hook-result.json')
+      const hook = path.join(
+        repo.root,
+        '.git',
+        'hooks',
+        'reference-transaction'
+      )
+      writeFileSync(
+        hook,
+        '#!/bin/sh\nexec "$ACCOUNT_NODE" "$CREDENTIALS_REFERENCE_FIXTURE" "$@"\n',
+        { mode: 0o700 }
+      )
+      Object.assign(suite.env, {
+        CREDENTIALS_REFERENCE_FIXTURE: path.resolve(
+          'rust/tests/fixtures/reference-credential-hook.ts'
+        ),
+        CREDENTIALS_HOOK_OUTPUT: output,
+        CREDENTIALS_HOOK_HOST: suite.service.host,
+      })
+      try {
+        const params = {
+          name: 'broker-reference-hook',
+          start_point: 'refs/heads/main',
+          no_track: true,
+        }
+        const plan = suite.rpc(repo, 'create_branch_preview', params)
+        const stored = readFileSync(suite.registry)
+        const before = object(suite.evidence(repo))
+        suite.clear()
+        suite.clearTransport()
+        assert.equal(
+          suite.rpc(repo, 'create_branch', { ...params, basis: plan.basis })
+            .code,
+          0
+        )
+        assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
+          ok: true,
+          caller_parameter: true,
+          code: 0,
+          phase: 'prepared',
+        })
+        assert.deepEqual(
+          repo.git('rev-parse', 'refs/heads/broker-reference-hook'),
+          repo.git('rev-parse', 'HEAD')
+        )
+        const after = object(suite.evidence(repo))
+        delete before.refs
+        delete after.refs
+        assert.deepEqual(readFileSync(suite.registry), stored)
+        assert.deepEqual(after, before)
+        assert.ok(!existsSync(suite.nativeLog))
+        assert.ok(
+          suite
+            .calls()
+            .some(row => row.kind === 'api' && row.actor === 'alicecase')
+        )
+        assert.ok(
+          suite
+            .records(suite.gitLog)
+            .every(row => row.argv_clean && row.alice_environment_clean)
+        )
+        for (const entry of readdirSync(path.join(repo.root, '.git'), {
+          recursive: true,
+          withFileTypes: true,
+        })) {
+          if (entry.isDirectory() && entry.name.endsWith('.create-hooks')) {
+            for (const script of readdirSync(
+              path.join(entry.parentPath, entry.name),
+              { withFileTypes: true }
+            )) {
+              if (script.isFile()) {
+                const body = readFileSync(
+                  path.join(script.parentPath, script.name)
+                )
+                assert.ok(!body.includes(sentinel) && !body.includes(ALICE))
+              }
+            }
+          }
+        }
+        suite.assertPrivateStorage(repo)
+      } finally {
+        if (inherited === undefined) delete suite.env.GIT_CONFIG_PARAMETERS
+        else suite.env.GIT_CONFIG_PARAMETERS = inherited
+      }
+    }, 90_000)
 
     it('validates staged and committed LFS configuration without changing the index', () => {
       const bad = `[lfs]\n url = https://embedded:${ALICE}@${suite.service.host}/fork/repo.git/info/lfs\n`

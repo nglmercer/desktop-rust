@@ -712,6 +712,7 @@ dependencies = [
  "axum",
  "desktop-core",
  "futures-util",
+ "include_dir",
  "serde",
  "serde_json",
  "tokio",

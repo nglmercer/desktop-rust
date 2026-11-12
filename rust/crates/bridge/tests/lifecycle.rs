@@ -10,6 +10,7 @@ use tokio_tungstenite::{
 };
 
 #[tokio::test]
+#[cfg(not(feature = "embedded-ui"))]
 async fn browser_entry_reports_unavailable_without_exposing_the_desktop_bundle() {
     let directory =
         std::env::temp_dir().join(format!("desktop-lifecycle-{}", uuid::Uuid::new_v4()));
@@ -30,6 +31,61 @@ async fn browser_entry_reports_unavailable_without_exposing_the_desktop_bundle()
     assert!(response.starts_with("HTTP/1.1 503"));
     assert!(response.contains("browser frontend is not available"));
     assert!(response.contains("cache-control: no-store"));
+    server.shutdown().await.unwrap();
+    if directory.exists() {
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[tokio::test]
+#[cfg(feature = "embedded-ui")]
+async fn embedded_frontend_serves_only_bundled_assets_and_describes_resources() {
+    async fn get(address: &str, host: &str, path: &str) -> Vec<u8> {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        stream
+            .write_all(
+                format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        response
+    }
+    let directory = std::env::temp_dir().join(format!("desktop-frontend-{}", uuid::Uuid::new_v4()));
+    let server = start(None, Registry::new(directory.join("registry.json")), 0)
+        .await
+        .unwrap();
+    let address = server.session_url().split('/').nth(2).unwrap();
+    let index = String::from_utf8(get(address, address, "/").await).unwrap();
+    assert!(index.starts_with("HTTP/1.1 200"));
+    assert!(index.contains("content-type: text/html; charset=utf-8"));
+    assert!(index.contains("cache-control: no-store"));
+    assert!(index.contains("x-content-type-options: nosniff"));
+    assert!(index.contains("frame-ancestors 'none'"));
+    assert!(index.contains("desktop-app-container"));
+    let start = index.find("assets/index-").expect("missing Vite entry");
+    let relative = index[start..].split('"').next().unwrap();
+    let script = get(address, address, &format!("/{relative}")).await;
+    assert!(script.starts_with(b"HTTP/1.1 200"));
+    assert!(
+        script
+            .windows(b"content-type: text/javascript; charset=utf-8".len())
+            .any(|w| w == b"content-type: text/javascript; charset=utf-8")
+    );
+    let metadata =
+        String::from_utf8(get(address, address, "/__bundle?path=index.html").await).unwrap();
+    assert!(metadata.starts_with("HTTP/1.1 200"));
+    assert!(metadata.contains("\"kind\":\"file\""));
+    let traversal =
+        String::from_utf8(get(address, address, "/__bundle?path=%2e%2e%2fCargo.toml").await)
+            .unwrap();
+    assert!(traversal.ends_with("null"));
+    let missing = String::from_utf8(get(address, address, "/does-not-exist").await).unwrap();
+    assert!(missing.starts_with("HTTP/1.1 404"));
+    let bad_host = String::from_utf8(get(address, "attacker.invalid", "/").await).unwrap();
+    assert!(bad_host.starts_with("HTTP/1.1 403"));
     server.shutdown().await.unwrap();
     if directory.exists() {
         std::fs::remove_dir_all(directory).unwrap();

@@ -111,7 +111,7 @@ Responsabilidad anterior: git exec, keychain, helpers de plataforma
 Reemplazo conectado: Rust: git via process runner, SecretStore nativo (DPAPI/Keychain/Secret Service), trampolines via crate dedicated
 Consumidores, imports dinámicos y scripts revisados: app/src/lib/git/*, app/src/web/{dugite,keytar,registry-js,fs-admin,koffi}.ts, app/src/lib/api.ts
 Datos o formatos que deben seguir siendo compatibles: credenciales migradas solo tras comprobar destino; sin tokens en logs/URLs
-Prueba o recorrido que acredita la sustitución: suites git_credentials.py, github*.py, discard*.py
+Prueba o recorrido que acredita la sustitución: suites Rust y Vitest de credenciales, GitHub y descarte.
 Commit de retirada: (pendiente)
 ```
 
@@ -141,7 +141,7 @@ Responsabilidad anterior: suites Electron, fixtures obsoletas, docs Electron
 Reemplazo conectado: suites rust/tests/*.py (41 headless), app_smoke.rs (GUI), docs/migration/*, rust/{README,MIGRATION}.md, MIGRATION.md actualizado
 Consumidores, imports dinámicos y scripts revisados: app/test/unit/** Electron, script/*.ts, docs/**, README.md, AGENTS.md, CONTRIBUTING
 Datos o formatos que deben seguir siendo compatibles: oráculos branch/lfs (branch-rules-oracle, lfs-attributes-oracle.json), licencias, procedencia (THIRD_PARTY_NOTICES), gemoji/gitignore/choosealicense submódulos
-Prueba o recorrido que acredita la sustitución: cargo/python suites + vite build + app_smoke + build limpio con submódulos
+Prueba o recorrido que acredita la sustitución: suites Cargo y Vitest + vite build + app_smoke + build limpio con submódulos
 Commit de retirada: (pendiente — conservar React/Primer, estilos, componentes, recursos vigentes, highlighter, submódulos, licencias, oráculos)
 ```
 

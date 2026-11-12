@@ -2,9 +2,9 @@ import assert from 'node:assert'
 import { dirname, resolve } from 'node:path'
 import ts from 'typescript'
 
-import { buildStatsPayload } from '../../src/lib/stats/stats-store'
+import { buildStatsPayload } from '../../src/lib/stats/stats-payload'
+import type { StatsPayload } from '../../src/lib/stats/stats-store'
 
-type StatsPayload = Parameters<typeof buildStatsPayload>[0]
 type ITelemetryPayload = ReturnType<typeof buildStatsPayload>
 
 function getDailyStatsType(): {

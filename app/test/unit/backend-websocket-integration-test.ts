@@ -112,6 +112,10 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         '#!/bin/sh\nprintf "%s\\n" "$$" >> "$BRIDGE_GH_PID"\nexec sleep 60\n'
       )
       await chmod(bin, 0o700)
+      await writeFile(
+        path.join(directory, 'gitconfig'),
+        '[user]\n\tname = Bridge Test\n\temail = bridge@example.invalid\n'
+      )
       server = spawn(
         path.resolve('rust/target/debug/desktop-rs'),
         [
@@ -161,6 +165,15 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const client = new BackendClient()
       clients.push(client)
       expect((await bounded(client.waitReady())).version).toBe(3)
+      expect(await bounded(client.gitVersion())).toBe(execFileSync('git', ['--version'], { encoding: 'utf8' }).trim().replace(/^git version /, ''))
+      expect(await bounded(client.request('git_settings', { scope: 'global' }))).toMatchObject({
+        scope: 'global',
+        values: { 'user.name': 'Bridge Test', 'user.email': 'bridge@example.invalid' },
+      })
+      expect(await bounded(client.request('set_git_setting', { scope: 'global', key: 'user.name', value: '' }))).toMatchObject({ values: { 'user.name': '', 'user.email': 'bridge@example.invalid' } })
+      expect(await bounded(client.request('git_settings', { scope: 'global' }))).toMatchObject({ values: { 'user.name': '' } })
+      await expect(bounded(client.request('set_git_setting', { scope: 'global', key: 'credential.helper', value: 'unsafe' }))).rejects.toThrow()
+      expect(await bounded(client.request('set_git_setting', { scope: 'global', key: 'user.name', value: 'Bridge Test' }))).toMatchObject({ values: { 'user.name': 'Bridge Test' } })
       expect(dom.window.location.hash).toBe('')
       await expect(bounded(client.snapshot())).resolves.toBeNull()
       await expect(client.directoryExists(directory)).resolves.toBe(true)
@@ -188,6 +201,14 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await bounded(
         client.request('init_repository', { path: firstRepository })
       )
+      expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', true)).toBeNull()
+      expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', false)).toBe('Bridge Test')
+      await client.setRepositoryGitIdentityValue(firstRepository, 'user.name', 'Local Author')
+      expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', true)).toBe('Local Author')
+      await client.setRepositoryGitIdentityValue(firstRepository, 'user.name', null)
+      await client.setRepositoryGitIdentityValue(firstRepository, 'user.name', null)
+      expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', true)).toBeNull()
+      expect(await client.repositoryGitIdentityValue(firstRepository, 'user.name', false)).toBe('Bridge Test')
       execFileSync('git', [
         '-C',
         firstRepository,
@@ -474,6 +495,13 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await bounded(
         client.request('init_repository', { path: secondRepository })
       )
+      await expect(
+        client.repositoryGitIdentityValue(firstRepository, 'user.name', true)
+      ).rejects.toMatchObject({ code: 'repository_changed' })
+      await expect(
+        client.setRepositoryGitIdentityValue(firstRepository, 'user.name', 'Wrong Repository')
+      ).rejects.toMatchObject({ code: 'repository_changed' })
+      expect(spawnSync('git', ['-C', firstRepository, 'config', '--local', '--get', 'user.name']).status).toBe(1)
       await expect(
         client.repositoryBranches(firstRepository, ['refs/heads'])
       ).rejects.toMatchObject({ code: 'repository_changed' })

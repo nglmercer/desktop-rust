@@ -49,6 +49,7 @@ interface IConfigureGitUserState {
    * choice to delete the lock file.
    */
   readonly existingLockFilePath?: string
+  readonly saveError?: string
 }
 
 /**
@@ -142,6 +143,9 @@ export class ConfigureGitUser extends React.Component<
         {this.renderAuthorOptions()}
 
         {error}
+        {this.state.saveError !== undefined && (
+          <p role="alert">{this.state.saveError}</p>
+        )}
 
         {this.renderConfigForm()}
 
@@ -335,6 +339,7 @@ export class ConfigureGitUser extends React.Component<
   }
 
   private save = async () => {
+    this.setState({ saveError: undefined })
     const {
       manualName,
       manualEmail,
@@ -363,6 +368,11 @@ export class ConfigureGitUser extends React.Component<
           return
         }
       }
+      this.setState({
+        saveError:
+          'Could not save Git settings. Some changes may have been saved; check your configuration and try again.',
+      })
+      return
     }
 
     if (this.props.onSave) {

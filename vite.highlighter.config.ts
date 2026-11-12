@@ -29,9 +29,24 @@ const codeMirrorNodeRunmode: Plugin = {
     if (!/runmode\.node\.js$/.test(id)) {
       return null
     }
-    return code
-      .replace(/^require\.cache\[.*\n/gm, '')
+    // Keep line numbers stable when removing Node's cache wiring so the
+    // worker's source map can still identify the original runmode lines.
+    const transformed = code
+      .replace(/^require\.cache\[.*$/gm, '')
       .replace(/require\("\.\.\/\.\.\/lib\/codemirror"\)/g, 'exports')
+    return {
+      code: transformed,
+      map: {
+        version: 3,
+        sources: [id],
+        sourcesContent: [code],
+        names: [],
+        mappings: transformed
+          .split('\n')
+          .map((_, index) => (index === 0 ? 'AAAA' : 'AACA'))
+          .join(';'),
+      },
+    }
   },
 }
 

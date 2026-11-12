@@ -7,7 +7,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { getPrintenvzPath } from 'printenvz'
 import { getProxyCommandPath } from 'process-proxy'
-import { externals } from '../app/webpack.common'
+import { packagedExternals } from '../app/build-externals'
 
 interface IChooseALicense {
   readonly title: string
@@ -330,7 +330,7 @@ function copyDependencies() {
 
   const filterExternals = (dependencies: Record<string, string>) =>
     Object.fromEntries(
-      Object.entries(dependencies).filter(([k]) => externals.includes(k))
+      Object.entries(dependencies).filter(([k]) => packagedExternals.includes(k))
     )
 
   // The product name changes depending on whether it's a prod build or dev

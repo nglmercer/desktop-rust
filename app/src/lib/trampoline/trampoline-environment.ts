@@ -14,6 +14,7 @@ import memoizeOne from 'memoize-one'
 import { GitError, getDescriptionForError } from '../git/core'
 import { getDesktopAskpassTrampolineFilename } from 'desktop-trampoline'
 import { IAccountIdentity } from '../../models/account'
+import { backend } from '../../backend/client'
 
 const hasRejectedCredentialsForEndpoint = new Map<string, Set<string>>()
 
@@ -94,9 +95,10 @@ export const getCredentialUrl = (cred: Map<string, string>) => {
 
 export const GitUserAgent = memoizeOne(() =>
   // Can't use git() as that will call withTrampolineEnv which calls this method
-  exec(['--version'], process.cwd())
-    // https://github.com/git/git/blob/a9e066fa63149291a55f383cfa113d8bdbdaa6b3/help.c#L733-L739
-    .then(r => /git version (.*)/.exec(r.stdout)?.at(1) ?? 'unknown')
+  (typeof window !== 'undefined' && backend().transportKind !== 'none'
+    ? backend().gitVersion()
+    : exec(['--version'], process.cwd())
+        .then(r => /git version (.*)/.exec(r.stdout)?.at(1) ?? 'unknown'))
     .catch(e => {
       log.warn(`Could not get git version information`, e)
       return 'unknown'

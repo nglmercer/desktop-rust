@@ -32,6 +32,10 @@ struct ReadRequest {
     #[serde(default)]
     kind: Option<desktop_backend::StatusConflictKind>,
     #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    only_local: Option<bool>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -44,6 +48,55 @@ struct CopilotRequest {
     operation: Operation,
     request_id: Option<uuid::Uuid>,
     deadline_ms: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GitInfoRequest {
+    operation: GitInfoOperation,
+    request_id: Option<uuid::Uuid>,
+    deadline_ms: Option<u64>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum GitInfoOperation {
+    Read {},
+    Version {},
+    LfsStatus {},
+    LfsInstall {
+        force: bool,
+    },
+    Set {
+        key: GitIdentityKey,
+        value: String,
+    },
+    SetRepository {
+        repository_path: String,
+        key: GitIdentityKey,
+        value: String,
+    },
+    UnsetRepository {
+        repository_path: String,
+        key: GitIdentityKey,
+    },
+}
+
+#[derive(Clone, Deserialize)]
+enum GitIdentityKey {
+    #[serde(rename = "user.name")]
+    Name,
+    #[serde(rename = "user.email")]
+    Email,
+}
+
+impl GitIdentityKey {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Name => "user.name",
+            Self::Email => "user.email",
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -65,6 +118,7 @@ enum ReadMethod {
     AheadBehind,
     RevisionList,
     HasMergeCommits,
+    GitIdentityValue,
 }
 
 pub struct Backend {
@@ -91,6 +145,7 @@ enum BackendOperation {
     PathExists,
     CanonicalMutationPath,
     TrustRepository,
+    GitInfo(GitInfoOperation),
     Repository(Operation),
     Copilot(Operation),
 }
@@ -132,6 +187,49 @@ impl Backend {
     pub fn with_copilot_runtime_root(mut self, root: Option<PathBuf>) -> Self {
         self.copilot_runtime_root = root;
         self
+    }
+
+    pub fn admit_git_info(&self, args: Vec<Value>) -> Result<ReadJob> {
+        let [value]: [Value; 1] = args
+            .try_into()
+            .map_err(|_| AppError::BadArgs("Git identity requires exactly one request".into()))?;
+        let request: GitInfoRequest = serde_json::from_value(value)
+            .map_err(|_| AppError::BadArgs("invalid Git identity request".into()))?;
+        if let GitInfoOperation::SetRepository {
+            repository_path, ..
+        }
+        | GitInfoOperation::UnsetRepository {
+            repository_path, ..
+        } = &request.operation
+            && !Path::new(repository_path).is_absolute()
+        {
+            return Err(AppError::BadArgs("repository path must be absolute".into()));
+        }
+        let duration = request.deadline_ms.unwrap_or(60_000);
+        if !(1..=60_000).contains(&duration) {
+            return Err(AppError::BadArgs(
+                "deadline_ms must be between 1 and 60000".into(),
+            ));
+        }
+        let token = Cancellation::default();
+        if let Some(id) = request.request_id {
+            let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+            if jobs.len() >= self.capacity || jobs.contains_key(&id) {
+                return Err(AppError::Coded {
+                    code: "EBUSY".into(),
+                    message: "backend queue is full or request ID is already active".into(),
+                });
+            }
+            jobs.insert(id, token.clone());
+        }
+        Ok(ReadJob {
+            path: String::new(),
+            operation: BackendOperation::GitInfo(request.operation),
+            token,
+            id: request.request_id,
+            jobs: self.jobs.clone(),
+            deadline: Instant::now() + Duration::from_millis(duration),
+        })
     }
 
     pub fn admit_copilot(&self, args: Vec<Value>) -> Result<ReadJob> {
@@ -210,6 +308,13 @@ impl Backend {
                 "kind only applies to conflict detail reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::GitIdentityValue)
+            && (request.key.is_some() || request.only_local.is_some())
+        {
+            return Err(AppError::BadArgs(
+                "identity options only apply to Git identity reads".into(),
+            ));
+        }
         let operation = if matches!(
             &request.method,
             ReadMethod::RepositoryType
@@ -239,6 +344,23 @@ impl Backend {
                         && request.commitish.is_none() =>
                 {
                     Operation::Snapshot
+                }
+                ReadMethod::GitIdentityValue
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    let key = request
+                        .key
+                        .ok_or_else(|| AppError::BadArgs("identity key is required".into()))?;
+                    if !matches!(key.as_str(), "user.name" | "user.email") {
+                        return Err(AppError::BadArgs("unsupported Git identity field".into()));
+                    }
+                    Operation::GitIdentityValue {
+                        key,
+                        only_local: request.only_local.unwrap_or(false),
+                    }
                 }
                 ReadMethod::Status
                     if request.include_untracked.is_none()
@@ -409,8 +531,16 @@ impl Backend {
 
     pub fn read(&self, job: ReadJob) -> Result<Value> {
         let token = job.token.clone();
+        let identity_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(
+                GitInfoOperation::Set { .. }
+                    | GitInfoOperation::SetRepository { .. }
+                    | GitInfoOperation::UnsetRepository { .. }
+            )
+        );
         self.runtime.block_on(token.clone().scope(async {
-            if token.is_cancelled() { return Err(AppError::Coded { code: "cancelled".into(), message: "repository read cancelled".into() }); }
+            if token.is_cancelled() { return Err(AppError::Coded { code: "cancelled".into(), message: "backend operation cancelled before start".into() }); }
             let remaining = job.deadline.saturating_duration_since(Instant::now());
             let work = async {
                 let (operation, scoped) = match job.operation.clone() {
@@ -419,6 +549,35 @@ impl Backend {
                     BackendOperation::PathExists => return desktop_backend::path_exists(Path::new(&job.path)).await.map(serde_json::Value::Bool).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::CanonicalMutationPath => return desktop_backend::canonical_mutation_path(Path::new(&job.path)).await.map(serde_json::Value::String).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::TrustRepository => return desktop_backend::trust_repository(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
+                    BackendOperation::GitInfo(operation) => {
+                        return match operation {
+                            GitInfoOperation::Version {} => desktop_backend::git_version().await.map(serde_json::Value::String),
+                            GitInfoOperation::LfsStatus {} => {
+                                let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
+                                desktop_backend::lfs_tool_status(&cwd).await
+                            }
+                            GitInfoOperation::LfsInstall { force } => {
+                                let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
+                                desktop_backend::lfs_install(&cwd, desktop_backend::LfsInstallScope::Global, force, true, false).await
+                            }
+                            GitInfoOperation::Read {} => {
+                                let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
+                                desktop_backend::git_settings(&cwd, desktop_backend::ConfigScope::Global).await
+                            }
+                            GitInfoOperation::Set { key, value } => {
+                                let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
+                                desktop_backend::set_git_setting(&cwd, desktop_backend::ConfigScope::Global, key.as_str(), Some(value)).await
+                            }
+                            GitInfoOperation::SetRepository { repository_path, key, value } => {
+                                let repo = Repository::open(Path::new(&repository_path)).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                repo.execute(Operation::SetGitSetting { scope: desktop_backend::ConfigScope::Local, key: key.as_str().into(), value: Some(value) }).await
+                            }
+                            GitInfoOperation::UnsetRepository { repository_path, key } => {
+                                let repo = Repository::open(Path::new(&repository_path)).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                repo.execute(Operation::SetGitSetting { scope: desktop_backend::ConfigScope::Local, key: key.as_str().into(), value: None }).await
+                            }
+                        }.map_err(|error| AppError::msg(error.to_string()));
+                    }
                     BackendOperation::Repository(operation) => (operation, false),
                     BackendOperation::Copilot(operation) => (operation, true),
                 };
@@ -437,11 +596,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: "repository read cancelled".into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: "repository read timed out".into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         }))
@@ -736,6 +895,135 @@ esac
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn global_identity_uses_isolated_git_config_and_validates_requests() {
+        const CHILD: &str = "DESKTOP_WRY_IDENTITY_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let backend = Backend::new(2).unwrap();
+            let repository = PathBuf::from(std::env::var_os("HOME").unwrap()).join("repo");
+            assert!(
+                Command::new("git")
+                    .args(["init", "-q"])
+                    .arg(&repository)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let read_identity = |only_local: bool| {
+                backend.read_args(vec![json!({"repository_path":repository,"method":"git_identity_value","key":"user.name","only_local":only_local})]).unwrap()
+            };
+            assert_eq!(read_identity(true), Value::Null);
+            assert_eq!(read_identity(false), "Before");
+            let local_id = uuid::Uuid::new_v4();
+            let cancelled_local = backend.admit_git_info(vec![json!({"operation":{"type":"set_repository","repository_path":repository,"key":"user.name","value":"Must not write"},"request_id":local_id})]).unwrap();
+            backend.cancel(&[json!({"request_id":local_id})]).unwrap();
+            assert!(backend.read(cancelled_local).is_err());
+            assert_eq!(read_identity(true), Value::Null);
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&repository)
+                    .args(["config", "--local", "user.name", "Local"])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            assert_eq!(read_identity(true), "Local");
+            assert!(backend.read_args(vec![json!({"repository_path":repository,"method":"git_identity_value","key":"credential.helper"})]).is_err());
+            assert!(
+                backend
+                    .read_args(vec![
+                        json!({"repository_path":repository,"method":"status","key":"user.name"})
+                    ])
+                    .is_err()
+            );
+            let run = |operation: Value| {
+                backend.read(
+                    backend
+                        .admit_git_info(vec![json!({"operation":operation})])
+                        .unwrap(),
+                )
+            };
+            let first = run(json!({"type":"read"})).unwrap();
+            let expected_version = Command::new("git").arg("--version").output().unwrap();
+            assert!(expected_version.status.success());
+            assert_eq!(
+                run(json!({"type":"version"})).unwrap().as_str().unwrap(),
+                String::from_utf8(expected_version.stdout)
+                    .unwrap()
+                    .trim()
+                    .strip_prefix("git version ")
+                    .unwrap()
+            );
+            assert_eq!(first["values"]["user.name"], "Before");
+            assert!(first["values"].get("credential.helper").is_none());
+            run(json!({"type":"set_repository","repository_path":repository,"key":"user.name","value":"Updated"})).unwrap();
+            assert_eq!(read_identity(true), "Updated");
+            run(json!({"type":"unset_repository","repository_path":repository,"key":"user.name"}))
+                .unwrap();
+            run(json!({"type":"unset_repository","repository_path":repository,"key":"user.name"}))
+                .unwrap();
+            assert_eq!(read_identity(true), Value::Null);
+            assert_eq!(read_identity(false), "Before");
+            assert!(backend.admit_git_info(vec![json!({"operation":{"type":"set_repository","repository_path":"relative","key":"user.name","value":"bad"}})]).is_err());
+            assert!(backend.admit_git_info(vec![json!({"operation":{"type":"unset_repository","repository_path":repository,"key":"credential.helper"}})]).is_err());
+            assert!(backend.admit_git_info(vec![json!({"operation":{"type":"set_repository","repository_path":repository,"key":"user.name"}})]).is_err());
+            let updated = run(json!({"type":"set","key":"user.name","value":""})).unwrap();
+            assert_eq!(updated["values"]["user.name"], "");
+            assert_eq!(updated["values"]["user.email"], "before@example.invalid");
+            assert!(backend.admit_git_info(vec![json!({"operation":{"type":"set","key":"credential.helper","value":"unsafe"}})]).is_err());
+            assert!(
+                backend
+                    .admit_git_info(vec![json!({"operation":{"type":"read","extra":true}})])
+                    .is_err()
+            );
+            let id = uuid::Uuid::new_v4();
+            let job = backend.admit_git_info(vec![json!({"operation":{"type":"set","key":"user.name","value":"Should not write"},"request_id":id})]).unwrap();
+            assert!(
+                backend
+                    .admit_git_info(vec![json!({"operation":{"type":"read"},"request_id":id})])
+                    .is_err()
+            );
+            backend.cancel(&[json!({"request_id":id})]).unwrap();
+            assert!(backend.read(job).is_err());
+            let released = backend
+                .admit_git_info(vec![json!({"operation":{"type":"read"},"request_id":id})])
+                .unwrap();
+            assert!(backend.read(released).is_ok());
+            assert_eq!(
+                run(json!({"type":"read"})).unwrap()["values"]["user.name"],
+                ""
+            );
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("desktop-wry-identity-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("gitconfig"), "[user]\n name = Before\n email = before@example.invalid\n[credential]\n helper = secret-fixture\n").unwrap();
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "backend::tests::global_identity_uses_isolated_git_config_and_validates_requests",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("HOME", &root)
+            .env("GIT_CONFIG_GLOBAL", root.join("gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env_remove("GIT_CONFIG_PARAMETERS")
+            .env_remove("GIT_CONFIG_COUNT")
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        let config = fs::read_to_string(root.join("gitconfig")).unwrap();
+        assert!(config.contains("helper = secret-fixture"));
         fs::remove_dir_all(root).unwrap();
     }
 

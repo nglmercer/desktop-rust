@@ -1,4 +1,6 @@
 //! Loopback HTTP/WebSocket transport for the browser and native shells.
+#[cfg(feature = "embedded-ui")]
+mod frontend;
 use axum::{
     Router,
     extract::{
@@ -170,8 +172,9 @@ pub async fn start(
             }
         }
     });
-    let app = Router::new()
-        .route(
+    let app = Router::new().route("/ws", get(upgrade));
+    #[cfg(not(feature = "embedded-ui"))]
+    let app = app.route(
             "/",
             get(|| async {
                 (
@@ -179,8 +182,13 @@ pub async fn start(
                     "The browser frontend is not available in this build. The authenticated WebSocket API remains available at /ws.\n",
                 )
             }),
-        )
-        .route("/ws", get(upgrade))
+        );
+    #[cfg(feature = "embedded-ui")]
+    let app = app
+        .route("/", get(frontend::index))
+        .route("/__bundle", get(frontend::entry))
+        .route("/{*path}", get(frontend::asset));
+    let app = app
         .layer(middleware::from_fn_with_state(state.clone(), check_host))
         .with_state(state.clone());
     let session_url = format!("http://{}/#token={}", state.authority, state.token);
@@ -237,7 +245,7 @@ async fn check_host(State(state): State<Arc<Bridge>>, req: Request, next: Next) 
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
-        format!("default-src 'self'; connect-src 'self' ws://{}; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'", state.authority)
+        format!("default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://{}; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'", state.authority)
             .parse()
             .unwrap(),
     );
@@ -299,6 +307,7 @@ enum ControlOperation {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum ManagementOperation {
     AvailableEditors,
+    GitVersion,
     OpenEditor {
         path: Option<desktop_core::GitPath>,
     },
@@ -423,6 +432,9 @@ async fn execute(
         ApplicationOperation::Management(AvailableEditors) => {
             let preferences = cancellation::blocking(move || registry.preferences().read()).await?;
             desktop_core::available_editors(preferences.external_editor).await
+        }
+        ApplicationOperation::Management(GitVersion) => {
+            Ok(json!(desktop_core::git_version().await?))
         }
         ApplicationOperation::Management(RepositoryType { path }) => {
             desktop_core::repository_type(&desktop_core::directory_path(path)?).await

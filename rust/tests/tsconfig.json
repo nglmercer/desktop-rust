@@ -18,6 +18,8 @@
     "git-http-fixture.test.ts",
     "git-credentials.test.ts",
     "git-credential-policy.test.ts",
+    "git-credential-checkout.test.ts",
+    "github-checkout-tracking.test.ts",
     "fixtures/gh.ts",
     "fixtures/branch-rules-gh.ts",
     "fixtures/accounts.ts",
@@ -31,6 +33,8 @@
     "fixtures/credentials.ts",
     "fixtures/native-credential-helper.ts",
     "fixtures/native-ssh.ts",
-    "fixtures/credential-probe.ts"
+    "fixtures/credential-probe.ts",
+    "fixtures/reference-credential-hook.ts",
+    "fixtures/lfs-route.ts"
   ]
 }

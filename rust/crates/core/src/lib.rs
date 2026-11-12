@@ -53,7 +53,7 @@ pub use paths::{canonical_mutation_path, directory_exists, directory_path, path_
 mod submodules;
 mod worktrees;
 pub use preferences::{Preferences, PreferencesPatch, PreferencesStore, Theme};
-pub use settings::{ConfigScope, git_settings, set_git_setting};
+pub use settings::{ConfigScope, git_settings, git_version, set_git_setting};
 mod history;
 mod stash;
 pub use stash::remote_deletion::{RemoteBranchDeletion, UpstreamDeletion};
@@ -312,6 +312,9 @@ impl Repository {
             }
 
             Operation::GitSettings { scope } => return git_settings(&self.path, scope).await,
+            Operation::GitIdentityValue { key, only_local } => {
+                return settings::git_identity_value(&self.path, &key, only_local).await;
+            }
             Operation::SetGitSetting { scope, key, value } => {
                 return set_git_setting(&self.path, scope, &key, value).await;
             }
@@ -751,6 +754,7 @@ impl Repository {
                 command
             }
             GitSettings { .. }
+            | GitIdentityValue { .. }
             | SetGitSetting { .. }
             | Worktrees
             | WorktreeAdd { .. }

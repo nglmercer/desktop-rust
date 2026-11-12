@@ -8,6 +8,9 @@ license.workspace = true
 name = "desktop-rs"
 path = "src/main.rs"
 
+[features]
+embedded-ui = ["desktop-bridge/embedded-ui"]
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true

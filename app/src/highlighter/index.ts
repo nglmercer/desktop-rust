@@ -1,8 +1,8 @@
 /// <reference path="./globals.d.ts" />
 
 // This doesn't import all of CodeMirror, instead it only imports
-// a small subset. This hack is brought to you by webpack and you
-// can read all about it in webpack.common.js.
+// a small subset. The worker build aliases the full editor to runmode in
+// vite.highlighter.config.ts.
 import {
   getMode,
   innerMode,

@@ -33,6 +33,47 @@ const KEYS: &[&str] = &[
     "pull.ff",
 ];
 
+/// Return the installed Git version without exposing arbitrary command execution.
+pub async fn git_version() -> Result<String> {
+    let output = process::run(&std::env::current_dir()?, &args(&["--version"])).await?;
+    if output.code != 0 {
+        bail!("Git version query failed");
+    }
+    let output = std::str::from_utf8(&output.stdout)?.trim();
+    let version = output
+        .strip_prefix("git version ")
+        .ok_or_else(|| anyhow::anyhow!("unrecognized Git version"))?;
+    if version.is_empty() || version.len() > 256 || version.chars().any(char::is_control) {
+        bail!("unrecognized Git version");
+    }
+    Ok(version.to_owned())
+}
+
+/// Read one identity field using Git's effective or local-only lookup rules.
+pub async fn git_identity_value(path: &Path, key: &str, only_local: bool) -> Result<Value> {
+    if !matches!(key, "user.name" | "user.email") {
+        bail!("unsupported Git identity field");
+    }
+    let mut command = args(&["config", "-z"]);
+    if only_local {
+        command.extend(args(&["--local"]));
+    }
+    command.extend(args(&["--get", key]));
+    let output = process::run(path, &command).await?;
+    if output.code == 1 {
+        return Ok(Value::Null);
+    }
+    if output.code != 0 {
+        bail!("{}", output.text().stderr);
+    }
+    let value = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .next()
+        .unwrap_or_default();
+    Ok(json!(String::from_utf8_lossy(value)))
+}
+
 pub async fn git_settings(path: &Path, scope: ConfigScope) -> Result<Value> {
     let pattern = format!(
         "^({})$",
@@ -79,6 +120,9 @@ pub async fn set_git_setting(
             bail!("Git setting must be one line and at most 4096 bytes");
         }
         let allowed = match key.as_str() {
+            // Git permits explicitly empty identity fields. The preferences
+            // editor uses those values when a user clears a field.
+            "user.name" | "user.email" => true,
             "commit.gpgsign" | "core.filemode" | "fetch.prune" => {
                 matches!(value.as_str(), "true" | "false")
             }
@@ -98,13 +142,14 @@ pub async fn set_git_setting(
             }
         }
     }
+    let is_unset = value.is_none();
     let command = if let Some(value) = value {
         args(&["config", scope.flag(), "--replace-all", "--", &key, &value])
     } else {
         args(&["config", scope.flag(), "--unset-all", "--", &key])
     };
     let output = process::run(path, &command).await?;
-    if !matches!(output.code, 0 | 5) {
+    if output.code != 0 && !(is_unset && output.code == 5) {
         bail!("{}", output.text().stderr);
     }
     git_settings(path, scope).await

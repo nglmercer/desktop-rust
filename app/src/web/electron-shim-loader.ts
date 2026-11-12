@@ -12,21 +12,40 @@
  * remains distinct from the real Wry bridge for subsequent client instances.
  */
 import { backend } from '../backend/client'
+import { BundleRoot } from './bundle'
 
-if (typeof window !== 'undefined' && !(window as any).__desktop) {
+if (typeof window !== 'undefined' && !Reflect.get(window, '__desktop')) {
   const client = backend()
   const subscriptions = new Map<
     string,
     Map<(...args: unknown[]) => void, () => void>
   >()
 
-  ;(window as any).__desktop = {
+  const shim = {
     __transport: client.transportKind,
     invoke: async (channel: string, ...args: unknown[]) => {
       if (client.transportKind === 'none') {
         throw new Error(
           `[vite] bridge not attached — run via desktop-rs serve or the Tao/Wry shell`
         )
+      }
+      if (client.transportKind === 'ws') {
+        // Browsers own their window and zoom state; these Electron queries
+        // must not be sent as repository RPCs to the Rust bridge.
+        switch (channel) {
+          case 'get-current-window-state':
+          case 'get-current-window-zoom-factor':
+            return undefined
+          case 'get-app-path':
+            return BundleRoot
+          case 'is-window-focused':
+            return document.hasFocus()
+          case 'should-use-dark-colors':
+            return (
+              window.matchMedia?.('(prefers-color-scheme: dark)').matches ??
+              false
+            )
+        }
       }
       // Only typed methods are implemented by the WebSocket bridge.
       const method = channel.startsWith('desktop.backend.')
@@ -41,7 +60,9 @@ if (typeof window !== 'undefined' && !(window as any).__desktop) {
         // server-driven; client sends are RPCs, so a stray `send` is a no-op.
         return
       }
-      ;(window as any).ipc?.postMessage?.(JSON.stringify({ channel, args }))
+      Reflect.get(window, 'ipc')?.postMessage?.(
+        JSON.stringify({ channel, args })
+      )
     },
     on: (channel: string, listener: (...args: unknown[]) => void) => {
       if (client.transportKind === 'ws') {
@@ -59,7 +80,7 @@ if (typeof window !== 'undefined' && !(window as any).__desktop) {
           )
         }
       }
-      return (window as any).__desktop
+      return Reflect.get(window, '__desktop')
     },
     removeListener: (
       channel: string,
@@ -69,7 +90,7 @@ if (typeof window !== 'undefined' && !(window as any).__desktop) {
       listeners?.get(listener)?.()
       listeners?.delete(listener)
       if (listeners?.size === 0) subscriptions.delete(channel)
-      return (window as any).__desktop
+      return Reflect.get(window, '__desktop')
     },
     removeAllListeners: (channel?: string) => {
       for (const [event, listeners] of subscriptions) {
@@ -77,21 +98,22 @@ if (typeof window !== 'undefined' && !(window as any).__desktop) {
         for (const unsubscribe of listeners.values()) unsubscribe()
         subscriptions.delete(event)
       }
-      return (window as any).__desktop
+      return Reflect.get(window, '__desktop')
     },
     emit: () => {},
     resolve: () => {},
     // Exposed for `pendingLimitFromHealth` in `app/src/backend/client.ts`.
     pendingPromises: client.capabilities().max_pending,
   }
+  Reflect.set(window, '__desktop', shim)
 
   // Prefer the WebSocket bridge when we are not in the Wry shell.
   if (client.transportKind === 'ws') {
     client
       .waitReady()
       .then(ready => {
-        ;(window as any).__desktop.ready = ready
-        ;(window as any).__desktop.__backendReady = true
+        Reflect.set(shim, 'ready', ready)
+        Reflect.set(shim, '__backendReady', true)
       })
       .catch(error => {
         console.warn('[vite] bridge WebSocket not ready', error)

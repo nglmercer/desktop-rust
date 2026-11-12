@@ -139,6 +139,73 @@ impl Fixture {
     }
 }
 
+#[test]
+fn repository_git_identity_reads_preserve_git_scope_and_values() {
+    let fixture = Fixture::new();
+    let read = |key: &str, only_local: bool| {
+        fixture.rpc(
+            "git_identity_value",
+            json!({"key":key,"only_local":only_local}),
+            false,
+        )
+    };
+    assert!(read("user.name", true).is_null());
+    assert_eq!(read("user.name", false), "Fixture");
+    fixture.repo_git(&["config", "--add", "user.name", "First"]);
+    fixture.repo_git(&["config", "--add", "user.name", "Last"]);
+    assert_eq!(read("user.name", true), "Last");
+    assert_eq!(read("user.name", false), "Last");
+    fixture.repo_git(&["config", "--replace-all", "user.email", ""]);
+    assert_eq!(read("user.email", true), "");
+    fixture.rpc(
+        "git_identity_value",
+        json!({"key":"credential.helper","only_local":true}),
+        true,
+    );
+}
+
+#[test]
+fn git_setting_write_failure_is_not_confused_with_an_absent_unset() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let real_git = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    assert!(real_git.status.success());
+    let real_git = String::from_utf8(real_git.stdout).unwrap();
+    let bin = fixture.root.join("git-wrapper");
+    fs::create_dir(&bin).unwrap();
+    let wrapper = bin.join("git");
+    fs::write(
+        &wrapper,
+        "#!/bin/sh\ncase \" $* \" in *' --replace-all '*) echo 'synthetic write failure' >&2; exit 5;; esac\nexec \"$TEST_REAL_GIT\" \"$@\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
+    let before = fs::read(&fixture.gitconfig).unwrap();
+    let output = fixture
+        .setup(env!("CARGO_BIN_EXE_desktop-rs"))
+        .env("TEST_REAL_GIT", real_git.trim())
+        .env(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
+            )
+            .unwrap(),
+        )
+        .arg("--config")
+        .arg(&fixture.registry)
+        .args(["-C", fixture.repo.to_str().unwrap(), "repo"])
+        .arg(json!({"method":"set_git_setting","scope":"global","key":"user.name","value":"New Name"}).to_string())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("synthetic write failure"));
+    assert_eq!(fs::read(&fixture.gitconfig).unwrap(), before);
+}
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);

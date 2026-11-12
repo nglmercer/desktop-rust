@@ -6,6 +6,30 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it.each([
+    { type: 'set', key: 'user.name', value: 'Alice' },
+    { type: 'set_repository', repository_path: '/repo', key: 'user.name', value: 'Alice' },
+    { type: 'unset_repository', repository_path: '/repo', key: 'user.name' },
+  ])('treats interrupted $type identity writes as uncertain', async operation => {
+    const invoke = vi.fn(() => new Promise<unknown>(() => {}))
+    const send = vi.fn()
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, send, on: vi.fn() },
+    })
+    const client = new BackendClient()
+    const controller = new AbortController()
+    const pending = client.request('git_info', { operation }, { signal: controller.signal })
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation, request_id: expect.any(String), deadline_ms: 60000 }))
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({
+      code: 'cancelled',
+      retryable: false,
+      message: expect.stringContaining('inspect Git settings'),
+    })
+    expect(send).toHaveBeenCalledWith('desktop.backend.cancel', { request_id: expect.any(String) })
+  })
+
   it('validates repository status context responses', async () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({
@@ -39,6 +63,36 @@ describe('backend Copilot session cleanup', () => {
     await expect(
       client.repositoryStatusContext('/repo-a')
     ).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('reads Git version through the native scoped service and validates the response', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => '2.44.0')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.gitVersion()).resolves.toBe('2.44.0')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'version' } }))
+    invoke.mockResolvedValueOnce({ version: '2.44.0' })
+    await expect(client.gitVersion()).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('routes repository Git identity reads and rejects malformed responses', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => 'Local Author')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryGitIdentityValue('/repo-a', 'user.name', true)).resolves.toBe('Local Author')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo-a', method: 'git_identity_value', key: 'user.name', only_local: true }))
+    invoke.mockResolvedValueOnce({ value: 'unexpected' })
+    await expect(client.repositoryGitIdentityValue('/repo-a', 'user.email', false)).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('routes repository identity writes and removals through the scoped Wry operation', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ scope: 'local', values: {} }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.setRepositoryGitIdentityValue('/repo-a', 'user.name', 'Alice')
+    await client.setRepositoryGitIdentityValue('/repo-a', 'user.email', null)
+    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'set_repository', repository_path: '/repo-a', key: 'user.name', value: 'Alice' } }))
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'unset_repository', repository_path: '/repo-a', key: 'user.email' } }))
   })
 
   it('validates revision and merge history responses', async () => {

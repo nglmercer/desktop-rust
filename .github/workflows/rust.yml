@@ -11,6 +11,7 @@ on:
       - 'app/styles/**'
       - '.test.env'
       - 'app/webpack.common.ts'
+      - 'app/build-externals.ts'
       - 'app/src/models/**'
       - 'app/src/lib/git/interpret-trailers.ts'
       - 'app/src/lib/git/stash.ts'
@@ -20,9 +21,12 @@ on:
       - 'app/src/web/**'
       - 'app/test/unit/web-*'
       - 'app/test/unit/**'
+      - 'app/test/helpers/usage-data.ts'
       - 'app/test/vitest-setup.ts'
       - 'app/test/backend-transport-tsconfig.json'
       - 'script/test.mts'
+      - 'script/generate-example-usage-data.mts'
+      - 'script/highlighter-build.test.ts'
       - 'eslint-rules/**'
       - 'biome.json'
       - 'vitest.config.ts'
@@ -51,6 +55,7 @@ on:
       - 'app/styles/**'
       - '.test.env'
       - 'app/webpack.common.ts'
+      - 'app/build-externals.ts'
       - 'app/src/models/**'
       - 'app/src/lib/git/interpret-trailers.ts'
       - 'app/src/lib/git/stash.ts'
@@ -60,9 +65,12 @@ on:
       - 'app/src/web/**'
       - 'app/test/unit/web-*'
       - 'app/test/unit/**'
+      - 'app/test/helpers/usage-data.ts'
       - 'app/test/vitest-setup.ts'
       - 'app/test/backend-transport-tsconfig.json'
       - 'script/test.mts'
+      - 'script/generate-example-usage-data.mts'
+      - 'script/highlighter-build.test.ts'
       - 'eslint-rules/**'
       - 'biome.json'
       - 'vitest.config.ts'
@@ -146,8 +154,14 @@ jobs:
           node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/git-http-fixture.test.ts
           DESKTOP_TEST_GIT_CREDS=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/git-credentials.test.ts
           DESKTOP_TEST_GIT_CREDS=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/git-credential-policy.test.ts
-          python3 rust/tests/git_credentials.py
-          python3 rust/tests/github_checkout_tracking.py
+          DESKTOP_TEST_GIT_CREDS=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/git-credential-checkout.test.ts
+          DESKTOP_TEST_GIT_CREDS=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/github-checkout-tracking.test.ts
+      - name: Exercise the opt-in embedded browser frontend
+        run: |
+          cargo test -p desktop-bridge --features embedded-ui --test lifecycle --locked
+          cargo build -p desktop-cli --features embedded-ui --locked
+          pnpm exec playwright install --with-deps --only-shell chromium
+          DESKTOP_TEST_BROWSER_ENTRY=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts app/test/unit/backend-browser-entry-integration-test.ts
 
   native:
     strategy:
