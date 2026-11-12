@@ -41,6 +41,8 @@
   "app/test/unit/rust-index-changes-routing-test.ts",
   "app/test/unit/rust-worktree-routing-test.ts",
   "app/test/unit/rust-reflog-routing-test.ts",
+  "app/test/unit/rust-trailers-routing-test.ts",
+  "app/test/unit/selected-commit-review-test.ts",
   "app/test/unit/browser-context-menu-test.ts",
   "app/test/unit/rust-large-files-routing-test.ts",
   "app/test/unit/rust-reviewed-discard-test.ts",

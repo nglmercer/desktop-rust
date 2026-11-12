@@ -49,6 +49,23 @@ export interface ISelectedCommitReview {
   }
 }
 
+export type SelectedCommitSelection = Pick<ICopilotCommitOptions, 'paths' | 'remove_paths' | 'partial_selections' | 'amend_head' | 'expected_head'> & { readonly allow_empty?: boolean }
+export type CommitCheckpoint = { readonly id: string; readonly state: 'prepared'; readonly head: string | null; readonly branch: string | null } | { readonly id: string; readonly state: 'invalid' }
+export interface CommitCheckpointInspection {
+  readonly id: string
+  readonly state: 'prepared'
+  readonly basis: string
+  readonly recorded_files_verified: true
+  readonly index_coverage_verified: true
+  readonly objects_verified: number
+  readonly lfs_verified: number
+  readonly shared_indexes_verified: number
+  readonly head_matches: boolean
+  readonly branch_matches: boolean
+  readonly index_matches: boolean
+  readonly operation_matches: boolean
+}
+
 export type BackendReadableGitSetting =
   | 'core.autocrlf'
   | 'core.safecrlf'
@@ -1789,6 +1806,23 @@ export class BackendClient {
     return value as string | null
   }
 
+  async repositoryProtectedResources(repositoryPath: string): Promise<{ readonly paths: ReadonlyArray<string>; readonly objectDirectories: ReadonlyArray<string>; readonly objectRoutingDiagnostics: string }> {
+    const value = this.transport === 'wry'
+      ? await this.repositoryRead(repositoryPath, 'protected_resources', {})
+      : await this.request('repository_protected_resources', { path: repositoryPath })
+    if (!isRecord(value) || !Array.isArray(value.paths) || !Array.isArray(value.object_directories) || typeof value.object_routing_diagnostics !== 'string' || value.paths.length < 4 || value.paths.length > 32768 || value.object_directories.length < 1 || value.object_directories.length > 16384 || ![...value.paths, ...value.object_directories].every(path => typeof path === 'string' && path.length > 0 && !path.includes('\0'))) throw new BackendError({ code: 'invalid_response', message: 'Invalid repository resource paths', retryable: false })
+    const paths = value.paths as string[]
+    const objectDirectories = value.object_directories as string[]
+    if (paths.length !== 2 * (3 + objectDirectories.length) || paths[0] !== repositoryPath || !objectDirectories.every((path, index) => paths[3 + index] === path)) throw new BackendError({ code: 'invalid_response', message: 'Incomplete repository resource paths', retryable: false })
+    return { paths, objectDirectories, objectRoutingDiagnostics: value.object_routing_diagnostics }
+  }
+
+  async repositoryBranchCheckouts(repositoryPath: string, afterDate: Date): Promise<string | null> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_branch_checkouts', { after_date: afterDate.toISOString() })
+    if (value !== null && (typeof value !== 'string' || value.length > 2 * 1024 * 1024)) throw new BackendError({ code: 'invalid_response', message: 'Invalid checkout history response', retryable: false })
+    return value as string | null
+  }
+
   async repositoryRendererTagRefs(repositoryPath: string): Promise<string> {
     const value = await this.repositoryRead(repositoryPath, 'renderer_tag_refs', {})
     if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid tag refs response', retryable: false })
@@ -1822,8 +1856,8 @@ export class BackendClient {
   }
 
   /** Capture a review basis without publishing the selected index or committing. */
-  async repositorySelectedCommitPreview(repositoryPath: string, selection: Pick<ICopilotCommitOptions, 'paths' | 'remove_paths' | 'partial_selections' | 'amend_head' | 'expected_head'>): Promise<ISelectedCommitReview> {
-    const operation = { method: 'selected_commit_preview', paths: selection.paths ?? [], remove_paths: selection.remove_paths ?? [], partial_selections: selection.partial_selections ?? [], amend_head: selection.amend_head ?? null, expected_head: selection.expected_head ?? null }
+  async repositorySelectedCommitPreview(repositoryPath: string, selection: SelectedCommitSelection): Promise<ISelectedCommitReview> {
+    const operation = { method: 'selected_commit_preview', paths: selection.paths ?? [], remove_paths: selection.remove_paths ?? [], partial_selections: selection.partial_selections ?? [], allow_empty: selection.allow_empty ?? false, amend_head: selection.amend_head ?? null, expected_head: selection.expected_head ?? null }
     const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
     if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Selected commit review exceeds the request limit', retryable: false })
     const value = this.transport === 'wry'
@@ -1849,6 +1883,62 @@ export class BackendClient {
       largePaths.add(key)
     }
     return value as unknown as ISelectedCommitReview
+  }
+
+  private async commitCheckpointRequest(repositoryPath: string, operation: Record<string, unknown>): Promise<unknown> {
+    return this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'commit_checkpoint', repository_path: repositoryPath, operation } })
+      : this.repositoryRead(repositoryPath, operation.method as string, operation)
+  }
+
+  async prepareSelectedCommit(repositoryPath: string, selection: SelectedCommitSelection, basis: string): Promise<string> {
+    if (!/^[a-f0-9]{64}$/.test(basis)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit review basis', retryable: false })
+    const operation = { method: 'prepare_selected_commit', paths: selection.paths ?? [], remove_paths: selection.remove_paths ?? [], partial_selections: selection.partial_selections ?? [], allow_empty: selection.allow_empty ?? false, amend_head: selection.amend_head ?? null, expected_head: selection.expected_head ?? null, basis }
+    const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
+    if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Selected commit preparation exceeds the transport limit', retryable: false })
+    let value: unknown
+    try { value = await this.commitCheckpointRequest(repositoryPath, operation) }
+    catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
+    if (!isRecord(value) || value.state !== 'prepared' || value.basis !== basis || typeof value.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.id)) throw new BackendError({ code: 'invalid_response', message: 'Preparation outcome is uncertain; inspect commit checkpoints', retryable: false })
+    return value.id
+  }
+
+  async listCommitCheckpoints(repositoryPath: string): Promise<ReadonlyArray<CommitCheckpoint>> {
+    const value = await this.commitCheckpointRequest(repositoryPath, { method: 'list_commit_checkpoints' })
+    if (!isRecord(value) || !Array.isArray(value.checkpoints) || value.checkpoints.length > 1000) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint history', retryable: false })
+    const ids = new Set<string>()
+    for (const item of value.checkpoints) {
+      if (!isRecord(item) || typeof item.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.id) || (item.state !== 'invalid' && (item.state !== 'prepared' || !(item.head === null || (typeof item.head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(item.head))) || !(item.branch === null || (typeof item.branch === 'string' && item.branch.length <= 4096 && !item.branch.includes('\0')))))) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint history', retryable: false })
+      if (ids.has(item.id)) throw new BackendError({ code: 'invalid_response', message: 'Duplicate commit checkpoint ID', retryable: false })
+      ids.add(item.id)
+    }
+    return value.checkpoints as CommitCheckpoint[]
+  }
+
+  async forgetCommitCheckpoint(repositoryPath: string, id: string): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint ID', retryable: false })
+    let value: unknown
+    try { value = await this.commitCheckpointRequest(repositoryPath, { method: 'forget_commit_checkpoint', checkpoint_id: id }) }
+    catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
+    if (!isRecord(value) || value.id !== id || value.forgotten !== true) throw new BackendError({ code: 'invalid_response', message: 'Checkpoint deletion outcome is uncertain; inspect commit checkpoints', retryable: false })
+  }
+
+  async inspectCommitCheckpoint(repositoryPath: string, id: string): Promise<CommitCheckpointInspection> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint ID', retryable: false })
+    const value = await this.commitCheckpointRequest(repositoryPath, { method: 'inspect_commit_checkpoint', checkpoint_id: id })
+    if (!isRecord(value) || value.id !== id || value.state !== 'prepared' || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || value.recorded_files_verified !== true || value.index_coverage_verified !== true || ![value.objects_verified, value.lfs_verified, value.shared_indexes_verified].every(count => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 && count <= 65536) || ![value.head_matches, value.branch_matches, value.index_matches, value.operation_matches].every(flag => typeof flag === 'boolean')) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkpoint inspection', retryable: false })
+    return value as unknown as CommitCheckpointInspection
+  }
+
+  async repositoryInterpretTrailers(repositoryPath: string, message: string, trailers: ReadonlyArray<{ readonly token: string; readonly value: string }>, parse: boolean, unfold: boolean): Promise<string> {
+    const operation = { method: 'interpret_trailers', message, trailers, parse, unfold }
+    const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
+    if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Commit trailer request exceeds the transport limit', retryable: false })
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'interpret_trailers', repository_path: repositoryPath, operation } })
+      : await this.repositoryRead(repositoryPath, operation.method, operation)
+    if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid Git trailer response', retryable: false })
+    return value
   }
 
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {

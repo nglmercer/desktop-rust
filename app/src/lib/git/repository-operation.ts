@@ -429,7 +429,13 @@ function parseAlternateObjectDirectory(value: string): string {
 export async function getAssistedCommitProtectedPaths(
   path: string
 ): Promise<ReadonlyArray<string>> {
-  return (await getAssistedCommitProtectedResources(path)).paths
+  const resources = await getAssistedCommitProtectedResources(path)
+  if (resources.objectRoutingDiagnostics.length > 0) {
+    throw new Error(
+      `Cannot verify all Git object stores: ${resources.objectRoutingDiagnostics}`
+    )
+  }
+  return resources.paths
 }
 
 /** Discover admitted paths and the complete native alternate-object routing graph together. */
@@ -440,6 +446,22 @@ export async function getAssistedCommitProtectedResources(
   readonly objectDirectories: ReadonlyArray<string>
   readonly objectRoutingDiagnostics: string
 }> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const resources = await backend().repositoryProtectedResources(path)
+    const canonicalIndex = resources.paths.length / 2
+    if (
+      !Number.isInteger(canonicalIndex) ||
+      resources.paths.some(value => !isAbsolute(value)) ||
+      resources.objectDirectories.some(value => !isAbsolute(value))
+    ) {
+      throw new Error('Invalid repository resource paths')
+    }
+    if (resources.objectRoutingDiagnostics.length === 0) {
+      repositoryResourcePaths.set(pathKey(path), resources.paths)
+      repositoryResourcePaths.set(pathKey(resources.paths[canonicalIndex]), resources.paths)
+    }
+    return resources
+  }
   const directory = await git(
     ['rev-parse', '--absolute-git-dir'],
     path,

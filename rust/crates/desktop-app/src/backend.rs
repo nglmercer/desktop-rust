@@ -28,6 +28,8 @@ struct ReadRequest {
     #[serde(default)]
     commitish: Option<String>,
     #[serde(default)]
+    after_date: Option<String>,
+    #[serde(default)]
     limit: Option<u64>,
     #[serde(default)]
     skip: Option<u64>,
@@ -111,6 +113,14 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    CommitCheckpoint {
+        repository_path: String,
+        operation: Operation,
+    },
+    InterpretTrailers {
+        repository_path: String,
+        operation: Operation,
+    },
     InitialCommit {
         repository_path: String,
         paths: Vec<desktop_backend::GitPath>,
@@ -190,12 +200,14 @@ enum ReadMethod {
     RendererCommit,
     RendererHistory,
     RendererRecentBranches,
+    RendererBranchCheckouts,
     RendererStashLog,
     RendererTagRefs,
     RendererCommitChanges,
     RendererLargeFiles,
     Worktrees,
     WorktreesFromGitDir,
+    ProtectedResources,
     StatusContext,
     StatusConflictDetails,
     BranchEnumeration,
@@ -244,6 +256,7 @@ enum BackendOperation {
     SafeFetchRemotes,
     Worktrees,
     WorktreesFromGitDir,
+    ProtectedResources,
     SafeRemoteUrl(String),
     SymbolicRef(String),
     GitInfo(GitInfoOperation),
@@ -320,6 +333,12 @@ impl Backend {
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
+        | GitInfoOperation::CommitCheckpoint {
+            repository_path, ..
+        }
+        | GitInfoOperation::InterpretTrailers {
+            repository_path, ..
+        }
         | GitInfoOperation::InitialCommit {
             repository_path, ..
         }
@@ -367,6 +386,24 @@ impl Backend {
             return Err(AppError::BadArgs(
                 "unsupported selected commit preview operation".into(),
             ));
+        }
+        if let GitInfoOperation::CommitCheckpoint { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::PrepareSelectedCommit { .. }
+                    | Operation::ListCommitCheckpoints
+                    | Operation::InspectCommitCheckpoint { .. }
+                    | Operation::ForgetCommitCheckpoint { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported commit checkpoint operation".into(),
+            ));
+        }
+        if let GitInfoOperation::InterpretTrailers { operation, .. } = &request.operation
+            && !matches!(operation, Operation::InterpretTrailers { .. })
+        {
+            return Err(AppError::BadArgs("unsupported trailer operation".into()));
         }
         let duration = request.deadline_ms.unwrap_or(60_000);
         if !(1..=60_000).contains(&duration) {
@@ -454,6 +491,13 @@ impl Backend {
             .try_into()
             .map_err(|_| AppError::BadArgs("backend read requires exactly one request".into()))?;
         let request: ReadRequest = serde_json::from_value(value)?;
+        if !matches!(&request.method, ReadMethod::RendererBranchCheckouts)
+            && request.after_date.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "after_date only applies to checkout history".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::RendererHistory)
             && (request.limit.is_some()
                 || request.skip.is_some()
@@ -533,6 +577,7 @@ impl Backend {
                 | ReadMethod::SafeFetchRemotes
                 | ReadMethod::Worktrees
                 | ReadMethod::WorktreesFromGitDir
+                | ReadMethod::ProtectedResources
                 | ReadMethod::SafeRemoteUrl
                 | ReadMethod::SymbolicRef
         ) && request.include_untracked.is_none()
@@ -549,6 +594,7 @@ impl Backend {
                 ReadMethod::SafeFetchRemotes => BackendOperation::SafeFetchRemotes,
                 ReadMethod::Worktrees => BackendOperation::Worktrees,
                 ReadMethod::WorktreesFromGitDir => BackendOperation::WorktreesFromGitDir,
+                ReadMethod::ProtectedResources => BackendOperation::ProtectedResources,
                 ReadMethod::SafeRemoteUrl => BackendOperation::SafeRemoteUrl(
                     request
                         .remote_name
@@ -698,6 +744,18 @@ impl Backend {
                         ReadMethod::RendererRecentBranches => Operation::RendererRecentBranches,
                         ReadMethod::RendererStashLog => Operation::RendererStashLog,
                         _ => unreachable!(),
+                    }
+                }
+                ReadMethod::RendererBranchCheckouts
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::RendererBranchCheckouts {
+                        after_date: request
+                            .after_date
+                            .ok_or_else(|| AppError::BadArgs("after_date is required".into()))?,
                     }
                 }
                 ReadMethod::RendererTagRefs
@@ -983,6 +1041,7 @@ impl Backend {
                     BackendOperation::SafeFetchRemotes => return desktop_backend::safe_fetch_remotes(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::Worktrees => return desktop_backend::worktrees_at(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::WorktreesFromGitDir => return desktop_backend::worktrees_from_git_dir(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
+                    BackendOperation::ProtectedResources => return desktop_backend::protected_resources(Path::new(&job.path)).await.and_then(|resources| serde_json::to_value(resources).map_err(Into::into)).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::SafeRemoteUrl(name) => return desktop_backend::safe_remote_url(Path::new(&job.path), &name).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::SymbolicRef(reference) => return desktop_backend::symbolic_ref(Path::new(&job.path), &reference).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::GitInfo(operation) => {
@@ -1029,6 +1088,20 @@ impl Backend {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::CommitCheckpoint { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::InterpretTrailers { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::InitialCommit { repository_path, paths } => {
@@ -1943,6 +2016,15 @@ esac
 
     #[test]
     fn reads_blob_prefix_through_wry() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(reads_blob_prefix_through_wry_inner)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn reads_blob_prefix_through_wry_inner() {
         let root = std::env::temp_dir().join(format!("desktop-wry-blob-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         assert!(
@@ -1992,11 +2074,49 @@ esac
                 json!({"repository_path":root,"method":"renderer_recent_branches"}),
             ])
             .unwrap();
+        let trailer = |operation: serde_json::Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"interpret_trailers","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        assert_eq!(trailer(json!({"method":"interpret_trailers","message":"Summary\n","parse":false,"unfold":false,"trailers":[{"token":"Reviewed-by","value":"Test"}]})).unwrap(), "Summary\n\nReviewed-by: Test\n");
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"interpret_trailers","repository_path":root,"operation":{"method":"status"}}})]).is_err());
+        let resources = backend
+            .read_args(vec![
+                json!({"repository_path":root,"method":"protected_resources"}),
+            ])
+            .unwrap();
+        assert!(resources["paths"].as_array().is_some_and(|paths| {
+            paths
+                .iter()
+                .any(|path| path.as_str() == root.join(".git").to_str())
+        }));
+        assert!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":"relative","method":"protected_resources"})
+                ])
+                .is_err()
+        );
         assert!(
             recent
                 .as_str()
                 .is_some_and(|value| value.contains("initial"))
         );
+        assert!(
+            std::process::Command::new("git")
+                .current_dir(&root)
+                .args(["checkout", "-qb", "recent-checkout"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let checkouts = backend.read_args(vec![json!({"repository_path":root,"method":"renderer_branch_checkouts","after_date":"2000-01-01T00:00:00.000Z"})]).unwrap();
+        assert!(
+            checkouts
+                .as_str()
+                .is_some_and(|value| value.contains("to recent-checkout"))
+        );
+        assert!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_branch_checkouts","after_date":"--all"})]).is_err());
+        assert!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_recent_branches","after_date":"2000-01-01T00:00:00.000Z"})]).is_err());
         let history = backend.read_args(vec![json!({"repository_path":root,"method":"renderer_history","commitish":"HEAD","limit":1,"skip":0,"first_parent":true,"exclude_remotes":false})]).unwrap();
         assert!(history.as_str().is_some_and(|value| !value.is_empty()));
         assert_eq!(
@@ -2041,6 +2161,9 @@ esac
             backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":operation}})]).unwrap())
         };
         let first = preview().unwrap();
+        let empty_operation = json!({"method":"selected_commit_preview","paths":[],"remove_paths":[],"partial_selections":[],"allow_empty":true,"amend_head":null,"expected_head":null});
+        let empty_review = backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":empty_operation}})]).unwrap()).unwrap();
+        assert_eq!(empty_review["review"]["staged_count"], 0);
         assert_eq!(first, preview().unwrap());
         assert_eq!(first["review"]["staged_count"], 1);
         assert_eq!(
@@ -2053,6 +2176,26 @@ esac
                 .is_some_and(|basis| basis.len() == 64)
         );
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        let prepare = json!({"method":"prepare_selected_commit","paths":["selected"],"remove_paths":[],"partial_selections":[],"allow_empty":false,"amend_head":null,"expected_head":null,"basis":first["basis"]});
+        let checkpoint = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"commit_checkpoint","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        let prepared = checkpoint(prepare).unwrap();
+        let id = prepared["id"].as_str().unwrap();
+        assert_eq!(
+            checkpoint(json!({"method":"list_commit_checkpoints"})).unwrap()["checkpoints"][0]["id"],
+            id
+        );
+        let inspection =
+            checkpoint(json!({"method":"inspect_commit_checkpoint","checkpoint_id":id})).unwrap();
+        assert_eq!(inspection["recorded_files_verified"], true);
+        assert_eq!(inspection["index_matches"], true);
+        assert_eq!(
+            checkpoint(json!({"method":"forget_commit_checkpoint","checkpoint_id":id})).unwrap()["forgotten"],
+            true
+        );
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"commit_checkpoint","repository_path":root,"operation":{"method":"stage","paths":["selected"]}}})]).is_err());
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"selected_commit_preview","repository_path":root,"operation":{"method":"stage","paths":["selected"]}}})]).is_err());
         fs::remove_dir_all(root).unwrap();
     }

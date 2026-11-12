@@ -1,6 +1,8 @@
 import { git, IGitExecutionOptions } from './core'
 import { Repository } from '../../models/repository'
 import { getConfigValue } from './config'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * A representation of a Git commit message trailer.
@@ -101,23 +103,29 @@ export async function parseTrailers(
   repository: Repository,
   commitMessage: string
 ): Promise<ReadonlyArray<ITrailer>> {
-  const result = await git(
-    ['interpret-trailers', '--parse'],
-    repository.path,
-    'parseTrailers',
-    {
-      stdin: commitMessage,
-    }
-  )
-
-  const trailers = result.stdout
+  const trailers =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
+      ? await withRepositoryGitOperation(
+          repository.path,
+          'mutation',
+          () => backend().repositoryInterpretTrailers(repository.path, commitMessage, [], true, false),
+          true
+        )
+      : (
+          await git(
+            ['interpret-trailers', '--parse'],
+            repository.path,
+            'parseTrailers',
+            { stdin: commitMessage }
+          )
+        ).stdout
 
   if (trailers.length === 0) {
     return []
   }
 
   const separators = await getTrailerSeparatorCharacters(repository)
-  return parseRawUnfoldedTrailers(result.stdout, separators)
+  return parseRawUnfoldedTrailers(trailers, separators)
 }
 
 /**
@@ -156,6 +164,18 @@ export async function mergeTrailers(
   unfold: boolean = false,
   options?: Pick<IGitExecutionOptions, 'env'>
 ) {
+  if (
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none' &&
+    options?.env === undefined
+  ) {
+    return withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().repositoryInterpretTrailers(repository.path, commitMessage, trailers, false, unfold),
+      true
+    )
+  }
   const args = ['interpret-trailers']
 
   // See https://github.com/git/git/blob/ebf3c04b262aa/Documentation/git-interpret-trailers.txt#L129-L132

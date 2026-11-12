@@ -4,6 +4,7 @@ import type { Repository } from '../../src/models/repository'
 const mocks = vi.hoisted(() => ({
   transport: 'wry',
   read: vi.fn(),
+  checkouts: vi.fn(),
   git: vi.fn(),
   scope: vi.fn(
     async (_path: string, _kind: string, run: () => Promise<unknown>) => run()
@@ -13,6 +14,7 @@ vi.mock('../../src/backend/client', () => ({
   backend: () => ({
     transportKind: mocks.transport,
     repositoryRendererReflog: mocks.read,
+    repositoryBranchCheckouts: mocks.checkouts,
   }),
 }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git, GitError: {} }))
@@ -20,7 +22,7 @@ vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
 }))
 
-import { getRecentBranches } from '../../src/lib/git/reflog'
+import { getBranchCheckouts, getRecentBranches } from '../../src/lib/git/reflog'
 import { getStashes } from '../../src/lib/git/stash'
 
 const repository = { path: '/repo' } as Repository
@@ -39,6 +41,22 @@ describe.each(['wry', 'ws'])('Rust reflog reads via %s', transport => {
       'topic',
     ])
     expect(mocks.read).toHaveBeenCalledWith('/repo', 'branches')
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+  it('preserves the newest checkout date per branch and propagates errors', async () => {
+    const after = new Date('2024-01-01T00:00:00.000Z')
+    mocks.checkouts.mockResolvedValueOnce([
+      `${'a'.repeat(40)} HEAD@{2024-02-03 10:00:00 +0000} checkout: moving from main to topic`,
+      `${'b'.repeat(64)} HEAD@{2024-02-02 10:00:00 +0000} checkout: moving from topic to another`,
+      `${'c'.repeat(40)} HEAD@{2024-02-01 10:00:00 +0000} checkout: moving from another to topic`,
+    ].join('\n')).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('history unavailable'))
+    expect([...await getBranchCheckouts(repository, after)]).toEqual([
+      ['topic', new Date('2024-02-03T10:00:00Z')],
+      ['another', new Date('2024-02-02T10:00:00Z')],
+    ])
+    expect(mocks.checkouts).toHaveBeenCalledWith('/repo', after)
+    expect((await getBranchCheckouts(repository, after)).size).toBe(0)
+    await expect(getBranchCheckouts(repository, after)).rejects.toThrow('history unavailable')
     expect(mocks.git).not.toHaveBeenCalled()
   })
   it('preserves stash entries, counts, empty reflogs, and errors', async () => {

@@ -27,6 +27,13 @@ pub enum RendererDiffBase {
     Empty,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommitTrailer {
+    pub token: String,
+    pub value: String,
+}
+
 /// A reviewed HEAD-to-working-tree line selection.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -314,6 +321,9 @@ pub enum Operation {
         exclude_remotes: bool,
     },
     RendererRecentBranches,
+    RendererBranchCheckouts {
+        after_date: String,
+    },
     RendererStashLog,
     RendererTagRefs,
     RendererCommitChanges {
@@ -321,6 +331,15 @@ pub enum Operation {
     },
     RendererLargeFiles {
         paths: Vec<GitPath>,
+    },
+    InterpretTrailers {
+        message: String,
+        #[serde(default)]
+        parse: bool,
+        #[serde(default)]
+        unfold: bool,
+        #[serde(default)]
+        trailers: Vec<CommitTrailer>,
     },
     RendererCommitDiff {
         revision: String,
@@ -488,8 +507,30 @@ pub enum Operation {
         remove_paths: Vec<GitPath>,
         #[serde(default)]
         partial_selections: Vec<CopilotLineSelection>,
+        #[serde(default)]
+        allow_empty: bool,
         amend_head: Option<String>,
         expected_head: Option<CopilotExpectedHead>,
+    },
+    PrepareSelectedCommit {
+        #[serde(default)]
+        paths: Vec<GitPath>,
+        #[serde(default)]
+        remove_paths: Vec<GitPath>,
+        #[serde(default)]
+        partial_selections: Vec<CopilotLineSelection>,
+        #[serde(default)]
+        allow_empty: bool,
+        amend_head: Option<String>,
+        expected_head: Option<CopilotExpectedHead>,
+        basis: String,
+    },
+    ListCommitCheckpoints,
+    InspectCommitCheckpoint {
+        checkpoint_id: String,
+    },
+    ForgetCommitCheckpoint {
+        checkpoint_id: String,
     },
     InitialCommit {
         paths: Vec<GitPath>,

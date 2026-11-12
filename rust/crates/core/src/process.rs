@@ -55,6 +55,46 @@ pub async fn run_git(
     run_command(path, command, args, input, 2 * 1024 * 1024, None).await
 }
 
+/// Inspect an index using an isolated, temporary Git directory. Never inherit
+/// repository or configuration overrides that could redirect the probe or run
+/// a configured fsmonitor command.
+pub(crate) async fn inspect_saved_index(
+    worktree: &Path,
+    git_directory: &Path,
+    index: &Path,
+) -> Result<RawOutput> {
+    let mut command = git_command(Some(index));
+    command
+        .env("GIT_DIR", git_directory)
+        .env("GIT_COMMON_DIR", git_directory)
+        .env("GIT_WORK_TREE", worktree)
+        .env("GIT_CONFIG_GLOBAL", git_directory.join("empty-config"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_COUNT", "0")
+        .env_remove("GIT_CONFIG_PARAMETERS")
+        .env_remove("GIT_CONFIG_SYSTEM")
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        .env("GIT_NO_LAZY_FETCH", "1");
+    run_command(
+        worktree,
+        command,
+        &crate::args(&[
+            "-c",
+            "core.fsmonitor=false",
+            "ls-files",
+            "--sparse",
+            "--stage",
+            "-z",
+        ]),
+        None,
+        2 * 1024 * 1024,
+        None,
+    )
+    .await
+}
+
 /// Capture at most `limit` bytes from a known blob. Closing stdout after the
 /// prefix can make Git exit with SIGPIPE, so the caller must verify the blob
 /// beforehand and interpret the exit status together with the expected size.

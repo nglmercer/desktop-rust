@@ -4,6 +4,8 @@ use crate::{
     cancellation::{self, Cancellation},
     diff::{IndexTransaction, read_index},
     discard_fs::{self as work, FileState, Kind, WorkingFile},
+    index_object_backup::SavedObject,
+    shared_index_backup::SharedIndex,
 };
 use anyhow::{Context, Result, bail};
 use cap_std::{ambient_authority, fs::Dir};
@@ -37,21 +39,6 @@ struct Change {
     after: FileState,
     before_index: Vec<IndexEntry>,
     after_index: Vec<IndexEntry>,
-}
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct SavedObject {
-    oid: String,
-    size: u64,
-    sha256: String,
-}
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct SharedIndex {
-    name: String,
-    common: bool,
-    size: u64,
-    sha256: String,
 }
 #[derive(Clone, Copy, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -456,7 +443,15 @@ impl Repository {
             )
             .await?;
         let (objects, lfs, unavailable_lfs) = self
-            .save_index_objects(&space.directory, &changes, false)
+            .save_index_objects(
+                &space.directory,
+                changes
+                    .iter()
+                    .flat_map(|change| &change.before_index)
+                    .map(|entry| (entry.mode.clone(), entry.oid.clone()))
+                    .collect(),
+                false,
+            )
             .await?;
         debug_assert!(unavailable_lfs.is_empty());
         let shared = self
@@ -510,81 +505,6 @@ impl Repository {
         Ok(plan)
     }
 
-    async fn save_index_objects(
-        &self,
-        directory: &Path,
-        changes: &[Change],
-        available_only: bool,
-    ) -> Result<(
-        Vec<SavedObject>,
-        Vec<crate::lfs::LfsObject>,
-        Vec<crate::lfs::LfsObject>,
-    )> {
-        let mut objects = Vec::<SavedObject>::new();
-        let mut lfs = Vec::<crate::lfs::LfsObject>::new();
-        for entry in changes.iter().flat_map(|change| &change.before_index) {
-            if entry.mode == "160000" || objects.iter().any(|object| object.oid == entry.oid) {
-                continue;
-            }
-            let path = directory.join(format!("object-{}", entry.oid));
-            success(
-                crate::process::git_to_file(
-                    &self.path,
-                    &args(&["--no-replace-objects", "cat-file", "blob", &entry.oid]),
-                    &path,
-                )
-                .await?,
-            )?;
-            let state =
-                cancellation::blocking(move || work::copy_state(fs::File::open(path)?, None))
-                    .await?;
-            if state.size < 1024 {
-                let bytes = fs::read(directory.join(format!("object-{}", entry.oid)))?;
-                // Empty LFS content has no cache object; the retained pointer
-                // and its size are sufficient to reconstruct the empty body.
-                if let Some(pointer) =
-                    crate::lfs::pointer(&bytes).filter(|pointer| pointer.size != 0)
-                {
-                    if let Some(existing) = lfs.iter().find(|object| object.oid == pointer.oid) {
-                        anyhow::ensure!(*existing == pointer, "inconsistent LFS pointer sizes");
-                    } else {
-                        lfs.push(pointer);
-                    }
-                }
-            }
-            objects.push(SavedObject {
-                oid: entry.oid.clone(),
-                size: state.size,
-                sha256: state.sha256,
-            });
-        }
-        if !lfs.is_empty() && !available_only {
-            crate::lfs::save_payloads(
-                self.lfs_media_directory().await?,
-                directory.to_owned(),
-                lfs.clone(),
-            )
-            .await?;
-        }
-        let mut unavailable = Vec::new();
-        if available_only && !lfs.is_empty() {
-            match self.lfs_media_directory().await {
-                Ok(media) => {
-                    let retained =
-                        crate::lfs::save_available_payloads(media, directory.to_owned(), lfs)
-                            .await?;
-                    lfs = retained.0;
-                    unavailable = retained.1;
-                }
-                Err(_) => {
-                    Cancellation::current().check()?;
-                    unavailable = std::mem::take(&mut lfs);
-                }
-            }
-        }
-        Ok((objects, lfs, unavailable))
-    }
-
     pub(crate) async fn common_directory(&self) -> Result<PathBuf> {
         let result = success(
             self.run(&args(&[
@@ -600,139 +520,18 @@ impl Repository {
         .canonicalize()?)
     }
 
-    async fn save_shared_indexes(
-        &self,
-        directory: &Path,
-        original: &Option<Vec<u8>>,
-        replacement: Option<&Vec<u8>>,
-    ) -> Result<Vec<SharedIndex>> {
-        let mut shared = Vec::<SharedIndex>::new();
-        let git_directory = self.git_directory().await?.canonicalize()?;
-        let common = self.common_directory().await?;
-        for index in original.iter().chain(replacement) {
-            let probe = directory.join(format!("index-{}", uuid::Uuid::new_v4()));
-            work::private_write(&probe, index)?;
-            let _cleanup = AlternateIndex(probe.clone());
-            let result = success(
-                crate::process::run_git(
-                    &self.path,
-                    &args(&["rev-parse", "--path-format=absolute", "--shared-index-path"]),
-                    None,
-                    Some(&probe),
-                )
-                .await?,
-            )?;
-            let name = result.stdout.strip_suffix(b"\n").unwrap_or(&result.stdout);
-            if name.is_empty() {
-                continue;
-            }
-            let source = PathBuf::from(crate::os_from_bytes(name)?).canonicalize()?;
-            let name = source
-                .file_name()
-                .and_then(|value| value.to_str())
-                .context("invalid shared-index filename")?
-                .to_owned();
-            validate_shared_name(&name)?;
-            if shared.iter().any(|index| index.name == name) {
-                continue;
-            }
-            let parent = source
-                .parent()
-                .context("shared index has no directory")?
-                .to_owned();
-            anyhow::ensure!(
-                parent == git_directory || parent == common,
-                "shared index is outside Git metadata"
-            );
-            let destination = directory.join(&name);
-            let state = cancellation::blocking(move || {
-                work::copy_state(fs::File::open(source)?, Some(&destination))
-            })
-            .await?;
-            anyhow::ensure!(
-                state.size <= 64 * 1024 * 1024,
-                "shared index exceeds supported undo size"
-            );
-            shared.push(SharedIndex {
-                name,
-                common: parent == common && common != git_directory,
-                size: state.size,
-                sha256: state.sha256,
-            });
-        }
-        Ok(shared)
-    }
-
     async fn restore_saved_data(&self, directory: &Path, record: &Record) -> Result<()> {
-        let git_directory = self.git_directory().await?.canonicalize()?;
-        let common = self.common_directory().await?;
-        for shared in &record.shared {
-            validate_shared_name(&shared.name)?;
-            let path = directory.join(&shared.name);
-            let bytes = read_index(&path)?.context("missing saved shared index")?;
-            anyhow::ensure!(
-                bytes.len() as u64 == shared.size && checksum(&bytes) == shared.sha256,
-                "saved shared index was changed; undo data retained"
-            );
-            let target = if shared.common {
-                &common
-            } else {
-                &git_directory
-            }
-            .join(&shared.name);
-            match read_index(&target)? {
-                Some(existing) => anyhow::ensure!(
-                    existing == bytes,
-                    "shared index changed; undo data retained"
-                ),
-                None => {
-                    let temporary =
-                        target.with_extension(format!("desktop-{}", uuid::Uuid::new_v4()));
-                    work::private_write(&temporary, &bytes)?;
-                    fs::rename(&temporary, &target)?;
-                    sync_directory(target.parent().context("shared index has no parent")?)?;
-                }
-            }
-        }
-        for object in &record.objects {
-            validate_oid(&object.oid, record.hash_length)?;
-            let path = directory.join(format!("object-{}", object.oid));
-            let state = cancellation::blocking({
-                let path = path.clone();
-                move || work::copy_state(fs::File::open(path)?, None)
-            })
+        self.restore_shared_indexes(directory, &record.shared)
             .await?;
-            anyhow::ensure!(
-                state.size == object.size && state.sha256 == object.sha256,
-                "saved index blob was changed; undo data retained"
-            );
-            if record.version >= 2
-                && object.size < 1024
-                && let Some(pointer) =
-                    crate::lfs::pointer(&fs::read(&path)?).filter(|pointer| pointer.size != 0)
-            {
-                anyhow::ensure!(
-                    record.lfs.contains(&pointer) || record.unavailable_lfs.contains(&pointer),
-                    "saved LFS payload is missing from the undo record"
-                );
-            }
-            let mut command = args(&["hash-object", "-w", "--no-filters", "--"]);
-            command.push(path.into_os_string());
-            let restored = success(self.run(&command).await?)?;
-            anyhow::ensure!(
-                std::str::from_utf8(&restored.stdout)?.trim() == object.oid,
-                "saved index blob no longer matches its Git object ID"
-            );
-        }
-        if !record.lfs.is_empty() {
-            crate::lfs::restore_payloads(
-                self.lfs_media_directory().await?,
-                directory.to_owned(),
-                record.lfs.clone(),
-            )
-            .await?;
-        }
-        Ok(())
+        self.restore_index_objects(
+            directory,
+            &record.objects,
+            &record.lfs,
+            &record.unavailable_lfs,
+            record.hash_length,
+            record.version >= 2,
+        )
+        .await
     }
 
     async fn special_index(
@@ -1060,7 +859,15 @@ impl Repository {
             .await?
         };
         let (objects, lfs, unavailable_lfs) = self
-            .save_index_objects(&space.directory, &changes, true)
+            .save_index_objects(
+                &space.directory,
+                changes
+                    .iter()
+                    .flat_map(|change| &change.before_index)
+                    .map(|entry| (entry.mode.clone(), entry.oid.clone()))
+                    .collect(),
+                true,
+            )
             .await?;
         let shared = self
             .save_shared_indexes(
@@ -1703,22 +1510,6 @@ fn checkout_permissions(directory: &Path) -> Result<u32> {
         let _ = directory;
         Ok(0o644)
     }
-}
-
-fn validate_oid(oid: &str, length: usize) -> Result<()> {
-    anyhow::ensure!(
-        matches!(length, 40 | 64)
-            && oid.len() == length
-            && oid.bytes().all(|byte| byte.is_ascii_hexdigit()),
-        "invalid saved object ID"
-    );
-    Ok(())
-}
-fn validate_shared_name(name: &str) -> Result<()> {
-    let hash = name
-        .strip_prefix("sharedindex.")
-        .context("invalid shared-index name")?;
-    validate_oid(hash, hash.len())
 }
 
 pub(crate) fn operation_certificate(directory: &Path) -> Result<String> {

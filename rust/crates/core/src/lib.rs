@@ -23,6 +23,9 @@ mod branch_policy;
 pub mod cancellation;
 pub use branch_policy::{BranchPermissions, BranchPolicy, DefaultBranch};
 mod commit;
+mod commit_checkpoint;
+mod commit_ref_guard;
+pub use commit_ref_guard::CommitReferenceGuard;
 mod diff;
 mod editors;
 pub use editors::{EditorLaunch, ExternalEditor, available_editors};
@@ -53,8 +56,11 @@ mod preferences;
 mod publish;
 mod publish_origin;
 pub use publish_origin::publication_config_preflight;
+mod protected_resources;
 mod publish_receipt;
+pub use protected_resources::{ProtectedResources, protected_resources};
 mod settings;
+mod shared_index_backup;
 mod storage;
 pub use paths::{canonical_mutation_path, directory_exists, directory_path, path_exists};
 mod submodules;
@@ -66,6 +72,7 @@ pub use settings::{
 };
 pub use worktrees::{worktrees_at, worktrees_from_git_dir};
 mod history;
+mod index_object_backup;
 mod stash;
 pub use stash::remote_deletion::{RemoteBranchDeletion, UpstreamDeletion};
 mod state;
@@ -283,22 +290,62 @@ impl Repository {
         }
         match operation {
             Operation::CommitPreview => return self.commit_preview().await,
+            Operation::InterpretTrailers {
+                message,
+                parse,
+                unfold,
+                trailers,
+            } => {
+                return self
+                    .interpret_trailers(message, parse, unfold, trailers)
+                    .await;
+            }
             Operation::SelectedCommitPreview {
                 paths,
                 remove_paths,
                 partial_selections,
+                allow_empty,
                 amend_head,
                 expected_head,
             } => {
                 return self
-                    .selected_commit_preview(
+                    .selected_commit_preview_with_empty(
                         paths,
                         remove_paths,
                         partial_selections,
+                        allow_empty,
                         amend_head.as_deref(),
                         expected_head.as_ref(),
                     )
                     .await;
+            }
+            Operation::PrepareSelectedCommit {
+                paths,
+                remove_paths,
+                partial_selections,
+                allow_empty,
+                amend_head,
+                expected_head,
+                basis,
+            } => {
+                return self
+                    .prepare_selected_commit(
+                        paths,
+                        remove_paths,
+                        partial_selections,
+                        allow_empty,
+                        amend_head.as_deref(),
+                        expected_head.as_ref(),
+                        &basis,
+                    )
+                    .await;
+            }
+            Operation::ListCommitCheckpoints => return self.list_commit_checkpoints().await,
+            Operation::InspectCommitCheckpoint { checkpoint_id } => {
+                return self.inspect_commit_checkpoint(&checkpoint_id).await;
+            }
+            Operation::ForgetCommitCheckpoint { checkpoint_id } => {
+                return self.forget_commit_checkpoint(&checkpoint_id).await;
             }
             Operation::InitialCommit { paths } => return self.initial_commit(paths).await,
             Operation::Commit {
@@ -373,6 +420,9 @@ impl Repository {
                     .await;
             }
             Operation::RendererRecentBranches => return self.renderer_reflog(false).await,
+            Operation::RendererBranchCheckouts { after_date } => {
+                return self.renderer_branch_checkouts(&after_date).await;
+            }
             Operation::RendererStashLog => return self.renderer_reflog(true).await,
             Operation::RendererTagRefs => return self.renderer_tag_refs().await,
             Operation::RendererCommitChanges { revision } => {
@@ -883,10 +933,12 @@ impl Repository {
             | RendererCommit { .. }
             | RendererHistory { .. }
             | RendererRecentBranches
+            | RendererBranchCheckouts { .. }
             | RendererStashLog
             | RendererTagRefs
             | RendererCommitChanges { .. }
             | RendererLargeFiles { .. }
+            | InterpretTrailers { .. }
             | RendererCommitDiff { .. }
             | RendererWorkingDiff { .. }
             | RendererBlobPrefix { .. }
@@ -999,7 +1051,14 @@ impl Repository {
                     path_command(&["rm", "--cached", "--force", "--quiet", "--"], paths)?
                 }
             }
-            Commit { .. } | CommitPreview | SelectedCommitPreview { .. } | InitialCommit { .. } => {
+            Commit { .. }
+            | CommitPreview
+            | SelectedCommitPreview { .. }
+            | PrepareSelectedCommit { .. }
+            | ListCommitCheckpoints
+            | InspectCommitCheckpoint { .. }
+            | ForgetCommitCheckpoint { .. }
+            | InitialCommit { .. } => {
                 unreachable!("handled by execute")
             }
             Checkout { .. }

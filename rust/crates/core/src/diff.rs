@@ -92,13 +92,13 @@ struct Side {
     size: u64,
 }
 
-struct SelectedWorktreeSnapshot {
+pub(crate) struct SelectedWorktreeSnapshot {
     patch: Vec<u8>,
-    index: Vec<u8>,
-    live_index: Option<Vec<u8>>,
-    head: Vec<u8>,
-    branch: Vec<u8>,
-    operation: String,
+    pub(crate) index: Vec<u8>,
+    pub(crate) live_index: Option<Vec<u8>>,
+    pub(crate) head: Vec<u8>,
+    pub(crate) branch: Vec<u8>,
+    pub(crate) operation: String,
     review: Option<crate::commit::StagedReview>,
 }
 
@@ -288,6 +288,7 @@ impl Repository {
                 amend_head,
                 expected_head,
                 false,
+                false,
             )
             .await?
             .patch)
@@ -296,7 +297,8 @@ impl Repository {
     /// Preview the exact private index that a later selected-file commit must
     /// recapture and compare before publishing. This operation does not write
     /// the live index or create a commit.
-    pub(crate) async fn selected_commit_preview(
+    #[cfg(test)]
+    async fn selected_commit_preview(
         &self,
         paths: Vec<GitPath>,
         remove_paths: Vec<GitPath>,
@@ -304,8 +306,56 @@ impl Repository {
         amend_head: Option<&str>,
         expected_head: Option<&crate::protocol::CopilotExpectedHead>,
     ) -> Result<Value> {
-        let requested =
-            serde_json::to_vec(&(&paths, &remove_paths, &partial, amend_head, expected_head))?;
+        self.selected_commit_preview_with_empty(
+            paths,
+            remove_paths,
+            partial,
+            false,
+            amend_head,
+            expected_head,
+        )
+        .await
+    }
+
+    pub(crate) async fn selected_commit_preview_with_empty(
+        &self,
+        paths: Vec<GitPath>,
+        remove_paths: Vec<GitPath>,
+        partial: Vec<crate::CopilotLineSelection>,
+        allow_empty: bool,
+        amend_head: Option<&str>,
+        expected_head: Option<&crate::protocol::CopilotExpectedHead>,
+    ) -> Result<Value> {
+        Ok(self
+            .capture_selected_commit_review(
+                paths,
+                remove_paths,
+                partial,
+                allow_empty,
+                amend_head,
+                expected_head,
+            )
+            .await?
+            .1)
+    }
+
+    pub(crate) async fn capture_selected_commit_review(
+        &self,
+        paths: Vec<GitPath>,
+        remove_paths: Vec<GitPath>,
+        partial: Vec<crate::CopilotLineSelection>,
+        allow_empty: bool,
+        amend_head: Option<&str>,
+        expected_head: Option<&crate::protocol::CopilotExpectedHead>,
+    ) -> Result<(SelectedWorktreeSnapshot, Value)> {
+        let requested = serde_json::to_vec(&(
+            &paths,
+            &remove_paths,
+            &partial,
+            allow_empty,
+            amend_head,
+            expected_head,
+        ))?;
         anyhow::ensure!(
             requested.len() <= 1024 * 1024,
             "selected commit review request is too large"
@@ -318,6 +368,7 @@ impl Repository {
                 amend_head,
                 expected_head,
                 true,
+                allow_empty,
             )
             .await?;
         let review = snapshot
@@ -330,7 +381,7 @@ impl Repository {
             "selected commit review is too large; split the selection"
         );
         let mut digest = Sha256::new();
-        digest.update(b"desktop-selected-commit-preview-v2\0");
+        digest.update(b"desktop-selected-commit-preview-v3\0");
         let repository_id = self.id();
         for value in [
             repository_id.as_bytes(),
@@ -352,9 +403,8 @@ impl Repository {
             }
             None => digest.update([0]),
         }
-        Ok(
-            json!({"basis":format!("{:x}", digest.finalize()), "head": if snapshot.head.is_empty() { None } else { Some(String::from_utf8(snapshot.head)?.trim().to_owned()) }, "branch": if snapshot.branch.is_empty() { None } else { Some(String::from_utf8(snapshot.branch)?.trim().to_owned()) }, "review":review}),
-        )
+        let result = json!({"basis":format!("{:x}", digest.finalize()), "head": if snapshot.head.is_empty() { None } else { Some(std::str::from_utf8(&snapshot.head)?.trim().to_owned()) }, "branch": if snapshot.branch.is_empty() { None } else { Some(std::str::from_utf8(&snapshot.branch)?.trim().to_owned()) }, "review":review});
+        Ok((snapshot, result))
     }
 
     async fn capture_selected_worktree(
@@ -365,12 +415,14 @@ impl Repository {
         amend_head: Option<&str>,
         expected_head: Option<&crate::protocol::CopilotExpectedHead>,
         certify_live_index: bool,
+        allow_empty: bool,
     ) -> Result<SelectedWorktreeSnapshot> {
         anyhow::ensure!(
             !paths.is_empty()
                 || !remove_paths.is_empty()
                 || !partial.is_empty()
-                || amend_head.is_some(),
+                || amend_head.is_some()
+                || allow_empty,
             "select at least one working-tree file"
         );
         let mut path_bytes = Vec::new();
@@ -455,8 +507,48 @@ impl Repository {
                     &format!("{head_oid}^"),
                 ]))
                 .await?;
-            anyhow::ensure!(result.code == 0, "cannot amend a commit without a parent");
-            Some(String::from_utf8(result.stdout)?.trim().to_owned())
+            if result.code == 0 {
+                Some(String::from_utf8(result.stdout)?.trim().to_owned())
+            } else {
+                anyhow::ensure!(result.code == 1, "cannot resolve the amend parent");
+                // A failed parent lookup may also mean a shallow or damaged
+                // history. Only use the empty tree after inspecting the raw
+                // commit and proving it really has no parent.
+                let commit = self
+                    .run(&args(&[
+                        "--no-replace-objects",
+                        "cat-file",
+                        "commit",
+                        head_oid,
+                    ]))
+                    .await?;
+                anyhow::ensure!(commit.code == 0, "cannot inspect the amend commit");
+                let header = commit
+                    .stdout
+                    .split(|b| *b == b'\n')
+                    .take_while(|line| !line.is_empty());
+                anyhow::ensure!(
+                    !header.into_iter().any(|line| line.starts_with(b"parent ")),
+                    "cannot amend a commit whose parent is unavailable"
+                );
+                let empty = process::run_git(
+                    &self.path,
+                    &args(&["hash-object", "-w", "-t", "tree", "--stdin"]),
+                    Some(Vec::new()),
+                    None,
+                )
+                .await?;
+                anyhow::ensure!(
+                    empty.code == 0,
+                    "cannot create the empty tree for amend review"
+                );
+                let oid = String::from_utf8(empty.stdout)?.trim().to_owned();
+                anyhow::ensure!(
+                    oid.len() == head_oid.len() && oid.bytes().all(|b| b.is_ascii_hexdigit()),
+                    "invalid empty tree object ID"
+                );
+                Some(oid)
+            }
         } else {
             None
         };
@@ -1926,6 +2018,72 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn selected_empty_commit_review_requires_explicit_permission() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-empty-commit-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let run = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["init", "-q"]);
+        fs::write(root.join("staged"), b"preserve staged data\n").unwrap();
+        run(&["add", "staged"]);
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        assert!(
+            repo.selected_commit_preview_with_empty(vec![], vec![], vec![], false, None, None)
+                .await
+                .is_err()
+        );
+        let empty = repo
+            .selected_commit_preview_with_empty(vec![], vec![], vec![], true, None, None)
+            .await
+            .unwrap();
+        assert_eq!(empty["review"]["staged_count"], 0);
+        assert_eq!(empty["review"]["files"], json!([]));
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        run(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "initial",
+        ]);
+        fs::write(root.join("staged"), b"new staged data\n").unwrap();
+        run(&["add", "staged"]);
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let selected = || vec![GitPath::Text("staged".into())];
+        let with_empty = repo
+            .selected_commit_preview_with_empty(selected(), vec![], vec![], true, None, None)
+            .await
+            .unwrap();
+        let normal = repo
+            .selected_commit_preview_with_empty(selected(), vec![], vec![], false, None, None)
+            .await
+            .unwrap();
+        assert_ne!(normal["basis"], with_empty["basis"]);
+        let empty = repo
+            .selected_commit_preview_with_empty(vec![], vec![], vec![], true, None, None)
+            .await
+            .unwrap();
+        assert_eq!(empty["review"]["staged_count"], 0);
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn selected_worktree_patch_handles_unborn_head_without_changing_index() {
         let root =
             std::env::temp_dir().join(format!("desktop-selected-diff-{}", uuid::Uuid::new_v4()));
@@ -2248,8 +2406,92 @@ mod tests {
             json!([{ "bytes": b"existing".to_vec() }, { "bytes": b"new".to_vec() }])
         );
         assert_ne!(ordinary["basis"], amended["basis"]);
+        // A shallow boundary is not a root commit even though Git cannot
+        // resolve its parent through the revision walker.
+        fs::write(root.join(".git/shallow"), format!("{head}\n")).unwrap();
+        assert!(
+            repo.selected_commit_preview(vec![], vec![], vec![], Some(&head), None)
+                .await
+                .is_err()
+        );
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn selected_root_amend_reviews_original_and_selected_files() {
+        for format in ["sha1", "sha256"] {
+            let root =
+                std::env::temp_dir().join(format!("desktop-root-amend-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let init = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["init", "-q", &format!("--object-format={format}")])
+                .output()
+                .unwrap();
+            if !init.status.success() && format == "sha256" {
+                fs::remove_dir_all(root).unwrap();
+                continue;
+            }
+            assert!(
+                init.status.success(),
+                "{}",
+                String::from_utf8_lossy(&init.stderr)
+            );
+            let git = |arguments: &[&str]| {
+                let result = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args(arguments)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                String::from_utf8(result.stdout).unwrap().trim().to_owned()
+            };
+            git(&["config", "user.name", "Test"]);
+            git(&["config", "user.email", "test@example.invalid"]);
+            fs::write(root.join("original"), b"first commit\n").unwrap();
+            git(&["add", "--", "original"]);
+            git(&["commit", "-qm", "initial"]);
+            let head = git(&["rev-parse", "HEAD"]);
+            fs::write(root.join("new"), b"selected\n").unwrap();
+            fs::write(root.join("unrelated"), b"already staged\n").unwrap();
+            git(&["add", "--", "unrelated"]);
+            let index = fs::read(root.join(".git/index")).unwrap();
+            let repo = Repository::open(&root).await.unwrap();
+            let empty = repo
+                .selected_commit_preview(vec![], vec![], vec![], Some(&head), None)
+                .await
+                .unwrap();
+            assert_eq!(
+                empty["review"]["files"],
+                json!([{ "bytes": b"original".to_vec() }])
+            );
+            let selected = vec![GitPath::Text("new".into())];
+            let reviewed = repo
+                .selected_commit_preview(selected.clone(), vec![], vec![], Some(&head), None)
+                .await
+                .unwrap();
+            assert_eq!(
+                reviewed["review"]["files"],
+                json!([{ "bytes": b"new".to_vec() }, { "bytes": b"original".to_vec() }])
+            );
+            let patch = repo
+                .selected_worktree_patch(selected, vec![], vec![], Some(&head), None)
+                .await
+                .unwrap();
+            let patch = String::from_utf8(patch).unwrap();
+            assert!(patch.contains("+first commit\n") && patch.contains("+selected\n"));
+            assert!(!patch.contains("already staged"));
+            assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+            assert_eq!(git(&["rev-parse", "HEAD"]), head);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[tokio::test]

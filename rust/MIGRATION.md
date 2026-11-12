@@ -279,6 +279,12 @@ subject to the native 2 MiB output bound. A Chromium integration test now adds
 a repository, opens the context menu, reviews and discards a changed file, and
 undoes it while checking the file bytes and the typed bridge calls. This does
 not establish parity for other menus, diff types or discard workflows.
+Branch pruning's date-filtered checkout history now also uses a typed Rust read
+on both transports. It rejects malformed dates and reports Git failures rather
+than treating them as empty history; an unborn branch remains an empty result.
+The read shares the current 2 MiB Git output limit.
+Date cutoffs outside 1970–2037 are rejected because Git's approximate-date
+parser can silently reinterpret them as a different date.
 
 The renderer's selected-file size preflight now uses Rust on Wry and WebSocket.
 It fails on inaccessible paths rather than silently skipping them, treats a
@@ -292,11 +298,54 @@ the original live index and the selected index; capture checks HEAD, branch,
 live index and operation
 state again before returning. The preview also reports every changed path and
 oversized Git blob from that private index, with LFS attributes included in the
-basis. For amend, the review compares against the original commit's parent.
+basis. For amend, the review compares against the original commit's parent,
+or the empty tree for a root commit; shallow history with an unavailable
+parent is rejected.
 It leaves the live index and commit history unchanged, but Git may write object
-data and run configured clean filters. This is a building block only: no
-renderer commit uses the basis yet, and publication, hooks, size review and
-recovery must be implemented and verified before selected commits migrate.
+data and run configured clean filters. The renderer now translates selected
+whole files and certified partial lines into this preview and warns on
+oversized, non-LFS blobs. Explicitly allowed empty commits are also reviewed,
+including on unborn branches, without staging unrelated files; the permission
+is included in the review basis. A browser test verifies that a commit attempt reaches
+the Rust preview without changing HEAD or the index. The following resource
+discovery now uses Rust on both transports, including linked worktrees,
+canonical aliases, and Git's transitive alternate-object graph. Invalid paths
+and unresolved object routing fail closed. A browser test reaches this typed
+discovery and then encounters the still-legacy commit step. The renderer does
+not yet use the basis to fence publication;
+publication, hooks and recovery must be implemented and verified before
+selected commits migrate.
+Rust also has a commit reference fence that preserves existing Git hooks and
+checks the reviewed branch, old tip, and resulting parent during Git's
+reference transaction. It supports unborn, detached and amended commits,
+and rejects Git versions that cannot run its configured hook. It is not yet
+wired into commit publication and is not a substitute for durable recovery.
+Split-index backup and restore is now shared infrastructure for commit recovery
+and the existing discard journal. Restoring a missing shared index uses an
+atomic hard link and refuses to overwrite a concurrently created conflicting
+file. Shared-index files are opened without following symlinks; filesystems
+without hard-link support fail safely and retain the backup.
+Staged-blob and LFS-payload retention has also been separated from the discard
+journal so the selected-commit transaction can reuse it. The existing journal
+format is unchanged. A typed selected-commit preparation now rechecks the
+review basis while holding the index lock and writes a durable checkpoint of
+the original index, selected index, both indexes' blobs, LFS payloads, and split-index
+dependencies. Prepared checkpoints can be listed or removed on both transports;
+non-prepared or unreadable records cannot be removed by that operation. The
+checkpoint can require significant disk space, is limited to 32,768 staged
+entries and Git's 2 MiB listing bound, and is not yet used to publish commits
+or exposed in the renderer's recovery UI.
+Checkpoint inspection verifies the recorded index, blob, LFS and shared-index
+files, including Git blob object IDs, and reports observed HEAD, branch, index
+and operation matches. It compares the saved indexes' complete blob sets
+against the retained objects in an isolated Git directory, including when the
+live shared index has been pruned. It does not revalidate working-tree
+selections and cannot authorize publication. Preparation rejects sparse-index
+tree entries until their dependencies can be retained and verified.
+Commit-message trailer parsing and merging now use Git through typed Rust
+operations on both transports, retaining repository trailer configuration and
+configured trailer commands. Requests with an explicit isolated Git
+environment still use the legacy path until that environment is migrated.
 
 The native commit session appends commit-message instructions as a system
 message, disables tools and session storage, and passes cleaned repository
@@ -2017,7 +2066,7 @@ app's models/stores/UI/platform integrations also require audit.
 | `gitignore.ts`                       | Partial: root ignore file reads and edits use Rust for Wry and WebSocket; Electron fallback and external-editor concurrency remain                                                                                 |
 | `index.ts`                           | Pending semantic audit and replacement                                                                                                                                                                            |
 | `init.ts`                            | Partial; new-repository initialization and registry covered offline                                                                                                                                               |
-| `interpret-trailers.ts`              | Pure parsing moved/shared; Rust history uses Git trailer parsing; merge-trailer semantics pending                                                                                                                 |
+| `interpret-trailers.ts`              | Typed Git trailer parsing and merging on Rust transports; isolated-environment and Electron fallbacks remain                                                                                                        |
 | `lfs.ts`                             | Partial: typed setup/attributes, payload journaling/previews and ordinary text selection implemented; typed transfers/tracking implemented; legacy callers, extensions and platform audit pending                 |
 | `log.ts`                             | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `merge.ts`                           | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |

@@ -339,6 +339,8 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::LfsCheckout { .. }
             | Operation::Commit { .. }
             | Operation::SelectedCommitPreview { .. }
+            | Operation::PrepareSelectedCommit { .. }
+            | Operation::InterpretTrailers { .. }
             | Operation::InitialCommit { .. }
             | Operation::ManageRemote { .. }
             | Operation::Stage { .. }

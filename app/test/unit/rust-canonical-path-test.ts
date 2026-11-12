@@ -4,11 +4,13 @@ const mocks = vi.hoisted(() => ({
   transport: 'ws',
   canonical: vi.fn(),
   realpath: vi.fn(),
+  resources: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
     transportKind: mocks.transport,
     canonicalMutationPath: mocks.canonical,
+    repositoryProtectedResources: mocks.resources,
   }),
 }))
 vi.mock('fs/promises', () => ({
@@ -21,6 +23,10 @@ import {
   hasRepositoryGitOperationAccess,
   withRepositoryGitOperation,
   requireRepositoryGitAsyncOwnership,
+  getAssistedCommitProtectedResources,
+  getAssistedCommitProtectedPaths,
+  protectAssistedCommitResources,
+  assertRepositoryGitDestructionAvailable,
 } from '../../src/lib/git/repository-operation'
 
 describe('canonical mutation destinations', () => {
@@ -76,5 +82,76 @@ describe('canonical mutation destinations', () => {
       withRepositoryGitOperation('/repo', 'mutation', operation)
     ).rejects.toThrow('disconnected')
     expect(operation).not.toHaveBeenCalled()
+  })
+  it.each(['ws', 'wry'])(
+    'protects canonical shared object stores from %s discovery',
+    async transport => {
+      mocks.transport = transport
+      mocks.resources.mockResolvedValue({
+        paths: [
+          '/alias/repo',
+          '/repo/.git',
+          '/repo/.git',
+          '/shared/objects',
+          '/physical/repo',
+          '/repo/.git',
+          '/repo/.git',
+          '/physical/shared/objects',
+        ],
+        objectDirectories: ['/shared/objects'],
+        objectRoutingDiagnostics: '',
+      })
+      const resources = await getAssistedCommitProtectedResources('/alias/repo')
+      const protection = protectAssistedCommitResources(
+        '/alias/repo',
+        resources.paths
+      )
+      try {
+        expect(() =>
+          assertRepositoryGitDestructionAvailable('/physical/shared')
+        ).toThrow(/assisted commit/)
+        expect(mocks.realpath).not.toHaveBeenCalled()
+      } finally {
+        protection.release()
+      }
+    }
+  )
+  it('rejects relative resource paths', async () => {
+    mocks.resources.mockResolvedValue({
+      paths: [
+        '/repo',
+        '/repo/.git',
+        '/repo/.git',
+        'relative',
+        '/repo',
+        '/repo/.git',
+        '/repo/.git',
+        'relative',
+      ],
+      objectDirectories: ['relative'],
+      objectRoutingDiagnostics: '',
+    })
+    await expect(getAssistedCommitProtectedResources('/repo')).rejects.toThrow(
+      'Invalid repository resource paths'
+    )
+  })
+  it('rejects unresolved alternate object routing', async () => {
+    mocks.resources.mockResolvedValue({
+      paths: [
+        '/repo',
+        '/repo/.git',
+        '/repo/.git',
+        '/repo/.git/objects',
+        '/repo',
+        '/repo/.git',
+        '/repo/.git',
+        '/repo/.git/objects',
+      ],
+      objectDirectories: ['/repo/.git/objects'],
+      objectRoutingDiagnostics: 'unreadable alternate',
+    })
+    await expect(getAssistedCommitProtectedPaths('/repo')).rejects.toThrow(
+      'Cannot verify all Git object stores'
+    )
   })
 })

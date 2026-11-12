@@ -315,6 +315,68 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           `Discard/undo journey failed: ${String(error)}; body: ${((await page.locator('body').textContent()) ?? '').slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls.filter(call => !call.includes('"method":"path_exists"')).join(' ')}`
         )
       }
+      const indexBeforeCommit = await readFile(
+        path.join(repository, '.git', 'index')
+      )
+      const headBeforeCommit = execFileSync(
+        'git',
+        ['-C', repository, 'rev-parse', 'HEAD'],
+        { encoding: 'utf8' }
+      )
+      await page.getByLabel('Commit summary').fill('Review selected changes')
+      await page
+        .getByRole('group', { name: 'Create commit' })
+        .getByRole('button', { name: /^Commit(?:\s|$)/ })
+        .click()
+      try {
+        await page.waitForFunction(
+          () =>
+            (Reflect.get(window, '__browserAudit') as string[]).some(
+              call => JSON.parse(call).method === 'selected_commit_preview'
+            ),
+          undefined,
+          { timeout: 5000 }
+        )
+      } catch {
+        const audit = await page.evaluate(
+          () => Reflect.get(window, '__browserAudit') as string[]
+        )
+        throw new Error(
+          `Commit review did not run: ${((await page.locator('body').textContent()) ?? '').slice(-3000)}; calls: ${audit.filter(call => !call.includes('"method":"path_exists"')).join(' ')}; errors: ${errors.join('; ')}`
+        )
+      }
+      expect(await readFile(path.join(repository, '.git', 'index'))).toEqual(
+        indexBeforeCommit
+      )
+      expect(
+        execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+        })
+      ).toBe(headBeforeCommit)
+      await page.waitForFunction(
+        () =>
+          (Reflect.get(window, '__browserAudit') as string[]).some(
+            call => JSON.parse(call).method === 'repository_protected_resources'
+          ),
+        undefined,
+        { timeout: 5000 }
+      )
+      await page.waitForFunction(
+        () =>
+          (Reflect.get(window, '__browserAudit') as string[]).some(
+            call => JSON.parse(call).method === 'desktop.io.git-exec'
+          ),
+        undefined,
+        { timeout: 5000 }
+      )
+      const legacyCalls = await page.evaluate(() =>
+        (Reflect.get(window, '__browserAudit') as string[])
+          .map(call => JSON.parse(call))
+          .filter(call => call.method === 'desktop.io.git-exec')
+      )
+      expect(legacyCalls).toEqual([
+        { method: 'desktop.io.git-exec', args: ['reset', '--', '.'] },
+      ])
     }, 90_000)
   }
 )

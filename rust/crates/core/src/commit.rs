@@ -11,7 +11,127 @@ use std::{
 
 const LARGE_BLOB_LIMIT: u64 = 100 * 1024 * 1024;
 
+#[cfg(test)]
+mod trailer_tests {
+    use super::*;
+    #[tokio::test]
+    async fn preserves_git_trailer_configuration_and_parse_semantics() {
+        let root = std::env::temp_dir().join(format!("desktop-trailers-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |command: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(command)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "trailer.separators", "=:"]);
+        git(&["config", "trailer.ifexists", "replace"]);
+        let repo = Repository::open(&root).await.unwrap();
+        let message = "Summary\n\nReviewed-by= Old\n continuation\n";
+        let trailer = || crate::CommitTrailer {
+            token: "Reviewed-by".into(),
+            value: "New <n@example.test>".into(),
+        };
+        let expected = process::run_git(
+            &root,
+            &args(&[
+                "interpret-trailers",
+                "--no-divider",
+                "--unfold",
+                "--trailer",
+                "Reviewed-by=New <n@example.test>",
+            ]),
+            Some(message.as_bytes().to_vec()),
+            None,
+        )
+        .await
+        .unwrap();
+        let actual = repo
+            .interpret_trailers(message.into(), false, true, vec![trailer()])
+            .await
+            .unwrap();
+        assert_eq!(actual.as_str().unwrap().as_bytes(), expected.stdout);
+        let expected = process::run_git(
+            &root,
+            &args(&["interpret-trailers", "--parse"]),
+            Some(message.as_bytes().to_vec()),
+            None,
+        )
+        .await
+        .unwrap();
+        let actual = repo
+            .interpret_trailers(message.into(), true, false, vec![])
+            .await
+            .unwrap();
+        assert_eq!(actual.as_str().unwrap().as_bytes(), expected.stdout);
+        assert!(
+            repo.interpret_trailers(message.into(), true, false, vec![trailer()])
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.interpret_trailers("bad\0message".into(), false, false, vec![])
+                .await
+                .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 impl Repository {
+    /// Preserve Git's configured trailer placement, duplication and commands.
+    pub(crate) async fn interpret_trailers(
+        &self,
+        message: String,
+        parse: bool,
+        unfold: bool,
+        trailers: Vec<crate::CommitTrailer>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            !message.contains('\0') && message.len() <= 1024 * 1024,
+            "invalid commit message"
+        );
+        anyhow::ensure!(
+            trailers.len() <= 1024 && (!parse || (!unfold && trailers.is_empty())),
+            "invalid trailer request"
+        );
+        let mut command = args(&["interpret-trailers"]);
+        if parse {
+            command.push("--parse".into());
+        } else {
+            command.push("--no-divider".into());
+            if unfold {
+                command.push("--unfold".into());
+            }
+            let mut size = 0usize;
+            for trailer in trailers {
+                anyhow::ensure!(
+                    !trailer.token.contains('\0') && !trailer.value.contains('\0'),
+                    "trailer contains NUL"
+                );
+                size = size
+                    .saturating_add(trailer.token.len())
+                    .saturating_add(trailer.value.len());
+                anyhow::ensure!(size <= 1024 * 1024, "trailers exceed the request limit");
+                command.extend(args(&[
+                    "--trailer",
+                    &format!("{}={}", trailer.token, trailer.value),
+                ]));
+            }
+        }
+        let output = checked(
+            process::run_git(&self.path, &command, Some(message.into_bytes()), None).await?,
+        )?;
+        Ok(json!(String::from_utf8_lossy(&output.stdout)))
+    }
     /// Inspect selected worktree entries without following a file symlink out
     /// of the repository. Git stores the link itself, not its target.
     pub(crate) async fn renderer_large_files(&self, paths: Vec<GitPath>) -> Result<Value> {

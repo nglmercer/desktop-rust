@@ -354,6 +354,28 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.repositoryLargeFiles('/repo', ['small', 'large'])).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('routes trailer requests and rejects malformed output', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => 'Summary\n\nReviewed-by: Test\n')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryInterpretTrailers('/repo', 'Summary\n', [{ token: 'Reviewed-by', value: 'Test' }], false, false)).resolves.toContain('Reviewed-by: Test')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ type: 'interpret_trailers', repository_path: '/repo', operation: expect.objectContaining({ method: 'interpret_trailers' }) }) }))
+    invoke.mockResolvedValueOnce({ output: 'bad' })
+    await expect(client.repositoryInterpretTrailers('/repo', 'Summary\n', [], true, false)).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('requires complete resource discovery before protecting a repository', async () => {
+    const value = { paths: ['/repo', '/repo/.git', '/repo/.git', '/shared/objects', '/repo', '/repo/.git', '/repo/.git', '/shared/objects'], object_directories: ['/shared/objects'], object_routing_diagnostics: '' }
+    const invoke = vi.fn(async (): Promise<unknown> => value)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryProtectedResources('/repo')).resolves.toEqual({ paths: value.paths, objectDirectories: value.object_directories, objectRoutingDiagnostics: '' })
+    invoke.mockResolvedValueOnce({ ...value, paths: value.paths.slice(0, -1) })
+    await expect(client.repositoryProtectedResources('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({ ...value, object_directories: ['/other/objects'] })
+    await expect(client.repositoryProtectedResources('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('validates selected commit review without staging', async () => {
     const value = { basis: 'a'.repeat(64), head: 'b'.repeat(40), branch: 'refs/heads/main', review: { threshold_bytes: 100 * 1024 * 1024, staged_count: 1, files: ['selected'], large_files: [] } }
     const invoke = vi.fn(async (): Promise<unknown> => value)
@@ -367,6 +389,28 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })
     invoke.mockResolvedValueOnce({ ...value, review: { ...value.review, large_files: [{ path: 'other', display_path: 'other', oid: 'c'.repeat(40), size: 100 * 1024 * 1024 + 1, tracked_by_lfs: false }] } })
     await expect(client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('validates commit checkpoint preparation and history', async () => {
+    const id = '12345678-1234-4234-8234-123456789abc'
+    const basis = 'a'.repeat(64)
+    const invoke = vi.fn(async (): Promise<unknown> => ({ id, state: 'prepared', basis }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.prepareSelectedCommit('/repo', { paths: ['file'] }, basis)).resolves.toBe(id)
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ type: 'commit_checkpoint', operation: expect.objectContaining({ method: 'prepare_selected_commit', basis }) }) }))
+    invoke.mockResolvedValueOnce({ checkpoints: [{ id, state: 'prepared', head: null, branch: 'refs/heads/main' }] })
+    await expect(client.listCommitCheckpoints('/repo')).resolves.toHaveLength(1)
+    invoke.mockResolvedValueOnce({ checkpoints: [{ id: '../bad', state: 'prepared' }] })
+    await expect(client.listCommitCheckpoints('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+    const inspection = { id, state: 'prepared', basis, recorded_files_verified: true, index_coverage_verified: true, objects_verified: 1, lfs_verified: 0, shared_indexes_verified: 0, head_matches: true, branch_matches: true, index_matches: true, operation_matches: true }
+    invoke.mockResolvedValueOnce(inspection)
+    await expect(client.inspectCommitCheckpoint('/repo', id)).resolves.toEqual(inspection)
+    invoke.mockResolvedValueOnce({ ...inspection, recorded_files_verified: false })
+    await expect(client.inspectCommitCheckpoint('/repo', id)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({ id, forgotten: true })
+    await expect(client.forgetCommitCheckpoint('/repo', id)).resolves.toBeUndefined()
+    await expect(client.forgetCommitCheckpoint('/repo', '../bad')).rejects.toMatchObject({ code: 'invalid_request' })
   })
 
   it('validates typed history pagination and responses', async () => {

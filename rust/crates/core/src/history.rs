@@ -180,6 +180,35 @@ impl Repository {
         Ok(json!(String::from_utf8_lossy(&output.stdout)))
     }
 
+    /// Checkout history used to protect recently used branches from pruning.
+    pub(crate) async fn renderer_branch_checkouts(&self, after_date: &str) -> Result<Value> {
+        anyhow::ensure!(
+            valid_checkout_date(after_date),
+            "invalid checkout history date"
+        );
+        let date = format!("--after=\"{after_date}\"");
+        let output = self
+            .run(&args(&[
+                "reflog",
+                "--date=iso",
+                &date,
+                "--pretty=%H %gd %gs",
+                "--grep-reflog=checkout: moving from .* to .*$",
+                "--",
+            ]))
+            .await?;
+        if output.code == 128 {
+            let error = String::from_utf8_lossy(&output.stderr);
+            if error.contains("fatal: your current branch '")
+                && error.contains("' does not have any commits yet")
+            {
+                return Ok(Value::Null);
+            }
+        }
+        ensure(&output)?;
+        Ok(json!(String::from_utf8_lossy(&output.stdout)))
+    }
+
     /// Read a bounded prefix of a blob, keeping invalid revisions distinct
     /// from a path that is absent in a valid tree or index stage.
     pub(crate) async fn renderer_blob_prefix(
@@ -471,6 +500,51 @@ impl Repository {
     }
 }
 
+fn valid_checkout_date(value: &str) -> bool {
+    let b = value.as_bytes();
+    if b.len() != 24
+        || [
+            (4, b'-'),
+            (7, b'-'),
+            (10, b'T'),
+            (13, b':'),
+            (16, b':'),
+            (19, b'.'),
+            (23, b'Z'),
+        ]
+        .iter()
+        .any(|(i, expected)| b[*i] != *expected)
+        || b.iter()
+            .enumerate()
+            .any(|(i, byte)| ![4, 7, 10, 13, 16, 19, 23].contains(&i) && !byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let number = |start: usize, end: usize| -> u32 {
+        b[start..end]
+            .iter()
+            .fold(0, |n, digit| n * 10 + u32::from(digit - b'0'))
+    };
+    let (year, month, day) = (number(0, 4), number(5, 7), number(8, 10));
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    // Git's approximate-date parser can silently reinterpret years beyond
+    // the signed 32-bit timestamp range as a different, recent date. Fail
+    // closed instead of returning incomplete history to branch pruning.
+    (1970..=2037).contains(&year)
+        && day > 0
+        && day <= days
+        && number(11, 13) < 24
+        && number(14, 16) < 60
+        && number(17, 19) < 60
+}
+
 #[derive(Serialize)]
 struct ChangedFile {
     status: String,
@@ -596,6 +670,20 @@ fn parse_identity(value: &str) -> Result<Identity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checkout_date_must_be_a_real_iso_timestamp() {
+        assert!(valid_checkout_date("2024-02-29T23:59:59.999Z"));
+        for invalid in [
+            "2023-02-29T23:59:59.999Z",
+            "2024-13-01T00:00:00.000Z",
+            "2024-01-01T24:00:00.000Z",
+            "2999-01-01T00:00:00.000Z",
+            "----00-00T00:00:00.000Z",
+            "--all",
+        ] {
+            assert!(!valid_checkout_date(invalid), "{invalid}");
+        }
+    }
     #[test]
     fn length_framing_preserves_delimiters_in_messages() {
         let raw=b"tree abc\nauthor A <a@b> -1 +0200\ncommitter C <c@d> 2 -0500\ngpgsig signature\n continuation\n\nsubject\n\nbody\0with delimiter\n";

@@ -98,33 +98,40 @@ export async function getBranchCheckouts(
 ): Promise<Map<string, Date>> {
   //regexr.com/46n1v
   const regex = new RegExp(
-    /^[a-z0-9]{40}\sHEAD@{(.*)}\scheckout: moving from\s.*\sto\s(.*)$/
+    /^(?:[a-f0-9]{40}|[a-f0-9]{64})\sHEAD@{(.*)}\scheckout: moving from\s.*\sto\s(.*)$/
   )
-  const result = await git(
-    [
-      'reflog',
-      '--date=iso',
-      `--after="${afterDate.toISOString()}"`,
-      '--pretty=%H %gd %gs',
-      `--grep-reflog=checkout: moving from .* to .*$`,
-      '--',
-    ],
-    repository.path,
-    'getCheckoutsAfterDate',
-    { successExitCodes: new Set([0, 128]) }
-  )
+  let stdout: string
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryBranchCheckouts(repository.path, afterDate)
+    const result = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    if (result === null) return new Map()
+    stdout = result
+  } else {
+    const result = await git(
+      [
+        'reflog',
+        '--date=iso',
+        `--after="${afterDate.toISOString()}"`,
+        '--pretty=%H %gd %gs',
+        `--grep-reflog=checkout: moving from .* to .*$`,
+        '--',
+      ],
+      repository.path,
+      'getCheckoutsAfterDate',
+      { successExitCodes: new Set([0, 128]) }
+    )
 
-  const checkouts = new Map<string, Date>()
-
-  // edge case where orphaned branch is created but Git raises error when
-  // reading the reflog on this new branch as it has no commits
-  //
-  // see https://github.com/desktop/desktop/issues/7983 for more information
-  if (result.exitCode === 128 && noCommitsOnBranchRe.test(result.stderr)) {
-    return checkouts
+    // Git reports an error when the current branch is unborn.
+    if (result.exitCode === 128 && noCommitsOnBranchRe.test(result.stderr)) {
+      return new Map()
+    }
+    stdout = result.stdout
   }
 
-  const lines = result.stdout.split('\n')
+  const checkouts = new Map<string, Date>()
+  const lines = stdout.split('\n')
   for (const line of lines) {
     const parsedLine = regex.exec(line)
 

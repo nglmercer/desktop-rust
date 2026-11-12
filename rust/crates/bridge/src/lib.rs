@@ -345,6 +345,9 @@ enum ManagementOperation {
     RepositoryWorktreesFromGitDir {
         path: desktop_core::GitPath,
     },
+    RepositoryProtectedResources {
+        path: desktop_core::GitPath,
+    },
     RepositorySafeRemoteUrl {
         path: desktop_core::GitPath,
         name: String,
@@ -613,6 +616,18 @@ async fn execute(
             anyhow::ensure!(requested.is_absolute(), "Git directory must be absolute");
             let _current = cancellation::wait(state.repo.lock()).await?;
             desktop_core::worktrees_from_git_dir(&requested).await
+        }
+        ApplicationOperation::Management(RepositoryProtectedResources { path }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "An explicit repository cannot use a selected-repository binding"
+            );
+            let requested = desktop_core::directory_path(path)?;
+            anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
+            let _current = cancellation::wait(state.repo.lock()).await?;
+            Ok(serde_json::to_value(
+                desktop_core::protected_resources(&requested).await?,
+            )?)
         }
         ApplicationOperation::Management(RepositorySafeRemoteUrl { path, name }) => {
             anyhow::ensure!(

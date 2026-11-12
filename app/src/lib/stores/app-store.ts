@@ -41,6 +41,7 @@ import {
 import { backend } from '../../backend/client'
 import { RepositorySelectionQueue } from '../../backend/repository-selection'
 import { discardBatchWithoutDialog, discardReviewedSelection } from '../git/reviewed-discard'
+import { reviewSelectedCommit } from '../git/selected-commit-review'
 import {
   getReviewedCopilotLines,
   getWholeFileCopilotSelection,
@@ -3982,6 +3983,73 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
 
     const gitStore = this.gitStoreCache.get(repository)
+    if (
+      typeof window !== 'undefined' &&
+      backend().transportKind !== 'none' &&
+      (selectedFiles.length > 0 || context.amend === true || state.allowEmptyCommit)
+    ) {
+      const reviewed = await gitStore.performFailableOperation(
+        async () => {
+          const certifiedPartialDiffs =
+            await this.assistedCommits.selections.verifyManual(
+              repository,
+              selectedFiles
+            )
+          const restored = selectedFiles
+            .map(file =>
+              this.assistedCommits.selections.getRestored(file.selection)
+            )
+            .filter(value => value !== undefined)
+          const head = restored[0]?.head
+          if (
+            head !== undefined &&
+            restored.some(
+              value =>
+                value.head.ref !== head.ref || value.head.sha !== head.sha
+            )
+          ) {
+            throw new Error(
+              'Restored selections belong to different repository states. Review and reselect the changes.'
+            )
+          }
+          const amendHead =
+            context.amend === true ? state.commitToAmend?.sha : undefined
+          if (context.amend === true && amendHead === undefined) {
+            throw new Error(
+              'The commit to amend is no longer available. Refresh and try again.'
+            )
+          }
+          const review = await reviewSelectedCommit(
+            repository,
+            selectedFiles,
+            file =>
+              certifiedPartialDiffs.get(file.id) ??
+              this.assistedCommits.selections.getBasis(file.selection)
+                ?.displayedDiff ??
+              this.assistedCommits.selections.getRestored(file.selection)
+                ?.displayedDiff,
+            amendHead,
+            head,
+            state.allowEmptyCommit
+          )
+          const oversized = review.review.large_files
+            .filter(file => !file.tracked_by_lfs)
+            .map(file => file.display_path)
+          if (oversized.length > 0) {
+            await this._showPopup({
+              type: PopupType.OversizedFiles,
+              oversizedFiles: oversized,
+              context,
+              repository,
+            })
+            return undefined
+          }
+          return true
+        },
+        { gitContext: { kind: 'commit' }, repository }
+      )
+      if (reviewed === undefined) return false
+    }
 
     return this.withIsCommitting(repository, selectedFiles, async () => {
       const result = await gitStore.performFailableOperation(
