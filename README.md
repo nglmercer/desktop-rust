@@ -12,13 +12,20 @@ Build and start the desktop shell:
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts   # renderer dependencies
 pnpm vite:build                                   # renderer bundle -> out/vite-dist
-cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
+cargo build -p desktop-app --locked
 ./rust/target/debug/github-desktop-rs
 ```
 
 `pnpm` is pinned by `packageManager` in `package.json`. The root Cargo workspace
-(`Cargo.toml`: headless CLI, bridge, native host) builds separately with
-`cargo build --locked`.
+contains the headless CLI, bridge, native host, and desktop shell. Its default
+members build without GUI dependencies using `cargo build --locked`.
+
+Unit tests are moving from Node's test runner to Vitest. `npm test -- <path>`
+routes migrated suites through Vitest; `vitest-suites.json` lists those suites.
+Run them together with `node node_modules/vitest/vitest.mjs run --config vitest.config.ts`.
+Biome currently checks the test-runner tooling via
+`npm run lint:biome`; Prettier and ESLint still cover the remaining files and
+custom rules while their migration is in progress.
 
 See [Rust development and commands](rust/README.md) and the
 [full migration ledger](rust/MIGRATION.md). The Electron-era `postinstall`

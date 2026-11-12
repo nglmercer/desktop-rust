@@ -77,6 +77,31 @@ pub enum Operation {
         parent: usize,
     },
     BranchList,
+    /// Renderer operation markers and the interactive rebase's original refs.
+    StatusContext,
+    StatusConflictDetails {
+        kind: StatusConflictKind,
+    },
+    /// Git's disambiguated names for renderer branch enumeration.
+    BranchEnumeration {
+        #[serde(default)]
+        prefixes: Vec<String>,
+    },
+    BranchMerged {
+        branch: String,
+    },
+    BranchPointsAt {
+        commitish: String,
+    },
+    AheadBehind {
+        range: String,
+    },
+    RevisionList {
+        range: String,
+    },
+    HasMergeCommits {
+        range: String,
+    },
     BranchPolicy,
     BranchNameRules {
         name: String,
@@ -242,6 +267,11 @@ pub enum Operation {
         name: Option<String>,
     },
     Status,
+    /// Porcelain-v2 records for the desktop status view, preserving path bytes.
+    StatusDetailed {
+        #[serde(default = "default_true")]
+        include_untracked: bool,
+    },
     Snapshot,
     Log,
     Branches,
@@ -458,12 +488,23 @@ pub enum Operation {
         #[serde(default)]
         timeout_ms: Option<u64>,
     },
+    CopilotCloseSession {
+        session_id: String,
+    },
     CopilotGenerateCommitMessage {
         #[serde(default)]
         paths: Vec<GitPath>,
         #[serde(default)]
         system_prompt: Option<String>,
     },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusConflictKind {
+    Merge,
+    Rebase,
+    Working,
 }
 
 #[derive(Debug, Serialize)]
@@ -484,6 +525,23 @@ pub struct FileChange {
     pub conflicted: bool,
     pub size: Option<u64>,
     pub modified_ns: Option<u128>,
+}
+
+/// One porcelain-v2 record. Paths and branch header values retain Git's bytes.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DetailedStatusRecord {
+    Header {
+        value: GitPath,
+    },
+    Entry {
+        entry_kind: char,
+        status_code: String,
+        submodule_status_code: String,
+        path: GitPath,
+        old_path: Option<GitPath>,
+        rename_or_copy_score: Option<u16>,
+    },
 }
 
 #[derive(Debug, Serialize)]

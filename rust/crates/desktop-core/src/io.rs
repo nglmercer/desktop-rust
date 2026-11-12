@@ -414,16 +414,24 @@ const TRAMPOLINE_CREDENTIAL_CONFIG: &str = "'credential.helper=' 'credential.hel
 /// reported as success. A stopped command's error carries the output it had
 /// produced (`details`), up to `maxBuffer`.
 fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
-    let args: Vec<String> = o
+    let args: Vec<&str> = o
         .get("args")
         .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
+        .ok_or_else(|| AppError::BadArgs("`args` must be an array of strings".into()))?
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            value
+                .as_str()
+                .ok_or_else(|| AppError::BadArgs(format!("`args[{index}]` must be a string")))
         })
-        .ok_or_else(|| AppError::BadArgs("missing `args`".into()))?;
-    let cwd = string(o, "cwd").unwrap_or_default();
+        .collect::<Result<_>>()?;
+    let cwd = match o.get("cwd") {
+        None => "",
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| AppError::BadArgs("`cwd` must be a string".into()))?,
+    };
     let cancel = CancelGuard::new(o);
     if cancel.raised() {
         // Cancelled while queued: never start the command.
@@ -443,7 +451,7 @@ fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
         // encoding the way LC_ALL=C would.
         .env("LANGUAGE", "en");
     if !cwd.is_empty() {
-        command.current_dir(&cwd);
+        command.current_dir(cwd);
     }
 
     for (key, value) in git_environment(o.get("env")) {
@@ -1191,6 +1199,22 @@ mod tests {
         .unwrap();
         assert_ne!(failed["exitCode"], 0);
         assert!(!failed["stderr"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn git_exec_rejects_malformed_arguments_before_starting_a_process() {
+        for request in [
+            json!({}),
+            json!({ "args": "status" }),
+            json!({ "args": ["reset", null, "--hard"] }),
+            json!({ "args": ["status", 7] }),
+            json!({ "args": ["status"], "cwd": false }),
+        ] {
+            // A nonexistent executable proves validation happens before spawn.
+            let error =
+                git_exec(Path::new("/missing/git"), &test_resources(), &request).unwrap_err();
+            assert!(matches!(error, AppError::BadArgs(_)), "{error:?}");
+        }
     }
 
     #[test]

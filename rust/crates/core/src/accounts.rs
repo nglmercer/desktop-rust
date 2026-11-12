@@ -152,8 +152,8 @@ impl Repository {
         Ok(AccountState { view, record })
     }
     pub(crate) async fn account_state(&self) -> Result<AccountState> {
-        let mut state = self.account_store_state().await?;
-        let binding = self.selected_binding().await?;
+        let mut state = Box::pin(self.account_store_state()).await?;
+        let binding = Box::pin(self.selected_binding()).await?;
         state.view.basis = digest(&(&state.view.basis, &binding.remote, &binding.fingerprint))?;
         Ok(state)
     }

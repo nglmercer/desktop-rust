@@ -22,6 +22,14 @@ pub struct ApiClient {
     secure: SecureStore,
 }
 
+/// Fields sent when creating a pull request.
+pub struct PullRequestInput<'a> {
+    pub title: &'a str,
+    pub head: &'a str,
+    pub base: &'a str,
+    pub body: &'a str,
+}
+
 impl ApiClient {
     pub fn new(secure: SecureStore) -> Result<Self> {
         let client = reqwest::blocking::Client::builder()
@@ -175,17 +183,14 @@ impl ApiClient {
         token: &str,
         owner: &str,
         name: &str,
-        title: &str,
-        head: &str,
-        base: &str,
-        body: &str,
+        input: PullRequestInput<'_>,
     ) -> Result<Value> {
         self.request_value(
             reqwest::Method::POST,
             endpoint,
             &format!("/repos/{owner}/{name}/pulls"),
             Some(token),
-            Some(&json!({ "title": title, "head": head, "base": base, "body": body })),
+            Some(&json!({ "title": input.title, "head": input.head, "base": input.base, "body": input.body })),
         )
     }
 

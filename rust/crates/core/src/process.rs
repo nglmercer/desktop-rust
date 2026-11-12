@@ -13,6 +13,15 @@ pub struct RawOutput {
 }
 
 impl RawOutput {
+    /// Match the legacy Git error classification while keeping other failures distinct.
+    pub(crate) fn bad_revision(&self) -> bool {
+        self.code != 0
+            && self
+                .stderr
+                .split(|byte| *byte == b'\n')
+                .any(|line| line.starts_with(b"fatal: bad revision '") && line.ends_with(b"'"))
+    }
+
     pub fn text(self) -> CommandOutput {
         CommandOutput {
             code: self.code,
@@ -24,6 +33,12 @@ impl RawOutput {
 
 pub async fn run(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     run_git(path, args, None, None).await
+}
+
+pub(crate) async fn repository_discovery(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    let mut command = git_command(None);
+    command.env("LC_ALL", "C");
+    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
 }
 
 pub(crate) async fn configuration(path: &Path, args: &[OsString]) -> Result<RawOutput> {
@@ -416,12 +431,12 @@ async fn run_command(
 
 /// A dropped future must also terminate hooks, credential helpers, and other descendants.
 /// Unix commands have their own process group; Windows still uses direct-child cleanup.
-struct ProcessGroup {
+pub(crate) struct ProcessGroup {
     #[cfg(unix)]
     pid: Option<i32>,
 }
 impl ProcessGroup {
-    fn new(child: &tokio::process::Child) -> Self {
+    pub(crate) fn new(child: &tokio::process::Child) -> Self {
         #[cfg(not(unix))]
         let _ = child;
         Self {
@@ -429,7 +444,7 @@ impl ProcessGroup {
             pid: child.id().and_then(|pid| i32::try_from(pid).ok()),
         }
     }
-    fn disarm(&mut self) {
+    pub(crate) fn disarm(&mut self) {
         #[cfg(unix)]
         {
             self.pid = None;
@@ -477,6 +492,19 @@ async fn read_bounded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bad_revision_classification_does_not_hide_other_git_failures() {
+        let output = |code, stderr: &[u8]| RawOutput {
+            code,
+            stdout: Vec::new(),
+            stderr: stderr.to_vec(),
+        };
+        assert!(output(128, b"fatal: bad revision 'missing..HEAD'\n").bad_revision());
+        assert!(!output(0, b"fatal: bad revision 'missing'\n").bad_revision());
+        assert!(!output(128, b"fatal: not a git repository\n").bad_revision());
+        assert!(!output(128, b"fatal: bad revision 'unterminated\n").bad_revision());
+    }
     #[test]
     fn private_api_commands_pin_credentials_without_logging_or_repository_defaults() {
         let command = private_gh_command(Some("synthetic-session-token"));

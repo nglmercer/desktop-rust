@@ -5,7 +5,7 @@ target-dir = "rust/target"
 # devices such as Termux. On a desktop machine, raise it without editing this
 # file by setting the environment variable, which takes precedence:
 #
-#   CARGO_BUILD_JOBS=8 cargo build --manifest-path rust/Cargo.toml --release --locked
+#   CARGO_BUILD_JOBS=8 cargo build -p desktop-app --release --locked
 #
 # Choose a value your free RAM can sustain.
 jobs = 1

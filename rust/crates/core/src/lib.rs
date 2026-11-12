@@ -40,6 +40,8 @@ mod lfs_operations;
 pub use lfs::LfsInstallScope;
 pub use lfs_operations::{LfsTransferRequest, lfs_install, lfs_tool_status};
 mod paths;
+mod repository_discovery;
+pub use repository_discovery::{repository_type, trust_repository};
 mod preferences;
 mod publish;
 mod publish_origin;
@@ -47,7 +49,7 @@ pub use publish_origin::publication_config_preflight;
 mod publish_receipt;
 mod settings;
 mod storage;
-pub use paths::directory_path;
+pub use paths::{canonical_mutation_path, directory_exists, directory_path, path_exists};
 mod submodules;
 mod worktrees;
 pub use preferences::{Preferences, PreferencesPatch, PreferencesStore, Theme};
@@ -75,11 +77,16 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+type NativeSessionSlot = Arc<Mutex<Option<copilot::native_turn::NativeSession>>>;
+type NativeSessions = Arc<Mutex<std::collections::HashMap<String, NativeSessionSlot>>>;
+
 #[derive(Clone)]
 pub struct Repository {
     path: PathBuf,
     gate: Arc<Mutex<()>>,
     saved_scope: Option<SavedRepositoryScope>,
+    native_copilot_sessions: NativeSessions,
+    native_copilot_slots: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Clone)]
@@ -101,6 +108,10 @@ impl Repository {
             path: PathBuf::from(os_from_bytes(root)?),
             gate: Arc::new(Mutex::new(())),
             saved_scope: None,
+            native_copilot_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            native_copilot_slots: Arc::new(tokio::sync::Semaphore::new(
+                copilot_bridge::MAX_NATIVE_SESSIONS,
+            )),
         })
     }
 
@@ -238,6 +249,11 @@ impl Repository {
         }
         if matches!(operation, Operation::Snapshot) {
             return Ok(serde_json::to_value(self.snapshot().await?)?);
+        }
+        if let Operation::StatusDetailed { include_untracked } = operation {
+            return Ok(serde_json::to_value(
+                self.detailed_status(include_untracked).await?,
+            )?);
         }
         match operation {
             Operation::CommitPreview => return self.commit_preview().await,
@@ -466,6 +482,20 @@ impl Repository {
                 return self.forget_deleted_branch(&receipt_id).await;
             }
             Operation::BranchList => return self.branch_list_with_policy().await,
+            Operation::StatusContext => return self.status_context().await,
+            Operation::StatusConflictDetails { kind } => {
+                return self.status_conflict_details(kind).await;
+            }
+            Operation::BranchEnumeration { prefixes } => {
+                return self.branch_enumeration(&prefixes).await;
+            }
+            Operation::BranchMerged { branch } => return self.branches_merged(&branch).await,
+            Operation::BranchPointsAt { commitish } => {
+                return self.branches_pointing_at(&commitish).await;
+            }
+            Operation::AheadBehind { range } => return self.ahead_behind(&range).await,
+            Operation::RevisionList { range } => return self.revision_list(&range).await,
+            Operation::HasMergeCommits { range } => return self.has_merge_commits(&range).await,
             Operation::UpstreamSetupPreview => return self.upstream_setup_preview().await,
             Operation::SetupUpstream { basis } => {
                 return self.setup_upstream(basis.as_deref()).await;
@@ -578,9 +608,14 @@ impl Repository {
             Operation::CopilotSendMessage {
                 session_id,
                 message,
-                ..
+                timeout_ms,
             } => {
-                return self.copilot_send_message(&session_id, &message).await;
+                return self
+                    .copilot_send_message(&session_id, &message, timeout_ms)
+                    .await;
+            }
+            Operation::CopilotCloseSession { session_id } => {
+                return self.copilot_close_session(&session_id).await;
             }
             Operation::CopilotGenerateCommitMessage {
                 paths,
@@ -695,6 +730,7 @@ impl Repository {
             | LfsStatus { .. }
             | LfsInstall { .. } => unreachable!("handled by execute"),
             Snapshot
+            | StatusDetailed { .. }
             | Github { .. }
             | DiffDetail { .. }
             | SelectDiff { .. }
@@ -707,6 +743,14 @@ impl Repository {
             | CommitFiles { .. }
             | CommitDiff { .. }
             | BranchList
+            | StatusContext
+            | StatusConflictDetails { .. }
+            | BranchEnumeration { .. }
+            | BranchMerged { .. }
+            | BranchPointsAt { .. }
+            | AheadBehind { .. }
+            | RevisionList { .. }
+            | HasMergeCommits { .. }
             | BranchPolicy
             | BranchNameRules { .. }
             | RepositoryContext
@@ -851,6 +895,7 @@ impl Repository {
             CopilotProbe { .. }
             | CopilotCreateSession { .. }
             | CopilotSendMessage { .. }
+            | CopilotCloseSession { .. }
             | CopilotGenerateCommitMessage { .. } => {
                 unreachable!("handled by execute")
             }
@@ -989,6 +1034,10 @@ mod future_size_tests {
             path: PathBuf::from("."),
             gate: Arc::new(Mutex::new(())),
             saved_scope: None,
+            native_copilot_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            native_copilot_slots: Arc::new(tokio::sync::Semaphore::new(
+                copilot_bridge::MAX_NATIVE_SESSIONS,
+            )),
         };
         let future = repository.execute(Operation::Status);
         let bytes = std::mem::size_of_val(&future);

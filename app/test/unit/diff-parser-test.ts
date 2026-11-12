@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { DiffParser } from '../../src/lib/diff-parser'
 import { DiffLineType } from '../../src/models/diff'

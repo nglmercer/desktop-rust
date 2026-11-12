@@ -10,5 +10,5 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["*.js", "tests/**/*.mjs"]
+  "include": ["*.js", "tests/**/*.mts"]
 }

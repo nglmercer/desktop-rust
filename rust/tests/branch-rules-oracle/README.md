@@ -2,22 +2,22 @@
 
 This tests-only package executes the current legacy `checkBranchNameRules`,
 `parseRepoRules`, rule models, account matching, and endpoint capability code.
-It does not install or run Electron. The matcher/model source has moved to
-shared browser modules; the legacy helper imports those same implementations.
+It does not install or run Electron. The matcher is extracted directly from
+the renderer's current `app/src/lib/helpers/repo-rules.ts` implementation.
 
 ```sh
-npm ci --prefix rust/web --ignore-scripts
+pnpm install --frozen-lockfile --ignore-scripts
 npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts
 npm test --prefix rust/tests/branch-rules-oracle
 ```
 
-The first install supplies the existing pinned esbuild/TypeScript development
-tools. The second supplies RE2JS **2.0.1** and semver **5.7.2**, matching the
-legacy app lockfile. Neither is a new frontend runtime dependency. The lockfile
-pins registry integrity. No API, Git, authentication, or other network operation
-runs during the tests.
+The root install supplies Vite, TypeScript, tsx and Vitest. The isolated oracle
+install supplies RE2JS **2.0.1** and semver **5.7.2** with pinned registry
+integrity. The test also compares the installed renderer's RE2JS version to
+the frozen cases. No API, Git, authentication, or other network operation runs
+during the tests.
 
-`oracle.mjs` bundles authoritative TypeScript in memory. TypeScript AST
+`oracle.mts` uses Vite to bundle authoritative TypeScript in memory. TypeScript AST
 extraction retains the original account/repository predicate functions and API
 branch-rule method, including `encodeURIComponent` of the complete branch name.
 Only renderer functions, network responses, Git configuration reads, and the
@@ -43,9 +43,10 @@ oracle evidence rather than a claim that the gated check parsed those rules.
 native-engine differential tests.
 
 ```sh
-node rust/tests/branch-rules-oracle/oracle.mjs --check
-node rust/tests/branch-rules-oracle/oracle.mjs --json
-node rust/tests/branch-rules-oracle/oracle.mjs --evaluate < cases-to-evaluate.json
+node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check
+node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check --current-re2js
+node --import tsx rust/tests/branch-rules-oracle/oracle.mts --json
+node --import tsx rust/tests/branch-rules-oracle/oracle.mts --evaluate < cases-to-evaluate.json
 ```
 
 `--evaluate` accepts one case or an array of cases on stdin and prints the same
@@ -79,12 +80,12 @@ The corpus preserves these observed legacy decisions:
 ## Trusted embedded matcher
 
 The Rust service embeds `rust/crates/core/src/repo_rules/re2js.js`. It is a
-static ES2020 IIFE built from the shared matcher and pinned RE2JS ESM, with the
+static ES2020 IIFE built by Vite from the production matcher and pinned RE2JS ESM, with the
 upstream MIT license retained in the banner and `RE2JS-LICENSE.txt`.
 
 ```sh
-node rust/tests/branch-rules-oracle/build-engine.mjs
-node rust/tests/branch-rules-oracle/build-engine.mjs --check
+node --import tsx rust/tests/branch-rules-oracle/build-engine.mts
+node --import tsx rust/tests/branch-rules-oracle/build-engine.mts --check
 ```
 
 The single exposed global is
@@ -97,7 +98,7 @@ strings as function arguments and must bound memory, stack, and execution time.
 
 There is no CommonJS loader, Node process/Buffer, network, timer, or OS
 requirement. RE2JS optionally uses TextEncoder/TextDecoder and has built-in
-fallbacks; `embedded-parity.mjs` deliberately runs without either. That V8
+fallbacks; `embedded-parity.test.ts` deliberately runs without either. That V8
 sandbox check is not proof of QuickJS execution: the Rust tests must exercise
 its actual embedded runtime and resource limits.
 
@@ -111,6 +112,6 @@ evidence and is not an exhaustive grammar or Unicode certification.
 
 ## Status
 
-Pending. The oracle compares against TypeScript sources under `rust/web`, which
-was removed when the renderer moved to `app/` (see `MIGRATION.md`). It is not
-run by `.github/workflows/rust.yml` until those sources are re-homed.
+The oracle uses current `app/` sources and is run by the Rust migration CI job.
+The frozen corpus and renderer comparison are targeted evidence; they do not
+establish complete equivalence across every regex or application workflow.

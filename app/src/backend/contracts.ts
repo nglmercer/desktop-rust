@@ -3,9 +3,8 @@
  *
  * Single source: `rust/crates/core/src/application.rs` (`IRequest`,
  * `IBackendError`, `Capabilities`, `BACKEND_VERSION`). The TypeScript
- * renderer consumes these via `app/src/backend/client.ts`; the Rust
- * transports (Tao/Wry `desktop-app` and loopback `desktop-bridge`)
- * translate their wire envelopes to the same shapes. Validated by
+ * renderer consumes these via `app/src/backend/client.ts`. The loopback
+ * bridge and the limited Wry read path do not yet have full parity. Validated by
  * `cargo test -p desktop-core application` and `cargo clippy`; check
  * freshness with `cargo test -p desktop-core --locked` after changing
  * `application.rs`.
@@ -13,6 +12,37 @@
 
 /** Backend protocol version. The bridge advertises `3` on connect (not JSON-RPC v1/v2). */
 export const BACKEND_VERSION = 3 as const
+
+/** A Git path or header value with its original bytes intact. */
+export type GitBytes = { readonly bytes: ReadonlyArray<number> }
+
+/** Git's disambiguated branch names and canonical references. */
+export interface IBackendBranch {
+  readonly ref: string
+  readonly name: string
+  readonly upstream: string | null
+  readonly upstream_ref: string | null
+  readonly current: boolean
+  readonly oid: string
+}
+
+export interface IBackendBranchRef {
+  readonly ref: string
+  readonly oid: string
+}
+
+/** Porcelain-v2 records returned by the Rust detailed status operation. */
+export type DetailedStatusRecord =
+  | { readonly kind: 'header'; readonly value: GitBytes }
+  | {
+      readonly kind: 'entry'
+      readonly entry_kind: '1' | '2' | 'u' | '?'
+      readonly status_code: string
+      readonly submodule_status_code: string
+      readonly path: GitBytes
+      readonly old_path: GitBytes | null
+      readonly rename_or_copy_score: number | null
+    }
 
 /** Declared capabilities the backend advertises on connect. */
 export interface Capabilities {

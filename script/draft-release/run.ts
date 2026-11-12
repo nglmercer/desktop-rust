@@ -10,7 +10,7 @@ import { execFileSync } from 'child_process'
 
 import { writeFileSync } from 'fs'
 import { join } from 'path'
-import { format } from 'prettier'
+import { formatJson } from './format-json'
 import { assertNever } from '../../app/src/lib/fatal-error'
 import { sh } from '../sh'
 import { readFile } from 'fs/promises'
@@ -63,12 +63,7 @@ function printInstructions(nextVersion: string, entries: Array<string>) {
   } else {
     const object = { [nextVersion]: entries.sort() }
     const steps = [
-      `Concatenate this to the beginning of the 'releases' element in the changelog.json as a starting point:\n${format(
-        JSON.stringify(object),
-        {
-          parser: 'json',
-        }
-      )}\n`,
+      `Concatenate this to the beginning of the 'releases' element in the changelog.json as a starting point:\n${formatJson(JSON.stringify(object))}\n`,
       ...baseSteps,
     ]
     printSteps(steps)
@@ -178,9 +173,7 @@ export async function run(args: ReadonlyArray<string>): Promise<void> {
       // this might throw
       writeFileSync(
         changelogPath,
-        format(JSON.stringify(changelog), {
-          parser: 'json',
-        })
+        formatJson(JSON.stringify(changelog))
       )
       console.log('Added!')
       printInstructions(nextVersion, [])

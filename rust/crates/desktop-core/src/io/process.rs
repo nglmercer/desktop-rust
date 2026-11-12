@@ -323,7 +323,9 @@ fn id_of(o: &Value) -> Result<u64> {
 
 /// Clone out what a request needs, so the registry lock is never held while
 /// touching pipes or the child.
-fn lookup(id: u64) -> Option<(Arc<InputGate>, Arc<Mutex<Child>>, [Arc<OutputGate>; 2])> {
+type ProcessHandles = (Arc<InputGate>, Arc<Mutex<Child>>, [Arc<OutputGate>; 2]);
+
+fn lookup(id: u64) -> Option<ProcessHandles> {
     registry()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -705,7 +707,7 @@ pub fn kill(app: &DesktopApp, o: &Value) -> Result<Value> {
 pub fn shutdown(app: &DesktopApp) {
     // Only this application's children: the registry is shared by every
     // application in the process (tests included).
-    let entries: Vec<(u64, Arc<InputGate>, Arc<Mutex<Child>>, [Arc<OutputGate>; 2])> = registry()
+    let entries: Vec<(u64, ProcessHandles)> = registry()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
@@ -713,13 +715,15 @@ pub fn shutdown(app: &DesktopApp) {
         .map(|(id, entry)| {
             (
                 *id,
-                entry.input.clone(),
-                entry.child.clone(),
-                entry.outputs.clone(),
+                (
+                    entry.input.clone(),
+                    entry.child.clone(),
+                    entry.outputs.clone(),
+                ),
             )
         })
         .collect();
-    for (id, input, child, outputs) in entries {
+    for (id, (input, child, outputs)) in entries {
         if input.refuse() {
             app.host()
                 .emit(EVENT, json!([{ "id": id, "event": "drain" }]));

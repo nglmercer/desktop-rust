@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { truncateMid, truncatePath, extract } from '../../src/ui/lib/path-text'
 

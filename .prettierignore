@@ -20,3 +20,6 @@ app/static/logos/dev/**/*.json
 
 
 rust/crates/core/src/repo_rules/re2js.js
+script/test.mts
+vitest.config.ts
+app/test/vitest-setup.ts

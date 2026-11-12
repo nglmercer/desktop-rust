@@ -14,9 +14,7 @@ replacement passes the removal gates in [MIGRATION.md](MIGRATION.md). Remaining
 headless and platform work is tracked in [TODO.md](TODO.md). Upstream
 is https://github.com/desktop/desktop at
 `1bfab971ad2d373d5ef996dda2b894232658f8f6`. The upstream MIT license applies.
-Bundled browser dependencies and moved source notices are preserved in
-`web/THIRD_PARTY_NOTICES.txt` and the generated `panels.js` artifact. Embedded
-branch-rule matcher notices are in `THIRD_PARTY_NOTICES.txt`.
+Embedded branch-rule matcher notices are in `THIRD_PARTY_NOTICES.txt`.
 
 ## Termux
 
@@ -37,22 +35,18 @@ cargo build --locked -j 1
 ./target/debug/desktop-rs -C .. serve --port 9418
 ```
 
-Open the exact `http://127.0.0.1:9418/#token=...` URL printed by `serve` in an
-Android browser. `--port 0` selects an available port. The page stores the token
-in tab-local session storage for reloads and removes it from the address bar.
-The token changes on server restart; reopen the new URL. Ctrl-C stops the
-server. Temporary socket failures reconnect automatically with bounded backoff.
-Disconnected requests fail without replay; reconnection refreshes repository
-state and preferences. The Reconnect button retries immediately. Use
-`serve --empty` to start with a repository chooser when no working tree exists
-yet.
+`serve` starts the authenticated loopback WebSocket API, but the browser
+frontend is not currently available. Its printed URL contains a session secret;
+do not share it. `--port 0` selects an available port, and Ctrl-C stops the
+server. Use `serve --empty` to start without selecting a working tree.
 
 ## Optional desktop host
 
-The `desktop-native` crate hosts the same browser assets and authenticated
-WebSocket protocol using Wry and Tao. It is separate from `desktop-rs`; default
-builds do not compile Wry/Tao or link desktop libraries. Termux uses the browser
-bridge above, including when Cargo's `native` feature is selected on Android.
+The older `desktop-native` crate hosts the authenticated WebSocket bridge
+using Wry and Tao, but its browser frontend is currently missing. It is separate
+from `desktop-rs`; default builds do not compile Wry/Tao or link desktop
+libraries. The active React desktop shell is `desktop-app`, described in the
+root [migration overview](../MIGRATION.md).
 
 On a Linux, macOS, or Windows desktop:
 
@@ -1459,48 +1453,50 @@ deletion uses Git's merged-branch check, and push does not force.
 
 ## Validation
 
+Run these commands from the repository root. The headless workspace checks
+exclude `desktop-app`, which needs the desktop dependencies listed above.
+
 ```sh
 cargo fmt --all -- --check
-cargo test --workspace --locked -j 1
-cargo clippy --workspace --all-targets --locked -j 1 -- -D warnings
-python tests/smoke.py
-python tests/lifecycle.py
-python tests/cancellation.py
-python tests/signals.py
-python tests/workflows.py
-python tests/direct_git_cli.py
-python tests/stashes.py
-python tests/branch_rename.py
-python tests/branch_create.py
-python tests/branch_delete.py
-python tests/checkout.py
-python tests/checkout_native.py
-python tests/commit_review.py
-python tests/lfs_operations.py
-python tests/diffs.py
-python tests/discard.py
-python tests/discard_advanced.py
-python tests/discard_gc.py
-python tests/history_state.py
-python tests/editor_conflicts.py
-python tests/conflict_undo.py
-python tests/management.py
-python tests/repositories.py
-python tests/publish_context.py
-python tests/publish_preview.py
-python tests/publish_receipts.py
-python tests/publish_create.py
-python tests/publish_ledger_visibility.py
-python tests/publish_preview_cancel.py
-python tests/publish_continue.py
-python tests/publish_origin.py
-python tests/github.py
-python tests/github_cli.py
-node --test tests/transport.test.mjs
-npm --prefix web run test:integration
-node --check web/client.js
-node --check web/transport.js
+cargo test --workspace --exclude desktop-app --locked -j 1
+cargo clippy --workspace --exclude desktop-app --all-targets --locked -j 1 -- -D warnings
+cargo test -p desktop-cli --test bridge_shutdown --locked
+cargo test -p desktop-native --test headless_cli --locked
+cargo test -p desktop-cli --test bridge_cancellation --locked
+cargo test -p desktop-cli --test signals --locked
+cargo test -p desktop-cli --test workflows --locked
+cargo test -p desktop-cli --test direct_git --locked
+cargo test -p desktop-cli --test branch_rename --locked
+cargo test -p desktop-cli --test branch_create --locked
+cargo test -p desktop-cli --test branch_delete --locked
+DESKTOP_TEST_REQUIRE_LFS=1 cargo test -p desktop-cli --test remote_delete --locked
+DESKTOP_TEST_REQUIRE_LFS=1 cargo test -p desktop-cli --test upstream_delete --locked
+cargo test -p desktop-cli --test commit_review --locked
+DESKTOP_TEST_REQUIRE_LFS=1 cargo test -p desktop-cli --test lfs --locked
+cargo test -p desktop-cli --test diffs --locked
+cargo test -p desktop-cli --test discard --locked
+cargo test -p desktop-cli --test discard_gc --locked
+cargo test -p desktop-cli --test history_state --locked
+cargo test -p desktop-cli --test conflict_undo --locked
+cargo test -p desktop-cli --test management --locked
+cargo test -p desktop-cli --test repositories --locked
+cargo test -p desktop-cli --test publish_receipts --locked
+python rust/tests/publish_create.py
+cargo test -p desktop-cli --test publish_preview_cancel --locked
+cargo build -p desktop-cli --locked
+DESKTOP_TEST_BRIDGE=1 npx vitest run app/test/unit/backend-websocket-integration-test.ts rust/tests/github-adapter.test.ts
+DESKTOP_TEST_REAL_GH=1 npx vitest run rust/tests/github-cli.test.ts
 ```
+
+To check the desktop shell after installing its platform dependencies and
+building the renderer, run:
+
+```sh
+cargo clippy -p desktop-app --all-targets --locked -- -D warnings
+cargo test -p desktop-app --locked
+```
+
+The ignored `app_smoke` test additionally requires a display.
 
 Integration tests use isolated local repositories and a local bare remote; no
 GitHub credentials or network are needed. They cover CLI forwarding and exit
@@ -1511,8 +1507,7 @@ and fetch/push/pull. Repository tests cover create/clone, saved selection,
 concurrent registry updates, safe forgetting, and corrupt-data preservation.
 Transport tests cover authentication, reply correlation, events, and disconnect
 failures. The GitHub adapter tests use a controlled gh substitute and the
-installed gh against a local HTTPS mock API. `github_cli.py` requires `openssl`
+installed gh against a local HTTPS mock API. `github-cli.test.ts` requires `openssl`
 or an explicit `OPENSSL_BIN` path (Termux: install `openssl-tool`). React DOM
 tests use JSDOM; actual browser rendering and live GitHub authentication still
-need separate verification. Upstream `npm run lint:fix` currently requires
-missing Node dependencies; it fails at `prettier: not found` in this checkout.
+need separate verification.

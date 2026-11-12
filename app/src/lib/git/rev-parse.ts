@@ -2,6 +2,7 @@ import { git } from './core'
 import { directoryExists } from '../directory-exists'
 import { dirname, resolve } from 'path'
 import { realpath } from 'fs/promises'
+import { backend } from '../../backend/client'
 
 export type RepositoryType =
   | { kind: 'bare' }
@@ -18,6 +19,11 @@ export type RepositoryType =
  * path, verified against Git's ownership diagnostic.
  */
 export async function getRepositoryType(path: string): Promise<RepositoryType> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return path.length === 0
+      ? { kind: 'missing' }
+      : backend().repositoryType(resolve(path))
+  }
   if (!(await directoryExists(path))) {
     return { kind: 'missing' }
   }
@@ -93,23 +99,3 @@ export async function getRepositoryType(path: string): Promise<RepositoryType> {
     throw err
   }
 }
-
-export async function getUpstreamRefForRef(path: string, ref?: string) {
-  const rev = (ref ?? '') + '@{upstream}'
-  const args = ['rev-parse', '--symbolic-full-name', rev]
-  const opts = { successExitCodes: new Set([0, 128]) }
-  const result = await git(args, path, 'getUpstreamRefForRef', opts)
-
-  return result.exitCode === 0 ? result.stdout.trim() : null
-}
-
-export async function getUpstreamRemoteNameForRef(path: string, ref?: string) {
-  const remoteRef = await getUpstreamRefForRef(path, ref)
-  return remoteRef?.match(/^refs\/remotes\/([^/]+)\//)?.[1] ?? null
-}
-
-export const getCurrentUpstreamRef = (path: string) =>
-  getUpstreamRefForRef(path)
-
-export const getCurrentUpstreamRemoteName = (path: string) =>
-  getUpstreamRemoteNameForRef(path)

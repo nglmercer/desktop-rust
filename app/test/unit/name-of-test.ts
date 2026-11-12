@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { Repository, nameOf } from '../../src/models/repository'
 import { gitHubRepoFixture } from '../helpers/github-repo-builder'

@@ -26,6 +26,47 @@ pub(crate) struct Commit {
 }
 
 impl Repository {
+    /// Match the renderer's rebase-order `rev-list` output exactly; the
+    /// renderer's parser owns its existing commit-ID and summary semantics.
+    pub(crate) async fn revision_list(&self, range: &str) -> Result<Value> {
+        let output = self
+            .run(&args(&[
+                "rev-list",
+                "--reverse",
+                "--oneline",
+                "--no-abbrev-commit",
+                "--end-of-options",
+                range,
+                "--",
+            ]))
+            .await?;
+        if output.bad_revision() {
+            return Ok(Value::Null);
+        }
+        ensure(&output)?;
+        Ok(json!(String::from_utf8_lossy(&output.stdout)))
+    }
+
+    pub(crate) async fn has_merge_commits(&self, range: &str) -> Result<Value> {
+        let output = self
+            .run(&args(&[
+                "rev-list",
+                "-1",
+                "--merges",
+                "--end-of-options",
+                range,
+                "--",
+            ]))
+            .await?;
+        match output.code {
+            0 | 128 => Ok(json!(!output.stdout.is_empty())),
+            _ => {
+                ensure(&output)?;
+                unreachable!("nonzero output was rejected")
+            }
+        }
+    }
+
     pub(crate) async fn history(
         &self,
         revision: Option<String>,

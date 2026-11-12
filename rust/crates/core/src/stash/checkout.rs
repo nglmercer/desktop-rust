@@ -292,7 +292,7 @@ impl Repository {
             depth <= 8,
             "nested repository depth exceeds checkout review support"
         );
-        let snapshot = self.snapshot().await?;
+        let snapshot = Box::pin(self.snapshot()).await?;
         let index = crate::diff::read_index(&self.index_path().await?)?;
         let (reference, head) = self.current_checkout_identity().await?;
         let mut states = Vec::new();
@@ -346,19 +346,19 @@ impl Repository {
     }
     async fn checkout_plan(&self, request: &str) -> Result<Plan> {
         let target = self.checkout_target(request).await?;
-        self.checkout_plan_for(target).await
+        Box::pin(self.checkout_plan_for(target)).await
     }
     async fn checkout_plan_for(&self, target: Target) -> Result<Plan> {
         if target.remote {
             self.branch_destination_direct(&format!("refs/heads/{}", target.branch))
                 .await?;
         }
-        let capture = self.checkout_capture(0).await?;
+        let capture = Box::pin(self.checkout_capture(0)).await?;
         let (source_ref, source_head) = self.current_checkout_identity().await?;
         let source_branch = source_ref
             .as_deref()
             .and_then(|s| s.strip_prefix("refs/heads/"));
-        let stashes = self.stashes().await?;
+        let stashes = Box::pin(self.stashes()).await?;
         let source_stash = stashes
             .entries
             .iter()
@@ -367,7 +367,7 @@ impl Repository {
             .entries
             .iter()
             .find(|entry| entry.branch.as_deref() == Some(&target.branch));
-        let worktrees = self.worktrees().await?;
+        let worktrees = Box::pin(self.worktrees()).await?;
         let occupied = worktrees
             .as_array()
             .context("invalid worktree list")?
@@ -635,13 +635,13 @@ impl Repository {
         replace: bool,
         restore_index: bool,
     ) -> Result<Value> {
-        self.checkout_execute_id(
+        Box::pin(self.checkout_execute_id(
             plan,
             strategy,
             replace,
             restore_index,
             uuid::Uuid::new_v4().to_string(),
-        )
+        ))
         .await
     }
     async fn checkout_execute_id(
@@ -683,10 +683,14 @@ impl Repository {
             error: None,
         };
         write_receipt(base.clone(), receipt.clone()).await?;
-        let result=async {
+        let result=Box::pin(async {
             cancellation::Cancellation::current().check()?;
             // Bind the last read to the same reviewed source, before any native mutation.
-            let refreshed = self.refresh_checkout_plan(&plan.target).await?;
+            let repository = self.clone();
+            let target = plan.target.clone();
+            let refreshed = crate::git_credentials::scoped_read_task(async move {
+                repository.refresh_checkout_plan(&target).await
+            }).await?;
             if let Some(creation) = &refreshed.target.creation {
                 creation.ensure_name_rules()?;
             }
@@ -742,7 +746,7 @@ impl Repository {
             }
             self.checkout_phase(&base,&mut receipt,"complete").await?;
             Ok::<_,anyhow::Error>(json!({"code":0,"stdout":switched.text().stdout,"stderr":"","receipt_id":receipt.id,"saved_oid":receipt.saved_oid,"strategy":strategy,"created":plan.target.creation.is_some(),"checked_out":true}))
-        }.await;
+        }).await;
         match result {
             Ok(value) => Ok(value),
             Err(error) => {

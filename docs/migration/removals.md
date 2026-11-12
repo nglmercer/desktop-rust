@@ -9,27 +9,27 @@
 Ruta retirada: (pendiente) rust/crates/desktop-core  [renombrado a desktop-shell-core-legacy]
 Responsabilidad anterior: dominio desktop GUI-free: models, git, storage, api, state, ipc, platform, io/limits/executor/process
 Reemplazo conectado: rust/crates/core (único desktop-core definitivo) + rust/crates/desktop-app (Tao/Wry)
-Consumidores, imports dinámicos y scripts revisados: rust/crates/desktop-app/Cargo.toml (antes desktop-core), rust/Cargo.toml workspace.dependencies, todo el crate desktop-app/src/*.rs (DesktopApp, io::executor/limits/lane, ipc::channels/protocol)
+Consumidores, imports dinámicos y scripts revisados: rust/crates/desktop-app/Cargo.toml (antes desktop-core), Cargo.toml raíz workspace.dependencies, todo el crate desktop-app/src/*.rs (DesktopApp, io::executor/limits/lane, ipc::channels/protocol)
 Datos o formatos que deben seguir siendo compatibles: state JSON sanitizado sin tokens, SecureStore DPAPI, AppPaths, persistencia atómica
-Prueba o recorrido que acredita la sustitución: cargo test --workspace (raíz) + cargo test --manifest-path rust/Cargo.toml + app_smoke.py + suites rust/tests/*.py (41 headless)
+Prueba o recorrido que acredita la sustitución: cargo test --workspace (raíz) + app_smoke.rs + suites rust/tests/*.py
 Commit de retirada: (pendiente Fase final)
 ```
 
 ```text
-Ruta retirada: (pendiente) rust/Cargo.toml + rust/Cargo.lock (workspace shell)
+Ruta retirada: rust/Cargo.toml + rust/Cargo.lock (workspace shell)
 Responsabilidad anterior: workspace shell separado (desktop-core legacy + desktop-app)
 Reemplazo conectado: Cargo.toml raíz consolidado (un solo workspace, un solo lock)
-Consumidores, imports dinámicos y scripts revisados: .github/workflows/rust.yml, scripts `cargo build --manifest-path rust/Cargo.toml`, docs/MIGRATION.md, rust/README.md
+Consumidores, imports dinámicos y scripts revisados: .github/workflows/rust.yml, script/package-rust.sh, MIGRATION.md, rust/README.md
 Datos o formatos que deben seguir siendo compatibles: MSRV 1.85, edition, features, perfiles, dependencias heredadas propias del shell
 Prueba o recorrido que acredita la sustitución: cargo metadata (raíz) single workspace; build CLI/core/bridge sin GTK via default-members; shell build explícito en CI
-Commit de retirada: (pendiente Fase final)
+Commit de retirada: (pendiente)
 ```
 
 ```text
 Ruta retirada: (pendiente) rust/crates/native como host independiente
 Responsabilidad anterior: host Wry/Tao alternativo que sirve assets del bridge (desktop-native)
 Reemplazo conectado: rust/crates/desktop-app (github-desktop-rs, Tao/Wry + desktop://) + rust/crates/cli (desktop-rs serve) para Termux/browser
-Consumidores, imports dinámicos y scripts revisados: rust/tests/native_smoke_launch.py, lifecycle.py (--help/--empty), .github/workflows/rust.yml (job native), rust/README.md
+Consumidores, imports dinámicos y scripts revisados: rust/crates/native/tests/{smoke_launch,headless_cli}.rs, .github/workflows/rust.yml (job native), rust/README.md
 Datos o formatos que deben seguir siendo compatibles: argumentos (--empty/--selected/-C/--config/--smoke-test) y códigos de retorno vía wrapper de compatibilidad
 Prueba o recorrido que acredita la sustitución: native job en CI (xvfb smoke) + wrapper de compatibilidad verificado
 Commit de retirada: (pendiente Fase final; conservar wrapper fino si hay consumidores del ejecutable anterior)
@@ -41,7 +41,7 @@ Responsabilidad anterior: main process Electron (ventana, menú, dialogs, update
 Reemplazo conectado: rust/crates/desktop-app/src/{main,host,instance,menu,protocol}.rs (Tao/Wry, instancia única, protocolos)
 Consumidores, imports dinámicos y scripts revisados: app/src/** imports electron, shims app/src/web/electron*.ts, vite.config.ts (ya no usa webpack), package.json (electron/packager)
 Datos o formatos que deben seguir siendo compatibles: identidad fork propia, directorios propios (no colisión con desktop oficial), protocolo x-github-client://
-Prueba o recorrido que acredita la sustitución: app_smoke.py (arranque real), prueba GUI Windows/macOS/Linux
+Prueba o recorrido que acredita la sustitución: app_smoke.rs (arranque real), prueba GUI Windows/macOS/Linux
 Commit de retirada: (pendiente)
 ```
 
@@ -138,7 +138,7 @@ Commit de retirada: (pendiente Fase final)
 ```text
 Ruta retirada: Tests/fixtures/documentation anteriores exclusivas de rutas eliminadas
 Responsabilidad anterior: suites Electron, fixtures obsoletas, docs Electron
-Reemplazo conectado: suites rust/tests/*.py (41 headless), app_smoke.py (GUI), docs/migration/*, rust/{README,MIGRATION}.md, MIGRATION.md actualizado
+Reemplazo conectado: suites rust/tests/*.py (41 headless), app_smoke.rs (GUI), docs/migration/*, rust/{README,MIGRATION}.md, MIGRATION.md actualizado
 Consumidores, imports dinámicos y scripts revisados: app/test/unit/** Electron, script/*.ts, docs/**, README.md, AGENTS.md, CONTRIBUTING
 Datos o formatos que deben seguir siendo compatibles: oráculos branch/lfs (branch-rules-oracle, lfs-attributes-oracle.json), licencias, procedencia (THIRD_PARTY_NOTICES), gemoji/gitignore/choosealicense submódulos
 Prueba o recorrido que acredita la sustitución: cargo/python suites + vite build + app_smoke + build limpio con submódulos
@@ -150,7 +150,7 @@ Commit de retirada: (pendiente — conservar React/Primer, estilos, componentes,
 | Candidato | Condición antes de eliminar |
 |---|---|
 | `rust/crates/desktop-core` legacy → `desktop-shell-core-legacy` (renombrado Fase 2) | Todos los servicios útiles integrados al `core` definitivo y GUI/CLI/bridge usan `desktop-core` |
-| `rust/Cargo.toml`/`lock` | Workspace raíz consolidado, herencia/features correctas, comandos migrados |
+| `rust/Cargo.toml`/`lock` | Retirados; workspace raíz consolidado y comandos migrados |
 | `rust/crates/native` host independiente | Shell definitivo probado; wrapper compatibilidad solo si quedan consumidores |
 | Dominio TS en stores/`lib/git` | No decide efectos ni persistencia; conserva interfaces/proyecciones |
 | `app/src/main-process/**`, entradas Electron, crash shell | Responsabilidades portadas, referencias resueltas, plataforma verificada |

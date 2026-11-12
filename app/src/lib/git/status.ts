@@ -17,7 +17,10 @@ import {
   IStatusHeader,
   isStatusHeader,
   isStatusEntry,
+  statusItemsFromBackend,
 } from '../status-parser'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 import { DiffSelectionType, DiffSelection } from '../../models/diff'
 import { Repository } from '../../models/repository'
 import { IAheadBehind } from '../../models/branch'
@@ -218,38 +221,142 @@ export async function getStatus(
     '-z',
   ]
 
-  const { stdout, exitCode } = await git(args, repository.path, 'getStatus', {
-    successExitCodes: new Set(rejectOnError ? [0] : [0, 128]),
-    encoding: 'buffer',
-  })
-
-  if (exitCode === 128) {
-    log.debug(
-      `'git status' returned 128 for '${repository.path}' and is likely missing its .git directory`
+  let parsed: ReturnType<typeof parsePorcelainStatus> | undefined
+  let usedRustStatus = false
+  if (backend().transportKind === 'ws') {
+    parsed = statusItemsFromBackend(
+      await backend().detailedRepositoryStatus(
+        repository.path,
+        includeUntracked
+      )
     )
-    return null
+    usedRustStatus = true
   }
+  if (!rejectOnError && backend().transportKind === 'wry') {
+    parsed = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          const records = await backend().detailedRepositoryStatus(
+            repository.path,
+            includeUntracked
+          )
+          return statusItemsFromBackend(records)
+        } catch (error) {
+          // Missing repositories and oversized reads still use the legacy
+          // path so its existing error and output-size behavior is preserved.
+          log.warn(
+            'Rust status read failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+    usedRustStatus = parsed !== undefined
+  }
+  if (parsed === undefined) {
+    const { stdout, exitCode } = await git(args, repository.path, 'getStatus', {
+      successExitCodes: new Set(rejectOnError ? [0] : [0, 128]),
+      encoding: 'buffer',
+    })
 
-  const parsed = parsePorcelainStatus(stdout)
+    if (exitCode === 128) {
+      log.debug(
+        `'git status' returned 128 for '${repository.path}' and is likely missing its .git directory`
+      )
+      return null
+    }
+    parsed = parsePorcelainStatus(stdout)
+  }
   const headers = parsed.filter(isStatusHeader)
   const entries = parsed.filter(isStatusEntry)
 
-  const mergeHeadFound = await isMergeHeadSet(repository)
+  const transport = backend().transportKind
+  let context:
+    | Awaited<ReturnType<ReturnType<typeof backend>['repositoryStatusContext']>>
+    | undefined
+  if (transport === 'ws') {
+    context = await backend().repositoryStatusContext(repository.path)
+  } else if (transport === 'wry' && usedRustStatus) {
+    context = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          return await backend().repositoryStatusContext(repository.path)
+        } catch (error) {
+          log.warn(
+            'Rust status context read failed; retrying with the existing shell path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+  }
+  const mergeHeadFound =
+    context?.mergeHeadFound ?? (await isMergeHeadSet(repository))
   const conflictedFilesInIndex = entries.filter(e =>
     conflictStatusCodes.includes(e.statusCode)
   )
-  const rebaseInternalState = await getRebaseInternalState(repository)
+  const rebaseInternalState =
+    context === undefined
+      ? await getRebaseInternalState(repository)
+      : context.rebaseInternalState
 
-  const conflictDetails = await getConflictDetails(
-    repository,
-    mergeHeadFound,
-    conflictedFilesInIndex,
-    rebaseInternalState
-  )
+  let conflictDetails: ConflictFilesDetails | undefined
+  if (transport === 'ws') {
+    conflictDetails = await getBridgeConflictDetails(
+      repository,
+      mergeHeadFound,
+      conflictedFilesInIndex,
+      rebaseInternalState
+    )
+  } else if (
+    transport === 'wry' &&
+    usedRustStatus &&
+    (mergeHeadFound ||
+      rebaseInternalState !== null ||
+      conflictedFilesInIndex.length > 0)
+  ) {
+    conflictDetails = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          return await getBridgeConflictDetails(
+            repository,
+            mergeHeadFound,
+            conflictedFilesInIndex,
+            rebaseInternalState
+          )
+        } catch (error) {
+          log.warn(
+            'Rust conflict details read failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+  }
+  const resolvedConflictDetails =
+    conflictDetails ??
+    (await getConflictDetails(
+      repository,
+      mergeHeadFound,
+      conflictedFilesInIndex,
+      rebaseInternalState
+    ))
 
   // Map of files keyed on their paths.
   const files = entries.reduce(
-    (files, entry) => buildStatusMap(files, entry, conflictDetails),
+    (files, entry) => buildStatusMap(files, entry, resolvedConflictDetails),
     new Map<string, WorkingDirectoryFileChange>()
   )
 
@@ -268,9 +375,12 @@ export async function getStatus(
 
   const workingDirectory = WorkingDirectoryStatus.fromFiles([...files.values()])
 
-  const isCherryPickingHeadFound = await isCherryPickHeadFound(repository)
+  const isCherryPickingHeadFound =
+    context?.isCherryPickingHeadFound ??
+    (await isCherryPickHeadFound(repository))
 
-  const squashMsgFound = await isSquashMsgSet(repository)
+  const squashMsgFound =
+    context?.squashMsgFound ?? (await isSquashMsgSet(repository))
 
   return {
     currentBranch,
@@ -499,4 +609,46 @@ async function getConflictDetails(
     conflictCountsByPath: new Map<string, number>(),
     binaryFilePaths: new Array<string>(),
   }
+}
+
+async function getBridgeConflictDetails(
+  repository: Repository,
+  mergeHeadFound: boolean,
+  conflictedFilesInIndex: ReadonlyArray<IStatusEntry>,
+  rebaseInternalState: RebaseInternalState | null
+): Promise<ConflictFilesDetails> {
+  if (
+    !mergeHeadFound &&
+    rebaseInternalState === null &&
+    conflictedFilesInIndex.length === 0
+  ) {
+    return { conflictCountsByPath: new Map(), binaryFilePaths: [] }
+  }
+  const kind = mergeHeadFound
+    ? 'merge'
+    : rebaseInternalState !== null
+    ? 'rebase'
+    : 'working'
+  const details = await backend().repositoryConflictDetails(
+    repository.path,
+    kind
+  )
+  const counts = new Map<string, number>()
+  for (const [, path] of details.check.matchAll(
+    /^(.+):\d+: leftover conflict marker/gm
+  )) {
+    counts.set(path, (counts.get(path) ?? 0) + 1)
+  }
+  const binary = new Set(
+    Array.from(
+      details.numstat.matchAll(/-\t-\t(?:\0.+\0)?([^\0]*)/gi),
+      match => match[1]
+    )
+  )
+  const attrs = details.attributes.split('\0')
+  for (let i = 0; i + 2 < attrs.length; i += 3) {
+    if (attrs[i + 1] === 'merge' && attrs[i + 2] === 'binary')
+      binary.add(attrs[i])
+  }
+  return { conflictCountsByPath: counts, binaryFilePaths: [...binary] }
 }

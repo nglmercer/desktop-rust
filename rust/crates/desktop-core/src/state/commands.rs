@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::api::client::PullRequestInput;
 use crate::app::DesktopApp;
 use crate::error::{AppError, Result};
 use crate::git::{
@@ -20,7 +21,7 @@ use crate::git::{
 };
 use crate::ipc::protocol::IpcMessage;
 use crate::models::account::Account;
-use crate::models::app_state::{AppState, RepositoryState};
+use crate::models::app_state::AppState;
 use crate::models::misc::PopupType;
 use crate::models::repository::Repository;
 
@@ -89,7 +90,7 @@ fn refresh(app: &DesktopApp, state: &mut AppState, path: &Path) -> Result<Value>
     let repository_state = state
         .repository_states
         .entry(path.to_string_lossy().into_owned())
-        .or_insert_with(RepositoryState::default);
+        .or_default();
     repository_state.changes_state.working_directory = status.clone();
     repository_state.branches_state.all_branches = branches.clone();
     repository_state.history_state.commits = commits.clone();
@@ -631,10 +632,12 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
                 &token,
                 &required(&o, "owner")?,
                 &required(&o, "name")?,
-                &required(&o, "title")?,
-                &required(&o, "head")?,
-                &required(&o, "base")?,
-                &get_str(&o, "body").unwrap_or_default(),
+                PullRequestInput {
+                    title: &required(&o, "title")?,
+                    head: &required(&o, "head")?,
+                    base: &required(&o, "base")?,
+                    body: &get_str(&o, "body").unwrap_or_default(),
+                },
             )?)?
         }
         "desktop.fetch-issues" => {

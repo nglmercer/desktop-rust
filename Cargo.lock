@@ -686,6 +686,7 @@ name = "desktop-app"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "desktop-core",
  "desktop-shell-core-legacy",
  "http",
  "include_dir",
@@ -695,8 +696,10 @@ dependencies = [
  "serde_json",
  "tao",
  "thiserror 2.0.21",
+ "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "webkit2gtk",
  "wry",
 ]
@@ -709,7 +712,6 @@ dependencies = [
  "axum",
  "desktop-core",
  "futures-util",
- "include_dir",
  "serde",
  "serde_json",
  "tokio",
@@ -722,12 +724,17 @@ name = "desktop-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "clap",
  "desktop-bridge",
  "desktop-core",
+ "futures-util",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
+ "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]
@@ -3889,6 +3896,7 @@ checksum = "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

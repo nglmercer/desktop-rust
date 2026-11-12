@@ -1,0 +1,40 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.7/schema.json",
+  "files": {
+    "includes": [
+      "script/test.mts",
+      "vitest.config.ts",
+      "app/test/vitest-setup.ts",
+      "rust/tests/github-cli.test.ts",
+      "rust/tests/branch-rules-oracle/*.mts",
+      "rust/tests/branch-rules-oracle/*.test.ts",
+      "script/draft-release/format-json.ts",
+      "script/draft-release/format-json-cli.ts",
+      "script/draft-release/format-json.test.ts"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "es5",
+      "arrowParentheses": "asNeeded"
+    }
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "off"
+      }
+    }
+  }
+}

@@ -178,9 +178,9 @@ jobs:
           npm exec --silent -- ts-node -P script/tsconfig.json \
             script/draft-release/ci.ts prepare "$NEXT_VERSION" "$ENTRIES"
 
-          # Ensure changelog.json passes Prettier (ci.ts writes with
-          # JSON.stringify which differs from Prettier's formatting)
-          npm exec -- prettier --write changelog.json
+          # Format the changelog with the project formatter.
+          npm exec --silent -- ts-node -P script/tsconfig.json \
+            script/draft-release/format-json-cli.ts changelog.json
 
           git add app/package.json changelog.json
           # Release refs from before the npm migration have no npm lockfile.

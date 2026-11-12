@@ -6,6 +6,10 @@ on:
       - 'Cargo.lock'
       - '.cargo/**'
       - 'rust/**'
+      - 'app/src/**'
+      - 'app/index.html'
+      - 'app/styles/**'
+      - '.test.env'
       - 'app/webpack.common.ts'
       - 'app/src/models/**'
       - 'app/src/lib/git/interpret-trailers.ts'
@@ -15,9 +19,19 @@ on:
       - 'app/src/lib/get-file-hash.ts'
       - 'app/src/web/**'
       - 'app/test/unit/web-*'
+      - 'app/test/unit/**'
+      - 'app/test/vitest-setup.ts'
+      - 'app/test/backend-transport-tsconfig.json'
+      - 'script/test.mts'
+      - 'eslint-rules/**'
+      - 'biome.json'
+      - 'vitest.config.ts'
+      - 'vitest-suites.json'
       - 'vite.config.ts'
+      - 'vite.highlighter.config.ts'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'app/src/models/diff/diff-line.ts'
       - 'app/src/models/diff/raw-diff.ts'
       - 'app/src/ui/diff/image-diffs/**'
@@ -32,6 +46,10 @@ on:
       - 'Cargo.lock'
       - '.cargo/**'
       - 'rust/**'
+      - 'app/src/**'
+      - 'app/index.html'
+      - 'app/styles/**'
+      - '.test.env'
       - 'app/webpack.common.ts'
       - 'app/src/models/**'
       - 'app/src/lib/git/interpret-trailers.ts'
@@ -41,9 +59,19 @@ on:
       - 'app/src/lib/get-file-hash.ts'
       - 'app/src/web/**'
       - 'app/test/unit/web-*'
+      - 'app/test/unit/**'
+      - 'app/test/vitest-setup.ts'
+      - 'app/test/backend-transport-tsconfig.json'
+      - 'script/test.mts'
+      - 'eslint-rules/**'
+      - 'biome.json'
+      - 'vitest.config.ts'
+      - 'vitest-suites.json'
       - 'vite.config.ts'
+      - 'vite.highlighter.config.ts'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'app/src/models/diff/diff-line.ts'
       - 'app/src/models/diff/raw-diff.ts'
       - 'app/src/ui/diff/image-diffs/**'
@@ -82,64 +110,42 @@ jobs:
           pnpm vite:build
           test -f out/vite-dist/index.html
           test -f out/vite-dist/highlighter.js
-      - name: Frontend web shims (Vitest via node --test)
-        run: node --test app/test/unit/web-*.ts 2>&1 | head -n 100 || node script/test.mjs app/test/unit/web-child-process-test.ts app/test/unit/web-fs-range-test.ts app/test/unit/web-random-uuid-test.ts
+      - name: Check migrated frontend tooling and tests
+        run: |
+          npm run lint:biome
+          npm run check:eslint
+          node node_modules/typescript/bin/tsc -p app/test/backend-transport-tsconfig.json
+          node node_modules/typescript/bin/tsc -p rust/tests/tsconfig.json
+          node node_modules/vitest/vitest.mjs run --config vitest.config.ts
+          npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts --no-audit --no-fund
+          npm run typecheck --prefix rust/tests/branch-rules-oracle
+          node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check
+          node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check --current-re2js
+          node --import tsx rust/tests/branch-rules-oracle/build-engine.mts --check
       - name: Check Rust (headless workspace)
+        env:
+          DESKTOP_TEST_REQUIRE_LFS: '1'
         run: |
           cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-          cargo test --workspace --locked
-          cargo build --workspace --locked
-      - name: Check Rust shell workspace compilation
-        run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
+          cargo clippy --workspace --exclude desktop-app --all-targets --locked -- -D warnings
+          cargo test --workspace --exclude desktop-app --locked
+          DESKTOP_TEST_REQUIRE_COPILOT_RUNTIME=1 cargo test -p desktop-core installed_runtime_responds_to_handshake_and_ping_when_present --locked
+          cargo test -p desktop-native --test smoke_launch --locked
+          cargo build --workspace --exclude desktop-app --locked
+      - name: Exercise the frontend transport against the real bridge
+        run: DESKTOP_TEST_BRIDGE=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts app/test/unit/backend-websocket-integration-test.ts rust/tests/github-adapter.test.ts
+      - name: Exercise the installed GitHub CLI against a local HTTPS API
+        run: DESKTOP_TEST_REAL_GH=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/github-cli.test.ts
       - name: Verify installed Git LFS
         run: git lfs version
       - name: Check repository and GitHub services offline
         run: |
-          python3 rust/tests/lifecycle.py
-          python3 rust/tests/cancellation.py
-          python3 rust/tests/signals.py
-          python3 rust/tests/workflows.py
-          python3 rust/tests/direct_git_cli.py
-          python3 rust/tests/stashes.py
-          python3 rust/tests/branch_rename.py
-          python3 rust/tests/branch_create.py
-          python3 rust/tests/branch_refs.py
-          python3 rust/tests/branch_policy.py
           python3 rust/tests/repository_context.py
           python3 rust/tests/repository_accounts.py
-          python3 rust/tests/publish_context.py
-          python3 rust/tests/publish_preview.py
-          python3 rust/tests/publish_receipts.py
           python3 rust/tests/publish_create.py
-          python3 rust/tests/publish_ledger_visibility.py
-          python3 rust/tests/publish_preview_cancel.py
-          python3 rust/tests/publish_continue.py
-          python3 rust/tests/publish_origin.py
           python3 rust/tests/git_credentials.py
           python3 rust/tests/upstream_setup.py
           python3 rust/tests/branch_name_rules.py
-          python3 rust/tests/branch_delete.py
-          python3 rust/tests/remote_delete.py
-          python3 rust/tests/upstream_delete.py
-          python3 rust/tests/checkout.py
-          python3 rust/tests/checkout_native.py
-          python3 rust/tests/native_smoke_launch.py
-          python3 rust/tests/commit_review.py
-          python3 rust/tests/diffs.py
-          python3 rust/tests/discard.py
-          python3 rust/tests/discard_advanced.py
-          python3 rust/tests/discard_gc.py
-          python3 rust/tests/lfs.py
-          python3 rust/tests/lfs_diffs.py
-          python3 rust/tests/lfs_operations.py
-          python3 rust/tests/history_state.py
-          python3 rust/tests/editor_conflicts.py
-          python3 rust/tests/conflict_undo.py
-          python3 rust/tests/management.py
-          python3 rust/tests/repositories.py
-          python3 rust/tests/github.py
-          python3 rust/tests/github_cli.py
           python3 rust/tests/github_create.py
           python3 rust/tests/github_checkout_tracking.py
 
@@ -175,9 +181,12 @@ jobs:
           cargo clippy -p desktop-native --features native --all-targets --locked -- -D warnings
           cargo test -p desktop-core -p desktop-native --features desktop-native/native --locked
           cargo build -p desktop-native --features native --locked
-      - name: Compile desktop shell
+      - name: Check desktop shell
         if: runner.os == 'Linux'
-        run: cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
+        run: |
+          cargo clippy -p desktop-app --all-targets --locked -- -D warnings
+          cargo test -p desktop-app --locked
+          cargo build -p desktop-app --locked
       - name: Exercise native webview on Linux
         if: runner.os == 'Linux'
         env:
@@ -202,4 +211,4 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
           NO_AT_BRIDGE: '1'
-        run: python3 rust/tests/app_smoke.py
+        run: xvfb-run -a cargo test -p desktop-app --test app_smoke --locked -- --ignored

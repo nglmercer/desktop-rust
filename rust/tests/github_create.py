@@ -18,9 +18,9 @@ import tempfile
 import threading
 from urllib.parse import urlsplit
 
-from discard_advanced import BINARY
+from support.fixture import BINARY
 from git_credentials import Credentials, optional_tool, process_descendants
-from lifecycle import alive
+from support.process import alive
 from repository_accounts import Accounts, ALICE, BOB, ENV, SECRET, NAMED, OTHER, NONE, EFFECTIVE, clean
 from repository_context import private, stop, wait_for
 

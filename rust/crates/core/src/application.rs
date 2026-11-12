@@ -1,16 +1,15 @@
-//! Common application service — single authority for GitHub Desktop workflows.
+//! Experimental common application-service contract and job ledger.
 //!
-//! Transports (GUI via Tao/Wry `desktop-app`, headless server via `desktop-bridge`,
-//! CLI via `desktop-rs`) delegate here. No workflow is duplicated in a transport.
-//! The service resolves repositories, accounts, capabilities and operations; it
-//! negotiates version/capabilities and surfaces recoverable `IBackendError`s.
+//! The CLI, bridge and shell do not yet all delegate workflow execution here.
+//! Repository and account resolution, cancellation and transport integration
+//! remain migration work; the ledger below is not an execution service.
 //!
 //! Contract mirrors `app/src/backend/` files generated from this module.
 //! Internal wire formats of the existing carriers are preserved: the bridge
 //! announces `version 3` with `{cancel,max_pending}` capabilities (not JSON-RPC
 //! v1/v2); the Tauri/Wry shell uses correlated `__rpc`/`%RpcResult` IPC. Both
-//! carriers translate to this service; no wire change without explicit
-//! compatibility.
+//! carriers have different supported operations; do not infer parity from
+//! the shared types.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -195,10 +194,7 @@ impl Job {
     }
 }
 
-/// Application service — the single authority all transports delegate to.
-/// Holds the repository registry/handle (when opened) and the job ledger.
-/// GUI, CLI and bridge share its `execute`, `cancel`, `capabilities` and
-/// `snapshot` surfaces; they differ only in wire encoding.
+/// Experimental job ledger. Transports do not yet share its lifecycle.
 #[derive(Clone, Default)]
 pub struct ApplicationService {
     inner: Arc<application_inner::ApplicationInner>,

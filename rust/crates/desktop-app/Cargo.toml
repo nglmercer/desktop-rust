@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 desktop_core.workspace = true
+desktop_backend = { package = "desktop-core", path = "../core" }
+tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -25,6 +27,7 @@ muda.workspace = true
 rfd.workspace = true
 arboard.workspace = true
 include_dir = "0.7"
+uuid = { workspace = true, features = ["serde"] }
 
 [target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]
 # Same version wry links; used for the Edit menu's editing commands.

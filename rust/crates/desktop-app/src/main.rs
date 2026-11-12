@@ -18,6 +18,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod actions;
+mod backend;
 mod bridge;
 mod host;
 mod instance;
@@ -182,7 +183,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let bridge = bridge.clone();
             move |request| bridge.handle_ipc(request.body())
         })
-        .with_initialization_script(&host_env_script())
+        .with_initialization_script(host_env_script())
         .with_initialization_script(INIT_SCRIPT)
         .with_navigation_handler(|url| {
             url.starts_with("desktop://")

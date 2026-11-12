@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node oracle.mjs --check && node build-engine.mjs --check && node embedded-parity.mjs",
-    "build:engine": "node build-engine.mjs",
-    "check:engine": "node build-engine.mjs --check",
-    "record": "node oracle.mjs --record"
+    "test": "npm run typecheck && node --import tsx oracle.mts --check && node --import tsx oracle.mts --check --current-re2js && node --import tsx build-engine.mts --check && cd ../../.. && node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/branch-rules-oracle/embedded-parity.test.ts",
+    "typecheck": "node ../../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "build:engine": "node --import tsx build-engine.mts",
+    "check:engine": "node --import tsx build-engine.mts --check",
+    "record": "node --import tsx oracle.mts --record"
   },
   "dependencies": {
     "re2js": "2.0.1",

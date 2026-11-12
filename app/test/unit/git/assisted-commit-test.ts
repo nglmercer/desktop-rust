@@ -3934,7 +3934,9 @@ describe('git/assisted-commit', () => {
     const child = await promisify(execFile)(
       process.execPath,
       [
-        'script/test.mjs',
+        '--import',
+        'tsx',
+        'script/test.mts',
         'app/test/unit/git/assisted-commit-test.ts',
         '--test-name-pattern=freezes inherited attribute source without remapping',
       ],

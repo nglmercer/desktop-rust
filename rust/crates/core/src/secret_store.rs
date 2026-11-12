@@ -412,10 +412,10 @@ fn detect_backend() -> Backend {
                 kind: StoreKind::Native,
             };
         }
-        return Backend {
+        Backend {
             name: "file-private",
             kind: StoreKind::FilePrivate,
-        };
+        }
     }
 }
 

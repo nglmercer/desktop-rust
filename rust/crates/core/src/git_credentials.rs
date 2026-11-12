@@ -36,6 +36,43 @@ const CHANGED: &str = "Repository account or destination changed; reload before 
 
 tokio::task_local! { static CURRENT: Arc<Lease>; static NATIVE_CONFIGURATION: bool; }
 
+/// Poll a deeply nested read in its own task while retaining request-scoped
+/// cancellation and credential policy. Aborting the caller aborts the child.
+pub(crate) async fn scoped_read_task<T, F>(work: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T>> + Send + 'static,
+{
+    struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+    impl<T> Drop for AbortOnDrop<T> {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let cancellation = Cancellation::current();
+    let lease = CURRENT.try_with(Clone::clone).ok();
+    let native = NATIVE_CONFIGURATION
+        .try_with(|value| *value)
+        .unwrap_or(false);
+    let mut task = AbortOnDrop(tokio::spawn(async move {
+        cancellation
+            .scope(async move {
+                match lease {
+                    Some(lease) => {
+                        CURRENT
+                            .scope(lease, NATIVE_CONFIGURATION.scope(native, work))
+                            .await
+                    }
+                    None => NATIVE_CONFIGURATION.scope(native, work).await,
+                }
+            })
+            .await
+    }));
+    (&mut task.0)
+        .await
+        .context("Repository review task failed")?
+}
+
 struct Lease {
     repository: Repository,
     basis: String,
@@ -800,6 +837,54 @@ async fn helper_inner(operation: &str) -> Result<Reply> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn scoped_read_inherits_cancellation_and_aborts_when_dropped() {
+        let token = super::Cancellation::default();
+        let parent = token.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        token
+            .scope(super::NATIVE_CONFIGURATION.scope(true, async move {
+                let work = super::scoped_read_task(async move {
+                    assert!(
+                        super::NATIVE_CONFIGURATION
+                            .try_with(|value| *value)
+                            .unwrap()
+                    );
+                    started_tx.send(()).unwrap();
+                    super::Cancellation::current().cancelled().await;
+                    Ok(())
+                });
+                let cancel = async move {
+                    started_rx.await.unwrap();
+                    parent.cancel();
+                };
+                let (result, ()) = tokio::join!(work, cancel);
+                result.unwrap();
+            }))
+            .await;
+
+        struct Dropped(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(super::scoped_read_task(async move {
+            let _dropped = Dropped(Some(dropped_tx));
+            started_tx.send(()).unwrap();
+            std::future::pending::<anyhow::Result<()>>().await
+        }));
+        started_rx.await.unwrap();
+        task.abort();
+        tokio::time::timeout(std::time::Duration::from_secs(1), dropped_rx)
+            .await
+            .unwrap()
+            .unwrap();
+    }
     use super::*;
 
     #[test]

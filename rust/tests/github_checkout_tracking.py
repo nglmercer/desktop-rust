@@ -7,10 +7,10 @@ import subprocess
 import sys
 import tempfile
 
-from discard_advanced import BINARY
+from support.fixture import BINARY
 from git_credentials import Credentials, HttpsGit, optional_tool, read_records
 from repository_accounts import clean
-from lfs_diffs import cached, pointer
+from support.lfs import cached, pointer
 import hashlib
 from repository_context import private, stop, wait_for
 

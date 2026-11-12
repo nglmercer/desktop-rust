@@ -485,9 +485,9 @@ impl Repository {
         })
     }
     pub(crate) async fn branch_context(&self) -> Result<BranchContext> {
-        let state = self.context_state().await?;
-        let binding = self.binding_for_state(&state).await?;
-        self.context_view(&state, &binding).await
+        let state = Box::pin(self.context_state()).await?;
+        let binding = Box::pin(self.binding_for_state(&state)).await?;
+        Box::pin(self.context_view(&state, &binding)).await
     }
     pub(crate) async fn repository_context(&self) -> Result<Value> {
         Ok(serde_json::to_value(self.branch_context().await?.view)?)

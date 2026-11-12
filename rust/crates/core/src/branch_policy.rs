@@ -64,10 +64,11 @@ impl BranchPolicy {
 }
 impl Repository {
     pub(crate) async fn branch_policy(&self) -> Result<BranchPolicy> {
-        self.branch_policy_for(&self.branch_list().await?).await
+        let branches = Box::pin(self.branch_list()).await?;
+        Box::pin(self.branch_policy_for(&branches)).await
     }
     pub(crate) async fn branch_policy_for(&self, branches: &Value) -> Result<BranchPolicy> {
-        let context = self.branch_context().await?;
+        let context = Box::pin(self.branch_context()).await?;
         let default_remote = context.remote;
         let remote_head = if let Some(remote) = &default_remote
             && context.inspect_head

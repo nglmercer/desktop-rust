@@ -9,29 +9,26 @@
 //! `$(INTERNAL)` handshake. This client does not reinvent the wire; it
 //! verifies the contract against the installed dependency before wiring.
 //!
-//! Guarantees preserved from `copilot-store.ts` / `copilot-operation.ts`:
-//! discovery and startup per SO/arch, auth, account changes, models/quota/
-//! BYOK, session create/resume/destroy, streaming messages, errors,
-//! cancel/close, assisted-commit flows, credential renewal and runtime
-//! recovery without duplicating a mutation. Assisted-commit planning,
-//! `repository-operation.ts` leases and `assisted-commit-transactions.md`
-//! stay in Rust: resource protection spans acceptance/verification/
-//! reconciliation; the push boundary is irreversible — before entering
-//! push only the current execution rolls back; after that the local commits
-//! are preserved even if a hook aborts. `Retry rollback/push/refresh` are
-//! separate operations.
+//! Runtime discovery and a bounded native handshake and ping are implemented.
+//! The optional native turn keeps its session in memory; the default SDK
+//! wrapper still creates a new ephemeral session per request. Durable session
+//! recovery, account changes, streaming and the full assisted
+//! commit workflow remain migration work.
 //!
 //! Capability reporting: when the runtime is incompatible (e.g. a Linux
 //! x64 binary on Android/Termux or a foreign arch), the capability is
 //! published as **unavailable** and the Git client stays operational.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
+
+pub(crate) mod native_turn;
 
 /// The SDK pinned by `app/package.json` (`@github/copilot-sdk@1.0.27-preview.1`).
 /// The client discovers the runtime shipped with it; for exact parity the SDK is kept as
@@ -46,6 +43,35 @@ pub const COPILOT_MIN_PROTOCOL_VERSION: u32 = 3;
 /// JSON-RPC barrier message (`$/sdkDrain`).
 pub const SDK_DRAIN_METHOD: &str = "$/sdkDrain";
 
+/// Translate Rust target names to the platform labels used by the pinned SDK.
+pub(crate) fn runtime_platform(
+    os: &str,
+    arch: &str,
+    musl: bool,
+) -> Option<(&'static str, &'static str)> {
+    let platform = match os {
+        "linux" if musl => "linuxmusl",
+        "linux" => "linux",
+        "macos" => "darwin",
+        "windows" => "win32",
+        _ => return None,
+    };
+    let arch = match arch {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        _ => return None,
+    };
+    Some((platform, arch))
+}
+
+pub(crate) fn current_runtime_platform() -> Option<(&'static str, &'static str)> {
+    runtime_platform(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        cfg!(target_env = "musl"),
+    )
+}
+
 #[derive(Clone, Debug)]
 pub struct RuntimeInfo {
     pub root: PathBuf,
@@ -59,21 +85,18 @@ impl RuntimeInfo {
     /// copilot-runtime[.exe]`. Returns an error with an actionable message
     /// when the platform/arch has no runtime (capability unavailable).
     pub fn discover(runtime_root: &Path) -> Result<Self> {
-        let platform = std::env::consts::OS.to_string();
-        let arch = std::env::consts::ARCH.to_string();
-        let arch_npm = if arch == "x86_64" {
-            "x64".to_string()
-        } else {
-            arch.clone()
-        };
-        let name = if platform == "windows" {
+        let (platform, arch) = current_runtime_platform().ok_or_else(|| anyhow::anyhow!(
+            "Copilot runtime not available for {}-{} — Copilot is unavailable on this platform; Git remains operational",
+            std::env::consts::OS, std::env::consts::ARCH
+        ))?;
+        let name = if platform == "win32" {
             "copilot-runtime.exe"
         } else {
             "copilot-runtime"
         };
         let binary = runtime_root
             .join("prebuilds")
-            .join(format!("{platform}-{arch_npm}"))
+            .join(format!("{platform}-{arch}"))
             .join(name);
         if !binary.exists() {
             bail!(
@@ -81,19 +104,11 @@ impl RuntimeInfo {
                 binary.display()
             );
         }
-        // Refuse cross-arch execution (e.g. Linux x64 binary on Android).
-        // The binary must run natively; a foreign arch is reported
-        // unavailable, never executed.
-        if platform == "android" {
-            bail!(
-                "Copilot is unavailable on Android/Termux (no compatible runtime) — Git remains operational"
-            );
-        }
         Ok(Self {
             root: runtime_root.to_owned(),
             binary,
-            platform,
-            arch,
+            platform: platform.to_owned(),
+            arch: arch.to_owned(),
         })
     }
 }
@@ -145,58 +160,152 @@ pub fn probe(runtime_root: &Path) -> CopilotCapability {
     }
 }
 
-/// Bounded runtime process. Spawns JSON-RPC over stdio; shutdown is
-/// graceful (10 s like the SDK's `RUNTIME_SHUTDOWN_TIMEOUT_MS`) then forced.
-pub struct CopilotProcess {
-    child: std::process::Child,
-    /// Connection id assigned at spawn; used to pair `session` creations.
-    pub connection_id: String,
+const MAX_RPC_HEADER: usize = 8192;
+const MAX_RPC_BODY: usize = 1024 * 1024;
+const COPILOT_MAX_PROTOCOL_VERSION: u64 = 3;
+
+async fn read_rpc_frame(reader: &mut (impl AsyncRead + Unpin)) -> Result<serde_json::Value> {
+    let mut header = Vec::new();
+    loop {
+        anyhow::ensure!(
+            header.len() < MAX_RPC_HEADER,
+            "Copilot RPC header too large"
+        );
+        header.push(reader.read_u8().await.context("read Copilot RPC header")?);
+        if header.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let header = std::str::from_utf8(&header).context("invalid Copilot RPC header")?;
+    let mut length = None;
+    for line in header.split("\r\n").filter(|line| !line.is_empty()) {
+        let (name, value) = line
+            .split_once(':')
+            .context("malformed Copilot RPC header")?;
+        if name.eq_ignore_ascii_case("content-length") {
+            anyhow::ensure!(length.is_none(), "duplicate Copilot RPC content length");
+            let parsed: usize = value
+                .trim()
+                .parse()
+                .context("invalid Copilot RPC content length")?;
+            anyhow::ensure!(parsed <= MAX_RPC_BODY, "Copilot RPC body too large");
+            length = Some(parsed);
+        }
+    }
+    let mut body = vec![0; length.context("missing Copilot RPC content length")?];
+    reader
+        .read_exact(&mut body)
+        .await
+        .context("read Copilot RPC body")?;
+    serde_json::from_slice(&body).context("invalid Copilot RPC JSON")
 }
 
-impl CopilotProcess {
-    pub fn spawn(info: &RuntimeInfo) -> Result<Self> {
-        let connection_id = Uuid::new_v4().to_string();
-        let mut cmd = Command::new(&info.binary);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("COPILOT_SDK_VERSION", COPILOT_SDK_VERSION)
-            .env(
-                "COPILOT_MIN_PROTOCOL_VERSION",
-                COPILOT_MIN_PROTOCOL_VERSION.to_string(),
+async fn ping_rpc(
+    reader: &mut (impl AsyncRead + Unpin),
+    writer: &mut (impl AsyncWrite + Unpin),
+) -> Result<u64> {
+    let body = br#"{"jsonrpc":"2.0","id":1,"method":"ping","params":{"message":"probe"}}"#;
+    writer
+        .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+        .await?;
+    writer.write_all(body).await?;
+    writer.flush().await?;
+    for _ in 0..64 {
+        let message = read_rpc_frame(reader).await?;
+        if message.get("id") == Some(&serde_json::json!(1)) {
+            anyhow::ensure!(
+                message.get("error").is_none(),
+                "Copilot runtime rejected ping"
             );
-        // Never leak secrets on argv — tokens travel stdin.
-        let child = cmd
-            .spawn()
-            .with_context(|| format!("spawn copilot runtime at {}", info.binary.display()))?;
-        Ok(Self {
-            child,
-            connection_id,
-        })
+            anyhow::ensure!(
+                message["result"]["message"] == "pong: probe",
+                "unexpected Copilot ping response"
+            );
+            return message["result"]["protocolVersion"]
+                .as_u64()
+                .context("Copilot ping omitted protocol version");
+        }
     }
+    bail!("Copilot runtime did not reply to ping")
+}
 
-    /// Graceful shutdown: close stdin, wait up to `timeout`, then kill the
-    /// process group. Bounded — mirrors the SDK's 10 s drain.
-    pub fn shutdown(&mut self, timeout: Duration) -> Result<()> {
-        if self.child.try_wait()?.is_some() {
-            return Ok(());
+async fn connect_rpc(
+    reader: &mut (impl AsyncRead + Unpin),
+    writer: &mut (impl AsyncWrite + Unpin),
+) -> Result<Option<u64>> {
+    let body = br#"{"jsonrpc":"2.0","id":0,"method":"connect","params":{"supportedTaskKinds":["agent","client","shell"]}}"#;
+    writer
+        .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+        .await?;
+    writer.write_all(body).await?;
+    writer.flush().await?;
+    for _ in 0..64 {
+        let message = read_rpc_frame(reader).await?;
+        if message.get("id") != Some(&serde_json::json!(0)) {
+            continue;
         }
-        drop(self.child.stdin.take());
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            if self.child.try_wait()?.is_some() {
-                return Ok(());
+        if let Some(error) = message.get("error") {
+            if error["code"].as_i64() == Some(-32601)
+                || error["message"].as_str() == Some("Unhandled method connect")
+            {
+                return Ok(None);
             }
-            if std::time::Instant::now() >= deadline {
-                self.child
-                    .kill()
-                    .context("kill copilot runtime on shutdown timeout")?;
-                let _ = self.child.wait();
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(25));
+            bail!("Copilot runtime rejected protocol handshake");
         }
+        return Ok(Some(
+            message["result"]["protocolVersion"]
+                .as_u64()
+                .context("Copilot handshake omitted protocol version")?,
+        ));
     }
+    bail!("Copilot runtime did not reply to protocol handshake")
+}
+
+fn check_protocol_version(version: u64) -> Result<()> {
+    anyhow::ensure!(
+        (u64::from(COPILOT_MIN_PROTOCOL_VERSION)..=COPILOT_MAX_PROTOCOL_VERSION).contains(&version),
+        "unsupported Copilot protocol version {version}"
+    );
+    Ok(())
+}
+
+async fn verify_runtime(runtime: &RuntimeInfo) -> Result<()> {
+    crate::cancellation::Cancellation::current().check()?;
+    let mut command = tokio::process::Command::new(&runtime.binary);
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command
+        .args([
+            "--headless",
+            "--no-auto-update",
+            "--stdio",
+            "--no-auto-login",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("spawn Copilot runtime at {}", runtime.binary.display()))?;
+    let _group = crate::process::ProcessGroup::new(&child);
+    let mut stdin = child
+        .stdin
+        .take()
+        .context("Copilot runtime stdin unavailable")?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .context("Copilot runtime stdout unavailable")?;
+    let handshake = async {
+        if let Some(version) = connect_rpc(&mut stdout, &mut stdin).await? {
+            check_protocol_version(version)?;
+        }
+        check_protocol_version(ping_rpc(&mut stdout, &mut stdin).await?)
+    };
+    crate::cancellation::wait(tokio::time::timeout(Duration::from_secs(10), handshake))
+        .await?
+        .context("Copilot runtime handshake timed out")??;
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -215,25 +324,17 @@ pub struct SessionHandle {
     pub model: String,
 }
 
-/// Create a session (Rust-owned). The renderer never holds the SDK session —
-/// this handle is the only token that crosses to the UI. Renewal of
-/// credentials is re-run against the GitHub API without duplicating a
-/// mutation: the session id is stable across credential renewal.
+/// Verify the runtime and create a local handle for the current turn wrapper.
+/// This does not yet create or resume a persistent runtime session.
 pub async fn create_session(runtime: &RuntimeInfo, cfg: &SessionConfig) -> Result<SessionHandle> {
-    // In this Rust-owned client the runtime is spawned lazily per operation;
-    // `create_session` validates discovery and returns a handle that the
-    // application service ledger tracks. The actual JSON-RPC `sessions/create`
-    // is emitted by `CopilotProcess` when the long-lived worker is bound.
-    let _process = CopilotProcess::spawn(runtime)?;
-    // For Tokio-aware callers, downgrade to a blocking spawn in `spawn_blocking`;
-    // the handle creation itself is pure.
+    // The current turn wrapper creates an ephemeral SDK session later. Verify
+    // the runtime's framing and ping response before returning a local handle.
+    verify_runtime(runtime).await?;
     let handle = SessionHandle {
         id: Uuid::new_v4().to_string(),
         connection_id: Uuid::new_v4().to_string(),
         model: cfg.model.clone().unwrap_or_else(|| "auto".to_string()),
     };
-    // Validate that the runtime is executable without entering a turn.
-    let _ = drop(_process);
     Ok(handle)
 }
 
@@ -290,6 +391,137 @@ impl PushPhase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rust_target_names_match_the_sdk_runtime_packages() {
+        assert_eq!(
+            runtime_platform("linux", "x86_64", false),
+            Some(("linux", "x64"))
+        );
+        assert_eq!(
+            runtime_platform("linux", "aarch64", false),
+            Some(("linux", "arm64"))
+        );
+        assert_eq!(
+            runtime_platform("linux", "aarch64", true),
+            Some(("linuxmusl", "arm64"))
+        );
+        assert_eq!(
+            runtime_platform("linux", "x86_64", true),
+            Some(("linuxmusl", "x64"))
+        );
+        assert_eq!(
+            runtime_platform("macos", "aarch64", false),
+            Some(("darwin", "arm64"))
+        );
+        assert_eq!(
+            runtime_platform("macos", "x86_64", false),
+            Some(("darwin", "x64"))
+        );
+        assert_eq!(
+            runtime_platform("windows", "x86_64", false),
+            Some(("win32", "x64"))
+        );
+        assert_eq!(
+            runtime_platform("windows", "aarch64", false),
+            Some(("win32", "arm64"))
+        );
+        assert_eq!(runtime_platform("android", "aarch64", false), None);
+        assert_eq!(runtime_platform("linux", "riscv64", false), None);
+    }
+
+    #[tokio::test]
+    async fn framed_ping_handles_fragmented_messages_and_notifications() {
+        let (client, mut server) = tokio::io::duplex(4096);
+        let (mut reader, mut writer) = tokio::io::split(client);
+        let peer = tokio::spawn(async move {
+            let request = read_rpc_frame(&mut server).await.unwrap();
+            assert_eq!(request["method"], "ping");
+            for message in [
+                serde_json::json!({"jsonrpc":"2.0", "method":"notification"}),
+                serde_json::json!({"jsonrpc":"2.0", "id":1, "result":{"message":"pong: probe", "protocolVersion":3}}),
+            ] {
+                let body = serde_json::to_vec(&message).unwrap();
+                let frame = [
+                    format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes(),
+                    body,
+                ]
+                .concat();
+                for chunk in frame.chunks(3) {
+                    server.write_all(chunk).await.unwrap();
+                }
+            }
+        });
+        ping_rpc(&mut reader, &mut writer).await.unwrap();
+        peer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn framed_rpc_rejects_duplicate_and_oversized_lengths() {
+        for header in [
+            "Content-Length: 1\r\nContent-Length: 1\r\n\r\n",
+            "Content-Length: 1048577\r\n\r\n",
+            "Other: value\r\n\r\n",
+        ] {
+            let (mut writer, mut reader) = tokio::io::duplex(256);
+            writer.write_all(header.as_bytes()).await.unwrap();
+            assert!(read_rpc_frame(&mut reader).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn handshake_negotiates_version_and_recognizes_legacy_fallback() {
+        for (reply, expected) in [
+            (
+                serde_json::json!({"jsonrpc":"2.0", "id":0, "result":{"protocolVersion":3}}),
+                Some(3),
+            ),
+            (
+                serde_json::json!({"jsonrpc":"2.0", "id":0, "error":{"code":-32601,"message":"unknown"}}),
+                None,
+            ),
+        ] {
+            let (client, mut server) = tokio::io::duplex(4096);
+            let (mut reader, mut writer) = tokio::io::split(client);
+            let peer = tokio::spawn(async move {
+                let request = read_rpc_frame(&mut server).await.unwrap();
+                assert_eq!(request["method"], "connect");
+                let body = serde_json::to_vec(&reply).unwrap();
+                server
+                    .write_all(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes())
+                    .await
+                    .unwrap();
+                server.write_all(&body).await.unwrap();
+            });
+            assert_eq!(
+                connect_rpc(&mut reader, &mut writer).await.unwrap(),
+                expected
+            );
+            peer.await.unwrap();
+        }
+        assert!(check_protocol_version(3).is_ok());
+        assert!(check_protocol_version(2).is_err());
+        assert!(check_protocol_version(4).is_err());
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn installed_runtime_responds_to_handshake_and_ping_when_present() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../node_modules/.pnpm/@github+copilot-sdk-linux-x64@1.0.27-preview.1/node_modules/@github/copilot-sdk-linux-x64",
+        );
+        if !root.exists() {
+            assert!(
+                std::env::var_os("DESKTOP_TEST_REQUIRE_COPILOT_RUNTIME").is_none(),
+                "required Copilot test runtime not found at {}",
+                root.display()
+            );
+            return;
+        }
+        verify_runtime(&RuntimeInfo::discover(&root).unwrap())
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn discovery_reports_unavailable_for_missing_runtime() {

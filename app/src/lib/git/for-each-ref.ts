@@ -8,6 +8,8 @@ import {
   ITrackingBranch,
 } from '../../models/branch'
 import { createForEachRefParser } from './git-delimiter-parser'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /** Get all the branches. */
 export async function getBranches(
@@ -24,6 +26,60 @@ export async function getBranches(
 
   if (!prefixes || !prefixes.length) {
     prefixes = ['refs/heads', 'refs/remotes']
+  }
+
+  if (backend().transportKind === 'ws') {
+    const branches = await backend().repositoryBranches(
+      repository.path,
+      prefixes
+    )
+    return branches.map(
+      branch =>
+        new Branch(
+          branch.name,
+          branch.upstream,
+          { sha: branch.oid },
+          branch.ref.startsWith('refs/heads')
+            ? BranchType.Local
+            : BranchType.Remote,
+          branch.ref
+        )
+    )
+  }
+
+  if (backend().transportKind === 'wry') {
+    const migrated = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          const branches = await backend().repositoryBranches(
+            repository.path,
+            prefixes
+          )
+          return branches.map(
+            branch =>
+              new Branch(
+                branch.name,
+                branch.upstream,
+                { sha: branch.oid },
+                branch.ref.startsWith('refs/heads')
+                  ? BranchType.Local
+                  : BranchType.Remote,
+                branch.ref
+              )
+          )
+        } catch (error) {
+          log.warn(
+            'Rust branch enumeration failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+    if (migrated !== undefined) return migrated
   }
 
   // TODO: use expectedErrors here to handle a specific error
@@ -84,6 +140,54 @@ export async function getBranchesDifferingFromUpstream(
 
   const prefixes = ['refs/heads', 'refs/remotes']
 
+  if (backend().transportKind === 'ws') {
+    const branches = await backend().repositoryBranches(
+      repository.path,
+      prefixes
+    )
+    return trackingBranches(
+      branches.map(branch => ({
+        fullName: branch.ref,
+        sha: branch.oid,
+        upstream: branch.upstream_ref ?? '',
+        symref: '',
+        head: branch.current ? '*' : ' ',
+      }))
+    )
+  }
+
+  if (backend().transportKind === 'wry') {
+    const migrated = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          const branches = await backend().repositoryBranches(
+            repository.path,
+            prefixes
+          )
+          return trackingBranches(
+            branches.map(branch => ({
+              fullName: branch.ref,
+              sha: branch.oid,
+              upstream: branch.upstream_ref ?? '',
+              symref: '',
+              head: branch.current ? '*' : ' ',
+            }))
+          )
+        } catch (error) {
+          log.warn(
+            'Rust branch tracking read failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+    if (migrated !== undefined) return migrated
+  }
+
   const result = await git(
     ['for-each-ref', ...formatArgs, ...prefixes],
     repository.path,
@@ -95,13 +199,27 @@ export async function getBranchesDifferingFromUpstream(
     return []
   }
 
+  return trackingBranches(parse(result.stdout))
+}
+
+interface ITrackingRef {
+  readonly fullName: string
+  readonly sha: string
+  readonly upstream: string
+  readonly symref: string
+  readonly head: string
+}
+
+function trackingBranches(
+  refs: ReadonlyArray<ITrackingRef>
+): ReadonlyArray<ITrackingBranch> {
   const localBranches = []
   const remoteBranchShas = new Map<string, string>()
 
   // First we need to collect the relevant info from the command output:
   // - For local branches with upstream: name, ref, SHA and the upstream.
   // - For remote branches we only need the sha (and the ref as key).
-  for (const ref of parse(result.stdout)) {
+  for (const ref of refs) {
     if (ref.symref.length > 0 || ref.head === '*') {
       // Exclude symbolic refs and the current branch
       continue

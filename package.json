@@ -10,10 +10,10 @@
   "scripts": {
     "cli": "ts-node app/src/cli/main.ts",
     "check:eslint": "tsc -P eslint-rules/",
-    "test:eslint": "node script/test.mjs eslint-rules",
-    "test:script": "node script/test.mjs script",
-    "test": "node script/test.mjs",
-    "test:unit": "node script/test.mjs",
+    "test:eslint": "node --import tsx script/test.mts eslint-rules",
+    "test:script": "node --import tsx script/test.mts script",
+    "test": "node --import tsx script/test.mts",
+    "test:unit": "node --import tsx script/test.mts",
     "test:setup": "ts-node -P script/tsconfig.json script/test-setup.ts",
     "test:e2e": "npm run test:e2e:packaged --",
     "test:e2e:packaged": "npm run test:e2e:build:packaged && npm run test:e2e:run:packaged --",
@@ -35,13 +35,14 @@
     "generate-octicons": "ts-node -P script/tsconfig.json script/generate-octicons.ts",
     "generate-example-usage-data": "cross-env TEST_ENV=1 node --disable-warning=ExperimentalWarning --experimental-test-module-mocks --conditions=import --import tsx --import ./app/test/globals.mts script/generate-example-usage-data.mjs",
     "compile:script": "tsc -P script/tsconfig.json",
-    "lint": "npm run prettier && npm run lint:src --",
-    "lint:fix": "npm run prettier -- --write && npm run lint:src:fix --",
+    "lint": "npm run prettier && npm run lint:src && npm run lint:biome --",
+    "lint:biome": "biome check .",
+    "lint:fix": "npm run prettier -- --write && npm run lint:src:fix && biome check --write . --",
     "markdownlint": "markdownlint **/*.{md,mdx} --config .markdownlint.js --rules .markdownlint-rules.js --ignore node_modules --ignore gemoji",
-    "prettier": "prettier --check \"./**/*.{ts,tsx,js,json,jsx,scss,html,yaml,yml}\" \"./eslint-rules/**/*.mjs\"",
+    "prettier": "prettier --check \"./**/*.{ts,tsx,js,json,jsx,scss,html,yaml,yml}\" \"./eslint-rules/**/*.mts\"",
     "lint:src": "npm run eslint-check && npm run eslint --",
     "lint:src:fix": "npm run eslint -- --fix",
-    "eslint": "eslint --cache --rulesdir ./eslint-rules \"./eslint-rules/**/*.{js,mjs}\" \"./script/**/*.ts{,x}\" \"./app/{src,typings,test}/**/*.{j,t}s{,x}\" \"./changelog.json\"",
+    "eslint": "eslint --cache --rulesdir ./eslint-rules \"./eslint-rules/**/*.{js,mts}\" \"./script/**/*.ts{,x}\" \"./app/{src,typings,test}/**/*.{j,t}s{,x}\" \"./changelog.json\"",
     "eslint-check": "eslint --print-config .eslintrc.* | eslint-config-prettier-check",
     "validate-electron-version": "ts-node -P script/tsconfig.json script/validate-electron-version.ts",
     "validate-macos-version": "ts-node -P script/tsconfig.json script/validate-macos-version.ts",
@@ -49,7 +50,7 @@
     "rebuild-hard:dev": "npm run clean-slate && npm run build:dev --",
     "rebuild-hard:prod": "npm run clean-slate && npm run build:prod --",
     "draft-release": "ts-node -P script/tsconfig.json script/draft-release/index.ts",
-    "draft-release:format": "prettier --check --write changelog.json app/package.json && npm run validate-changelog --",
+    "draft-release:format": "ts-node -P script/tsconfig.json script/draft-release/format-json-cli.ts changelog.json app/package.json && npm run validate-changelog --",
     "draft-release:pr": "ts-node -P script/tsconfig.json script/draft-release/draft-pull-request.ts",
     "validate-changelog": "ts-node -P script/tsconfig.json script/validate-changelog.ts",
     "vite:dev": "vite",
@@ -77,6 +78,9 @@
     "markdownlint-cli": {
       "js-yaml": "5.4.3",
       "smol-toml": "1.9.1"
+    },
+    "@types/glob": {
+      "@types/minimatch": "3.0.5"
     }
   },
   "dependencies": {
@@ -129,6 +133,7 @@
     "webpack-merge": "^6.0.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.7",
     "@electron/packager": "^20.3.0",
     "@github/markdownlint-github": "^0.8.3",
     "@playwright/test": "^1.58.2",
@@ -187,6 +192,9 @@
     "tsconfig-paths": "^3.9.0",
     "tsx": "^4.19.3",
     "vite-plugin-node-polyfills": "^0.28.0",
-    "webpack-cli": "^6.0.1"
+    "vitest": "3.2.7",
+    "webpack-cli": "^6.0.1",
+    "tslib": "^2.9.1",
+    "schema-utils": "^4.8.3"
   }
 }

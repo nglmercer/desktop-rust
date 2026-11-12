@@ -1,14 +1,31 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import {
   IStatusEntry,
   IStatusHeader,
   parsePorcelainStatus,
+  statusItemsFromBackend,
 } from '../../src/lib/status-parser'
 
 const parse = (input: string) => parsePorcelainStatus(Buffer.from(input))
 
 describe('parsePorcelainStatus', () => {
+  it('maps Rust path bytes with the same decoding as porcelain status', () => {
+    const path = [102, 111, 111, 255]
+    const legacy = parsePorcelainStatus(Buffer.from([63, 32, ...path, 0]))
+    const rust = statusItemsFromBackend([
+      {
+        kind: 'entry',
+        entry_kind: '?',
+        status_code: '??',
+        submodule_status_code: '????',
+        path: { bytes: path },
+        old_path: null,
+        rename_or_copy_score: null,
+      },
+    ])
+    assert.equal(JSON.stringify(rust), JSON.stringify(legacy))
+  })
   it('parses a standard status', () => {
     const entries = parse(
       [

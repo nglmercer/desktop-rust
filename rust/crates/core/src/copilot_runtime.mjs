@@ -1,23 +1,29 @@
 #!/usr/bin/env node
 // Rust-owned Copilot turn via the SDK reference implementation.
-// Invoked by copilot_bridge.rs: `node copilot_runtime.mjs <runtime> <token> <model> <prompt>`
-// Reads prompt from stdin, writes JSON result to stdout.
+// Invoked by copilot_bridge.rs: `node copilot_runtime.mjs <runtime>`.
+// Reads credentials, model and prompt as JSON from stdin, writes JSON to stdout.
 // The protocol ( CopilotClient, createSession, sendAndWait ) is the SDK's own — this wrapper
 // keeps the Rust side honest without reimplementing vscode-jsonrpc framing.
 import fs from 'node:fs';
-import { createRequire } from 'module';
 import path from 'node:path';
 
-const [runtimePath, token, model, prompt] = process.argv.slice(2);
-if (!runtimePath || !token || !prompt) {
-  console.error('usage: copilot_runtime.mjs <runtimePath> <token> <model> <prompt>');
+const [runtimePath] = process.argv.slice(2);
+let input;
+try {
+  input = JSON.parse(fs.readFileSync(0, 'utf8'));
+} catch {
+  console.error('invalid Copilot request');
+  process.exit(2);
+}
+const { token, model, prompt } = input ?? {};
+if (!runtimePath || typeof token !== 'string' || !token || typeof prompt !== 'string' || !prompt || typeof model !== 'string') {
+  console.error('invalid Copilot request');
   process.exit(2);
 }
 if (!fs.existsSync(runtimePath)) {
   console.error(`runtime not found: ${runtimePath}`);
   process.exit(2);
 }
-const require = createRequire(import.meta.url);
 let client;
 try {
   // Resolve SDK via the packaged path; in dev it's under node_modules/.pnpm

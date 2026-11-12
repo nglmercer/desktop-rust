@@ -1,6 +1,4 @@
 //! Loopback HTTP/WebSocket transport for the browser and native shells.
-static VITE_DIST: include_dir::Dir =
-    include_dir::include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
 use axum::{
     Router,
     extract::{
@@ -9,7 +7,7 @@ use axum::{
     },
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use desktop_core::{
@@ -176,37 +174,10 @@ pub async fn start(
         .route(
             "/",
             get(|| async {
-                let content = VITE_DIST
-                    .get_file("index.html")
-                    .map(|f| String::from_utf8_lossy(f.contents()).into_owned())
-                    .unwrap_or_default();
-                Html(content)
-            }),
-        )
-        .route(
-            "/assets/{*path}",
-            get(|uri: axum::http::Uri| async move {
-                let path = uri
-                    .path()
-                    .strip_prefix("/assets/")
-                    .unwrap_or("")
-                    .to_string();
-                if let Some(file) = VITE_DIST.get_file(format!("assets/{path}")) {
-                    let content = file.contents().to_vec();
-                    let content_type = if path.ends_with(".css") {
-                        "text/css"
-                    } else if path.ends_with(".js") || path.ends_with(".mjs") {
-                        "text/javascript"
-                    } else {
-                        "application/octet-stream"
-                    };
-                    Response::builder()
-                        .header(header::CONTENT_TYPE, content_type)
-                        .body(axum::body::Body::from(content))
-                        .unwrap()
-                } else {
-                    StatusCode::NOT_FOUND.into_response()
-                }
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "The browser frontend is not available in this build. The authenticated WebSocket API remains available at /ws.\n",
+                )
             }),
         )
         .route("/ws", get(upgrade))
@@ -336,6 +307,24 @@ enum ManagementOperation {
         preferences: desktop_core::PreferencesPatch,
     },
     ListRepositories,
+    RepositoryBinding {
+        path: desktop_core::GitPath,
+    },
+    RepositoryType {
+        path: desktop_core::GitPath,
+    },
+    DirectoryExists {
+        path: desktop_core::GitPath,
+    },
+    PathExists {
+        path: desktop_core::GitPath,
+    },
+    CanonicalMutationPath {
+        path: desktop_core::GitPath,
+    },
+    TrustRepository {
+        path: desktop_core::GitPath,
+    },
     OpenRepository {
         path: desktop_core::GitPath,
     },
@@ -435,6 +424,21 @@ async fn execute(
             let preferences = cancellation::blocking(move || registry.preferences().read()).await?;
             desktop_core::available_editors(preferences.external_editor).await
         }
+        ApplicationOperation::Management(RepositoryType { path }) => {
+            desktop_core::repository_type(&desktop_core::directory_path(path)?).await
+        }
+        ApplicationOperation::Management(DirectoryExists { path }) => Ok(serde_json::json!(
+            desktop_core::directory_exists(&desktop_core::directory_path(path)?).await?
+        )),
+        ApplicationOperation::Management(PathExists { path }) => Ok(serde_json::json!(
+            desktop_core::path_exists(&desktop_core::directory_path(path)?).await?
+        )),
+        ApplicationOperation::Management(CanonicalMutationPath { path }) => Ok(serde_json::json!(
+            desktop_core::canonical_mutation_path(&desktop_core::directory_path(path)?).await?
+        )),
+        ApplicationOperation::Management(TrustRepository { path }) => {
+            desktop_core::trust_repository(&desktop_core::directory_path(path)?).await
+        }
         ApplicationOperation::Management(OpenEditor { path }) => {
             let current = cancellation::wait(state.repo.lock()).await?;
             let repository = current
@@ -467,6 +471,24 @@ async fn execute(
             cancellation::blocking(move || registry.read())
                 .await?
                 .public_view()
+        }
+        ApplicationOperation::Management(RepositoryBinding { path }) => {
+            let Ok(requested) = desktop_core::directory_path(path) else {
+                return Ok(serde_json::Value::Null);
+            };
+            if !requested.is_absolute() {
+                return Ok(serde_json::Value::Null);
+            }
+            let canonical =
+                cancellation::blocking(move || Ok(requested.canonicalize().ok())).await?;
+            let Some(canonical) = canonical else {
+                return Ok(serde_json::Value::Null);
+            };
+            let current = cancellation::wait(state.repo.lock()).await?;
+            Ok(match current.as_ref() {
+                Some(repo) if canonical == repo.path() => serde_json::json!({"root_id":repo.id()}),
+                _ => serde_json::Value::Null,
+            })
         }
         ApplicationOperation::Management(ForgetRepository { path }) => {
             cancellation::blocking(move || {

@@ -13,14 +13,27 @@ application logic is still TypeScript in `app/`.
 
 | Area | Implemented | Connected | Verified |
 |------|-------------|-----------|----------|
-| Window, webview, `desktop://` protocol, bundle serving | yes | yes (Linux, Xvfb) | startup smoke: `rust/tests/app_smoke.py` |
+| Window, webview, `desktop://` protocol, bundle serving | yes | yes (Linux, Xvfb) | startup smoke: `rust/crates/desktop-app/tests/app_smoke.rs` |
 | IPC bridge: admission lanes, bounded queues, `EBUSY` refusals | yes | yes | `desktop-app` and `desktop-core` unit tests |
+| Typed Wry repository backend | snapshot and porcelain-v2 status reads | normal Wry status refresh | Rust real-Git status and repository-isolation tests; frontend routing tests; cancellation and mutations pending |
 | Process spawn with stdin/stdout flow control | yes | yes (Copilot runtime path) | Rust tests; renderer adapter tests (`app/test/unit/web-child-process-test.ts`) |
 | git execution with `maxBuffer`, ceiling and cancellation | yes | yes | Rust tests (`io.rs`) and adapter (`dugite.ts`) reviewed, not unit-tested |
 | File range reads and native hashes | yes | yes (`fs.ts`, `get-file-hash.ts`) | Rust tests; renderer tests (`web-fs-range-test.ts`) |
 | Renderer-side UI flows (clicks, menus, Git operations) | React UI | yes | not automated: no GUI driver in this tree |
-| Browser / WebSocket transport for Termux | no | no | pending (the `rust/web` frontend was removed) |
+| Browser / WebSocket transport for Termux | typed transport | authenticated bridge; no browser UI | real-bridge authentication, events, cancellation and reconnect test; browser entry still returns 503 |
 | Copilot parity, multi-account Git auth, installers, updater | partial | partial | pending |
+
+The headless core has an experimental native Copilot turn transport, enabled
+only with `DESKTOP_COPILOT_NATIVE_TURN=1`. It uses the runtime's framed RPC
+protocol and falls back to the older send/event protocol only after a
+method-not-found response. Native sessions stay in memory until explicitly
+closed or their repository handle is dropped. Live authenticated parity and
+restart recovery have not been verified; the existing
+SDK wrapper remains the default until those gates pass. The renderer continues
+to use its account-scoped SDK path for commit messages: the headless Copilot
+service does not yet preserve the selected account, provider, model and rules.
+Runtime discovery maps Rust targets to the SDK's platform names and selects
+the pinned package version when searching npm or pnpm installations.
 
 
 ## Why this shape
@@ -44,8 +57,7 @@ window or a display server — `cargo test -p desktop-core` runs headless.
 ## Layout
 
 ```
-rust/                                 Rust workspace for the desktop shell (two crates)
-├── Cargo.toml
+rust/                                 Rust crates (root Cargo workspace)
 ├── crates/desktop-core/src/          no GUI dependencies
 │   ├── io.rs                         desktop.io.* host services: git, fs, HTTP, keychain
 │   ├── io/limits.rs                  finite budgets per resource profile
@@ -64,8 +76,8 @@ out/vite-dist/                        renderer bundle: embedded in release,
                                       served from disk in debug
 ```
 
-The root `Cargo.toml` is a second workspace (CLI, bridge, native host). It
-shares no crates with `rust/`; both are kept for now.
+The root `Cargo.toml` owns all crates. Default members are the headless CLI,
+core and bridge; the desktop shell and native host are built explicitly.
 
 ## The IPC bridge
 
@@ -121,12 +133,12 @@ pnpm install --frozen-lockfile --ignore-scripts
 # 2. renderer bundle; needs the submodules: git submodule update --init --recursive
 pnpm vite:build
 # 3. desktop shell
-cargo build --manifest-path rust/Cargo.toml -p desktop-app --locked
+cargo build -p desktop-app --locked
 ./rust/target/debug/github-desktop-rs
 
 # checks
-cargo test --manifest-path rust/Cargo.toml --workspace --locked
-python3 rust/tests/app_smoke.py      # starts the real app (Xvfb when no display)
+cargo test --workspace --locked
+xvfb-run -a cargo test -p desktop-app --test app_smoke --locked -- --ignored
 ```
 
 `cargo build` also rebuilds the bundle when an input is newer than it, by
@@ -148,13 +160,17 @@ Requirements: Rust 1.85+, a system `git`, and the platform webview runtime
 
 ## Scope and known limitations
 
-This is a working end-to-end replacement of the application shell and backend,
-not a line-by-line rewrite of all 490 React UI components. The shipped web
-frontend implements the primary flows (repository list/add/clone/select,
-status, staging, commit, diff, history, branches, fetch/pull/push, menus,
-dialogs, sign-in, preferences). The following Electron-era features remain
-explicitly out of scope and are surfaced as `NotImplemented` rather than
-silently dropped:
+The shell starts with the existing React frontend, but complete end-to-end
+workflow parity has not been established. Most renderer workflows still use
+compatibility shims instead of typed Rust operations. Normal Wry status refresh
+uses byte-preserving Rust porcelain-v2 records under the existing read lease;
+strict-error calls and failed or oversized Rust reads still use the legacy Git
+path. The typed Wry backend does not yet support cancellation, mutations,
+account selection or Copilot sessions.
+The browser transport can authenticate, deliver events, cancel requests and
+reconnect without replaying in-flight work. The React UI still depends on
+shell-only IPC, and the bridge does not serve a browser frontend yet.
+The following areas also need implementation or verification:
 
 * interactive rebase, conflict resolution UI, LFS, submodule management;
 * the full auto-updater (Squirrel / Darwin update flow) — `check-for-updates`
@@ -174,5 +190,7 @@ can be ported incrementally without changing the transport.
   equivalent) plus `about:` URLs.
 * The custom protocol rejects path traversal (`. .`, `\`, `:`).
 * No Content-Security-Policy is set yet. Adding one to the renderer is pending.
-* Tokens never cross into the webview; they are DPAPI-protected at rest.
+* Credential ownership is still being migrated; the current Copilot renderer
+  path receives account credentials and must be replaced with an equivalent
+  account-scoped Rust implementation before claiming a Rust-only backend.
 * JSON state is written via a temp file + rename for atomicity.

@@ -7,7 +7,6 @@ import {
   GitHubTokenProvider,
   CopilotClientOptions,
 } from '@github/copilot-sdk'
-import { backend } from '../../backend/client'
 import { AccountsStore } from './accounts-store'
 import { Account, isDotComAccount } from '../../models/account'
 import {
@@ -586,7 +585,7 @@ ${diffBlock}`
 /** Ordered reasoning effort levels from lowest to highest. */
 export const ReasoningEffortOrder = ['low', 'medium', 'high', 'xhigh'] as const
 
-export type ReasoningEffort = typeof ReasoningEffortOrder[number]
+export type ReasoningEffort = (typeof ReasoningEffortOrder)[number]
 
 /** Formats a reasoning effort for display, e.g. 'xhigh' → 'Extra high'. */
 export function formatReasoningEffort(effort: ReasoningEffort): string {
@@ -1086,57 +1085,7 @@ export class CopilotStore extends BaseStore {
 
   /** Whether the packaged SDK runtime needed for assisted commit planning is installed. */
   public async isAssistedCommitRuntimeAvailable(): Promise<boolean> {
-    // Prefer the Rust-owned runtime probe when a backend transport is
-    // attached (`backend/client.ts`); fall back to the legacy filesystem
-    // check so the renderer stays usable before the bridge is up.
-    if (backend().transportKind !== 'none') {
-      try {
-        const probe = await awaitCancellableCopilotOperation(() => backend().copilotProbe(), {
-          signal: undefined,
-          cancellationError: () => new CommitMessageGenerationCancelledError(),
-        })
-        if (probe.available) return true
-        // Probe unavailable — publish as unavailable and keep Git operating.
-        // Fall through to legacy check only for the happy-path marker; if
-        // the probe definitively reports unavailable we honour it.
-        return false
-      } catch {
-        // `no_transport` / network — fall through to filesystem hint.
-      }
-    }
     return pathExists(getCopilotRuntimePath(join(__dirname, 'copilot')))
-  }
-
-  /**
-   * Backend-backed commit-message generation. When the typed RPC transport
-   * is live we delegate to the Rust application/copilot service
-   * (`copilot_generate_commit_message`) instead of spawning the SDK client
-   * in the renderer. Cancellation is cooperative: `signal` abort is
-   * propagated as `cancelled` and the Rust ledger discards the late reply.
-   */
-  private async generateCommitMessageViaBackend(
-    diff: string,
-    signal?: AbortSignal
-  ): Promise<ICopilotCommitMessage | null> {
-    // No-op if the backend has no runtime; signals to the caller to fall back.
-    const transport = backend().transportKind
-    if (transport === 'none') return null
-    const probe = await backend().copilotProbe()
-    if (!probe.available) return null
-    const session = await awaitCancellableCopilotOperation(() => backend().copilotCreateSession({ model: DefaultCopilotModel }), {
-      signal,
-      cancellationError: () => new CommitMessageGenerationCancelledError(),
-    })
-    const reply = await awaitCancellableCopilotOperation(
-      () => backend().copilotSendMessage(session.id, `generate commit message for diff:\n${diff.slice(0, 4000)}`, { signal }),
-      {
-        signal,
-        cancellationError: () => new CommitMessageGenerationCancelledError(),
-      }
-    )
-    const content = (reply as { content?: string } | undefined)?.content ?? (reply as { summary?: string } | undefined)?.summary
-    if (!content || typeof content !== 'string') return null
-    return parseCopilotCommitMessage(content)
   }
 
   /** Reuse current session-bound authentication with the planner's isolated runtime policy. */
@@ -1379,15 +1328,6 @@ export class CopilotStore extends BaseStore {
     }
 
     throwIfCancelled()
-
-    // Rust-owned path: try the backend while the transport is ready so
-    // the renderer never holds the runtime or tokens. Generic SDK fallback
-    // stays for offline/dev where no transport is attached. Cancellation
-    // is honoured by the backend ledger.
-    if (backend().transportKind !== 'none') {
-      const viaBackend = await this.generateCommitMessageViaBackend(diff, signal)
-      if (viaBackend !== null) return viaBackend
-    }
 
     const credentials = this.createCredentialContext(account)
 

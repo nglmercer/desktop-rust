@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from 'node:test'
+import { describe, it, beforeEach, afterEach } from 'vitest'
 import assert from 'node:assert'
 import { mkdtempSync, openSync as nodeOpen, readSync as nodeRead, closeSync as nodeClose, writeFileSync, rmSync, renameSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'

@@ -17,9 +17,9 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from discard_advanced import BINARY
-from lfs_diffs import cached, pointer
-from lifecycle import alive
+from support.fixture import BINARY
+from support.lfs import cached, pointer
+from support.process import alive
 from repository_accounts import Accounts, ALICE, BOB, ENV, NAMED, OTHER, NONE, EFFECTIVE, call, clean
 from repository_context import private, stop, wait_for
 

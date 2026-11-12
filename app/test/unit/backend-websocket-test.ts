@@ -1,0 +1,289 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { BackendClient } from '../../src/backend/client'
+
+class FakeSocket {
+  static readonly OPEN = 1
+  static instances: FakeSocket[] = []
+  readonly sent: Array<Record<string, unknown>> = []
+  readyState = 0
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: ((event: { code: number }) => void) | null = null
+  onerror: (() => void) | null = null
+
+  constructor(readonly url: string) {
+    FakeSocket.instances.push(this)
+  }
+  send(value: string): void {
+    this.sent.push(JSON.parse(value))
+  }
+  open(): void {
+    this.readyState = 1
+    this.onopen?.()
+  }
+  message(value: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(value) })
+  }
+  disconnect(code = 1006): void {
+    this.readyState = 3
+    this.onclose?.({ code })
+  }
+  close(): void {
+    this.disconnect(1000)
+  }
+}
+
+const ready = {
+  ready: true,
+  version: 3,
+  capabilities: { cancel: true, max_pending: 32 },
+}
+const clients: BackendClient[] = []
+
+function client(): BackendClient {
+  const value = new BackendClient()
+  clients.push(value)
+  return value
+}
+
+async function connected(): Promise<{
+  client: BackendClient
+  socket: FakeSocket
+}> {
+  const value = client()
+  const pending = value.waitReady()
+  const socket = FakeSocket.instances.at(-1)!
+  socket.open()
+  expect(socket.sent[0]).toEqual({ token: 'secret' })
+  socket.message(ready)
+  await pending
+  return { client: value, socket }
+}
+
+describe('WebSocket backend transport', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    FakeSocket.instances = []
+    sessionStorage.clear()
+    Reflect.deleteProperty(window, '__desktop')
+    window.history.replaceState(null, '', '/#token=secret')
+    vi.stubGlobal('WebSocket', FakeSocket)
+  })
+  afterEach(() => {
+    for (const value of clients.splice(0)) value.close()
+    Reflect.deleteProperty(window, '__desktop')
+    sessionStorage.clear()
+    window.history.replaceState(null, '', '/')
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('retains the token for a reload while removing it from the URL', () => {
+    const first = client()
+    expect(first.transportKind).toBe('ws')
+    expect(window.location.hash).toBe('')
+    expect(sessionStorage.getItem('desktopBridgeToken')).toBe('secret')
+    expect(client().transportKind).toBe('ws')
+  })
+
+  it('does not use a stored token when the URL explicitly provides an empty token', () => {
+    sessionStorage.setItem('desktopBridgeToken', 'old-secret')
+    window.history.replaceState(null, '', '/#token=')
+    expect(client().transportKind).toBe('none')
+    expect(sessionStorage.getItem('desktopBridgeToken')).toBeNull()
+  })
+
+  it('does not mistake the loopback shim for the native Wry transport', () => {
+    const first = client()
+    expect(first.transportKind).toBe('ws')
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { __transport: 'ws', invoke: vi.fn(), on: vi.fn() },
+    })
+    expect(client().transportKind).toBe('ws')
+  })
+
+  it('cleans up abort listeners after success and sends no late cancellation', async () => {
+    const { client: value, socket } = await connected()
+    const controller = new AbortController()
+    const remove = vi.spyOn(controller.signal, 'removeEventListener')
+    const pending = value.request(
+      'snapshot',
+      {},
+      { signal: controller.signal, repositoryId: 'repo-1' }
+    )
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'snapshot',
+      repository_id: 'repo-1',
+    })
+    socket.message({ id: 1, result: { root: 'repo-1' } })
+    await expect(pending).resolves.toEqual({ root: 'repo-1' })
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
+    controller.abort()
+    expect(socket.sent).toHaveLength(2)
+  })
+
+  it('cancels a sent request on abort or timeout without replaying it', async () => {
+    const { client: value, socket } = await connected()
+    const controller = new AbortController()
+    const pending = value.request(
+      'commit',
+      { summary: 'one' },
+      { signal: controller.signal }
+    )
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'cancelled',
+      retryable: false,
+    })
+    controller.abort()
+    await rejected
+    expect(socket.sent[2]).toEqual({ id: 2, method: 'cancel', request_id: 1 })
+    const timed = value.request('stage', {}, { deadlineMs: 20 })
+    const timeout = expect(timed).rejects.toMatchObject({
+      code: 'timeout',
+      retryable: false,
+    })
+    await vi.advanceTimersByTimeAsync(20)
+    await timeout
+    expect(socket.sent[4]).toEqual({ id: 4, method: 'cancel', request_id: 3 })
+  })
+
+  it('does not start a request aborted or timed out during the handshake', async () => {
+    const value = client()
+    const controller = new AbortController()
+    const pending = value.request('commit', {}, { signal: controller.signal })
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'cancelled',
+    })
+    controller.abort()
+    await rejected
+    const timed = value.request('stage', {}, { deadlineMs: 10 })
+    const timeout = expect(timed).rejects.toMatchObject({ code: 'timeout' })
+    await vi.advanceTimersByTimeAsync(10)
+    await timeout
+    const socket = FakeSocket.instances[0]
+    socket.open()
+    socket.message(ready)
+    await value.waitReady()
+    expect(socket.sent).toEqual([{ token: 'secret' }])
+  })
+
+  it('rejects in-flight work on disconnect and waits for the new handshake', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.request('commit', {}, {})
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'disconnected',
+      retryable: false,
+    })
+    socket.disconnect()
+    await rejected
+    expect(value.isReady).toBe(false)
+    const next = value.waitReady()
+    await vi.advanceTimersByTimeAsync(1000)
+    const replacement = FakeSocket.instances[1]
+    replacement.open()
+    socket.message(ready)
+    expect(value.isReady).toBe(false)
+    replacement.message(ready)
+    await next
+    expect(value.isReady).toBe(true)
+    expect(replacement.sent).toEqual([{ token: 'secret' }])
+  })
+
+  it('rejects invalid authentication and does not reconnect', async () => {
+    const value = client()
+    const pending = value.waitReady()
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'unauthorized',
+      retryable: false,
+    })
+    const socket = FakeSocket.instances[0]
+    socket.open()
+    socket.disconnect(1008)
+    await rejected
+    expect(sessionStorage.getItem('desktopBridgeToken')).toBeNull()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(FakeSocket.instances).toHaveLength(1)
+    await expect(value.waitReady()).rejects.toMatchObject({
+      code: 'unauthorized',
+    })
+  })
+
+  it('rejects a failed handshake and permits a later reconnect', async () => {
+    const value = client()
+    const pending = value.waitReady()
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'disconnected',
+    })
+    FakeSocket.instances[0].disconnect()
+    await rejected
+    const next = value.waitReady()
+    await vi.advanceTimersByTimeAsync(1000)
+    const replacement = FakeSocket.instances[1]
+    replacement.open()
+    replacement.message(ready)
+    await expect(next).resolves.toMatchObject({ ready: true })
+  })
+
+  it('bounds an unanswered handshake', async () => {
+    const value = client()
+    const pending = value.waitReady()
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'disconnected',
+    })
+    FakeSocket.instances[0].open()
+    await vi.advanceTimersByTimeAsync(15_000)
+    await rejected
+  })
+
+  it('rejects unsupported account scopes and malformed handshakes', async () => {
+    const value = client()
+    await expect(
+      value.request('snapshot', {}, { accountId: 'other' })
+    ).rejects.toMatchObject({ code: 'unsupported' })
+    const pending = value.waitReady()
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'protocol' })
+    const socket = FakeSocket.instances[0]
+    socket.open()
+    socket.message({
+      ready: true,
+      version: 4,
+      capabilities: { cancel: true, max_pending: 32 },
+    })
+    await rejected
+    expect(value.isReady).toBe(false)
+  })
+
+  it('rejects in-flight work on malformed frames without reconnecting', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.request('commit', {}, {})
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'protocol',
+      retryable: false,
+    })
+    socket.onmessage?.({ data: '{' })
+    await rejected
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(FakeSocket.instances).toHaveLength(1)
+  })
+
+  it('delivers events to subscribers and stops after unsubscribe', async () => {
+    const { client: value, socket } = await connected()
+    const listener = vi.fn()
+    const unsubscribe = value.subscribe('repository_changed', listener)
+    socket.message({
+      event: 'repository_changed',
+      snapshot: { root_id: 'one' },
+    })
+    socket.message({ event: 'repository_changed', snapshot: null })
+    unsubscribe()
+    socket.message({
+      event: 'repository_changed',
+      snapshot: { root_id: 'two' },
+    })
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener).toHaveBeenNthCalledWith(1, { root_id: 'one' })
+    expect(listener).toHaveBeenNthCalledWith(2, null)
+  })
+})

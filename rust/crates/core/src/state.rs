@@ -12,6 +12,166 @@ pub struct OperationState {
     pub total: Option<u64>,
 }
 impl Repository {
+    pub(crate) async fn status_context(&self) -> Result<Value> {
+        let directory = self.git_directory().await?;
+        let rebase = if directory.join("REBASE_HEAD").exists() {
+            let read = |name: &str| -> Option<String> {
+                use std::io::Read;
+                let path = directory.join("rebase-merge").join(name);
+                let mut options = fs::OpenOptions::new();
+                options.read(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.custom_flags(libc::O_NONBLOCK);
+                }
+                let file = options.open(path).ok()?;
+                let metadata = file.metadata().ok()?;
+                if !metadata.is_file() || metadata.len() > 8192 {
+                    return None;
+                }
+                let mut bytes = Vec::new();
+                file.take(8193).read_to_end(&mut bytes).ok()?;
+                if bytes.len() > 8192 {
+                    return None;
+                }
+                Some(String::from_utf8_lossy(&bytes).into_owned())
+            };
+            match (read("orig-head"), read("head-name"), read("onto")) {
+                (Some(original), Some(branch), Some(base)) => {
+                    let branch = branch
+                        .strip_prefix("refs/heads/")
+                        .map_or(branch.clone(), |name| name.trim().to_owned());
+                    json!({"originalBranchTip":original.trim(), "targetBranch":branch, "baseBranchTip":base.trim()})
+                }
+                _ => Value::Null,
+            }
+        } else {
+            Value::Null
+        };
+        Ok(json!({
+            "mergeHeadFound":directory.join("MERGE_HEAD").exists(),
+            "squashMsgFound":directory.join("SQUASH_MSG").exists(),
+            "isCherryPickingHeadFound":directory.join("CHERRY_PICK_HEAD").exists(),
+            "rebaseInternalState":rebase,
+        }))
+    }
+    pub(crate) async fn ahead_behind(&self, range: &str) -> Result<Value> {
+        let output = self
+            .run(&args(&[
+                "rev-list",
+                "--left-right",
+                "--count",
+                "--end-of-options",
+                range,
+                "--",
+            ]))
+            .await?;
+        if output.code != 0 {
+            if output.bad_revision() {
+                return Ok(Value::Null);
+            }
+            bail!("{}", output.text().stderr);
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let Some((ahead, behind)) = text.split_once('\t') else {
+            return Ok(Value::Null);
+        };
+        match (ahead.trim().parse::<u64>(), behind.trim().parse::<u64>()) {
+            (Ok(ahead), Ok(behind)) => Ok(json!({ "ahead": ahead, "behind": behind })),
+            _ => Ok(Value::Null),
+        }
+    }
+
+    pub(crate) async fn branches_merged(&self, branch: &str) -> Result<Value> {
+        let output = self
+            .run(&args(&[
+                "branch",
+                "--format=%(objectname)%00%(refname)%00",
+                &format!("--merged={branch}"),
+                "--",
+            ]))
+            .await?;
+        if output.code != 0 {
+            bail!("{}", output.text().stderr);
+        }
+        let mut fields = output.stdout.split(|byte| *byte == 0);
+        let mut branches = Vec::new();
+        while let Some(oid) = fields.next() {
+            let oid = oid.strip_prefix(b"\n").unwrap_or(oid);
+            if oid.is_empty() {
+                break;
+            }
+            let reference = fields.next().context("missing merged branch ref")?;
+            branches.push(json!({"oid":String::from_utf8_lossy(oid), "ref":String::from_utf8_lossy(reference)}));
+        }
+        Ok(Value::Array(branches))
+    }
+
+    pub(crate) async fn branches_pointing_at(&self, commitish: &str) -> Result<Value> {
+        let output = self
+            .run(&args(&[
+                "branch",
+                &format!("--points-at={commitish}"),
+                "--format=%(refname:short)",
+                "--",
+            ]))
+            .await?;
+        match output.code {
+            0 => Ok(json!(
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .collect::<Vec<_>>()
+            )),
+            1 | 129 => Ok(Value::Null),
+            _ => bail!("{}", output.text().stderr),
+        }
+    }
+
+    pub(crate) async fn branch_enumeration(&self, prefixes: &[String]) -> Result<Value> {
+        let defaults = ["refs/heads".to_owned(), "refs/remotes".to_owned()];
+        let prefixes = if prefixes.is_empty() {
+            &defaults[..]
+        } else {
+            prefixes
+        };
+        let mut arguments = args(&[
+            "for-each-ref",
+            "--format=%(refname)%00%(refname:short)%00%(upstream:short)%00%(objectname)%00%(symref)%00%(upstream)%00%(HEAD)%00",
+            "--",
+        ]);
+        arguments.extend(prefixes.iter().map(std::ffi::OsString::from));
+        let output = self.run(&arguments).await?;
+        if output.code != 0 {
+            bail!("{}", output.text().stderr);
+        }
+        let mut fields = output.stdout.split(|byte| *byte == 0);
+        let mut branches = Vec::new();
+        while let Some(reference) = fields.next() {
+            let reference = reference.strip_prefix(b"\n").unwrap_or(reference);
+            if reference.is_empty() {
+                break;
+            }
+            let name = fields.next().context("missing branch short name")?;
+            let upstream = fields.next().context("missing branch upstream")?;
+            let oid = fields.next().context("missing branch oid")?;
+            let symbolic = fields.next().context("missing symbolic branch target")?;
+            let upstream_ref = fields.next().context("missing canonical upstream")?;
+            let current = fields.next().context("missing current branch flag")? == b"*";
+            if symbolic.is_empty() {
+                branches.push(json!({
+                    "ref": String::from_utf8_lossy(reference),
+                    "name": String::from_utf8_lossy(name),
+                    "upstream": (!upstream.is_empty()).then(|| String::from_utf8_lossy(upstream).into_owned()),
+                    "upstream_ref": (!upstream_ref.is_empty()).then(|| String::from_utf8_lossy(upstream_ref).into_owned()),
+                    "current": current,
+                    "oid": String::from_utf8_lossy(oid),
+                }));
+            }
+        }
+        Ok(Value::Array(branches))
+    }
+
     pub(crate) async fn git_directory(&self) -> Result<PathBuf> {
         let out = self
             .run(&args(&["rev-parse", "--absolute-git-dir"]))

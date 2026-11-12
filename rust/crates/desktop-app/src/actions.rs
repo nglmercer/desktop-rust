@@ -344,19 +344,6 @@ fn parse_color(value: &str) -> Option<(u8, u8, u8, u8)> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_hex_colors() {
-        assert_eq!(parse_color("#fff"), Some((255, 255, 255, 255)));
-        assert_eq!(parse_color("#1f6feb"), Some((31, 111, 235, 255)));
-        assert_eq!(parse_color("rgb(10, 20, 30)"), Some((10, 20, 30, 255)));
-        assert_eq!(parse_color("nope"), None);
-    }
-}
-
 /// Run a text editing command in the web view, as Electron's Edit menu
 /// roles did.
 pub fn edit(webview: &WebView, command: desktop_core::menu::EditCommand) {
@@ -389,5 +376,18 @@ pub fn edit(webview: &WebView, command: desktop_core::menu::EditCommand) {
             EditCommand::Paste => "paste",
         };
         let _ = webview.evaluate_script(&format!("document.execCommand('{name}')"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_hex_colors() {
+        assert_eq!(parse_color("#fff"), Some((255, 255, 255, 255)));
+        assert_eq!(parse_color("#1f6feb"), Some((31, 111, 235, 255)));
+        assert_eq!(parse_color("rgb(10, 20, 30)"), Some((10, 20, 30, 255)));
+        assert_eq!(parse_color("nope"), None);
     }
 }

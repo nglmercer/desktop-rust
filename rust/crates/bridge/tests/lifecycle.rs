@@ -2,11 +2,39 @@ use desktop_bridge::start;
 use desktop_core::Registry;
 use futures_util::{SinkExt, StreamExt};
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{Message, client::IntoClientRequest},
 };
+
+#[tokio::test]
+async fn browser_entry_reports_unavailable_without_exposing_the_desktop_bundle() {
+    let directory =
+        std::env::temp_dir().join(format!("desktop-lifecycle-{}", uuid::Uuid::new_v4()));
+    let server = start(None, Registry::new(directory.join("registry.json")), 0)
+        .await
+        .unwrap();
+    let address = server.session_url().split('/').nth(2).unwrap();
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    stream
+        .write_all(
+            format!("GET / HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n").as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 503"));
+    assert!(response.contains("browser frontend is not available"));
+    assert!(response.contains("cache-control: no-store"));
+    server.shutdown().await.unwrap();
+    if directory.exists() {
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
 
 #[tokio::test]
 async fn shutdown_closes_authenticated_and_unauthenticated_sessions_and_releases_port() {

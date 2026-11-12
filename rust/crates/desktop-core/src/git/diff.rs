@@ -92,7 +92,7 @@ pub fn parse_unified_diff(raw: &str) -> Vec<DiffHunk> {
             let mut new_start = 0;
             let mut new_count = 0;
             for part in ranges.split_whitespace() {
-                let clean = part.trim_start_matches(|c| c == '-' || c == '+');
+                let clean = part.trim_start_matches(['-', '+']);
                 let mut nums = clean.split(',');
                 let start = nums.next().and_then(|n| n.parse::<u32>().ok()).unwrap_or(0);
                 let count = nums.next().and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
@@ -135,13 +135,11 @@ pub fn parse_unified_diff(raw: &str) -> Vec<DiffHunk> {
             let n = Some(old_line);
             old_line += 1;
             (DiffLineType::Delete, t, n, None)
-        } else if line.starts_with(' ') {
+        } else if let Some(text) = line.strip_prefix(' ') {
             let (o, n) = (Some(old_line), Some(new_line));
             old_line += 1;
             new_line += 1;
-            (DiffLineType::Context, &line[1..], o, n)
-        } else if line.starts_with("\\ No newline") {
-            continue;
+            (DiffLineType::Context, text, o, n)
         } else {
             continue;
         };

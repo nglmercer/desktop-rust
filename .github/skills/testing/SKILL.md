@@ -52,7 +52,7 @@ DESKTOP_E2E_APP_MODE=unpackaged npx playwright test --config app/test/e2e/playwr
 npm run test:e2e:packaged
 ```
 
-The test runner (`script/test.mjs`) discovers files matching
+The test runner (`script/test.mts`) discovers files matching
 `-test.(ts|tsx|js|jsx|mts|mjs)` recursively in `app/test/unit/` by default, or
 in the paths you pass.
 

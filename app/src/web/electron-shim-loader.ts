@@ -5,28 +5,30 @@
  * initialization script and `window.__desktop` exists — this loader is a
  * no-op there. Otherwise it installs a minimal `__desktop` marker and,
  * when the page was served by the Rust bridge (`desktop-rs serve`, Termux
- * or the loopback server), attaches the typed WebSocket transport from
- * `app/src/backend/client.ts` behind the same `invoke`/`send`/`on`
- * surface the shims (`electron.ts`, `child_process.ts`, `dugite.ts`,
- * `keytar.ts`, `fs.ts`) expect.
+ * or the loopback server), attaches the typed WebSocket transport. Legacy
+ * `desktop.io.*` and synchronous shell commands are not supported by it.
  *
- * The marker `invoke` throws `[vite] bridge not attached` until the WebSocket
- * transport signals `ready`; callers that probe `__desktop` can distinguish
- * "shell present but not ready" from "no shell".
+ * Typed requests wait for authenticated WebSocket readiness. The marker
+ * remains distinct from the real Wry bridge for subsequent client instances.
  */
 import { backend } from '../backend/client'
 
 if (typeof window !== 'undefined' && !(window as any).__desktop) {
   const client = backend()
+  const subscriptions = new Map<
+    string,
+    Map<(...args: unknown[]) => void, () => void>
+  >()
 
   ;(window as any).__desktop = {
+    __transport: client.transportKind,
     invoke: async (channel: string, ...args: unknown[]) => {
       if (client.transportKind === 'none') {
-        throw new Error(`[vite] bridge not attached — run via desktop-rs serve or the Tao/Wry shell`)
+        throw new Error(
+          `[vite] bridge not attached — run via desktop-rs serve or the Tao/Wry shell`
+        )
       }
-      // `desktop.backend.*` channels map to the typed client; legacy
-      // `desktop.*` / `desktop.io.*` channels are forwarded through the
-      // transport unchanged (the Rust shell/bridge owns them).
+      // Only typed methods are implemented by the WebSocket bridge.
       const method = channel.startsWith('desktop.backend.')
         ? channel.slice('desktop.backend.'.length)
         : channel
@@ -43,8 +45,37 @@ if (typeof window !== 'undefined' && !(window as any).__desktop) {
     },
     on: (channel: string, listener: (...args: unknown[]) => void) => {
       if (client.transportKind === 'ws') {
-        // Map bridge events to ipc listeners.
-        return client as unknown as { on?: unknown }
+        let listeners = subscriptions.get(channel)
+        if (!listeners) {
+          listeners = new Map()
+          subscriptions.set(channel, listeners)
+        }
+        if (!listeners.has(listener)) {
+          listeners.set(
+            listener,
+            client.subscribe(channel, (...args) =>
+              listener({ sender: null }, ...args)
+            )
+          )
+        }
+      }
+      return (window as any).__desktop
+    },
+    removeListener: (
+      channel: string,
+      listener: (...args: unknown[]) => void
+    ) => {
+      const listeners = subscriptions.get(channel)
+      listeners?.get(listener)?.()
+      listeners?.delete(listener)
+      if (listeners?.size === 0) subscriptions.delete(channel)
+      return (window as any).__desktop
+    },
+    removeAllListeners: (channel?: string) => {
+      for (const [event, listeners] of subscriptions) {
+        if (channel !== undefined && channel !== event) continue
+        for (const unsubscribe of listeners.values()) unsubscribe()
+        subscriptions.delete(event)
       }
       return (window as any).__desktop
     },

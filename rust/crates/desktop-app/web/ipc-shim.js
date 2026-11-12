@@ -196,6 +196,9 @@
     invoke: invoke,
     invokeSync: invokeSync,
     send: send,
+    supportsCancellation: function () {
+      return !!(window.ipc && typeof window.ipc.postMessage === 'function');
+    },
     pendingPromises: PENDING_LIMIT,
     // Electron's three synchronous channels have no wry equivalent. They now
     // return a promise and callers must await them explicitly.

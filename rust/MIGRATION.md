@@ -1,5 +1,10 @@
 # Full migration and legacy-removal ledger
 
+The offline GitHub CLI adapter integration suite now runs in Vitest using a
+TypeScript `gh` fixture. It retains the CLI and authenticated WebSocket checks,
+including request bodies, invalid input, process failures, and redaction. The
+corresponding Python suite has been removed; other Python suites remain.
+
 The requested end state is a Rust implementation with a complete headless CLI,
 GitHub CLI integration, reusable web UI over localhost/WebSocket on Termux, and
 an optional Wry/Tao desktop host. Electron/Node backend code, bundled Git
@@ -38,16 +43,98 @@ implementations indefinitely is not the final architecture.
 No gate is satisfied by CLI passthrough alone, source counts, or the existence
 of a replacement file. Legacy removal requires runtime evidence of replacement.
 
+The loopback WebSocket client is tested against the Rust bridge for login,
+events, cancellation and reconnect. The browser entry currently returns 503:
+the React renderer still needs its shell-only dependencies replaced before it
+can be served as a functional browser UI.
+
+The Rust bridge integration tests exercise Copilot session creation, a message,
+commit-message generation and cancellation against an offline simulated native
+runtime. They also check unavailable-runtime reporting and preserve the staged
+repository state. This is not evidence of a live Copilot service or UI journey.
+The Rust commit-message operation now supplies a bounded staged diff for the
+requested literal paths; its bridge test checks that unstaged and unselected
+content is excluded. The wider assisted-commit flow and live service remain
+separate parity gates.
+
+The Rust repository-management integration suite also checks that CLI and
+WebSocket registry views hide the private publication ledger while repository
+selection, initialization, cloning and worktree operations preserve it.
+
+Wry's typed repository reads register cancellable Rust jobs before entering the
+worker queue, with one deadline covering queue time and execution. This applies
+only to the native IPC transport and read operations; the rest of the renderer
+still needs migration and parity validation.
+
+Repository type discovery for add and recovery flows now runs in Rust on Wry
+and WebSocket, without selecting a repository. It recognizes regular and bare
+repositories, missing directories, and Git's dubious-ownership diagnostic;
+tests cover nested and symlinked paths and an isolated unsafe-owner bridge.
+The legacy discovery path remains for the Electron renderer.
+Directory checks used by repository creation also run through Rust for Wry and
+WebSocket, including checks before a repository is selected. File and directory
+existence checks use the same transports; a disconnected backend is an error
+rather than a missing path, so overwrite decisions do not use false negatives.
+Canonical destination paths used by creation, cloning and operation fencing
+also resolve through Rust, including missing descendants and symlink traversal.
+This replaces only that filesystem call; creation and clone still have other
+legacy renderer dependencies.
+The explicit trust action also uses Rust on both transports. It accepts an
+existing repository root, rejects wildcard exceptions, and adds an exact
+global `safe.directory` value idempotently. Offline bridge tests cover unusual
+names, repeated requests, and the isolation of another unsafe repository.
+
+The Wry renderer uses a typed Rust read for its branch list, preserving Git's
+disambiguated short names, upstream names, prefix filtering, and symbolic-ref
+exclusion. Its upstream-difference refresh also uses canonical upstream refs
+and the current-branch marker from that read. The existing Git path remains as
+an error fallback. Merged-branch, point-at and ahead/behind lookups also use
+typed Rust reads; mutation and other workflows have not yet been migrated in
+the renderer.
+
+Branch enumeration, upstream-difference, merged-branch and point-at reads can
+use the authenticated WebSocket transport. The bridge resolves the requested
+repository path, including symlinks, against the selected repository; the
+client sends the resulting repository ID with each read, and the bridge rejects
+a selection change before execution. This covers protocol and renderer routing,
+not a working browser entry or the remaining browser workflows.
+
+Status refresh can read porcelain records and merge, squash, cherry-pick and
+rebase markers through typed Rust operations. Wry and WebSocket also read
+conflict marker counts and binary merge attributes through Rust, with a real
+merge conflict covered by the bridge integration test. This does not yet
+constitute a complete browser status workflow.
+
+The rebase-order revision list, ahead/behind and merge-commit presence checks
+also execute as scoped Wry and WebSocket Rust reads. Missing revisions retain
+the renderer's null result, while other errors remain failures. The renderer
+retains its existing one-line parser and native Git fallback, so these reads
+alone do not complete history or rebase migration.
+
 ## Current evidence
 
 The Rust workspace implements typed repository snapshots and common Git
 workflows, a CLI and browser bridge/client, authentication and change events.
 Repository creation/clone, saved selection and atomic registry updates now have
 Rust implementations and offline CLI/server integration coverage.
-`tests/workflows.py` exercises real local Git workflows, including conflict
-recovery and a local remote. `tests/smoke.py` exercises the authenticated server
-and argument forwarding. Unit tests cover status parsing and output limits.
+`crates/cli/tests/workflows.rs` exercises real local Git workflows, including conflict
+recovery and a local remote. `crates/bridge/tests/lifecycle.rs` exercises
+authenticated server sessions and shutdown. Unit tests cover status parsing
+and output limits.
 These are partial replacement evidence, not a full parity certification.
+
+The authenticated WebSocket pull-request checkout regression runs on the
+normal Tokio worker stack. Its nested checkout review is polled in a separate
+task that retains the request cancellation and credential scope; cancellation
+and task cleanup have Rust unit coverage.
+
+`crates/cli/tests/history_state.rs` exercises pinned history, historical diffs,
+tracking, and merge, cherry-pick, revert, rebase, and `git am` recovery through
+the real Rust CLI. On Unix it also checks non-UTF-8 committed filenames.
+`crates/cli/tests/diffs.rs` exercises selective staging and unstaging, stale
+views, index locks, binary and image diffs, renames, linked worktrees, and
+SHA-256 repositories through the real CLI; Unix additionally covers raw paths
+and symlink boundaries.
 
 The GitHub panel now reuses Row, Form, HorizontalRule, and HighlightText moved
 from the upstream UI into shared frontend source. Legacy entrypoints re-export
@@ -148,13 +235,13 @@ preserves unrelated staged entries; special index flags use an exact index
 snapshot and stricter stale-index guard. Completed backups can be explicitly
 deleted; prepared records require recovery.
 
-`tests/discard.py` covers working/staged/selected changes, raw filenames, new
+`crates/cli/tests/discard.rs` covers working/staged/selected changes, raw filenames, new
 and deleted files, staged renames, simulated interrupted recovery, corrupt/stale
 undo, private backups, executable permissions, 12 MB binary data, symlink
 targets, CRLF/custom filters, required filter failure, locks and intent-to-add
-flags. `tests/discard_advanced.py` covers unborn and unmerged indexes, sparse
+flags. `crates/cli/tests/discard.rs` covers unborn and unmerged indexes, sparse
 flags, UTF-16/CRLF conversion, SHA-256/detached/linked worktrees, symlink-parent
-fences, HEAD/ref locking and cancellation during a smudge. `tests/discard_gc.py`
+fences, HEAD/ref locking and cancellation during a smudge. `crates/cli/tests/discard_gc.rs`
 prunes the original staged blobs and removes split-index bases, then proves undo
 reconstructs the data and original flags from the independent journal. DOM tests
 cover reviewed confirmation, token/line forwarding, undo, explicit deletion and
@@ -212,7 +299,7 @@ staged payloads stop new discards before working-file/index publication; undo
 never replaces a corrupt existing cache object. Android uses no-replace rename
 because hard links are denied in the tested Termux filesystem.
 
-`tests/lfs.py` uses real Git LFS offline under isolated configuration: hook
+`crates/cli/tests/lfs.rs` uses real Git LFS offline under isolated configuration: hook
 conflicts/force, global skip-repo setup, exact raw filenames, 4.8 MB payloads,
 cache/object eviction, corrupt backups/cache objects, symlink refusal,
 noncanonical/empty pointers, custom and moved storage, raw repository roots,
@@ -238,12 +325,14 @@ settings are included in the selection certificate. Configured extensions
 disable partial selection. The CLI and React diff/recovery surfaces expose the
 same payload metadata and retain whole-file choices for unsupported content.
 
-`tests/lfs_diffs.py` exercises real payload diffs and selected operations under
+`crates/cli/tests/lfs.rs` exercises real payload diffs and selected operations under
 isolated local configuration, including failed/changed filters, selected undo,
 image/binary/large data, missing/corrupt/symlink/FIFO cache entries, raw names,
 custom storage, SHA-256 Git blobs, linked worktrees and split indexes. A local
 HTTP observer checks that missing-object previews never request a transfer, and
 cache/index/working-file guards check that read operations leave data unchanged.
+The test locates Git LFS on PATH or via `GIT_LFS_BIN`; CI requires it with
+`DESKTOP_TEST_REQUIRE_LFS=1` rather than silently skipping the coverage.
 The React test covers all payload states and selection controls. With Git LFS
 installed, the complete client test renders a real payload and stages/unstages
 its selected lines through the actual Rust WebSocket bridge.
@@ -265,15 +354,15 @@ Git. Tracking refuses symlink/special .gitattributes files and parent traversal;
 Git LFS owns the underlying multi-file mutation behavior. The UI refreshes even
 after an error, because an operation can have partial effects.
 
-`tests/lfs_operations.py` uses actual local bare-repository LFS storage to prove
+`crates/cli/tests/lfs.rs` uses actual local bare-repository LFS storage to prove
 uploads, filtered downloads, cached checkout, pull, refetch and all-ref
 behavior. It verifies that fetch leaves working pointers intact, pull preserves
-edits, checkout preserves an outside symlink target, and tracking leaves index
-content and unrelated rules intact. Empty-service RPC and standalone CLI setup
-use an isolated global configuration. Hook-conflict coverage preserves custom
-hooks, checks partial global setup, redacts hook contents and verifies explicit
-force replacement. A local HTTP service proves credential-safe failure responses
-and interruption of an in-flight transfer with lock cleanup. DOM tests cover
+edits, and checkout preserves an outside symlink target. The Rust LFS tests
+cover empty-service RPC and standalone CLI setup with isolated configuration,
+tracking without index changes, attribute boundaries, custom filters and
+hook conflicts, including redaction and explicit force replacement. A Rust
+local HTTP fixture proves credential-safe failure responses and interruption
+of an in-flight transfer with lock cleanup. DOM tests cover
 operation options, scope defaults, literal pattern spaces, refresh on failure
 and stale results. Native/live-service transfer behavior still needs the
 corresponding platform and authentication audits.
@@ -358,7 +447,7 @@ locking. The certificate is checked before invocation; hooks can subsequently
 change the index, so this is not an atomic tree reservation. Typed commit clears
 pathspec environment flags to preserve normal Git pattern behavior inside hooks.
 
-`tests/commit_review.py` uses genuine 100 MiB and 100 MiB + 1 blobs, verifies
+`crates/cli/tests/commit_review.rs` uses genuine 100 MiB and 100 MiB + 1 blobs, verifies
 no-write rejection, stale index/HEAD/branch/operation/attribute reviews,
 replacement refs, LFS pointers, raw names, rename destinations, hooks, split
 indexes, SHA-256 and linked worktrees. The React test covers consent, escaping,
@@ -430,14 +519,15 @@ when Git subsequently reports an error; it does not infer success from localized
 stdout or an empty error stream. Native LFS receives its normal internal path
 handling rather than the bridge's literal-path environment.
 
-`tests/stashes.py` exercises saved working/index/untracked content, ignored
-files, read-only diffs, branch markers and reassociation, stale ID/position
-reviews, older-entry application, successful/conflicted pop, conflict resolution
-and explicit removal, raw filenames, SHA-256, split indexes, linked worktrees,
-reftable, symlinks, concurrent Rust removals and lock cancellation. Additional
-fixtures cover lock symlink refusal, an error after stash creation, a concurrent
-native store during pop, replacement storage with failed removal and real LFS
-index/working content. DOM tests cover safe text, byte paths, index views,
+Rust `crates/cli/tests/workflows.rs` exercises saved working/index/untracked
+content, ignored files, read-only diffs, branch reassociation, stale reviews,
+older-entry application, successful and conflicted pop, conflict resolution,
+raw filenames, SHA-256, split indexes, linked worktrees, reftable and symlinks.
+The Rust LFS suite covers staged and working LFS stash content. The Rust signal
+suite covers concurrent removals, lock cancellation and symlink refusal, an
+error after stash creation, a concurrent native store during pop and replacement
+storage with failed removal. DOM tests
+cover safe text, byte paths, index views,
 review/confirmation parameters, errors, disabled controls and stale-root
 replies. A full localhost client journey saves and views the actual
 staged/working data, applies with the saved index, reassigns a branch, refuses a
@@ -506,17 +596,22 @@ has a distinct revision so it cannot replay a prior checkout. Busy ownership and
 branch-option readiness prevent another panel or initial mount enabling checkout
 prematurely.
 
-`tests/checkout.py` covers leave/overwrite consent, returning to saved changes,
-direct and fallback bring, native saved-index/untracked restoration, retained
-conflicts, stale bytes despite unchanged size/mtime, source/target/config
-fences, remote tracking, occupied-worktree CLI selection, SHA-256,
-split/linked/reftable, detached/unborn sources, errors before/after native
-switching, cancellation, preference defaults and uncertain-phase stash
-reconciliation. `tests/checkout_native.py` adds read-only preview with corrupt
-preferences, conflicting preview flags, canonical shadow refs, source/target
-movement during saving, cancellation after native stash creation, recursive
-submodule bytes and retained failures, real LFS content and native post-checkout
-hooks.
+Rust `crates/cli/tests/workflows.rs` covers leave/overwrite consent, returning
+to saved changes, direct and fallback bring, saved-index/untracked restoration,
+retained conflicts, stale bytes despite unchanged size/mtime,
+source/target/config fences, remote tracking, occupied-worktree selection,
+SHA-256, split/linked/reftable and detached/unborn sources.
+The Rust signal suite covers errors before/after native switching,
+cancellation and uncertain-phase stash reconciliation. Rust
+`crates/cli/tests/workflows.rs` covers read-only preview
+with corrupt preferences, conflicting preview flags, stale worktree removal,
+configuration and attribute fences, canonical shadow refs, and recursive
+submodule checkout with stale-content and retained-failure checks. Rust
+`crates/cli/tests/lfs.rs` covers native LFS content and post-checkout hooks;
+`crates/cli/tests/signals.rs` covers source/target movement during saving and
+cancellation after native stash creation.
+The Rust management suite verifies old preference defaults without rewriting
+the stored preferences.
 
 DOM tests exercise strategy values, overwrite acknowledgement, saved-index and
 remembered preferences, root fencing, failed records, worktree selection,
@@ -562,7 +657,7 @@ prewritten IDs, so cancellation after native store/rename still leaves evidence.
 Private atomic/fsynced phase records show current refs and reachable saved IDs.
 Acknowledgement removes only metadata; no operation is replayed automatically.
 
-`tests/branch_rename.py` covers all associated entries/order, raw untracked
+`crates/cli/tests/branch_rename.rs` covers all associated entries/order, raw untracked
 paths, staged versus working contents, destination/user stash retention, stale
 config/ ref/reflog/worktree reviews, invalid/existing names, missing identity,
 SHA-256, split/linked/reftable, detached/noncurrent renames, shared process
@@ -623,7 +718,7 @@ busy-panel regression first failed because a review request was dropped while
 controls were disabled. Pending reviews now wait for readiness and are claimed
 once per request revision; readiness changes do not replay branch operations.
 
-The native `branch_create.py` suite covers staged/working/untracked retention,
+The native `crates/cli/tests/branch_create.rs` suite covers staged/working/untracked retention,
 source-stash replacement consent, direct and fallback bring, conflicted bring,
 native tracking/inherit/no-track, canonical shadows and commit expressions,
 stale file/index/source/config/ref/stash reviews, unborn and detached sources,
@@ -697,7 +792,7 @@ restore and permanent forget are separate actions. Recovery controls now receive
 global readiness and are excluded from imperative button enabling, so releasing
 busy state cannot bypass their consent conditions.
 
-`branch_delete.py` exercises normal/unmerged/current deletion, ref/config
+`crates/cli/tests/branch_delete.rs` exercises normal/unmerged/current deletion, ref/config
 restoration, multivalue settings, other-branch preservation, GC reachability,
 leave/bring and saved index/untracked data, stale review inputs, quoted native
 hook paths/phase forwarding, an external ref change inside the native delete
@@ -761,7 +856,7 @@ preserves consent. Errors refresh history without replay. Discovery resolves
 canonical upstream remote/ref names independently of local branch names and
 fetch namespaces. Public records omit transport URLs and scrub known credentials.
 
-`remote_delete.py` uses private local bare remotes for differing multi-URL tips,
+`crates/cli/tests/remote_delete.rs` uses private local bare remotes for differing multi-URL tips,
 fetch-only separation, stale reviews, races inside pre-push, partial success,
 native hook payload/counts, supplied expectations, custom/negative/head mappings,
 URL rewriting/resets, fetch recovery, missing tips, GC/local restore/forget,
@@ -819,7 +914,7 @@ management panels refresh after their branch mutations, so a locally restored re
 tip becomes available immediately for local branch management. Reconnect and
 late root replies do not replay deletion.
 
-`upstream_delete.py` exercises canonical names, pushRemote separation, stale
+`crates/cli/tests/upstream_delete.rs` exercises canonical names, pushRemote separation, stale
 contexts/options, consent, leave/bring, native tracked target creation,
 submodule initialization, local hook/checkout refusals, server refusal,
 configuration changes during checkout, multi-destination partial success,
@@ -887,7 +982,7 @@ Source-associated stash copies remain available until the final renamed tip is
 verified. Preview metadata and the web view explain the case-only path, and
 rename now participates in global operation readiness.
 
-`branch_refs.py` covers file/SHA-256/reftable variants, existing and injected
+`crates/cli/tests/branch_refs.rs` covers file/SHA-256/reftable variants, existing and injected
 symbolic destinations, moved starts, preparing-hook races, hook executability,
 callback phase/input/count parity and disabling, nested Git configuration,
 private guard cleanup, quoted refs/private inherited config, normal case-only
@@ -933,7 +1028,7 @@ also uses this resolution, including remote-only defaults that need a native
 local tracking checkout. Browser controls validate shared permissions, explain
 blocked actions and clear outdated reviews when policy context changes.
 
-`branch_policy.py` covers global/local configuration precedence, excluded global
+`crates/cli/tests/branch_policy.rs` covers global/local configuration precedence, excluded global
 includes/conditional includes, invalid/looping cached HEAD fallback, symbolic
 aliases,
 nested/quoted and Unicode names, fetch URL resets/private line breaks, push-only exclusion,
@@ -1097,9 +1192,10 @@ local worktree reuse stays offline. The worktree command still lacks a separate
 preview certificate. Snapshots never call name-rule APIs. Raw Git/gh forwarding
 remains explicitly outside typed workflow guarantees.
 
-The actual pure Desktop metadata matcher and rule models now live in shared
-frontend source with legacy re-exports/imports. RE2JS remains pinned to 2.0.1 in
-an isolated test/build package. A deterministic static bundle runs inside
+The oracle extracts the Desktop metadata matcher and operator enum from the
+current `app/` sources. RE2JS remains pinned to 2.0.1 in an isolated test/build
+package; the oracle also checks the renderer's installed version against the
+same corpus. A deterministic Vite-built static bundle runs inside
 Rust's embedded QuickJS runtime with no Node, filesystem, networking or OS
 modules. Parameters are data passed to a fixed function, never evaluated code.
 Memory, stack, input-size, deadline and cancellation limits constrain evaluation.
@@ -1429,9 +1525,9 @@ Tests isolate global Git configuration and verify credential-key exclusion,
 configuration inheritance, default branch initialization, corrupt preference
 preservation, concurrent patches, WebSocket settings without a repository, and
 cross-client preference events. DOM tests exercise management controls and
-non-forcing mutations. Worktree display helpers and the uncommitted-changes
-strategy model now use shared source; the legacy Node path adapter remains until
-its callers are removed.
+non-forcing mutations in the retired standalone frontend. Current CLI and
+bridge coverage is in `crates/cli/tests/management.rs`; the React browser
+workflow and legacy Node path adapter still need replacement and verification.
 
 Native desktop platform integration, richer persistence/import of existing
 Desktop data, worktree repair/retry flows, nested submodule UI, and complete
@@ -1468,7 +1564,7 @@ writers is still outstanding. No claim of an exclusive editor/working-file
 reservation is made. Full native filesystem behavior and remaining rename, batch
 and recovery orchestration remain under the broader removal gates.
 
-`tests/conflict_undo.py` covers ours/theirs/deletion, newer-file refusal,
+`crates/cli/tests/conflict_undo.rs` covers ours/theirs/deletion, newer-file refusal,
 index-only Undo with newer edits/deletion, unrelated staged data, raw paths,
 UTF-16 conversion, SHA-256, split indexes, linked worktrees, reftable,
 interrupted publication prefixes, stale HEAD/branch/operation context, ref
@@ -1514,7 +1610,7 @@ filter/binary limitations. Nothing claims an exclusive working-file reservation
 against an editor or arbitrary external process. The UI refreshes the review
 after editing and clears stale marker consent.
 
-`tests/editor_conflicts.py` exercises literal/raw argv, path and repository
+`crates/cli/tests/bridge_cancellation.rs` and `conflict_undo.rs` exercise literal/raw argv, path and repository
 fences, settings validation/default compatibility, native CLI TTY/exit status,
 GUI launch errors/lifetime, reviewed marker choices, deletion, encoding,
 SHA-256/split indexes, real LFS cleaning and clean-filter cancellation. DOM
@@ -1551,8 +1647,9 @@ sessions. Local integration tests verify orderly shutdown, port release, and
 drop behavior. Navigation policy tests cover origin/port/path and unsupported
 URL schemes. Configuration defaults honor XDG overrides and use native macOS and
 Windows application-data locations; unit tests verify the current target and
-missing/relative-path errors. A Python integration check also verifies that
-shutdown stops an in-flight gh process. Desktop CI jobs are configured to
+missing/relative-path errors. The Rust CLI integration test
+`crates/cli/tests/bridge_shutdown.rs` verifies that shutdown stops an in-flight
+gh process. Desktop CI jobs are configured to
 compile and test all three supported OSes and run a Linux smoke check, but those
 jobs and a real native window have not run in this Termux environment. Native
 platform completion remains unchecked, as do production browser journeys,
@@ -1569,7 +1666,7 @@ Unix process groups receive SIGINT with a cleanup grace period, then forced
 termination of remaining group members. Disconnect and shutdown also drain
 active work; completed effects are not rolled back.
 
-`tests/cancellation.py` runs actual Git commit hooks and a local gh fixture with
+`crates/cli/tests/bridge_cancellation.rs` runs actual Git commit hooks and a local gh fixture with
 an interrupt-resistant descendant. It verifies index-lock cleanup, unchanged
 staged content, cancelled queued mutations, lock waits, cross-session isolation,
 queue bounds, and cleanup on disconnect/duplicate IDs/shutdown. The browser also
@@ -1577,7 +1674,7 @@ supplies snapshot root IDs with bound operations. The server checks those IDs
 under the repository-selection lock, and a two-repository queue test proves a
 stale branch mutation cannot run against another tab's newly selected root. Rust
 tests cover scope propagation and cancelled metadata locks preserving the
-original file. `tests/signals.py` verifies typed CLI SIGINT/SIGTERM cleanup,
+original file. `crates/cli/tests/signals.rs` verifies typed CLI SIGINT/SIGTERM cleanup,
 conventional exit codes, synchronous metadata-lock cancellation, and unchanged
 exec-passthrough signal behavior. Server/native shutdown handlers share the same
 signal source.
@@ -1678,7 +1775,7 @@ numeric actor, and account and remote changes invalidate an in-flight result.
 The description reader rejects symlinks and non-regular files without blocking.
 Provider responses that reflect credentials are rejected before exposure.
 
-The offline `publish_context.py` fixture passes CLI/protocol parity, effective
+The offline `crates/cli/tests/publish_preview_cancel.rs` tests cover CLI/protocol parity, effective
 credentials with an empty account catalog, actor and source races, numeric-ID
 checks, bounded pagination, encoded credential reflection, and corrupt unrelated
 legacy association data. Rust workspace tests, Clippy, formatting and build

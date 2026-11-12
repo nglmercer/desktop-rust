@@ -10,10 +10,10 @@ import subprocess
 import sys
 import tempfile
 
-from discard_advanced import BINARY
-from publish_context import PublishFixture, snapshot
-from publish_preview import preview, request
-from publish_receipts import digest, history, synthetic
+from support.fixture import BINARY
+from support.publish_context import PublishFixture, snapshot
+from support.publish_preview import preview, request
+from support.publish_receipts import digest, history, synthetic
 from repository_accounts import EFFECTIVE, NAMED
 from repository_context import private, stop, wait_for
 

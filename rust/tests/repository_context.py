@@ -11,7 +11,7 @@ import tempfile
 import time
 import hashlib
 import uuid
-from discard_advanced import BINARY, Fixture
+from support.fixture import BINARY, Fixture
 
 
 FORK = {

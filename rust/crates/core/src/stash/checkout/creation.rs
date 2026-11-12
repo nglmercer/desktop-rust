@@ -121,9 +121,9 @@ impl Repository {
             .as_ref()
             .is_some_and(|creation| !creation.request.checkout)
         {
-            self.create_branch_ref_plan(target).await
+            Box::pin(self.create_branch_ref_plan(target)).await
         } else {
-            self.checkout_plan_for(target).await
+            Box::pin(self.checkout_plan_for(target)).await
         }
     }
     async fn create_branch_ref_plan(&self, target: Target) -> Result<Plan> {
@@ -151,10 +151,9 @@ impl Repository {
     pub(super) async fn refresh_checkout_plan(&self, target: &Target) -> Result<Plan> {
         match &target.creation {
             Some(creation) => {
-                self.create_branch_plan(&target.branch, creation.request.clone())
-                    .await
+                Box::pin(self.create_branch_plan(&target.branch, creation.request.clone())).await
             }
-            None => self.checkout_plan(&target.request).await,
+            None => Box::pin(self.checkout_plan(&target.request)).await,
         }
     }
     pub(crate) async fn create_branch_preview(
@@ -187,15 +186,14 @@ impl Repository {
         restore_index: bool,
     ) -> Result<Value> {
         let _lock = self.stash_lock().await?;
-        let plan = self.create_branch_plan(name, request).await?;
+        let plan = Box::pin(self.create_branch_plan(name, request)).await?;
         if let Some(basis) = basis {
             anyhow::ensure!(
                 plan.view["basis"] == basis,
                 "Branch creation files, source, target, stashes or settings changed; review again"
             );
         }
-        self.checkout_execute(plan, strategy, replace, restore_index)
-            .await
+        Box::pin(self.checkout_execute(plan, strategy, replace, restore_index)).await
     }
     pub(super) async fn creation_preflight(&self, target: &Target) -> Result<()> {
         let creation = target

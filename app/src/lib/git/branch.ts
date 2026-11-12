@@ -8,6 +8,8 @@ import { envForRemoteOperation } from './environment'
 import { createForEachRefParser } from './git-delimiter-parser'
 import { IRemote } from '../../models/remote'
 import { coerceToString } from './coerce-to-string'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Create a new branch from the given start point.
@@ -153,6 +155,36 @@ export async function getBranchesPointedAt(
   repository: Repository,
   commitish: string
 ): Promise<Array<string> | null> {
+  if (backend().transportKind === 'ws') {
+    const branches = await backend().branchesPointingAt(
+      repository.path,
+      commitish
+    )
+    return branches === null ? null : Array.from(branches)
+  }
+  if (backend().transportKind === 'wry') {
+    const migrated = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          const branches = await backend().branchesPointingAt(
+            repository.path,
+            commitish
+          )
+          return branches === null ? null : Array.from(branches)
+        } catch (error) {
+          log.warn(
+            'Rust branch lookup failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+    if (migrated !== undefined) return migrated
+  }
   const args = [
     'branch',
     `--points-at=${commitish}`,
@@ -189,6 +221,44 @@ export async function getMergedBranches(
   branchName: string
 ): Promise<Map<string, string>> {
   const canonicalBranchRef = formatAsLocalRef(branchName)
+  if (backend().transportKind === 'ws') {
+    const branches = await backend().mergedRepositoryBranches(
+      repository.path,
+      branchName
+    )
+    return new Map(
+      branches
+        .filter(branch => branch.ref !== canonicalBranchRef)
+        .map(branch => [branch.ref, branch.oid])
+    )
+  }
+  if (backend().transportKind === 'wry') {
+    const migrated = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          const branches = await backend().mergedRepositoryBranches(
+            repository.path,
+            branchName
+          )
+          return new Map(
+            branches
+              .filter(branch => branch.ref !== canonicalBranchRef)
+              .map(branch => [branch.ref, branch.oid])
+          )
+        } catch (error) {
+          log.warn(
+            'Rust merged branch lookup failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+    if (migrated !== undefined) return migrated
+  }
   const { formatArgs, parse } = createForEachRefParser({
     sha: '%(objectname)',
     canonicalRef: '%(refname)',

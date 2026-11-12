@@ -507,7 +507,7 @@ impl Repository {
             self.pull_direct_ref(&temporary).await?.is_none(),
             "Cannot reserve a private pull request fetch ref"
         );
-        let workflow = async {
+        let workflow = Box::pin(async {
             let result: Result<Value> = async {
                 let start = if let Some(remote) = &head_remote {
                     let reference = format!("refs/remotes/{remote}/{}", head.branch);
@@ -554,15 +554,14 @@ impl Repository {
                 };
                 self.ensure_account_basis(account_basis).await?;
                 self.ensure_pull_configuration(&configuration).await?;
-                let output = self
-                    .checkout_pull_branch(
-                        &branch,
-                        &start,
-                        head_remote.is_some(),
-                        &head,
-                        account_basis,
-                    )
-                    .await?;
+                let output = Box::pin(self.checkout_pull_branch(
+                    &branch,
+                    &start,
+                    head_remote.is_some(),
+                    &head,
+                    account_basis,
+                ))
+                .await?;
                 if output["code"] == 0
                     && let Some(tracking) = tracking
                 {
@@ -586,10 +585,9 @@ impl Repository {
                 (Err(error), _) => Err(error),
                 (Ok(_), Err(error)) => Err(error),
             }
-        };
+        });
         if let Some(remote) = &head_remote {
-            crate::git_credentials::scope_checkout_head(self, remote, session, Box::pin(workflow))
-                .await
+            crate::git_credentials::scope_checkout_head(self, remote, session, workflow).await
         } else {
             workflow.await
         }
@@ -810,21 +808,20 @@ impl Repository {
             "Cannot inspect the local pull request branch"
         );
         if exists.code == 1 {
-            return self
-                .create_branch_reviewed(
-                    branch,
-                    CreationRequest {
-                        start_point: Some(start.into()),
-                        no_track: !track_direct,
-                        track_direct,
-                        checkout: true,
-                    },
-                    ChangesStrategy::AskForConfirmation,
-                    None,
-                    false,
-                    false,
-                )
-                .await;
+            return Box::pin(self.create_branch_reviewed(
+                branch,
+                CreationRequest {
+                    start_point: Some(start.into()),
+                    no_track: !track_direct,
+                    track_direct,
+                    checkout: true,
+                },
+                ChangesStrategy::AskForConfirmation,
+                None,
+                false,
+                false,
+            ))
+            .await;
         }
         let local = self
             .run(&args(&["show-ref", "--verify", "--hash", &reference]))
@@ -851,7 +848,7 @@ impl Repository {
                 "The local pull request branch has diverged; review its commits before updating it"
             );
         }
-        let preview = self.checkout_preview(&reference).await?;
+        let preview = Box::pin(self.checkout_preview(&reference)).await?;
         ensure!(
             preview["operation"].is_null() && preview["conflicted"] == false,
             "Finish or abort the current operation or conflicts before checking out a pull request"
@@ -865,15 +862,14 @@ impl Repository {
         let basis = preview["basis"]
             .as_str()
             .context("Pull request checkout review is missing")?;
-        let mut output = self
-            .checkout_reviewed(
-                &reference,
-                ChangesStrategy::AskForConfirmation,
-                Some(basis),
-                false,
-                false,
-            )
-            .await?;
+        let mut output = Box::pin(self.checkout_reviewed(
+            &reference,
+            ChangesStrategy::AskForConfirmation,
+            Some(basis),
+            false,
+            false,
+        ))
+        .await?;
         if output["code"] != 0 || !update {
             return Ok(output);
         }

@@ -1,6 +1,5 @@
 /**
- * Typed frontend client for the Rust application service — the single way
- * the React renderer talks to the backend. Owns transports (Wry via
+ * Typed frontend client for Rust application operations. Owns transports (Wry via
  * `window.__desktop` and WebSocket via `desktop-rs serve`), error/cancel
  * semantics, subscriptions and reconnection.
  *
@@ -14,16 +13,20 @@
  *   `/ws`, authenticate with the session token and speak the bridge JSON
  *   protocol (`{id,method,request}` / `{id,result|error,error_code}`).
  *
- * Both transports share the contract in `contracts.ts`, `IBackendError`
- * propagation and cooperative cancellation. The renderer never builds raw
- * Git arguments nor calls a generic arbitrary executor (`desktop.io.git-
- * exec`/`desktop.io.http-fetch`) to implement workflows — those channels
- * are for low-level shims (`fs.ts`, `dugite.ts`, `keytar.ts`) behind the
- * shims, not for application workflows. Application operations go through
- * `request()` / typed helpers below.
+ * Wry exposes typed repository reads and explicit trust requests; renderer
+ * workflows still use existing shims until the remaining operations migrate.
  */
 
-import { Capabilities, IBackendError, ReadyPayload } from './contracts'
+import {
+  Capabilities,
+  IBackendBranch,
+  IBackendBranchRef,
+  DetailedStatusRecord,
+  IBackendError,
+  ReadyPayload,
+} from './contracts'
+import { randomUUID } from '../web/random-uuid'
+import { isRecord } from '../lib/is-record'
 
 export interface BackendRequestOptions {
   readonly repositoryId?: string
@@ -52,25 +55,36 @@ export class BackendError extends Error implements IBackendError {
 
 function toBackendError(value: unknown): BackendError {
   if (value instanceof BackendError) return value
-  const anyValue = value as Partial<IBackendError> & { code?: unknown; message?: unknown; error_code?: unknown; error?: unknown }
+  const anyValue = value as Partial<IBackendError> & {
+    code?: unknown
+    message?: unknown
+    error_code?: unknown
+    error?: unknown
+  }
   const message =
     typeof anyValue?.message === 'string'
       ? anyValue.message
       : typeof anyValue?.error === 'string'
-        ? anyValue.error
-        : String(value ?? 'unknown backend error')
+      ? anyValue.error
+      : String(value ?? 'unknown backend error')
   const code =
     typeof anyValue?.code === 'string'
       ? anyValue.code
       : typeof anyValue?.error_code === 'string'
-        ? anyValue.error_code
-        : 'internal'
+      ? anyValue.error_code
+      : 'internal'
   return new BackendError({
     code,
     message,
-    retryable: code === 'cancelled' || code === 'queue_full' || (anyValue?.retryable === true),
+    retryable:
+      code === 'cancelled' ||
+      code === 'queue_full' ||
+      anyValue?.retryable === true,
     jobId: typeof anyValue?.jobId === 'string' ? anyValue.jobId : undefined,
-    recoveryId: typeof anyValue?.recoveryId === 'string' ? anyValue.recoveryId : undefined,
+    recoveryId:
+      typeof anyValue?.recoveryId === 'string'
+        ? anyValue.recoveryId
+        : undefined,
     details: anyValue?.details as IBackendError['details'],
   })
 }
@@ -79,21 +93,29 @@ function toBackendError(value: unknown): BackendError {
  *  shim exposes `__health` with `pending_promises`. We default to the
  *  normal profile (128) and honour `low-memory` (64) when presented. */
 function pendingLimitFromHealth(): number {
-  const desktop = (window as any)?.__desktop as { pendingPromises?: number } | undefined
-  if (typeof desktop?.pendingPromises === 'number') return desktop.pendingPromises
+  const desktop = (window as any)?.__desktop as
+    | { pendingPromises?: number }
+    | undefined
+  if (typeof desktop?.pendingPromises === 'number')
+    return desktop.pendingPromises
   const profile =
     typeof (window as any)?.__desktopEnv?.DESKTOP_RESOURCE_PROFILE === 'string'
       ? (window as any).__desktopEnv.DESKTOP_RESOURCE_PROFILE
       : typeof (window as any)?.DESKTOP_RESOURCE_PROFILE === 'string'
-        ? (window as any).DESKTOP_RESOURCE_PROFILE
-        : undefined
+      ? (window as any).DESKTOP_RESOURCE_PROFILE
+      : undefined
   return profile === 'low-memory' ? 64 : 128
 }
 
 type WryBridge = {
+  readonly __transport?: string
+  supportsCancellation?: () => boolean
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
   send: (channel: string, ...args: unknown[]) => void
-  on: (channel: string, listener: (event: unknown, ...args: unknown[]) => void) => unknown
+  on: (
+    channel: string,
+    listener: (event: unknown, ...args: unknown[]) => void
+  ) => unknown
   off?: (channel: string, listener?: unknown) => void
 }
 
@@ -109,19 +131,94 @@ class WryTransport {
   }
 
   capabilities(): Capabilities {
-    // Wry does not negotiate a version on connect; the Rust shell reports
-    // the same capabilities as the bridge (cancel + profile max_pending).
     return {
-      cancel: true,
+      cancel: this.bridge.supportsCancellation?.() ?? true,
       max_pending: pendingLimitFromHealth(),
     }
   }
 
-  async request(method: string, params: unknown, opts: BackendRequestOptions): Promise<unknown> {
+  async request(
+    method: string,
+    params: unknown,
+    opts: BackendRequestOptions
+  ): Promise<unknown> {
     if (opts.signal?.aborted) {
-      throw new BackendError({ code: 'cancelled', message: 'Operation cancelled before start', retryable: true })
+      throw new BackendError({
+        code: 'cancelled',
+        message: 'Operation cancelled before start',
+        retryable: true,
+      })
+    }
+    if (
+      opts.repositoryId !== undefined ||
+      opts.accountId !== undefined ||
+      (method !== 'read' &&
+        (opts.signal !== undefined || opts.deadlineMs !== undefined))
+    ) {
+      throw new BackendError({
+        code: 'unsupported',
+        message: 'Wry backend request options are not implemented',
+        retryable: false,
+      })
     }
     const channel = `desktop.backend.${method}`
+    if (method === 'read') {
+      if (opts.signal && !this.capabilities().cancel) {
+        throw new BackendError({
+          code: 'unsupported',
+          message: 'Cancellation requires the native IPC transport',
+          retryable: false,
+        })
+      }
+      const deadline = opts.deadlineMs ?? 60_000
+      if (!Number.isInteger(deadline) || deadline < 1 || deadline > 60_000) {
+        throw new BackendError({
+          code: 'invalid_request',
+          message: 'deadlineMs must be between 1 and 60000',
+          retryable: false,
+        })
+      }
+      const requestId = randomUUID()
+      return new Promise((resolve, reject) => {
+        let settled = false
+        let timer: ReturnType<typeof setTimeout>
+        const finish = (action: () => void) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          opts.signal?.removeEventListener('abort', abort)
+          action()
+        }
+        const cancel = (code: string, message: string) =>
+          finish(() => {
+            try {
+              if (this.capabilities().cancel) this.cancel(requestId)
+            } finally {
+              reject(new BackendError({ code, message, retryable: true }))
+            }
+          })
+        const abort = () => cancel('cancelled', 'Repository read cancelled')
+        opts.signal?.addEventListener('abort', abort, { once: true })
+        timer = setTimeout(
+          () => cancel('ETIMEDOUT', 'Repository read timed out'),
+          deadline
+        )
+        try {
+          this.bridge
+            .invoke(channel, {
+              ...(params as object),
+              request_id: requestId,
+              deadline_ms: deadline,
+            })
+            .then(
+              value => finish(() => resolve(value)),
+              error => finish(() => reject(toBackendError(error)))
+            )
+        } catch (error) {
+          finish(() => reject(toBackendError(error)))
+        }
+      })
+    }
     try {
       const value = await this.bridge.invoke(channel, params)
       return value
@@ -130,16 +227,21 @@ class WryTransport {
     }
   }
 
-  cancel(_requestId: string): void {
-    // Wry IPC cancellation is cooperative via the `cancel` channel; each
-    // in-flight RPC carries a cancellation id known to the Rust executor.
-    // The shim's `invoke` itself does not expose a per-request abort; we
-    // forward to the backend cancel lane when the shell supports it.
-    try {
-      this.bridge.send('desktop.io.cancel', {})
-    } catch {
-      // No cancel lane — cancellation is signal-driven on the Rust side.
+  subscribe(event: string, listener: (...args: unknown[]) => void): () => void {
+    const wrapped = (_event: unknown, ...args: unknown[]) => listener(...args)
+    this.bridge.on(event, wrapped)
+    return () => this.bridge.off?.(event, wrapped)
+  }
+
+  cancel(requestId: string): void {
+    if (!this.capabilities().cancel) {
+      throw new BackendError({
+        code: 'unsupported',
+        message: 'Cancellation requires the native IPC transport',
+        retryable: false,
+      })
     }
+    this.bridge.send('desktop.backend.cancel', { request_id: requestId })
   }
 }
 
@@ -157,23 +259,82 @@ interface BridgeRpcReply {
   preferences?: unknown
 }
 
-class WebSocketTransport implements AsyncIterableIterator<unknown> {
+function disconnectedError(): BackendError {
+  return new BackendError({
+    code: 'disconnected',
+    message: 'Bridge socket closed',
+    retryable: true,
+  })
+}
+
+function disconnectedInFlightError(): BackendError {
+  return new BackendError({
+    code: 'disconnected',
+    message:
+      'Bridge disconnected; the operation may have completed. Inspect state before retrying.',
+    retryable: false,
+  })
+}
+
+function bridgeToken(): string | null {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  if (fragment.has('token')) {
+    const token = fragment.get('token')
+    if (token) return token
+    try {
+      sessionStorage.removeItem('desktopBridgeToken')
+    } catch {}
+    return null
+  }
+  try {
+    return sessionStorage.getItem('desktopBridgeToken')
+  } catch {
+    return null
+  }
+}
+
+class WebSocketTransport {
   private socket: WebSocket | null = null
   private wsReady: Promise<ReadyPayload> | null = null
-  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void; timer: ReturnType<typeof setTimeout> }>()
+  private pending = new Map<
+    number,
+    {
+      resolve: (v: unknown) => void
+      reject: (e: unknown) => void
+      cleanup: () => void
+    }
+  >()
   private listeners = new Map<string, Set<(...args: unknown[]) => void>>()
   private nextId = 1
-  private token: string | null = null
+  private readonly token: string
   private _ready: ReadyPayload | null = null
-  private queue: unknown[] = []
-  private waiters: Array<(v: unknown) => void> = []
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private closed = false
-  private readyWaiters: Array<{ resolve: (v: ReadyPayload) => void; reject: (e: unknown) => void }> = []
+  private terminalError: BackendError | null = null
+  private readyWaiters: Array<{
+    resolve: (v: ReadyPayload) => void
+    reject: (e: unknown) => void
+  }> = []
 
-  constructor() {
-    this.token = new URLSearchParams(window.location.hash.slice(1)).get('token') || sessionStorage.getItem('desktopBridgeToken')
-    if (this.token) sessionStorage.setItem('desktopBridgeToken', this.token)
+  constructor(token: string) {
+    this.token = token
+    try {
+      sessionStorage.setItem('desktopBridgeToken', token)
+      const fragment = new URLSearchParams(window.location.hash.slice(1))
+      if (fragment.has('token')) {
+        fragment.delete('token')
+        const rest = fragment.toString()
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${
+            rest ? `#${rest}` : ''
+          }`
+        )
+      }
+    } catch {
+      // Storage is optional while the token is still present in the URL.
+    }
   }
 
   get ready(): boolean {
@@ -189,31 +350,67 @@ class WebSocketTransport implements AsyncIterableIterator<unknown> {
   }
 
   connect(): Promise<ReadyPayload> {
+    if (this._ready) return Promise.resolve(this._ready)
+    if (this.closed) {
+      return Promise.reject(this.terminalError ?? disconnectedError())
+    }
     if (this.wsReady) return this.wsReady
     this.wsReady = new Promise<ReadyPayload>((resolve, reject) => {
       this.readyWaiters.push({ resolve, reject })
     })
-    this.open()
-    return this.wsReady
+    const ready = this.wsReady
+    if (!this.socket && !this.reconnectTimer) this.open()
+    return ready
   }
 
   private open(): void {
-    if (!this.token) {
-      this.failReady(new Error('missing bridge token in URL fragment'))
-      return
-    }
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${scheme}//${window.location.host}/ws`
-    const socket = new WebSocket(url)
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(url)
+    } catch {
+      this.failReady(disconnectedError())
+      this.scheduleReconnect()
+      return
+    }
     this.socket = socket
+    const handshakeTimer = setTimeout(() => {
+      if (this.socket === socket && !this._ready && !this.closed) socket.close()
+    }, 15_000)
     socket.onmessage = event => {
+      if (this.socket !== socket || this.closed) return
       try {
-        const data = JSON.parse(event.data) as BridgeRpcReply & { ready?: boolean; version?: number; capabilities?: Capabilities & { cancel: boolean; max_pending: number } }
-        if (data.ready) {
+        const data = JSON.parse(event.data) as BridgeRpcReply & {
+          ready?: boolean
+          version?: number
+          capabilities?: Capabilities & { cancel: boolean; max_pending: number }
+        }
+        if (
+          !data ||
+          typeof data !== 'object' ||
+          (!this._ready && data.ready !== true)
+        ) {
+          throw new Error('invalid bridge frame')
+        }
+        if (data.ready === true) {
+          if (
+            data.version !== 3 ||
+            typeof data.capabilities?.cancel !== 'boolean' ||
+            !Number.isSafeInteger(data.capabilities?.max_pending) ||
+            data.capabilities!.max_pending < 1 ||
+            data.capabilities!.max_pending > 4096
+          ) {
+            throw new Error('unsupported bridge handshake')
+          }
+          clearTimeout(handshakeTimer)
           this._ready = {
             ready: true,
-            version: (data.version as 3 | undefined) ?? 3,
-            capabilities: { cancel: data.capabilities?.cancel ?? true, max_pending: data.capabilities?.max_pending ?? 32 },
+            version: 3,
+            capabilities: {
+              cancel: data.capabilities.cancel,
+              max_pending: data.capabilities.max_pending,
+            },
           }
           this.flushReady()
           return
@@ -222,13 +419,13 @@ class WebSocketTransport implements AsyncIterableIterator<unknown> {
           const entry = this.pending.get(data.id)
           if (entry) {
             this.pending.delete(data.id)
-            clearTimeout(entry.timer)
+            entry.cleanup()
             if (data.error !== undefined) {
               entry.reject(
                 new BackendError({
                   code: data.error_code ?? 'internal',
                   message: data.error,
-                  retryable: data.error_code === 'cancelled' || data.error_code === 'queue_full',
+                  retryable: data.error_code === 'queue_full',
                 })
               )
             } else {
@@ -238,19 +435,53 @@ class WebSocketTransport implements AsyncIterableIterator<unknown> {
           return
         }
         if (data.event) {
-          this.dispatch(data.event, data.snapshot ?? data.preferences ?? data)
+          this.dispatch(
+            data.event,
+            'snapshot' in data
+              ? data.snapshot
+              : 'preferences' in data
+              ? data.preferences
+              : data
+          )
         }
-      } catch (error) {
-        // Non-JSON frame — ignore; bridge only sends JSON text.
+      } catch {
+        clearTimeout(handshakeTimer)
+        this.terminalError = new BackendError({
+          code: 'protocol',
+          message:
+            'Invalid bridge message; inspect state before retrying an operation',
+          retryable: false,
+        })
+        this.closed = true
+        this.failReady(this.terminalError)
+        this.rejectPending(this.terminalError)
+        socket.close()
       }
     }
     socket.onopen = () => {
+      if (this.socket !== socket || this.closed) return
       socket.send(JSON.stringify({ token: this.token }))
     }
-    socket.onclose = () => {
+    socket.onclose = event => {
+      if (this.socket !== socket) return
+      clearTimeout(handshakeTimer)
       this.socket = null
       this._ready = null
-      this.rejectPending(new BackendError({ code: 'disconnected', message: 'bridge socket closed', retryable: true }))
+      if (event.code === 1008 && !this.closed) {
+        this.closed = true
+        this.terminalError = new BackendError({
+          code: 'unauthorized',
+          message: 'Bridge rejected the session token',
+          retryable: false,
+        })
+        try {
+          if (sessionStorage.getItem('desktopBridgeToken') === this.token)
+            sessionStorage.removeItem('desktopBridgeToken')
+        } catch {}
+      }
+      const error = this.terminalError ?? disconnectedError()
+      this.failReady(error)
+      this.rejectPending(this.terminalError ?? disconnectedInFlightError())
       if (!this.closed) this.scheduleReconnect()
     }
     socket.onerror = () => {
@@ -265,12 +496,13 @@ class WebSocketTransport implements AsyncIterableIterator<unknown> {
   }
 
   private failReady(error: unknown): void {
+    this.wsReady = null
     for (const w of this.readyWaiters.splice(0)) w.reject(error)
   }
 
   private rejectPending(error: unknown): void {
     for (const entry of this.pending.values()) {
-      clearTimeout(entry.timer)
+      entry.cleanup()
       entry.reject(error)
     }
     this.pending.clear()
@@ -280,57 +512,176 @@ class WebSocketTransport implements AsyncIterableIterator<unknown> {
     if (this.reconnectTimer || this.closed) return
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.wsReady = null
-      this.open()
+      if (!this.socket) this.open()
     }, 1000)
   }
 
-  async request(method: string, params: unknown, opts: BackendRequestOptions): Promise<unknown> {
+  async request(
+    method: string,
+    params: unknown,
+    opts: BackendRequestOptions
+  ): Promise<unknown> {
     if (opts.signal?.aborted) {
-      throw new BackendError({ code: 'cancelled', message: 'Operation cancelled before start', retryable: true })
+      throw new BackendError({
+        code: 'cancelled',
+        message: 'Operation cancelled before start',
+        retryable: true,
+      })
     }
-    if (!this._ready) await this.connect()
+    if (opts.accountId !== undefined) {
+      throw new BackendError({
+        code: 'unsupported',
+        message: 'Account-scoped bridge requests are not implemented',
+        retryable: false,
+      })
+    }
+    const deadlineMs = opts.deadlineMs ?? 170_000
+    if (
+      !Number.isFinite(deadlineMs) ||
+      deadlineMs <= 0 ||
+      deadlineMs > 2_147_483_647
+    ) {
+      throw new BackendError({
+        code: 'invalid_deadline',
+        message: 'Invalid bridge request deadline',
+        retryable: false,
+      })
+    }
+    const deadline = Date.now() + deadlineMs
+    if (!this._ready) await this.waitForReady(opts.signal, deadlineMs)
+    if (opts.signal?.aborted) {
+      throw new BackendError({
+        code: 'cancelled',
+        message: 'Operation cancelled before start',
+        retryable: true,
+      })
+    }
+    const socket = this.socket
+    if (!this._ready || !socket || socket.readyState !== WebSocket.OPEN)
+      throw disconnectedError()
+    if (Date.now() >= deadline) {
+      throw new BackendError({
+        code: 'timeout',
+        message: 'Bridge request deadline exceeded before start',
+        retryable: true,
+      })
+    }
     const limit = this.capabilities().max_pending
     if (this.pending.size >= limit) {
-      throw new BackendError({ code: 'queue_full', message: `EBUSY: QUEUE_FULL, ${this.pending.size} RPCs already waiting`, retryable: true })
+      throw new BackendError({
+        code: 'queue_full',
+        message: `EBUSY: QUEUE_FULL, ${this.pending.size} RPCs already waiting`,
+        retryable: true,
+      })
     }
     const id = this.nextId++
-    const payload: Record<string, unknown> = { ...(params as Record<string, unknown>), id, method }
-    if (opts.repositoryId) payload.repository_id = opts.repositoryId
+    const payload: Record<string, unknown> = {
+      ...(params as Record<string, unknown>),
+      id,
+      method,
+    }
+    if (opts.repositoryId !== undefined)
+      payload.repository_id = opts.repositoryId
     return new Promise<unknown>((resolve, reject) => {
+      let onAbort: (() => void) | undefined
+      const cleanup = () => {
+        clearTimeout(timer)
+        if (onAbort) opts.signal?.removeEventListener('abort', onAbort)
+      }
+      const rejectAndCancel = (error: BackendError) => {
+        if (!this.pending.delete(id)) return
+        cleanup()
+        if (this.capabilities().cancel) this.cancel(id)
+        reject(error)
+      }
       const timer = setTimeout(() => {
-        if (this.pending.delete(id)) {
-          reject(new BackendError({ code: 'timeout', message: `RPC timeout: ${method}`, retryable: false }))
-        }
-      }, opts.deadlineMs ?? 170_000)
-      this.pending.set(id, { resolve, reject, timer })
+        rejectAndCancel(
+          new BackendError({
+            code: 'timeout',
+            message: `RPC timeout: ${method}; inspect state before retrying a mutation`,
+            retryable: false,
+          })
+        )
+      }, Math.max(0, deadline - Date.now()))
+      this.pending.set(id, { resolve, reject, cleanup })
+      if (opts.signal) {
+        onAbort = () =>
+          rejectAndCancel(
+            new BackendError({
+              code: 'cancelled',
+              message:
+                'Cancellation requested; inspect state before retrying a mutation',
+              retryable: false,
+            })
+          )
+        opts.signal.addEventListener('abort', onAbort, { once: true })
+      }
       try {
-        this.socket!.send(JSON.stringify(payload))
+        socket.send(JSON.stringify(payload))
       } catch (error) {
         this.pending.delete(id)
-        clearTimeout(timer)
+        cleanup()
         reject(toBackendError(error))
       }
-      if (opts.signal) {
-        const onAbort = () => {
-          this.pending.delete(id)
-          clearTimeout(timer)
-          try {
-            this.socket!.send(JSON.stringify({ id: this.nextId++, method: 'cancel', request_id: id }))
-          } catch {}
-          reject(new BackendError({ code: 'cancelled', message: 'Operation cancelled', retryable: true }))
-        }
-        if (opts.signal.aborted) onAbort()
-        else opts.signal.addEventListener('abort', onAbort, { once: true })
+      if (opts.signal?.aborted) onAbort?.()
+    })
+  }
+
+  private waitForReady(
+    signal: AbortSignal | undefined,
+    timeoutMs: number
+  ): Promise<ReadyPayload> {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', abort)
       }
+      const abort = () => {
+        cleanup()
+        reject(
+          new BackendError({
+            code: 'cancelled',
+            message: 'Operation cancelled before start',
+            retryable: true,
+          })
+        )
+      }
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(
+          new BackendError({
+            code: 'timeout',
+            message: 'Bridge connection deadline exceeded before start',
+            retryable: true,
+          })
+        )
+      }, timeoutMs)
+      signal?.addEventListener('abort', abort, { once: true })
+      this.connect().then(
+        value => {
+          cleanup()
+          resolve(value)
+        },
+        error => {
+          cleanup()
+          reject(error)
+        }
+      )
+      if (signal?.aborted) abort()
     })
   }
 
   cancel(requestId: string | number): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
-    const id = typeof requestId === 'string' ? parseInt(requestId, 10) : requestId
-    if (Number.isNaN(id)) return
-    this.socket.send(JSON.stringify({ id: this.nextId++, method: 'cancel', request_id: id }))
+    const id = typeof requestId === 'string' ? Number(requestId) : requestId
+    if (!Number.isSafeInteger(id) || id < 1) return
+    try {
+      this.socket.send(
+        JSON.stringify({ id: this.nextId++, method: 'cancel', request_id: id })
+      )
+    } catch {
+      // The socket may close between the readiness check and send.
+    }
   }
 
   subscribe(event: string, listener: (...args: unknown[]) => void): () => void {
@@ -357,19 +708,13 @@ class WebSocketTransport implements AsyncIterableIterator<unknown> {
 
   close(): void {
     this.closed = true
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    this._ready = null
+    const error = this.terminalError ?? disconnectedError()
+    this.failReady(error)
+    this.rejectPending(this.terminalError ?? disconnectedInFlightError())
     this.socket?.close()
-  }
-
-  // AsyncIterable for snapshot/job streams (not used by the bridge today
-  // beyond `repository_changed`; kept for parity with the Wry dispatcher).
-  [Symbol.asyncIterator]() {
-    return this
-  }
-  async next(): Promise<IteratorResult<unknown>> {
-    if (this.queue.length) return { value: this.queue.shift(), done: false }
-    if (this.closed) return { value: undefined, done: true }
-    const value = await new Promise<unknown>(resolve => this.waiters.push(resolve))
-    return { value, done: false }
   }
 }
 
@@ -381,16 +726,23 @@ export class BackendClient {
   private wry: WryTransport | null = null
   private ws: WebSocketTransport | null = null
   private transport: 'wry' | 'ws' | 'none' = 'none'
-  private readyPromise: Promise<ReadyPayload> | null = null
 
   constructor() {
     const w = (window as any).__desktop as WryBridge | undefined
-    if (w && typeof w.invoke === 'function' && typeof w.on === 'function') {
+    if (
+      w &&
+      w.__transport === undefined &&
+      typeof w.invoke === 'function' &&
+      typeof w.on === 'function'
+    ) {
       this.wry = new WryTransport(w)
       this.transport = 'wry'
-    } else if (window.location.hash.includes('token=')) {
-      this.ws = new WebSocketTransport()
-      this.transport = 'ws'
+    } else {
+      const token = bridgeToken()
+      if (token) {
+        this.ws = new WebSocketTransport(token)
+        this.transport = 'ws'
+      }
     }
   }
 
@@ -407,22 +759,36 @@ export class BackendClient {
       return { ready: true, version: 3, capabilities: this.wry!.capabilities() }
     }
     if (this.transport === 'ws') {
-      if (!this.readyPromise) this.readyPromise = this.ws!.connect()
-      return this.readyPromise
+      return this.ws!.connect()
     }
-    throw new BackendError({ code: 'no_transport', message: 'no backend transport attached (run via desktop-rs serve or Tao/Wry shell)', retryable: false })
+    throw new BackendError({
+      code: 'no_transport',
+      message:
+        'no backend transport attached (run via desktop-rs serve or Tao/Wry shell)',
+      retryable: false,
+    })
   }
 
   capabilities(): Capabilities {
     if (this.transport === 'wry') return this.wry!.capabilities()
     if (this.transport === 'ws') return this.ws!.capabilities()
-    return { cancel: true, max_pending: 32 }
+    return { cancel: false, max_pending: 32 }
   }
 
-  async request<T = unknown>(method: string, params: unknown, opts: BackendRequestOptions = {}): Promise<T> {
-    if (this.transport === 'wry') return this.wry!.request(method, params, opts) as Promise<T>
-    if (this.transport === 'ws') return this.ws!.request(method, params, opts) as Promise<T>
-    throw new BackendError({ code: 'no_transport', message: 'no backend transport attached', retryable: false })
+  async request<T = unknown>(
+    method: string,
+    params: unknown,
+    opts: BackendRequestOptions = {}
+  ): Promise<T> {
+    if (this.transport === 'wry')
+      return this.wry!.request(method, params, opts) as Promise<T>
+    if (this.transport === 'ws')
+      return this.ws!.request(method, params, opts) as Promise<T>
+    throw new BackendError({
+      code: 'no_transport',
+      message: 'no backend transport attached',
+      retryable: false,
+    })
   }
 
   cancel(requestId: string): void {
@@ -430,15 +796,451 @@ export class BackendClient {
     else if (this.transport === 'ws') this.ws!.cancel(requestId)
   }
 
+  subscribe(event: string, listener: (...args: unknown[]) => void): () => void {
+    if (this.transport === 'wry') return this.wry!.subscribe(event, listener)
+    if (this.transport === 'ws') return this.ws!.subscribe(event, listener)
+    return () => {}
+  }
+
+  close(): void {
+    this.ws?.close()
+  }
+
   /** Snapshot of current repository (ws) or health/capabilities (wry). */
   async snapshot(opts: BackendRequestOptions = {}): Promise<unknown> {
     if (this.transport === 'ws') return this.request('snapshot', {}, opts)
     if (this.transport === 'wry') {
-      const health = (window as any).__desktop as { health?: () => unknown } | undefined
+      const health = (window as any).__desktop as
+        | { health?: () => unknown }
+        | undefined
       if (typeof health?.health === 'function') return health.health()
       return { version: 3, capabilities: this.wry!.capabilities() }
     }
-    throw new BackendError({ code: 'no_transport', message: 'no backend transport attached', retryable: false })
+    throw new BackendError({
+      code: 'no_transport',
+      message: 'no backend transport attached',
+      retryable: false,
+    })
+  }
+
+  /** Read a specific repository through the native shell's Rust core. */
+  async readRepositoryState(
+    repositoryPath: string,
+    method: 'snapshot' | 'status'
+  ): Promise<unknown> {
+    if (this.transport !== 'wry') {
+      throw new BackendError({
+        code: 'unsupported',
+        message: 'repository-scoped Wry reads require the desktop shell',
+        retryable: false,
+      })
+    }
+    return this.wry!.request(
+      'read',
+      { repository_path: repositoryPath, method },
+      {}
+    )
+  }
+
+  private async repositoryRead(
+    repositoryPath: string,
+    method: string,
+    params: Record<string, unknown>,
+    options: BackendRequestOptions = {}
+  ): Promise<unknown> {
+    if (this.transport === 'wry') {
+      return this.wry!.request(
+        'read',
+        { ...params, repository_path: repositoryPath, method },
+        options
+      )
+    } else if (this.transport === 'ws') {
+      const started = Date.now()
+      const binding = await this.request(
+        'repository_binding',
+        { path: repositoryPath },
+        {
+          signal: options.signal,
+          deadlineMs: options.deadlineMs,
+        }
+      )
+      if (!isRecord(binding) || typeof binding.root_id !== 'string') {
+        throw new BackendError({
+          code: 'repository_changed',
+          message:
+            'Selected repository does not match the requested repository',
+          retryable: true,
+        })
+      }
+      const remaining = (options.deadlineMs ?? 170_000) - (Date.now() - started)
+      if (remaining <= 0) {
+        throw new BackendError({
+          code: 'timeout',
+          message: 'Bridge request deadline exceeded before repository read',
+          retryable: true,
+        })
+      }
+      return this.request(method, params, {
+        ...options,
+        deadlineMs: remaining,
+        repositoryId: binding.root_id,
+      })
+    } else {
+      throw new BackendError({
+        code: 'unsupported',
+        message: 'repository-scoped reads require a backend transport',
+        retryable: false,
+      })
+    }
+  }
+
+  /** Classify a directory before it has been selected as a repository. */
+  async repositoryType(
+    path: string
+  ): Promise<
+    | { kind: 'bare' | 'missing' }
+    | { kind: 'regular'; topLevelWorkingDirectory: string; gitDir: string }
+    | { kind: 'unsafe'; path: string }
+  > {
+    const value =
+      this.transport === 'wry'
+        ? await this.repositoryRead(path, 'repository_type', {})
+        : await this.request('repository_type', { path })
+    if (isRecord(value)) {
+      if (value.kind === 'bare' || value.kind === 'missing')
+        return { kind: value.kind }
+      if (value.kind === 'unsafe' && typeof value.path === 'string')
+        return { kind: 'unsafe', path: value.path }
+      if (
+        value.kind === 'regular' &&
+        typeof value.topLevelWorkingDirectory === 'string' &&
+        typeof value.gitDir === 'string'
+      ) {
+        return {
+          kind: 'regular',
+          topLevelWorkingDirectory: value.topLevelWorkingDirectory,
+          gitDir: value.gitDir,
+        }
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid repository type response',
+      retryable: false,
+    })
+  }
+
+  /** Check a directory independently of the currently selected repository. */
+  async directoryExists(path: string): Promise<boolean> {
+    const value =
+      this.transport === 'wry'
+        ? await this.repositoryRead(path, 'directory_exists', {})
+        : await this.request('directory_exists', { path })
+    if (typeof value !== 'boolean') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid directory check response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  /** Check for a file or directory without selecting a repository. */
+  async pathExists(path: string): Promise<boolean> {
+    const value =
+      this.transport === 'wry'
+        ? await this.repositoryRead(path, 'path_exists', {})
+        : await this.request('path_exists', { path })
+    if (typeof value !== 'boolean') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid path check response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  /** Resolve an existing path or a prospective destination through Rust. */
+  async canonicalMutationPath(path: string): Promise<string> {
+    const value =
+      this.transport === 'wry'
+        ? await this.repositoryRead(path, 'canonical_mutation_path', {})
+        : await this.request('canonical_mutation_path', { path })
+    if (typeof value !== 'string') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid canonical path response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  /** Trust one repository root after the user confirms the exception. */
+  async trustRepository(path: string): Promise<void> {
+    const value =
+      this.transport === 'wry'
+        ? await this.repositoryRead(path, 'trust_repository', {})
+        : await this.request('trust_repository', { path })
+    if (!isRecord(value) || value.trusted !== true) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid repository trust response',
+        retryable: false,
+      })
+    }
+  }
+
+  /** Fetch Git's disambiguated branches for one explicit repository. */
+  async repositoryBranches(
+    repositoryPath: string,
+    prefixes: ReadonlyArray<string>
+  ): Promise<ReadonlyArray<IBackendBranch>> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'branch_enumeration',
+      { prefixes }
+    )
+    if (
+      !Array.isArray(value) ||
+      !value.every(
+        branch =>
+          branch !== null &&
+          typeof branch === 'object' &&
+          typeof branch.ref === 'string' &&
+          typeof branch.name === 'string' &&
+          (branch.upstream === null || typeof branch.upstream === 'string') &&
+          (branch.upstream_ref === null ||
+            typeof branch.upstream_ref === 'string') &&
+          typeof branch.current === 'boolean' &&
+          typeof branch.oid === 'string'
+      )
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid branch enumeration response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  /** Fetch local refs merged into a selected branch. */
+  async mergedRepositoryBranches(
+    repositoryPath: string,
+    branch: string
+  ): Promise<ReadonlyArray<IBackendBranchRef>> {
+    const value = await this.repositoryRead(repositoryPath, 'branch_merged', {
+      branch,
+    })
+    if (
+      !Array.isArray(value) ||
+      !value.every(
+        item =>
+          item !== null &&
+          typeof item === 'object' &&
+          typeof item.ref === 'string' &&
+          typeof item.oid === 'string'
+      )
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid merged branches response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  async branchesPointingAt(
+    repositoryPath: string,
+    commitish: string
+  ): Promise<ReadonlyArray<string> | null> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'branch_points_at',
+      { commitish }
+    )
+    if (
+      value !== null &&
+      (!Array.isArray(value) || !value.every(item => typeof item === 'string'))
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid branches pointing at response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  async repositoryAheadBehind(
+    repositoryPath: string,
+    range: string
+  ): Promise<{ readonly ahead: number; readonly behind: number } | null> {
+    const value = await this.repositoryRead(repositoryPath, 'ahead_behind', {
+      range,
+    })
+    if (value === null) return null
+    if (
+      !isRecord(value) ||
+      typeof value.ahead !== 'number' ||
+      typeof value.behind !== 'number' ||
+      !Number.isSafeInteger(value.ahead) ||
+      !Number.isSafeInteger(value.behind) ||
+      value.ahead < 0 ||
+      value.behind < 0
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid ahead/behind response',
+        retryable: false,
+      })
+    }
+    return { ahead: value.ahead, behind: value.behind }
+  }
+
+  /** Fetch the renderer's rebase-ordered revision list. */
+  async repositoryRevisionList(
+    repositoryPath: string,
+    range: string
+  ): Promise<string | null> {
+    const value = await this.repositoryRead(repositoryPath, 'revision_list', {
+      range,
+    })
+    if (value !== null && typeof value !== 'string') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid revision list response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  async repositoryHasMergeCommits(
+    repositoryPath: string,
+    range: string
+  ): Promise<boolean> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'has_merge_commits',
+      { range }
+    )
+    if (typeof value !== 'boolean') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid merge commit response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  async repositoryStatusContext(repositoryPath: string): Promise<{
+    readonly mergeHeadFound: boolean
+    readonly squashMsgFound: boolean
+    readonly isCherryPickingHeadFound: boolean
+    readonly rebaseInternalState: {
+      readonly originalBranchTip: string
+      readonly targetBranch: string
+      readonly baseBranchTip: string
+    } | null
+  }> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'status_context',
+      {}
+    )
+    if (
+      !isRecord(value) ||
+      typeof value.mergeHeadFound !== 'boolean' ||
+      typeof value.squashMsgFound !== 'boolean' ||
+      typeof value.isCherryPickingHeadFound !== 'boolean'
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid repository status context response',
+        retryable: false,
+      })
+    }
+    const rebase = value.rebaseInternalState
+    let rebaseInternalState = null
+    if (rebase !== null) {
+      if (
+        !isRecord(rebase) ||
+        typeof rebase.originalBranchTip !== 'string' ||
+        typeof rebase.targetBranch !== 'string' ||
+        typeof rebase.baseBranchTip !== 'string'
+      ) {
+        throw new BackendError({
+          code: 'invalid_response',
+          message: 'Invalid repository rebase context response',
+          retryable: false,
+        })
+      }
+      rebaseInternalState = {
+        originalBranchTip: rebase.originalBranchTip,
+        targetBranch: rebase.targetBranch,
+        baseBranchTip: rebase.baseBranchTip,
+      }
+    }
+    return {
+      mergeHeadFound: value.mergeHeadFound,
+      squashMsgFound: value.squashMsgFound,
+      isCherryPickingHeadFound: value.isCherryPickingHeadFound,
+      rebaseInternalState,
+    }
+  }
+
+  async repositoryConflictDetails(
+    repositoryPath: string,
+    kind: 'merge' | 'rebase' | 'working'
+  ): Promise<{
+    readonly check: string
+    readonly numstat: string
+    readonly attributes: string
+  }> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'status_conflict_details',
+      { kind }
+    )
+    if (
+      !isRecord(value) ||
+      typeof value.check !== 'string' ||
+      typeof value.numstat !== 'string' ||
+      typeof value.attributes !== 'string'
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid conflict details response',
+        retryable: false,
+      })
+    }
+    return {
+      check: value.check,
+      numstat: value.numstat,
+      attributes: value.attributes,
+    }
+  }
+
+  /** Fetch byte-preserving status records for one explicit repository. */
+  async detailedRepositoryStatus(
+    repositoryPath: string,
+    includeUntracked = true,
+    options: BackendRequestOptions = {}
+  ): Promise<ReadonlyArray<DetailedStatusRecord>> {
+    return this.repositoryRead(
+      repositoryPath,
+      'status_detailed',
+      {
+        include_untracked: includeUntracked,
+      },
+      options
+    ) as Promise<ReadonlyArray<DetailedStatusRecord>>
   }
 
   // ---------------------------------------------------------------------------
@@ -447,20 +1249,56 @@ export class BackendClient {
   // never spawns `copilot-runtime` directly when a transport is present.
   // ---------------------------------------------------------------------------
 
-  copilotProbe(runtimeRoot?: string): Promise<{ available: boolean; reason: string; sdk_version: string }> {
-    return this.request('copilot_probe', runtimeRoot ? { runtime_root: runtimeRoot } : {})
+  copilotProbe(
+    runtimeRoot?: string
+  ): Promise<{ available: boolean; reason: string; sdk_version: string }> {
+    return this.request(
+      'copilot_probe',
+      runtimeRoot ? { runtime_root: runtimeRoot } : {}
+    )
   }
 
-  copilotCreateSession(opts: { model?: string; reasoning_effort?: string } = {}): Promise<{ id: string; connection_id: string; model: string }> {
-    return this.request('copilot_create_session', { model: opts.model, reasoning_effort: opts.reasoning_effort })
+  copilotCreateSession(
+    opts: { model?: string; reasoning_effort?: string } = {}
+  ): Promise<{ id: string; connection_id: string; model: string }> {
+    return this.request('copilot_create_session', {
+      model: opts.model,
+      reasoning_effort: opts.reasoning_effort,
+    })
   }
 
-  copilotSendMessage(sessionId: string, message: string, opts: BackendRequestOptions = {}): Promise<{ content: string; session_id: string }> {
-    return this.request('copilot_send_message', { session_id: sessionId, message }, opts)
+  copilotSendMessage(
+    sessionId: string,
+    message: string,
+    opts: BackendRequestOptions = {}
+  ): Promise<{ content: string; session_id: string }> {
+    return this.request(
+      'copilot_send_message',
+      { session_id: sessionId, message },
+      opts
+    )
   }
 
-  copilotGenerateCommitMessage(opts: { paths?: string[]; system_prompt?: string } = {}, backendOpts: BackendRequestOptions = {}): Promise<{ summary: string; description: string; basis: string }> {
-    return this.request('copilot_generate_commit_message', { paths: opts.paths ?? [], system_prompt: opts.system_prompt }, backendOpts)
+  copilotCloseSession(
+    sessionId: string,
+    opts: BackendRequestOptions = {}
+  ): Promise<{ closed: boolean }> {
+    return this.request(
+      'copilot_close_session',
+      { session_id: sessionId },
+      opts
+    )
+  }
+
+  copilotGenerateCommitMessage(
+    opts: { paths?: string[]; system_prompt?: string } = {},
+    backendOpts: BackendRequestOptions = {}
+  ): Promise<{ summary: string; description: string; basis: string }> {
+    return this.request(
+      'copilot_generate_commit_message',
+      { paths: opts.paths ?? [], system_prompt: opts.system_prompt },
+      backendOpts
+    )
   }
 }
 

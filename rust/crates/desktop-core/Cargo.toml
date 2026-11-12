@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-name = "desktop_core"
+name = "desktop_shell_core_legacy"
 
 [dependencies]
 serde.workspace = true

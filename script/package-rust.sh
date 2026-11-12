@@ -60,7 +60,12 @@ check() {
 
 # 1. Build Rust binaries (release-ready, but debug ok for local check).
 cargo build --locked -p desktop-core -p desktop-bridge -p desktop-cli -p desktop-native 2>&1 | tail -n 5
-cargo build --locked --manifest-path "$ROOT/rust/Cargo.toml" -p desktop-app 2>&1 | tail -n 5 || true
+GUI_BUILT=0
+if cargo build --locked -p desktop-app; then
+  GUI_BUILT=1
+else
+  echo "warn: desktop shell build failed; packaging CLI/bridge only" >&2
+fi
 
 BIN_RS="$ROOT/rust/target/debug/desktop-rs"
 BIN_APP="$ROOT/rust/target/debug/github-desktop-rs"
@@ -101,12 +106,9 @@ else
 fi
 
 install -m755 "$BIN_RS" "$OUT/bin/desktop-rs"
-if [ -n "$BIN_APP" ] && [ -f "$BIN_APP" ] && [ "$PLATFORM" != "linux" ] || command -v cargo >/dev/null; then
-  if [ -f "$BIN_APP" ]; then
-    install -m755 "$BIN_APP" "$OUT/bin/github-desktop-rs"
-  else
-    echo "warn: github-desktop-rs not built (GUI deps missing) — CLI/bridge only package"
-  fi
+if [ "$GUI_BUILT" = 1 ]; then
+  check "$BIN_APP"
+  install -m755 "$BIN_APP" "$OUT/bin/github-desktop-rs"
 fi
 
 cp -R "$ROOT/out/vite-dist/." "$OUT/ui/"

@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
-from discard_advanced import BINARY
+from support.fixture import BINARY
 from repository_context import Suite, private, stop, wait_for
 from support.bridge import WebSocket
 

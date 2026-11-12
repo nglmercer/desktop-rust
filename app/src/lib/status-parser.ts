@@ -5,6 +5,7 @@ import {
   UnmergedEntrySummary,
 } from '../models/status'
 import { splitBuffer } from './split-buffer'
+import type { DetailedStatusRecord } from '../backend/contracts'
 
 type StatusItem = IStatusHeader | IStatusEntry
 
@@ -43,6 +44,31 @@ export function isStatusEntry(
   statusItem: StatusItem
 ): statusItem is IStatusEntry {
   return statusItem.kind === 'entry'
+}
+
+/** Adapt byte-preserving Rust status records to the existing UI model. */
+export function statusItemsFromBackend(
+  records: ReadonlyArray<DetailedStatusRecord>
+): ReadonlyArray<StatusItem> {
+  return records.map(record => {
+    if (record.kind === 'header') {
+      return {
+        kind: 'header',
+        value: Buffer.from(record.value.bytes).toString(),
+      }
+    }
+    return {
+      kind: 'entry',
+      statusCode: record.status_code,
+      submoduleStatusCode: record.submodule_status_code,
+      path: Buffer.from(record.path.bytes).toString(),
+      oldPath:
+        record.old_path === null
+          ? undefined
+          : Buffer.from(record.old_path.bytes).toString(),
+      renameOrCopyScore: record.rename_or_copy_score ?? undefined,
+    }
+  })
 }
 
 const ChangedEntryType = '1'

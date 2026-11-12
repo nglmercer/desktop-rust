@@ -2,6 +2,7 @@ import { git } from './core'
 import { Repository } from '../../models/repository'
 import { isAbsolute, normalize } from 'path'
 import { realpath } from 'fs/promises'
+import { backend } from '../../backend/client'
 
 /**
  * Look up a config value by name in the repository.
@@ -184,6 +185,11 @@ export async function addGlobalConfigValue(
 export async function addSafeDirectory(path: string) {
   if (!isAbsolute(path)) {
     throw new Error('A directory exception requires an absolute path.')
+  }
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await backend().trustRepository(path)
+    return
   }
 
   path = await realpath(path)

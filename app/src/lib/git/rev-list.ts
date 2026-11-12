@@ -3,6 +3,8 @@ import { git } from './core'
 import { Repository } from '../../models/repository'
 import { Branch, BranchType, IAheadBehind } from '../../models/branch'
 import { CommitOneLine } from '../../models/commit'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /**
  * Convert two refs into the Git range syntax representing the set of commits
@@ -55,6 +57,28 @@ export async function getAheadBehind(
   repository: Repository,
   range: string
 ): Promise<IAheadBehind | null> {
+  if (backend().transportKind === 'ws') {
+    return backend().repositoryAheadBehind(repository.path, range)
+  }
+  if (backend().transportKind === 'wry') {
+    const migrated = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          return await backend().repositoryAheadBehind(repository.path, range)
+        } catch (error) {
+          log.warn(
+            'Rust ahead/behind read failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+    if (migrated !== undefined) return migrated
+  }
   // `--left-right` annotates the list of commits in the range with which side
   // they're coming from. When used with `--count`, it tells us how many
   // commits we have from the two different sides of the range.
@@ -146,6 +170,28 @@ export async function getCommitsInRange(
   repository: Repository,
   range: string
 ): Promise<ReadonlyArray<CommitOneLine> | null> {
+  let stdout: string | null | undefined
+  if (backend().transportKind === 'ws') {
+    stdout = await backend().repositoryRevisionList(repository.path, range)
+  }
+  if (backend().transportKind === 'wry') {
+    stdout = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          return await backend().repositoryRevisionList(repository.path, range)
+        } catch (error) {
+          log.warn(
+            'Rust revision read failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+  }
   const args = [
     'rev-list',
     '--reverse',
@@ -162,13 +208,22 @@ export async function getCommitsInRange(
     expectedErrors: new Set<GitError>([GitError.BadRevision]),
   }
 
-  const result = await git(args, repository.path, 'getCommitsInRange', options)
-
-  if (result.gitError === GitError.BadRevision) {
-    return null
+  if (stdout === undefined) {
+    const result = await git(
+      args,
+      repository.path,
+      'getCommitsInRange',
+      options
+    )
+    if (result.gitError === GitError.BadRevision) {
+      return null
+    }
+    stdout = result.stdout
   }
 
-  const lines = result.stdout.split('\n')
+  if (stdout === null) return null
+
+  const lines = stdout.split('\n')
 
   const commits = new Array<CommitOneLine>()
 
@@ -200,6 +255,31 @@ export async function doMergeCommitsExistAfterCommit(
   commitRef: string | null
 ): Promise<boolean> {
   const revision = commitRef === null ? 'HEAD' : revRange(commitRef, 'HEAD')
+  if (backend().transportKind === 'ws') {
+    return backend().repositoryHasMergeCommits(repository.path, revision)
+  }
+  if (backend().transportKind === 'wry') {
+    const migrated = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      async () => {
+        try {
+          return await backend().repositoryHasMergeCommits(
+            repository.path,
+            revision
+          )
+        } catch (error) {
+          log.warn(
+            'Rust merge history read failed; retrying with the existing Git path',
+            error
+          )
+          return undefined
+        }
+      },
+      true
+    )
+    if (migrated !== undefined) return migrated
+  }
   const args = [
     'rev-list',
     '-1',

@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["*.mts"]
+}

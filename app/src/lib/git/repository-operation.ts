@@ -1,9 +1,10 @@
 import { realpath } from 'fs/promises'
-import { basename, dirname, resolve, sep } from 'path'
+import { basename, dirname, isAbsolute, resolve, sep } from 'path'
 import { git } from './core'
 import { isErrnoException } from '../errno-exception'
 import { AssistedCommitError } from './assisted-commit/error'
 import { createRepositoryOperationContext } from './repository-operation-context'
+import { backend } from '../../backend/client'
 
 interface IRepositoryOperation {
   readonly kind: 'read' | 'mutation'
@@ -348,6 +349,11 @@ export async function withRepositoryGitDestruction<T>(
 
 /** A not-yet-existing checkout target still belongs to its canonical existing parent. */
 export async function canonicalMutationPath(path: string): Promise<string> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().canonicalMutationPath(
+      isAbsolute(path) ? path : resolve(path)
+    )
+  }
   try {
     return await realpath(path)
   } catch (error) {

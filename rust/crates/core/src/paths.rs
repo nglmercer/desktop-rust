@@ -2,7 +2,68 @@
 use crate::GitPath;
 use anyhow::{Result, bail};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Check a directory without requiring a selected repository.
+pub async fn directory_exists(path: &Path) -> Result<bool> {
+    if !path.is_absolute() {
+        bail!("directory path must be absolute");
+    }
+    Ok(tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|entry| entry.is_dir()))
+}
+
+/// Check whether a path is visible to the process, following symlinks.
+pub async fn path_exists(path: &Path) -> Result<bool> {
+    if !path.is_absolute() {
+        bail!("path must be absolute");
+    }
+    Ok(tokio::fs::metadata(path).await.is_ok())
+}
+
+/// Resolve an existing path, or its nearest existing parent for a new target.
+pub async fn canonical_mutation_path(path: &Path) -> Result<String> {
+    if !path.is_absolute() {
+        bail!("path must be absolute");
+    }
+    let mut current = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        match tokio::fs::canonicalize(&current).await {
+            Ok(resolved) => {
+                let mut resolved = crate::repository_discovery::display_canonical(resolved);
+                for segment in missing.iter().rev() {
+                    resolved.push(segment);
+                }
+                return crate::repository_discovery::normalize(&resolved)
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| anyhow::anyhow!("resolved path is not UTF-8"));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let normalized = crate::repository_discovery::normalize(&current);
+                let raw = current
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("path is not UTF-8"))?;
+                let separator =
+                    |character| character == '/' || (cfg!(windows) && character == '\\');
+                let name = raw
+                    .trim_end_matches(separator)
+                    .rsplit(separator)
+                    .next()
+                    .filter(|name| !name.is_empty())
+                    .ok_or(error)?;
+                missing.push(std::ffi::OsString::from(name));
+                current = normalized
+                    .parent()
+                    .ok_or_else(|| anyhow::anyhow!("path has no existing parent"))?
+                    .to_path_buf();
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
 
 pub fn directory_path(path: GitPath) -> Result<PathBuf> {
     let value = match path {

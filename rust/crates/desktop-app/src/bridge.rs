@@ -47,6 +47,9 @@ const JSON: &str = "application/json; charset=utf-8";
 /// How long a normal request may wait for a worker before nobody is left to
 /// answer it. The renderer gives up after 180 s, so this is shorter.
 const RPC_DEADLINE: Duration = Duration::from_secs(170);
+// Repository reads have a 60-second execution limit. Leave enough time for
+// that limit before the renderer's 180-second IPC timeout.
+const READ_QUEUE_DEADLINE: Duration = Duration::from_secs(110);
 
 /// Simplex messages have no caller waiting for them.
 const SEND_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -86,6 +89,7 @@ enum Incoming {
 /// * `sync` serves `invokeSync` only.
 pub struct Bridge {
     app: std::sync::Arc<DesktopApp>,
+    backend: std::sync::Arc<crate::backend::Backend>,
     /// Redirects worker results back to the event loop. Behind a mutex only
     /// because `EventLoopProxy` is cloned out for each request.
     proxy: Mutex<EventLoopProxy<AppEvent>>,
@@ -124,6 +128,9 @@ impl Bridge {
         let sync = Executor::new("desktop-io-sync", 1, SYNC_CAPACITY, SYNC_BYTES)?;
         Ok(std::sync::Arc::new(Self {
             app,
+            backend: std::sync::Arc::new(crate::backend::Backend::new(
+                limits.queued_requests + limits.long_workers,
+            )?),
             proxy: Mutex::new(proxy),
             state,
             control,
@@ -139,6 +146,9 @@ impl Bridge {
 
     /// The executor that serves `channel`.
     fn executor_for(&self, channel: &str) -> &Executor {
+        if channel == "desktop.backend.read" {
+            return &self.long;
+        }
         if !desktop_core::io::handles(channel) {
             return &self.state;
         }
@@ -152,6 +162,7 @@ impl Bridge {
     /// Stop admitting work and finish what is queued as `Shutdown`. Running
     /// tasks are not interrupted; the process stop handles them.
     pub fn shutdown(&self) {
+        self.backend.cancel_all();
         for executor in [
             &self.state,
             &self.control,
@@ -179,9 +190,27 @@ impl Bridge {
         let lane = self.executor_for(&channel);
         let proxy = self.proxy_handle();
         let app = self.app.clone();
-        let task = Task::new(bytes, Instant::now() + RPC_DEADLINE, move |outcome| {
+        let backend = self.backend.clone();
+        let job = if channel == "desktop.backend.read" {
+            match backend.admit(args.clone()) {
+                Ok(job) => Some(job),
+                Err(error) => {
+                    let _ = proxy.send_event(AppEvent::RpcResult {
+                        id,
+                        result: RpcResult::err(error),
+                    });
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let deadline = job
+            .as_ref()
+            .map_or_else(|| queue_deadline(&channel), |job| job.deadline);
+        let task = Task::new(bytes, deadline, move |outcome| {
             let result = match outcome {
-                Outcome::Run => run_channel(&app, &channel, args),
+                Outcome::Run => run_channel(&app, &backend, &channel, args, job),
                 other => refused(&channel, other),
             };
             let _ = proxy.send_event(AppEvent::RpcResult { id, result });
@@ -192,6 +221,12 @@ impl Bridge {
     }
 
     fn admit_send(&self, channel: String, args: Vec<Value>, bytes: usize) {
+        if channel == "desktop.backend.cancel" {
+            if let Err(error) = self.backend.cancel(&args) {
+                tracing::warn!(%error, "invalid backend cancellation");
+            }
+            return;
+        }
         let lane = self.executor_for(&channel);
         let proxy = self.proxy_handle();
         let app = self.app.clone();
@@ -351,10 +386,25 @@ impl Bridge {
                 self.executor_for(&channel)
             };
             let app = self.app.clone();
+            let backend = self.backend.clone();
             let outcome_channel = channel.clone();
-            let task = Task::new(bytes, Instant::now() + RPC_DEADLINE, move |outcome| {
+            let job = if channel == "desktop.backend.read" {
+                match backend.admit(message.args.clone()) {
+                    Ok(job) => Some(job),
+                    Err(error) => {
+                        responder.respond(response(200, JSON, RpcResult::err(error).to_bytes()));
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+            let deadline = job
+                .as_ref()
+                .map_or_else(|| queue_deadline(&channel), |job| job.deadline);
+            let task = Task::new(bytes, deadline, move |outcome| {
                 let result = match outcome {
-                    Outcome::Run => run_channel(&app, &channel, message.args),
+                    Outcome::Run => run_channel(&app, &backend, &channel, message.args, job),
                     other => refused(&outcome_channel, other),
                 };
                 responder.respond(response(200, JSON, result.to_bytes()));
@@ -386,10 +436,30 @@ impl Bridge {
     }
 }
 
+fn queue_deadline(channel: &str) -> Instant {
+    Instant::now()
+        + if channel == "desktop.backend.read" {
+            READ_QUEUE_DEADLINE
+        } else {
+            RPC_DEADLINE
+        }
+}
+
 /// Run a request on the current (worker) thread. Host IO and state commands
 /// share this path because `DesktopApp::invoke` routes by channel.
-fn run_channel(app: &DesktopApp, channel: &str, args: Vec<Value>) -> RpcResult {
-    match app.invoke(channel, args) {
+fn run_channel(
+    app: &DesktopApp,
+    backend: &crate::backend::Backend,
+    channel: &str,
+    args: Vec<Value>,
+    job: Option<crate::backend::ReadJob>,
+) -> RpcResult {
+    let result = if channel == "desktop.backend.read" {
+        backend.read(job.expect("backend read must be admitted"))
+    } else {
+        app.invoke(channel, args)
+    };
+    match result {
         Ok(value) => RpcResult::ok(value),
         Err(error) => RpcResult::err(error),
     }
@@ -522,11 +592,6 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Describe a resource: a file, a directory with its entries, or
-/// `null` when nothing is present at `path`. In debug builds this
-/// consults the on-disk `out/vite-dist` first, so a new hashed file
-/// (`assets/index-[hash].js`) is discovered without a rebuild.
-
 /// Describe a file under the Copilot SDK package. The renderer reads that
 /// folder through the same bundle endpoint as the web build, but the files
 /// live on disk next to the app, not in the embedded bundle.
@@ -561,6 +626,8 @@ fn copilot_entry(root: &std::path::Path, rest: &str) -> Value {
     }
 }
 
+/// Describe a resource: a file, a directory with its entries, or `null` when
+/// absent. Debug builds consult the on-disk bundle first to discover new assets.
 fn bundle_entry(path: &str, copilot_dir: Option<&std::path::Path>) -> Value {
     let path = path.trim_matches('/');
     if path.contains("..") || path.contains('\\') || path.contains(':') {
