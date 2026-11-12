@@ -2395,12 +2395,35 @@ fn creation_requires_consent_and_performs_exactly_one_pinned_post() {
             json!({"method":"publish_create","request":request,"basis":plan["basis"],"acknowledge_partial":false}),
             true,
         );
+        let basis = plan["basis"].as_str().unwrap();
+        let mut cli_args = if effective {
+            vec!["--effective"]
+        } else {
+            vec!["--login", "AliceCase"]
+        };
+        cli_args.extend([
+            "--owner",
+            owner,
+            "--name",
+            "example-repo",
+            "--description",
+            " exact description\n",
+            "--basis",
+            basis,
+        ]);
+        let denied = bounded_command(publish_command(&f, "create", &cli_args), None);
+        assert!(!denied.status.success());
         assert!(!f.root.join("post-log").exists());
-        let result = preview(
-            &f,
-            json!({"method":"publish_create","request":request,"basis":plan["basis"],"acknowledge_partial":true}),
-            false,
-        );
+        let result = if owner == "ExampleOrg" {
+            preview(
+                &f,
+                json!({"method":"publish_create","request":request,"basis":plan["basis"],"acknowledge_partial":true}),
+                false,
+            )
+        } else {
+            cli_args.push("--acknowledge-partial");
+            publish_operation_cli(&f, "create", &cli_args)
+        };
         assert_eq!(result["phase"], "created");
         assert!(result["receipt_id"].is_string());
         assert_eq!(
@@ -2803,5 +2826,184 @@ fn changed_organization_after_intent_blocks_post() {
     assert_eq!(
         preview(&f, json!({"method":"publish_history"}), false)["receipts"][0]["phase"],
         "creation_unknown"
+    );
+}
+
+fn create_unknown(f: &Fixture) -> Value {
+    f.install_stub();
+    fs::write(f.root.join("post-fail"), "on").unwrap();
+    fs::write(
+        f.root.join("repository-response.json"),
+        repository_response("alicecase", 101).to_string(),
+    )
+    .unwrap();
+    let mut request = f.request()["request"].clone();
+    request["owner"] = json!("alicecase");
+    request["target"] = json!({"mode":"assigned","host":"github.com","login":"AliceCase"});
+    let plan = preview(
+        f,
+        json!({"method":"publish_preview","request":request}),
+        false,
+    );
+    let result = preview(
+        f,
+        json!({"method":"publish_create","request":request,"basis":plan["basis"],"acknowledge_partial":true}),
+        false,
+    );
+    assert_eq!(result["phase"], "creation_unknown");
+    request
+}
+
+#[test]
+fn unknown_publication_blocks_related_worktrees_and_relocated_repository() {
+    for kind in ["linked", "moved"] {
+        let mut f = Fixture::new();
+        let request = create_unknown(&f);
+        let old = f.repo.clone();
+        if kind == "linked" {
+            let linked = f.root.join("linked publish worktree");
+            f.git(&["worktree", "add", "-qb", "linked", linked.to_str().unwrap()]);
+            f.run(
+                env!("CARGO_BIN_EXE_desktop-rs"),
+                &[
+                    "--config",
+                    f.registry.to_str().unwrap(),
+                    "repositories",
+                    "add",
+                    linked.to_str().unwrap(),
+                ],
+            );
+            f.repo = linked;
+        } else {
+            let moved = f.root.join("moved repository");
+            fs::rename(&old, &moved).unwrap();
+            let mut data: Value = serde_json::from_slice(&fs::read(&f.registry).unwrap()).unwrap();
+            for item in data["repositories"].as_array_mut().unwrap() {
+                if item == old.to_str().unwrap() {
+                    *item = json!(moved);
+                }
+            }
+            if data["selected"] == old.to_str().unwrap() {
+                data["selected"] = json!(moved);
+            }
+            for record in data["records"].as_array_mut().unwrap() {
+                if record["path"] == old.to_str().unwrap() {
+                    record["path"] = json!(moved);
+                }
+            }
+            fs::write(&f.registry, data.to_string()).unwrap();
+            fs::set_permissions(&f.registry, fs::Permissions::from_mode(0o600)).unwrap();
+            f.repo = moved;
+        }
+        assert_eq!(
+            preview(
+                &f,
+                json!({"method":"publish_preview","request":request}),
+                false
+            )["can_create"],
+            false,
+            "{kind}"
+        );
+        assert_eq!(
+            preview(&f, json!({"method":"publish_history"}), false)["receipts"][0]["phase"],
+            "creation_unknown"
+        );
+        assert_eq!(
+            fs::read_to_string(f.root.join("post-log")).unwrap(),
+            "POST\n"
+        );
+    }
+}
+
+#[test]
+fn unsafe_registry_locations_cannot_authorize_publication() {
+    use std::os::unix::fs::symlink;
+    for kind in ["worktree", "gitdir", "symlink", "linked-common"] {
+        let mut f = Fixture::new();
+        f.install_stub();
+        let original = f.repo.clone();
+        let config = match kind {
+            "worktree" => original.join("metadata/registry.json"),
+            "gitdir" => original.join(".git/unsafe/registry.json"),
+            "symlink" => {
+                let outside = f.root.join("outside-registry");
+                fs::create_dir(&outside).unwrap();
+                fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+                let alias = f.root.join("registry-alias");
+                symlink(outside, &alias).unwrap();
+                alias.join("registry.json")
+            }
+            _ => {
+                let linked = f.root.join("unsafe linked worktree");
+                f.git(&[
+                    "worktree",
+                    "add",
+                    "-qb",
+                    "unsafe-linked",
+                    linked.to_str().unwrap(),
+                ]);
+                f.repo = linked;
+                original.join(".git/common-registry/registry.json")
+            }
+        };
+        f.run(
+            env!("CARGO_BIN_EXE_desktop-rs"),
+            &[
+                "--config",
+                config.to_str().unwrap(),
+                "repositories",
+                "add",
+                f.repo.to_str().unwrap(),
+            ],
+        );
+        f.registry = config;
+        let mut request = f.request()["request"].clone();
+        request["owner"] = json!("alicecase");
+        request["target"] = json!({"mode":"assigned","host":"github.com","login":"AliceCase"});
+        let plan = preview(
+            &f,
+            json!({"method":"publish_preview","request":request}),
+            false,
+        );
+        assert_eq!(plan["can_create"], false, "{kind}");
+        if kind == "worktree" || kind == "gitdir" {
+            preview(
+                &f,
+                json!({"method":"publish_create","request":request,"basis":plan["basis"],"acknowledge_partial":true}),
+                true,
+            );
+        }
+        assert!(!f.root.join("post-log").exists());
+    }
+}
+
+#[test]
+fn durable_creation_receipt_wins_over_forged_legacy_record() {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::ffi::OsStrExt;
+    let f = Fixture::new();
+    f.install_stub();
+    let id = create_publication(&f, "alicecase", 101, false);
+    let registry: Value = serde_json::from_slice(&fs::read(&f.registry).unwrap()).unwrap();
+    let record = &registry["records"][0];
+    let hash = |v: &[u8]| format!("{:x}", Sha256::digest(v));
+    let namespace = hash(f.registry.as_os_str().as_bytes());
+    let dir_id = hash(json!([namespace, record["id"]]).to_string().as_bytes());
+    let base = f.repo.join(".git/desktop-publish-receipts");
+    let directory = base.join(dir_id);
+    fs::create_dir_all(&directory).unwrap();
+    fs::set_permissions(&base, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+    let forged = json!({"version":1,"id":id,"repository_id":hash(f.repo.as_os_str().as_bytes()),"namespace":namespace,"record_id":record["id"],"phase":"complete","host":"github.com","owner":"ExampleOrg","name":"example-repo","error":null,"acknowledged":false});
+    let path = directory.join(format!("{id}.json"));
+    fs::write(&path, forged.to_string()).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let history = preview(&f, json!({"method":"publish_history"}), false);
+    assert_eq!(history["receipts"].as_array().unwrap().len(), 1);
+    assert_eq!(history["receipts"][0]["id"], id);
+    assert_eq!(history["receipts"][0]["phase"], "created");
+    assert_eq!(
+        fs::read_to_string(f.root.join("post-log")).unwrap(),
+        "POST\n"
     );
 }

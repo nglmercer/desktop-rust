@@ -729,6 +729,7 @@ dependencies = [
  "desktop-bridge",
  "desktop-core",
  "futures-util",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

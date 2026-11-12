@@ -9,24 +9,21 @@
 //! `$(INTERNAL)` handshake. This client does not reinvent the wire; it
 //! verifies the contract against the installed dependency before wiring.
 //!
-//! Runtime discovery and a bounded native handshake and ping are implemented.
-//! The optional native turn keeps its session in memory; the default SDK
-//! wrapper still creates a new ephemeral session per request. Durable session
-//! recovery, account changes, streaming and the full assisted
-//! commit workflow remain migration work.
+//! Runtime discovery, handshake and in-memory sessions are implemented in
+//! Rust. Durable session recovery, account changes, streaming and the full
+//! assisted commit workflow remain migration work.
 //!
 //! Capability reporting: when the runtime is incompatible (e.g. a Linux
 //! x64 binary on Android/Termux or a foreign arch), the capability is
 //! published as **unavailable** and the Git client stays operational.
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Duration;
+#[cfg(test)]
+use std::{process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use uuid::Uuid;
 
 pub(crate) mod native_turn;
 
@@ -269,6 +266,7 @@ fn check_protocol_version(version: u64) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 async fn verify_runtime(runtime: &RuntimeInfo) -> Result<()> {
     crate::cancellation::Cancellation::current().check()?;
     let mut command = tokio::process::Command::new(&runtime.binary);
@@ -306,36 +304,6 @@ async fn verify_runtime(runtime: &RuntimeInfo) -> Result<()> {
         .await?
         .context("Copilot runtime handshake timed out")??;
     Ok(())
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct SessionConfig {
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub cwd: Option<String>,
-    /// `true` keeps the runtime alive; `false` disposes on close.
-    pub keep_alive: Option<bool>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SessionHandle {
-    pub id: String,
-    pub connection_id: String,
-    pub model: String,
-}
-
-/// Verify the runtime and create a local handle for the current turn wrapper.
-/// This does not yet create or resume a persistent runtime session.
-pub async fn create_session(runtime: &RuntimeInfo, cfg: &SessionConfig) -> Result<SessionHandle> {
-    // The current turn wrapper creates an ephemeral SDK session later. Verify
-    // the runtime's framing and ping response before returning a local handle.
-    verify_runtime(runtime).await?;
-    let handle = SessionHandle {
-        id: Uuid::new_v4().to_string(),
-        connection_id: Uuid::new_v4().to_string(),
-        model: cfg.model.clone().unwrap_or_else(|| "auto".to_string()),
-    };
-    Ok(handle)
 }
 
 /// Assisted-commit plan/receipt contract types (the renderer never builds

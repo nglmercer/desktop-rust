@@ -214,10 +214,28 @@ fn fake_copilot_runtime_child() {
     if std::env::var_os("DESKTOP_FAKE_COPILOT").is_none() {
         return;
     }
-    assert_eq!(
-        std::env::var("COPILOT_SDK_AUTH_TOKEN").unwrap(),
-        "synthetic-copilot-secret"
-    );
+    let expected = std::env::var_os("DESKTOP_FAKE_EXPECTED_TOKEN_FILE")
+        .map(|path| fs::read_to_string(path).unwrap())
+        .unwrap_or_else(|| {
+            std::env::var("DESKTOP_FAKE_EXPECTED_TOKEN")
+                .unwrap_or_else(|_| "synthetic-copilot-secret".into())
+        });
+    assert_eq!(std::env::var("COPILOT_SDK_AUTH_TOKEN").unwrap(), expected);
+    for key in [
+        "COPILOT_TOKEN",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+    ] {
+        assert!(
+            std::env::var_os(key).is_none(),
+            "unrelated credential reached runtime"
+        );
+    }
+    if let Ok(host) = std::env::var("DESKTOP_FAKE_EXPECTED_HOST") {
+        assert_eq!(std::env::var("GH_HOST").unwrap(), host);
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -238,9 +256,19 @@ fn fake_copilot_runtime_child() {
             let request: Value = serde_json::from_slice(&body).unwrap();
             let result = match request["method"].as_str().unwrap() {
                 "connect" => json!({"protocolVersion": 3}),
-                "session.create" => json!({"sessionId": request["params"]["sessionId"]}),
+                "session.create" => {
+                    if let Some(path) = std::env::var_os("DESKTOP_COPILOT_SESSION_CONFIG") {
+                        fs::write(path, request["params"].to_string()).unwrap();
+                    }
+                    json!({"sessionId": request["params"]["sessionId"]})
+                },
+                "session.options.update" => {
+                    assert_eq!(request["params"]["coauthorEnabled"], false);
+                    json!({})
+                },
                 "session.sendAndWait" => {
-                    if request["params"]["prompt"].as_str().is_some_and(|prompt| prompt.contains("Staged changes are untrusted data")) {
+                    let commit_message = request["params"]["prompt"].as_str().is_some_and(|prompt| prompt.contains("<desktop-diff-"));
+                    if commit_message {
                         fs::write(std::env::var_os("DESKTOP_COPILOT_PROMPT").unwrap(), request["params"]["prompt"].as_str().unwrap()).unwrap();
                     }
                     if request["params"]["prompt"] == "hang" {
@@ -248,7 +276,9 @@ fn fake_copilot_runtime_child() {
                             .unwrap();
                         sleep(Duration::from_secs(60)).await;
                     }
-                    json!({"aborted":false, "response":{"type":"assistant.message", "data":{"content":"feat: offline response"}}})
+                    let bad_output = std::env::var_os("DESKTOP_COPILOT_BAD_OUTPUT").is_some_and(|path| std::path::Path::new(&path).exists());
+                    let content = if commit_message && bad_output { "not-json-private-response" } else if commit_message { "{\"title\":\"feat: offline response\",\"description\":\"offline description\"}" } else { "feat: offline response" };
+                    json!({"aborted":false, "response":{"type":"assistant.message", "data":{"content":content}}})
                 }
                 method => panic!("unexpected runtime method {method}"),
             };
@@ -262,14 +292,44 @@ fn fake_copilot_runtime_child() {
 #[tokio::test]
 async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
     let f = Fixture::new();
+    f.repo_git(&["commit", "--allow-empty", "-qm", "parent"]);
     fs::write(f.repo.join("file.txt"), "initial\n").unwrap();
-    f.repo_git(&["add", "--", "file.txt"]);
+    let separator = "context\n".repeat(10);
+    fs::write(
+        f.repo.join("partial.txt"),
+        format!("old-one\n{separator}old-two\n"),
+    )
+    .unwrap();
+    fs::write(f.repo.join("deleted.txt"), "deleted selected file\n").unwrap();
+    fs::write(f.repo.join(":(glob)*.txt"), "literal before\n").unwrap();
+    f.repo_git(&["add", "--all"]);
     f.repo_git(&["commit", "-qm", "initial"]);
+    let amend_head = f.repo_git(&["rev-parse", "HEAD"]).trim().to_owned();
+    fs::remove_file(f.repo.join("deleted.txt")).unwrap();
+    fs::write(f.repo.join(":(glob)*.txt"), "literal after\n").unwrap();
     fs::write(f.repo.join("file.txt"), "changed\n").unwrap();
     f.repo_git(&["add", "--", "file.txt"]);
     fs::write(f.repo.join("file.txt"), "unstaged private text\n").unwrap();
     fs::write(f.repo.join("other.txt"), "excluded staged text\n").unwrap();
     f.repo_git(&["add", "--", "other.txt"]);
+    fs::write(
+        f.repo.join("partial.txt"),
+        format!("staged-unrelated\n{separator}old-two\n"),
+    )
+    .unwrap();
+    f.repo_git(&["add", "--", "partial.txt"]);
+    fs::write(
+        f.repo.join("partial.txt"),
+        format!("new-one\n{separator}new-two\n"),
+    )
+    .unwrap();
+    fs::write(f.repo.join("untracked.txt"), "selected new file\n").unwrap();
+    fs::create_dir(f.repo.join("directory")).unwrap();
+    fs::write(
+        f.repo.join("directory/excluded.txt"),
+        "excluded directory\n",
+    )
+    .unwrap();
     let before = fs::read(f.repo.join(".git/index")).unwrap();
     let status = f.repo_git(&["status", "--porcelain=v2"]);
     let root = f.root.join("runtime");
@@ -299,13 +359,21 @@ async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", f.root.join("gitconfig"))
         .env("COPILOT_RUNTIME_ROOT", &root)
-        .env("DESKTOP_COPILOT_NATIVE_TURN", "1")
+        .env_remove("DESKTOP_COPILOT_NATIVE_TURN")
         .env("DESKTOP_FAKE_COPILOT", "1")
         .env(
             "DESKTOP_COPILOT_MARKER",
             f.root.join("copilot-turn-started"),
         )
         .env("DESKTOP_COPILOT_PROMPT", f.root.join("copilot-prompt"))
+        .env(
+            "DESKTOP_COPILOT_SESSION_CONFIG",
+            f.root.join("copilot-session-config"),
+        )
+        .env(
+            "DESKTOP_COPILOT_BAD_OUTPUT",
+            f.root.join("bad-copilot-output"),
+        )
         .env("COPILOT_TOKEN", "synthetic-copilot-secret")
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
@@ -334,23 +402,181 @@ async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
         .send(json!({"id":3,"method":"copilot_create_session", "model":"auto"}))
         .await;
     let created = client.receive().await;
+    assert!(created["result"]["id"].is_string(), "{created}");
     let session = created["result"]["id"].as_str().unwrap();
     client.send(json!({"id":4,"method":"copilot_send_message", "session_id":session, "message":"generate commit message"})).await;
     assert_eq!(
         client.receive().await["result"]["content"],
         "feat: offline response"
     );
-    client
-        .send(json!({"id":5,"method":"copilot_generate_commit_message", "paths":["file.txt"]}))
-        .await;
+    client.send(json!({"id":11,"method":"copilot_send_message", "session_id":session, "message":"another turn"})).await;
     assert_eq!(
-        client.receive().await["result"]["summary"],
+        client.receive().await["result"]["content"],
         "feat: offline response"
     );
+    client.send(json!({"id":12,"method":"copilot_send_message", "session_id":"unknown", "message":"must not run"})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown or closed Copilot session")
+    );
+    client
+        .send(json!({"id":5,"method":"copilot_generate_commit_message", "paths":["file.txt"], "model":"selected-model", "reasoning_effort":"high", "timeout_ms":10000,"rule_descriptions":["private-rule\ncontinued","private-rule continued"]}))
+        .await;
+    let generated = client.receive().await;
+    assert_eq!(generated["result"]["summary"], "feat: offline response");
+    assert_eq!(generated["result"]["description"], "offline description");
+    let options = fs::read(f.root.join("copilot-session-config")).unwrap();
+    let parsed: Value = serde_json::from_slice(&options).unwrap();
+    assert_eq!(parsed["model"], "selected-model");
+    assert_eq!(parsed["reasoningEffort"], "high");
+    assert_eq!(parsed["systemMessage"]["mode"], "append");
+    assert!(
+        parsed["systemMessage"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("JSON object")
+    );
+    assert!(
+        !parsed["systemMessage"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("private-rule")
+    );
+    assert_eq!(parsed["availableTools"], json!([]));
+    assert_eq!(parsed["enableSessionStore"], false);
+    for (id, invalid) in [
+        (14, json!({"timeout_ms":0})),
+        (15, json!({"reasoning_effort":"unknown"})),
+        (16, json!({"model":"\n"})),
+    ] {
+        let mut request =
+            json!({"id":id,"method":"copilot_generate_commit_message","paths":["file.txt"]});
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(invalid.as_object().unwrap().clone());
+        client.send(request).await;
+        assert!(client.receive().await["error"].is_string());
+        assert_eq!(
+            fs::read(f.root.join("copilot-session-config")).unwrap(),
+            options
+        );
+    }
     let prompt = fs::read_to_string(f.root.join("copilot-prompt")).unwrap();
+    assert_eq!(prompt.matches("private-rule continued").count(), 1);
     assert!(prompt.contains("+changed"));
     assert!(!prompt.contains("unstaged private text"));
     assert!(!prompt.contains("excluded staged text"));
+    fs::write(f.root.join("bad-copilot-output"), b"bad").unwrap();
+    client
+        .send(json!({"id":27,"method":"copilot_generate_commit_message", "paths":["file.txt"]}))
+        .await;
+    let invalid_response = client.receive().await;
+    assert!(
+        invalid_response["error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid JSON")
+    );
+    assert!(
+        !invalid_response
+            .to_string()
+            .contains("not-json-private-response")
+    );
+    fs::remove_file(f.root.join("bad-copilot-output")).unwrap();
+    client.send(json!({"id":17,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":["file.txt", "untracked.txt", "deleted.txt", ":(glob)*.txt"]})).await;
+    assert_eq!(
+        client.receive().await["result"]["basis"],
+        "working_tree_diff"
+    );
+    let working_prompt = fs::read_to_string(f.root.join("copilot-prompt")).unwrap();
+    assert!(working_prompt.contains("+unstaged private text"));
+    assert!(working_prompt.contains("+selected new file"));
+    assert!(working_prompt.contains("-deleted selected file"));
+    assert!(working_prompt.contains("+literal after"));
+    assert!(!working_prompt.contains("excluded staged text"));
+    assert!(!working_prompt.contains("excluded directory"));
+    assert_eq!(fs::read(f.repo.join(".git/index")).unwrap(), before);
+    client
+        .send(json!({"id":19,"method":"copilot_commit_diff_detail","path":"partial.txt"}))
+        .await;
+    let preview = client.receive().await["result"].clone();
+    assert_eq!(preview["can_select"], true);
+    let lines: Vec<Value> = preview["hunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|hunk| hunk["lines"].as_array().unwrap())
+        .filter(|line| line["text"] == "old-one" || line["text"] == "new-one")
+        .map(|line| line["id"].clone())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert!(!preview.to_string().contains("staged-unrelated"));
+    let selection = json!({"path":"partial.txt","basis":preview["basis"],"lines":lines});
+    client.send(json!({"id":20,"method":"copilot_generate_commit_message","source":"working_tree","partial_selections":[selection.clone()]})).await;
+    assert_eq!(
+        client.receive().await["result"]["basis"],
+        "working_tree_diff"
+    );
+    let selected_prompt = fs::read_to_string(f.root.join("copilot-prompt")).unwrap();
+    assert!(selected_prompt.contains("-old-one") && selected_prompt.contains("+new-one"));
+    assert!(!selected_prompt.contains("+new-two") && !selected_prompt.contains("staged-unrelated"));
+    assert_eq!(fs::read(f.repo.join(".git/index")).unwrap(), before);
+    let invalid_lines = json!({"path":"partial.txt","basis":preview["basis"],"lines":[999999]});
+    client.send(json!({"id":25,"method":"copilot_generate_commit_message","source":"working_tree","partial_selections":[invalid_lines]})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown line")
+    );
+    client.send(json!({"id":21,"method":"copilot_generate_commit_message","source":"working_tree","paths":["partial.txt"],"partial_selections":[selection.clone()]})).await;
+    assert!(client.receive().await["error"].is_string());
+    fs::write(
+        f.repo.join("partial.txt"),
+        format!("new-one\n{separator}changed-again\n"),
+    )
+    .unwrap();
+    client.send(json!({"id":22,"method":"copilot_generate_commit_message","source":"working_tree","partial_selections":[selection]})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("reload")
+    );
+    fs::write(
+        f.repo.join("partial.txt"),
+        format!("new-one\n{separator}new-two\n"),
+    )
+    .unwrap();
+    client.send(json!({"id":23,"method":"copilot_generate_commit_message","source":"working_tree","paths":["file.txt"],"amend_head":amend_head})).await;
+    assert_eq!(
+        client.receive().await["result"]["basis"],
+        "working_tree_diff"
+    );
+    let amended = fs::read_to_string(f.root.join("copilot-prompt")).unwrap();
+    assert!(amended.contains("+unstaged private text") && amended.contains("+old-one"));
+    client.send(json!({"id":26,"method":"copilot_generate_commit_message","source":"working_tree","amend_head":amend_head})).await;
+    assert_eq!(
+        client.receive().await["result"]["basis"],
+        "working_tree_diff"
+    );
+    let amend_only = fs::read_to_string(f.root.join("copilot-prompt")).unwrap();
+    assert!(amend_only.contains("+initial") && !amend_only.contains("unstaged private text"));
+    client.send(json!({"id":24,"method":"copilot_generate_commit_message","source":"working_tree","paths":["file.txt"],"amend_head":"0000000000000000000000000000000000000000"})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("HEAD changed")
+    );
+    for paths in [json!([]), json!(["directory"])] {
+        client.send(json!({"id":18,"method":"copilot_generate_commit_message", "source":"working_tree", "paths":paths})).await;
+        assert!(client.receive().await["error"].is_string());
+        assert_eq!(fs::read(f.repo.join(".git/index")).unwrap(), before);
+    }
     client
         .send(json!({"id":9,"method":"copilot_generate_commit_message", "paths":["../outside"]}))
         .await;
@@ -362,7 +588,7 @@ async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
         client.receive().await["error"]
             .as_str()
             .unwrap()
-            .contains("no staged changes")
+            .contains("no selected changes")
     );
     client
         .send(
@@ -380,12 +606,297 @@ async fn copilot_turns_and_cancellation_use_the_real_bridge_offline() {
     assert_eq!(replies[&6]["error_code"], "cancelled");
     assert_eq!(replies[&7]["result"]["status"], "requested");
     assert!(!format!("{created}{replies:?}").contains("synthetic-copilot-secret"));
+    client.send(json!({"id":13,"method":"copilot_send_message", "session_id":session, "message":"must not replay"})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown or closed Copilot session")
+    );
     client
         .send(json!({"id":8,"method":"get_preferences"}))
         .await;
     assert!(client.receive().await["result"].is_object());
     assert_eq!(fs::read(f.repo.join(".git/index")).unwrap(), before);
     assert_eq!(f.repo_git(&["status", "--porcelain=v2"]), status);
+    server.kill().await.unwrap();
+    server.wait().await.unwrap();
+}
+
+#[tokio::test]
+async fn copilot_uses_the_assigned_account_and_invalidates_changed_sessions() {
+    use desktop_core::{AccountAssignment, Registry, StoredAccount};
+
+    let f = Fixture::new();
+    f.repo_git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/fork/repo.git",
+    ]);
+    let registry = Registry::new(f.root.join("registry.json"));
+    let record = registry
+        .add(f.repo.clone(), true)
+        .unwrap()
+        .records
+        .remove(0);
+    registry
+        .compare_and_replace_account(
+            &record.id,
+            0,
+            StoredAccount {
+                revision: 1,
+                assignment: AccountAssignment::Assigned {
+                    host: "github.com".into(),
+                    login: "AliceCase".into(),
+                    id: 42,
+                },
+                association: None,
+                source_remote: Some("origin".into()),
+            },
+        )
+        .unwrap();
+    let bin = f.root.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let gh = bin.join("gh");
+    fs::write(&gh, r##"#!/bin/sh
+case "$1 $2" in
+  'auth status')
+    [ -z "${GH_TOKEN+x}" ] || exit 98
+    if [ -e "$FAKE_SIGNED_OUT" ]; then state=error; else state=success; fi
+    printf '{"hosts":{"github.com":[{"login":"AliceCase","state":"success","active":true},{"login":"BobCase","state":"%s","active":false}]}}\n' "$state";;
+  'auth token')
+    [ -z "${GH_TOKEN+x}" ] || exit 98
+    case "$*" in
+      'auth token --hostname github.com --user AliceCase --no-refresh') printf 'assigned-fixture-secret\n';;
+      'auth token --hostname github.com --user BobCase --no-refresh') printf 'selected-fixture-secret\n';;
+      *) exit 97;;
+    esac;;
+  'api --method')
+    case "$GH_TOKEN" in
+      assigned-fixture-secret) login=AliceCase; id=42;;
+      selected-fixture-secret) login=BobCase; id=84;;
+      *) exit 99;;
+    esac
+    case "$*" in *'/user'*) ;; *) exit 96;; esac
+    if [ -e "$FAKE_ACCOUNT_GATE" ]; then
+      printf ready > "$FAKE_ACCOUNT_STARTED"
+      count=0
+      while [ ! -e "$FAKE_ACCOUNT_RELEASE" ]; do
+        [ "$count" -lt 500 ] || exit 94
+        count=$((count + 1)); sleep 0.02
+      done
+    fi
+    if [ -e "$FAKE_ACCOUNT_MISMATCH" ]; then id=99; fi
+    printf '{"id":%s,"login":"%s"}\n' "$id" "$login";;
+  *) exit 95;;
+esac
+"##).unwrap();
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o700)).unwrap();
+    let root = f.root.join("runtime");
+    let arch = if std::env::consts::ARCH == "x86_64" {
+        "x64"
+    } else {
+        std::env::consts::ARCH
+    };
+    let runtime = root
+        .join("prebuilds")
+        .join(format!("{}-{arch}", std::env::consts::OS));
+    fs::create_dir_all(&runtime).unwrap();
+    let executable = std::env::current_exe()
+        .unwrap()
+        .to_string_lossy()
+        .replace('\'', "'\\''");
+    let wrapper = runtime.join("copilot-runtime");
+    fs::write(&wrapper, format!("#!/bin/sh\nexec 3>&1\nexec '{executable}' --exact fake_copilot_runtime_child --nocapture >/dev/null\n")).unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let mismatch = f.root.join("wrong-account");
+    fs::write(&mismatch, b"wrong").unwrap();
+    let expected_token = f.root.join("expected-copilot-token");
+    fs::write(&expected_token, "assigned-fixture-secret").unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_desktop-rs"))
+        .arg("-C")
+        .arg(&f.repo)
+        .arg("--config")
+        .arg(f.root.join("registry.json"))
+        .args(["serve", "--port", "0"])
+        .env("HOME", &f.root)
+        .env("PATH", path)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", f.root.join("gitconfig"))
+        .env("COPILOT_RUNTIME_ROOT", &root)
+        .env("DESKTOP_FAKE_COPILOT", "1")
+        .env("FAKE_ACCOUNT_MISMATCH", &mismatch)
+        .env("FAKE_ACCOUNT_GATE", f.root.join("account-gate"))
+        .env("FAKE_ACCOUNT_STARTED", f.root.join("account-started"))
+        .env("FAKE_ACCOUNT_RELEASE", f.root.join("account-release"))
+        .env("FAKE_SIGNED_OUT", f.root.join("account-signed-out"))
+        .env("DESKTOP_FAKE_EXPECTED_TOKEN_FILE", &expected_token)
+        .env(
+            "DESKTOP_COPILOT_PROMPT",
+            f.root.join("selected-account-prompt"),
+        )
+        .env("DESKTOP_FAKE_EXPECTED_HOST", "github.com")
+        .env("GH_HOST", "foreign.invalid")
+        .env("COPILOT_TOKEN", "wrong-environment-secret")
+        .env("GH_TOKEN", "wrong-environment-secret")
+        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(server.stderr.take().unwrap()).lines();
+    let line = timeout(Duration::from_secs(10), stderr.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let (origin, token) = line
+        .strip_prefix("Open ")
+        .unwrap()
+        .split_once("/#token=")
+        .unwrap();
+    let mut client = Client::connect(origin, token).await;
+    client
+        .send(json!({"id":1,"method":"copilot_create_session"}))
+        .await;
+    let wrong = client.receive().await;
+    assert!(wrong["error"].is_string());
+    assert!(!wrong.to_string().contains("fixture-secret"));
+    fs::remove_file(mismatch).unwrap();
+    client
+        .send(json!({"id":2,"method":"copilot_create_session"}))
+        .await;
+    let created = client.receive().await;
+    assert!(created["result"]["id"].is_string(), "{created}");
+    let session = created["result"]["id"].as_str().unwrap();
+    assert!(!created.to_string().contains("fixture-secret"));
+    client
+        .send(
+            json!({"id":3,"method":"copilot_send_message","session_id":session,"message":"first"}),
+        )
+        .await;
+    assert_eq!(
+        client.receive().await["result"]["content"],
+        "feat: offline response"
+    );
+    let selected = json!({"host":"GITHUB.COM","login":"bobcase","id":84});
+    client.send(json!({"id":18,"method":"copilot_create_session","account":{"host":"github.com","login":"BobCase","id":84,"token":"must-not-be-accepted"}})).await;
+    assert!(client.receive().await["error"].is_string());
+    fs::write(f.root.join("account-signed-out"), b"signed out").unwrap();
+    client
+        .send(json!({"id":10,"method":"copilot_create_session","account":selected}))
+        .await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("unavailable")
+    );
+    fs::remove_file(f.root.join("account-signed-out")).unwrap();
+    client.send(json!({"id":11,"method":"copilot_create_session","account":{"host":"github.com","login":"BobCase","id":42}})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("does not match")
+    );
+    client.send(json!({"id":12,"method":"copilot_create_session","account":{"host":"github.com","login":"unknown","id":84}})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("unavailable")
+    );
+    fs::write(&expected_token, "selected-fixture-secret").unwrap();
+    client
+        .send(json!({"id":13,"method":"copilot_create_session","account":selected}))
+        .await;
+    let explicit = client.receive().await;
+    assert!(!explicit.to_string().contains("fixture-secret"));
+    let explicit_id = explicit["result"]["id"]
+        .as_str()
+        .expect("selected account session");
+    client.send(json!({"id":14,"method":"copilot_send_message","session_id":explicit_id,"message":"first"})).await;
+    assert_eq!(
+        client.receive().await["result"]["content"],
+        "feat: offline response"
+    );
+    client
+        .send(json!({"id":15,"method":"copilot_close_session","session_id":explicit_id}))
+        .await;
+    assert_eq!(client.receive().await["result"]["closed"], true);
+    fs::write(f.repo.join("change.txt"), "selected account change\n").unwrap();
+    f.repo_git(&["add", "--", "change.txt"]);
+    client.send(json!({"id":16,"method":"copilot_generate_commit_message","paths":["change.txt"],"account":selected})).await;
+    assert_eq!(
+        client.receive().await["result"]["summary"],
+        "feat: offline response"
+    );
+    fs::write(&expected_token, "assigned-fixture-secret").unwrap();
+    fs::write(f.root.join("account-gate"), b"gate").unwrap();
+    client
+        .send(json!({"id":4,"method":"copilot_create_session","account":selected}))
+        .await;
+    wait_for("account verification did not start", || {
+        f.root.join("account-started").exists()
+    })
+    .await;
+    registry
+        .compare_and_replace_account(
+            &record.id,
+            1,
+            StoredAccount {
+                revision: 2,
+                assignment: AccountAssignment::None {},
+                association: None,
+                source_remote: Some("origin".into()),
+            },
+        )
+        .unwrap();
+    fs::write(f.root.join("account-release"), b"release").unwrap();
+    let interrupted = client.receive().await;
+    assert!(
+        interrupted["error"]
+            .as_str()
+            .unwrap()
+            .contains("account changed")
+    );
+    client.send(json!({"id":5,"method":"copilot_send_message","session_id":session,"message":"must not run"})).await;
+    let stale = client.receive().await;
+    assert!(stale["error"].as_str().unwrap().contains("account changed"));
+    client
+        .send(json!({"id":6,"method":"copilot_create_session"}))
+        .await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("No GitHub account")
+    );
+    client
+        .send(json!({"id":17,"method":"copilot_create_session","account":selected}))
+        .await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("No GitHub account")
+    );
+    fs::write(f.repo.join("unselected-untracked"), b"private\n").unwrap();
+    let objects = f.repo_git(&["count-objects", "-v"]);
+    client.send(json!({"id":7,"method":"copilot_generate_commit_message","source":"working_tree","paths":["unselected-untracked"]})).await;
+    assert!(
+        client.receive().await["error"]
+            .as_str()
+            .unwrap()
+            .contains("No GitHub account")
+    );
+    assert_eq!(f.repo_git(&["count-objects", "-v"]), objects);
     server.kill().await.unwrap();
     server.wait().await.unwrap();
 }

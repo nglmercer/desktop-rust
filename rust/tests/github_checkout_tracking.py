@@ -12,7 +12,7 @@ from git_credentials import Credentials, HttpsGit, optional_tool, read_records
 from repository_accounts import clean
 from support.lfs import cached, pointer
 import hashlib
-from repository_context import private, stop, wait_for
+from support.repository_context import private, stop, wait_for
 
 ACTION = {'type': 'checkout_pull_request', 'number': 7}
 

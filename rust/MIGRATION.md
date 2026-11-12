@@ -57,6 +57,45 @@ requested literal paths; its bridge test checks that unstaged and unselected
 content is excluded. The wider assisted-commit flow and live service remain
 separate parity gates.
 
+Commit-message requests can select a model, reasoning effort and timeout. In
+addition to the staged-index source, the service can snapshot explicitly
+selected whole working-tree files against HEAD using a private index; the real
+index remains intact. A separate HEAD-based preview provides a basis and line
+IDs for partial selections, including when that file has unrelated staged
+changes. Amend requests must name the current HEAD and compare against its
+parent. Git's normal clean filters may write objects or filter-managed data.
+Provider options, renderer wiring and live-service validation remain open, so
+this is not yet a complete replacement for the renderer flow.
+
+The Wry host now admits repository-scoped Copilot diff previews and commit
+generation through a bounded cancellable queue. Generation requires an
+explicit GitHub account, uses the host's repository-account registry, and
+resolves the host-selected runtime package. WebSocket callers bind the request
+to the requested repository before dispatch. The UI still needs to call these
+scoped operations and map its selections and account settings to them.
+
+The native commit session appends commit-message instructions as a system
+message, disables tools and session storage, and passes cleaned repository
+rules and the selected diff in separate untrusted blocks. It validates the
+model's JSON title and description instead of treating the response as a
+plain first line. Assigned-account sessions pin the verified GitHub host as
+well as its credential; renderer account selection still needs integration.
+
+Copilot sessions now use the Rust runtime client by default; the Node SDK turn
+wrapper and the temporary opt-in flag have been removed. Sessions persist for
+multiple turns and an unknown or failed session cannot start a new turn. The
+native client has offline simulated-runtime coverage; a live authenticated turn
+with this client still needs verification.
+
+The Rust client verifies a repository-assigned account through the existing
+GitHub CLI account service, clears unrelated credential variables before
+starting the runtime, and binds each session to the repository account and
+remote. It refuses a disabled or changed assignment. Selecting the renderer's
+account is supported in the typed protocol by host, login and numeric ID;
+Rust resolves the stored GitHub CLI account and verifies its identity before
+starting the runtime, without accepting a token from the renderer. Connecting
+the renderer's selection and provider settings remains a separate requirement.
+
 The Rust repository-management integration suite also checks that CLI and
 WebSocket registry views hide the private publication ledger while repository
 selection, initialization, cloning and worktree operations preserve it.
@@ -1141,7 +1180,7 @@ association. A newly present origin still takes priority. Legacy records without
 the source name recover it from the exact URL/name fingerprint and canonical
 identity until a subsequent refresh persists it.
 
-The native `upstream_setup.py` suite covers automatic/manual/CLI add, Self,
+The native `crates/cli/tests/upstream_setup.rs` suite covers automatic/manual/CLI add, Self,
 custom web ports, private URL omission, exact namespace/scope collisions,
 matching no-ops/custom configuration, rewrites/stale bases, no-origin/legacy
 cache source recovery, uncertain native failures, native config lock
@@ -1150,6 +1189,17 @@ wrapper rejects transfers; configuration setup does not mutate refs, index or
 working files. DOM tests cover confirmation/parameter whitelisting, blocked and
 no-op states, unsafe URLs, late roots and uncertain outcomes without replay.
 A full localhost journey exercises actual UI/WebSocket/native Git setup.
+
+The same Rust integration suite also exercises repository-context reads and
+preferences, provider validation and redaction, storage safety, linked
+worktrees, repository relocation, native ref formats, and concurrent refresh
+and cancellation. The remaining Python service suites temporarily share their
+fixture from `tests/support/repository_context.py`.
+
+The remaining credential and pull-request integration suites use the Rust
+`crates/cli/examples/git_credentials_wrapper.rs` fixture to instrument Git.
+It executes the real Git process, limits diagnostics to a fixed command
+vocabulary, and reads its synthetic credentials from a private fixture file.
 
 Validation passed the all-feature workspace build, warning-free Clippy and all
 26 Rust tests. Standalone frontend formatting/type checking/build and all 48

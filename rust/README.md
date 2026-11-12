@@ -1468,6 +1468,7 @@ cargo test -p desktop-cli --test workflows --locked
 cargo test -p desktop-cli --test direct_git --locked
 cargo test -p desktop-cli --test branch_rename --locked
 cargo test -p desktop-cli --test branch_create --locked
+cargo test -p desktop-cli --test upstream_setup --locked
 cargo test -p desktop-cli --test branch_delete --locked
 DESKTOP_TEST_REQUIRE_LFS=1 cargo test -p desktop-cli --test remote_delete --locked
 DESKTOP_TEST_REQUIRE_LFS=1 cargo test -p desktop-cli --test upstream_delete --locked
@@ -1481,7 +1482,6 @@ cargo test -p desktop-cli --test conflict_undo --locked
 cargo test -p desktop-cli --test management --locked
 cargo test -p desktop-cli --test repositories --locked
 cargo test -p desktop-cli --test publish_receipts --locked
-python rust/tests/publish_create.py
 cargo test -p desktop-cli --test publish_preview_cancel --locked
 cargo build -p desktop-cli --locked
 DESKTOP_TEST_BRIDGE=1 npx vitest run app/test/unit/backend-websocket-integration-test.ts rust/tests/github-adapter.test.ts

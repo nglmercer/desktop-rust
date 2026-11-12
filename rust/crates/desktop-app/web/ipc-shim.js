@@ -107,7 +107,7 @@
           pending.delete(id);
           reject(new Error('IPC timeout: ' + channel));
         }
-      }, 180000);
+      }, channel === 'desktop.backend.copilot' ? 360000 : 180000);
       pending.set(id, { resolve: resolvePromise, reject: reject, timer: timer });
 
       if (!post({ __rpc: id, channel: channel, args: args })) {

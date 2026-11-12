@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 from urllib.parse import quote
-from repository_context import Suite, private, stop, wait_for
+from support.repository_context import Suite, private, stop, wait_for
 from support.fixture import BINARY
 
 # Synthetic fixture credentials. The fake CLI never logs any credential value.

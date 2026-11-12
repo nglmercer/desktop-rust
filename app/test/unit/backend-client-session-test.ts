@@ -168,22 +168,174 @@ describe('backend Copilot session cleanup', () => {
     ).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
-  it('sends the session identifier to the host and returns its reply', async () => {
-    const invoke = vi.fn(async () => ({ closed: true }))
+  it('rejects unscoped Copilot requests in the desktop shell', async () => {
+    const invoke = vi.fn()
     Object.defineProperty(window, '__desktop', {
       configurable: true,
       value: { invoke, on: vi.fn(), send: vi.fn() },
     })
     const client = new BackendClient()
-    await expect(client.copilotCloseSession('session-1')).resolves.toEqual({
-      closed: true,
+    await expect(client.copilotCreateSession()).rejects.toMatchObject({
+      code: 'unsupported',
+    })
+    await expect(client.copilotCloseSession('session-1')).rejects.toMatchObject(
+      { code: 'unsupported' }
+    )
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('forwards the chosen model, effort and timeout for commit generation', async () => {
+    const invoke = vi.fn(async () => ({
+      summary: 'fix: example',
+      description: 'Example',
+      basis: 'staged_diff',
+    }))
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, on: vi.fn(), send: vi.fn() },
+    })
+    const client = new BackendClient()
+    await client.copilotGenerateForRepository('/repo-a', {
+      paths: ['selected.txt'],
+      source: 'working_tree',
+      partial_selections: [
+        { path: 'partial.txt', basis: 'reviewed', lines: [1, 2] },
+      ],
+      amend_head: 'abc123',
+      rule_descriptions: ['Include an issue number'],
+      account: { host: 'github.com', login: 'AliceCase', id: 42 },
+      model: 'selected-model',
+      reasoning_effort: 'high',
+      timeout_ms: 10000,
     })
     expect(invoke).toHaveBeenCalledWith(
-      'desktop.backend.copilot_close_session',
-      {
-        session_id: 'session-1',
-      }
+      'desktop.backend.copilot',
+      expect.objectContaining({
+        repository_path: '/repo-a',
+        operation: {
+          method: 'copilot_generate_commit_message',
+          paths: ['selected.txt'],
+          source: 'working_tree',
+          partial_selections: [
+            { path: 'partial.txt', basis: 'reviewed', lines: [1, 2] },
+          ],
+          amend_head: 'abc123',
+          rule_descriptions: ['Include an issue number'],
+          account: { host: 'github.com', login: 'AliceCase', id: 42 },
+          model: 'selected-model',
+          reasoning_effort: 'high',
+          timeout_ms: 10000,
+        },
+        request_id: expect.any(String),
+        deadline_ms: 170000,
+      })
     )
+  })
+
+  it('requests a HEAD-based preview for a byte-preserving path', async () => {
+    const invoke = vi.fn(async () => ({
+      path: { bytes: [102, 255] },
+      basis: 'reviewed',
+      kind: 'text',
+      can_select: true,
+      hunks: [],
+    }))
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, on: vi.fn(), send: vi.fn() },
+    })
+    const client = new BackendClient()
+    await expect(
+      client.copilotCommitDiffForRepository('/repo-a', { bytes: [102, 255] })
+    ).resolves.toMatchObject({ basis: 'reviewed' })
+    expect(invoke).toHaveBeenCalledWith(
+      'desktop.backend.copilot',
+      expect.objectContaining({
+        repository_path: '/repo-a',
+        operation: {
+          method: 'copilot_commit_diff_detail',
+          path: { bytes: [102, 255] },
+        },
+        request_id: expect.any(String),
+        deadline_ms: 170000,
+      })
+    )
+  })
+
+  it('rejects malformed scoped Copilot responses', async () => {
+    const invoke = vi.fn(
+      async (): Promise<unknown> => ({
+        path: { bytes: [256] },
+        basis: 'reviewed',
+        kind: 'text',
+        can_select: true,
+        hunks: [],
+      })
+    )
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, on: vi.fn(), send: vi.fn() },
+    })
+    const client = new BackendClient()
+    await expect(
+      client.copilotCommitDiffForRepository('/repo-a', 'bad')
+    ).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({
+      summary: '',
+      description: 'bad',
+      basis: 'staged_diff',
+    })
+    await expect(
+      client.copilotGenerateForRepository('/repo-a', {
+        account: { host: 'github.com', login: 'AliceCase', id: 42 },
+      })
+    ).rejects.toMatchObject({ code: 'invalid_response', retryable: false })
+  })
+
+  it('scopes and cancels a native Copilot request without replaying it', async () => {
+    const invoke = vi.fn(
+      (_channel: string, _request: { request_id: string }) =>
+        new Promise(() => {})
+    )
+    const send = vi.fn()
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, on: vi.fn(), send },
+    })
+    const client = new BackendClient()
+    const controller = new AbortController()
+    const pending = client.copilotGenerateForRepository(
+      '/repo-a',
+      {
+        account: { host: 'github.com', login: 'Alice', id: 42 },
+        timeout_ms: 300_000,
+      },
+      { signal: controller.signal }
+    )
+    expect(invoke).toHaveBeenCalledWith(
+      'desktop.backend.copilot',
+      expect.objectContaining({
+        repository_path: '/repo-a',
+        operation: {
+          method: 'copilot_generate_commit_message',
+          paths: [],
+          account: { host: 'github.com', login: 'Alice', id: 42 },
+          timeout_ms: 300_000,
+        },
+        request_id: expect.any(String),
+        deadline_ms: 330_000,
+      })
+    )
+    const request = invoke.mock.calls[0][1] as { request_id: string }
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({
+      code: 'cancelled',
+      retryable: false,
+    })
+    expect(send).toHaveBeenCalledWith('desktop.backend.cancel', {
+      request_id: request.request_id,
+    })
+    expect(invoke).toHaveBeenCalledTimes(1)
   })
 
   it('requests read-only state for the explicitly selected repository', async () => {

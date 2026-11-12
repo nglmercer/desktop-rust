@@ -126,11 +126,16 @@ impl Bridge {
             limits.queued_bytes,
         )?;
         let sync = Executor::new("desktop-io-sync", 1, SYNC_CAPACITY, SYNC_BYTES)?;
+        let registry =
+            desktop_backend::Registry::new(app.paths.user_data.join("repositories.json"));
+        let copilot_root = app.paths.copilot_dir.clone();
         Ok(std::sync::Arc::new(Self {
             app,
-            backend: std::sync::Arc::new(crate::backend::Backend::new(
-                limits.queued_requests + limits.long_workers,
-            )?),
+            backend: std::sync::Arc::new(
+                crate::backend::Backend::new(limits.queued_requests + limits.long_workers)?
+                    .with_registry(registry)
+                    .with_copilot_runtime_root(copilot_root),
+            ),
             proxy: Mutex::new(proxy),
             state,
             control,
@@ -146,7 +151,7 @@ impl Bridge {
 
     /// The executor that serves `channel`.
     fn executor_for(&self, channel: &str) -> &Executor {
-        if channel == "desktop.backend.read" {
+        if matches!(channel, "desktop.backend.read" | "desktop.backend.copilot") {
             return &self.long;
         }
         if !desktop_core::io::handles(channel) {
@@ -191,8 +196,16 @@ impl Bridge {
         let proxy = self.proxy_handle();
         let app = self.app.clone();
         let backend = self.backend.clone();
-        let job = if channel == "desktop.backend.read" {
-            match backend.admit(args.clone()) {
+        let job = if matches!(
+            channel.as_str(),
+            "desktop.backend.read" | "desktop.backend.copilot"
+        ) {
+            let admission = if channel == "desktop.backend.read" {
+                backend.admit(args.clone())
+            } else {
+                backend.admit_copilot(args.clone())
+            };
+            match admission {
                 Ok(job) => Some(job),
                 Err(error) => {
                     let _ = proxy.send_event(AppEvent::RpcResult {
@@ -388,8 +401,16 @@ impl Bridge {
             let app = self.app.clone();
             let backend = self.backend.clone();
             let outcome_channel = channel.clone();
-            let job = if channel == "desktop.backend.read" {
-                match backend.admit(message.args.clone()) {
+            let job = if matches!(
+                channel.as_str(),
+                "desktop.backend.read" | "desktop.backend.copilot"
+            ) {
+                let admission = if channel == "desktop.backend.read" {
+                    backend.admit(message.args.clone())
+                } else {
+                    backend.admit_copilot(message.args.clone())
+                };
+                match admission {
                     Ok(job) => Some(job),
                     Err(error) => {
                         responder.respond(response(200, JSON, RpcResult::err(error).to_bytes()));
@@ -438,7 +459,7 @@ impl Bridge {
 
 fn queue_deadline(channel: &str) -> Instant {
     Instant::now()
-        + if channel == "desktop.backend.read" {
+        + if matches!(channel, "desktop.backend.read" | "desktop.backend.copilot") {
             READ_QUEUE_DEADLINE
         } else {
             RPC_DEADLINE
@@ -454,8 +475,8 @@ fn run_channel(
     args: Vec<Value>,
     job: Option<crate::backend::ReadJob>,
 ) -> RpcResult {
-    let result = if channel == "desktop.backend.read" {
-        backend.read(job.expect("backend read must be admitted"))
+    let result = if matches!(channel, "desktop.backend.read" | "desktop.backend.copilot") {
+        backend.read(job.expect("backend operation must be admitted"))
     } else {
         app.invoke(channel, args)
     };

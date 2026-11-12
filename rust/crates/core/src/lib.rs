@@ -85,6 +85,7 @@ pub struct Repository {
     path: PathBuf,
     gate: Arc<Mutex<()>>,
     saved_scope: Option<SavedRepositoryScope>,
+    copilot_runtime_root: Option<PathBuf>,
     native_copilot_sessions: NativeSessions,
     native_copilot_slots: Arc<tokio::sync::Semaphore>,
 }
@@ -108,6 +109,7 @@ impl Repository {
             path: PathBuf::from(os_from_bytes(root)?),
             gate: Arc::new(Mutex::new(())),
             saved_scope: None,
+            copilot_runtime_root: None,
             native_copilot_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             native_copilot_slots: Arc::new(tokio::sync::Semaphore::new(
                 copilot_bridge::MAX_NATIVE_SESSIONS,
@@ -121,6 +123,12 @@ impl Repository {
             registry,
             record_id: None,
         });
+        self
+    }
+
+    /// Use the host-selected Copilot package without changing process environment.
+    pub fn with_copilot_runtime_root(mut self, root: PathBuf) -> Self {
+        self.copilot_runtime_root = Some(root);
         self
     }
 
@@ -602,8 +610,11 @@ impl Repository {
             Operation::CopilotCreateSession {
                 model,
                 reasoning_effort,
+                account,
             } => {
-                return self.copilot_create_session(model, reasoning_effort).await;
+                return self
+                    .copilot_create_session(model, reasoning_effort, account)
+                    .await;
             }
             Operation::CopilotSendMessage {
                 session_id,
@@ -617,11 +628,37 @@ impl Repository {
             Operation::CopilotCloseSession { session_id } => {
                 return self.copilot_close_session(&session_id).await;
             }
+            Operation::CopilotCommitDiffDetail { path } => {
+                return self.copilot_commit_diff_detail(path).await;
+            }
             Operation::CopilotGenerateCommitMessage {
                 paths,
                 system_prompt,
+                source,
+                partial_selections,
+                amend_head,
+                rule_descriptions,
+                account,
+                model,
+                reasoning_effort,
+                timeout_ms,
             } => {
-                return self.copilot_generate_commit(paths, system_prompt).await;
+                return self
+                    .copilot_generate_commit(
+                        paths,
+                        system_prompt,
+                        source,
+                        partial_selections,
+                        amend_head,
+                        copilot_bridge::CopilotCommitOptions {
+                            model,
+                            reasoning_effort,
+                            timeout_ms,
+                            rule_descriptions,
+                            account,
+                        },
+                    )
+                    .await;
             }
             _ => {}
         }
@@ -896,6 +933,7 @@ impl Repository {
             | CopilotCreateSession { .. }
             | CopilotSendMessage { .. }
             | CopilotCloseSession { .. }
+            | CopilotCommitDiffDetail { .. }
             | CopilotGenerateCommitMessage { .. } => {
                 unreachable!("handled by execute")
             }
@@ -1034,6 +1072,7 @@ mod future_size_tests {
             path: PathBuf::from("."),
             gate: Arc::new(Mutex::new(())),
             saved_scope: None,
+            copilot_runtime_root: None,
             native_copilot_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             native_copilot_slots: Arc::new(tokio::sync::Semaphore::new(
                 copilot_bridge::MAX_NATIVE_SESSIONS,

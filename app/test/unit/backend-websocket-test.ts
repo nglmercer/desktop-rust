@@ -124,6 +124,86 @@ describe('WebSocket backend transport', () => {
     expect(socket.sent).toHaveLength(2)
   })
 
+  it('allows a long Copilot turn to finish before the transport deadline', async () => {
+    const { client: value, socket } = await connected()
+    let finished = false
+    const pending = value
+      .copilotGenerateCommitMessage({ timeout_ms: 300_000 })
+      .finally(() => {
+        finished = true
+      })
+    await vi.advanceTimersByTimeAsync(170_001)
+    expect(finished).toBe(false)
+    expect(socket.sent).toHaveLength(2)
+    socket.message({
+      id: 1,
+      result: {
+        summary: 'fix: example',
+        description: '',
+        basis: 'staged_diff',
+      },
+    })
+    await expect(pending).resolves.toMatchObject({ summary: 'fix: example' })
+  })
+
+  it('binds a Copilot request to the requested repository before sending it', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.copilotGenerateForRepository('/repo-a', {
+      account: { host: 'github.com', login: 'Alice', id: 42 },
+      paths: ['selected.txt'],
+    })
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'repository_binding',
+      path: '/repo-a',
+    })
+    socket.message({ id: 1, result: { root_id: 'repo-a-id' } })
+    for (let i = 0; i < 10 && socket.sent.length < 3; i++) {
+      await Promise.resolve()
+    }
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'copilot_generate_commit_message',
+      repository_id: 'repo-a-id',
+      account: { host: 'github.com', login: 'Alice', id: 42 },
+      paths: ['selected.txt'],
+    })
+    socket.message({
+      id: 2,
+      result: {
+        summary: 'fix: example',
+        description: '',
+        basis: 'staged_diff',
+      },
+    })
+    await expect(pending).resolves.toMatchObject({ summary: 'fix: example' })
+  })
+
+  it('sends only the selected identity when creating and closing a session', async () => {
+    const { client: value, socket } = await connected()
+    const creating = value.copilotCreateSession({
+      account: { host: 'github.com', login: 'Alice', id: 42 },
+    })
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'copilot_create_session',
+      account: { host: 'github.com', login: 'Alice', id: 42 },
+    })
+    socket.message({
+      id: 1,
+      result: { id: 'session-1', connection_id: 'connection', model: 'auto' },
+    })
+    await expect(creating).resolves.toMatchObject({ id: 'session-1' })
+    const closing = value.copilotCloseSession('session-1')
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'copilot_close_session',
+      session_id: 'session-1',
+    })
+    socket.message({ id: 2, result: { closed: true } })
+    await expect(closing).resolves.toEqual({ closed: true })
+  })
+
   it('cancels a sent request on abort or timeout without replaying it', async () => {
     const { client: value, socket } = await connected()
     const controller = new AbortController()

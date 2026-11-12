@@ -4,7 +4,7 @@
 
 use std::{
     collections::HashMap,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -38,6 +38,15 @@ struct ReadRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CopilotRequest {
+    repository_path: String,
+    operation: Operation,
+    request_id: Option<uuid::Uuid>,
+    deadline_ms: Option<u64>,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ReadMethod {
     RepositoryType,
@@ -62,6 +71,8 @@ pub struct Backend {
     runtime: tokio::runtime::Runtime,
     jobs: Arc<Mutex<HashMap<uuid::Uuid, Cancellation>>>,
     capacity: usize,
+    registry: Option<desktop_backend::Registry>,
+    copilot_runtime_root: Option<PathBuf>,
 }
 
 pub struct ReadJob {
@@ -81,6 +92,7 @@ enum BackendOperation {
     CanonicalMutationPath,
     TrustRepository,
     Repository(Operation),
+    Copilot(Operation),
 }
 
 impl Drop for ReadJob {
@@ -107,6 +119,70 @@ impl Backend {
                 .build()?,
             jobs: Arc::new(Mutex::new(HashMap::new())),
             capacity,
+            registry: None,
+            copilot_runtime_root: None,
+        })
+    }
+
+    pub fn with_registry(mut self, registry: desktop_backend::Registry) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    pub fn with_copilot_runtime_root(mut self, root: Option<PathBuf>) -> Self {
+        self.copilot_runtime_root = root;
+        self
+    }
+
+    pub fn admit_copilot(&self, args: Vec<Value>) -> Result<ReadJob> {
+        let [value]: [Value; 1] = args
+            .try_into()
+            .map_err(|_| AppError::BadArgs("Copilot requires exactly one request".into()))?;
+        let request: CopilotRequest = serde_json::from_value(value)?;
+        if !Path::new(&request.repository_path).is_absolute() {
+            return Err(AppError::BadArgs("repository path must be absolute".into()));
+        }
+        if self.registry.is_none() {
+            return Err(AppError::BadArgs(
+                "Copilot account registry is unavailable".into(),
+            ));
+        }
+        match &request.operation {
+            Operation::CopilotCommitDiffDetail { .. } => {}
+            Operation::CopilotGenerateCommitMessage {
+                account: Some(_), ..
+            } => {}
+            Operation::CopilotGenerateCommitMessage { account: None, .. } => {
+                return Err(AppError::BadArgs(
+                    "choose a GitHub account for Copilot".into(),
+                ));
+            }
+            _ => return Err(AppError::BadArgs("unsupported Copilot operation".into())),
+        }
+        let duration = request.deadline_ms.unwrap_or(170_000);
+        if !(1..=330_000).contains(&duration) {
+            return Err(AppError::BadArgs(
+                "deadline_ms must be between 1 and 330000".into(),
+            ));
+        }
+        let token = Cancellation::default();
+        if let Some(id) = request.request_id {
+            let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+            if jobs.len() >= self.capacity || jobs.contains_key(&id) {
+                return Err(AppError::Coded {
+                    code: "EBUSY".into(),
+                    message: "backend queue is full or request ID is already active".into(),
+                });
+            }
+            jobs.insert(id, token.clone());
+        }
+        Ok(ReadJob {
+            path: request.repository_path,
+            operation: BackendOperation::Copilot(request.operation),
+            token,
+            id: request.request_id,
+            jobs: self.jobs.clone(),
+            deadline: Instant::now() + Duration::from_millis(duration),
         })
     }
 
@@ -335,17 +411,24 @@ impl Backend {
             if token.is_cancelled() { return Err(AppError::Coded { code: "cancelled".into(), message: "repository read cancelled".into() }); }
             let remaining = job.deadline.saturating_duration_since(Instant::now());
             let work = async {
-                let operation = match job.operation.clone() {
+                let (operation, scoped) = match job.operation.clone() {
                     BackendOperation::RepositoryType => return desktop_backend::repository_type(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::DirectoryExists => return desktop_backend::directory_exists(Path::new(&job.path)).await.map(serde_json::Value::Bool).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::PathExists => return desktop_backend::path_exists(Path::new(&job.path)).await.map(serde_json::Value::Bool).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::CanonicalMutationPath => return desktop_backend::canonical_mutation_path(Path::new(&job.path)).await.map(serde_json::Value::String).map_err(|error| AppError::msg(error.to_string())),
                     BackendOperation::TrustRepository => return desktop_backend::trust_repository(Path::new(&job.path)).await.map_err(|error| AppError::msg(error.to_string())),
-                    BackendOperation::Repository(operation) => operation,
+                    BackendOperation::Repository(operation) => (operation, false),
+                    BackendOperation::Copilot(operation) => (operation, true),
                 };
-                let repo = Repository::open(Path::new(&job.path))
+                let mut repo = Repository::open(Path::new(&job.path))
                     .await
                     .map_err(|error| AppError::msg(error.to_string()))?;
+                if scoped {
+                    repo = repo.with_registry(self.registry.clone().ok_or_else(|| AppError::BadArgs("Copilot account registry is unavailable".into()))?);
+                    if let Some(root) = &self.copilot_runtime_root {
+                        repo = repo.with_copilot_runtime_root(root.clone());
+                    }
+                }
                 repo.execute(operation)
                     .await
                     .map_err(|error| AppError::msg(error.to_string()))
@@ -368,6 +451,233 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::{fs, process::Command};
+
+    #[cfg(unix)]
+    #[test]
+    fn fake_wry_copilot_runtime() {
+        use std::io::{BufRead, Read, Write};
+        if std::env::var_os("DESKTOP_WRY_FAKE_RUNTIME").is_none() {
+            return;
+        }
+        assert_eq!(
+            std::env::var("COPILOT_SDK_AUTH_TOKEN").unwrap(),
+            "wry-selected-token"
+        );
+        assert_eq!(std::env::var("GH_HOST").unwrap(), "github.com");
+        assert!(std::env::var_os("GH_TOKEN").is_none());
+        let mut input = std::io::BufReader::new(std::io::stdin());
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/fd/3")
+            .unwrap();
+        loop {
+            let mut header = String::new();
+            if input.read_line(&mut header).unwrap() == 0 {
+                break;
+            }
+            let length: usize = header
+                .trim()
+                .strip_prefix("Content-Length: ")
+                .unwrap()
+                .parse()
+                .unwrap();
+            let mut blank = String::new();
+            input.read_line(&mut blank).unwrap();
+            assert_eq!(blank, "\r\n");
+            let mut body = vec![0; length];
+            input.read_exact(&mut body).unwrap();
+            let request: Value = serde_json::from_slice(&body).unwrap();
+            let result = match request["method"].as_str().unwrap() {
+                "connect" => json!({"protocolVersion":3}),
+                "session.create" => {
+                    assert_eq!(request["params"]["systemMessage"]["mode"], "append");
+                    assert_eq!(request["params"]["availableTools"], json!([]));
+                    json!({"sessionId":request["params"]["sessionId"]})
+                }
+                "session.options.update" => {
+                    assert_eq!(request["params"]["coauthorEnabled"], false);
+                    json!({})
+                }
+                "session.sendAndWait" => {
+                    let prompt = request["params"]["prompt"].as_str().unwrap();
+                    assert!(
+                        prompt.contains("+selected content")
+                            && !prompt.contains("unselected content")
+                    );
+                    json!({"aborted":false,"response":{"type":"assistant.message","data":{"content":"{\"title\":\"Fix selected\",\"description\":\"Details\"}"}}})
+                }
+                _ => panic!("unexpected fixture method"),
+            };
+            let reply = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
+            write!(output, "Content-Length: {}\r\n\r\n{}", reply.len(), reply).unwrap();
+            output.flush().unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wry_copilot_generation_uses_host_runtime_and_verified_account() {
+        use std::os::unix::fs::PermissionsExt;
+        const CHILD: &str = "DESKTOP_WRY_COPILOT_TEST_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let backend = Backend::new(4)
+                .unwrap()
+                .with_registry(desktop_backend::Registry::new(root.join("registry.json")))
+                .with_copilot_runtime_root(Some(root.join("runtime")));
+            let request = json!({"repository_path":root.join("repo"),"operation":{
+                "method":"copilot_generate_commit_message", "source":"working_tree", "paths":["selected"],
+                "account":{"host":"github.com","login":"alice","id":42}, "rule_descriptions":["Use an issue number"]
+            }});
+            let result = backend
+                .read(backend.admit_copilot(vec![request]).unwrap())
+                .unwrap();
+            assert_eq!(result["summary"], "Fix selected");
+            assert_eq!(result["description"], "Details");
+            assert!(!root.join("repo/.git/index").exists());
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("desktop-wry-copilot-live-{}", uuid::Uuid::new_v4()));
+        let repo = root.join("repo");
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(&repo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(repo.join("selected"), b"selected content\n").unwrap();
+        fs::write(repo.join("unselected"), b"unselected content\n").unwrap();
+        let gh = bin.join("gh");
+        fs::write(&gh, r##"#!/bin/sh
+case "$1 $2" in
+  'auth status') [ -z "${GH_TOKEN+x}" ] || exit 90; printf '{"hosts":{"github.com":[{"login":"Alice","state":"success"}]}}\n';;
+  'auth token') [ -z "${GH_TOKEN+x}" ] || exit 91; printf 'wry-selected-token\n';;
+  'api --method') [ "$GH_TOKEN" = wry-selected-token ] || exit 92; printf '{"login":"Alice","id":42}\n';;
+  *) exit 93;;
+esac
+"##).unwrap();
+        fs::set_permissions(&gh, fs::Permissions::from_mode(0o700)).unwrap();
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "x64",
+            "aarch64" => "arm64",
+            _ => return,
+        };
+        let platform = if std::env::consts::OS == "macos" {
+            "darwin"
+        } else {
+            std::env::consts::OS
+        };
+        let runtime = root
+            .join("runtime/prebuilds")
+            .join(format!("{platform}-{arch}"));
+        fs::create_dir_all(&runtime).unwrap();
+        let exe = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .replace('\'', "'\\''");
+        let wrapper = runtime.join("copilot-runtime");
+        fs::write(&wrapper, format!("#!/bin/sh\nexec 3>&1\nexec '{exe}' --exact backend::tests::fake_wry_copilot_runtime --nocapture >/dev/null\n")).unwrap();
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
+        let path = std::env::join_paths(
+            std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+        )
+        .unwrap();
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "backend::tests::wry_copilot_generation_uses_host_runtime_and_verified_account",
+                "--nocapture",
+            ])
+            .env(CHILD, &root)
+            .env("DESKTOP_WRY_FAKE_RUNTIME", "1")
+            .env("HOME", &root)
+            .env("PATH", path)
+            .env("GH_TOKEN", "wrong-token")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", root.join("gitconfig"))
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "host service test failed: {}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scoped_copilot_admission_fences_account_and_cancellation() {
+        use desktop_backend::{AccountAssignment, StoredAccount};
+        let root =
+            std::env::temp_dir().join(format!("desktop-wry-copilot-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(root.join("selected.txt"), b"selected line\n").unwrap();
+        let registry = desktop_backend::Registry::new(root.join("state/registry.json"));
+        let record = registry.add(root.clone(), true).unwrap().records.remove(0);
+        registry
+            .compare_and_replace_account(
+                &record.id,
+                0,
+                StoredAccount {
+                    revision: 1,
+                    assignment: AccountAssignment::None {},
+                    association: None,
+                    source_remote: None,
+                },
+            )
+            .unwrap();
+        let backend = Backend::new(1).unwrap().with_registry(registry);
+        let preview = || json!({"repository_path":root,"operation":{"method":"copilot_commit_diff_detail","path":"selected.txt"}});
+        let value = backend
+            .read(backend.admit_copilot(vec![preview()]).unwrap())
+            .unwrap();
+        assert_eq!(value["can_select"], true);
+        assert_eq!(value["hunks"][0]["lines"][0]["text"], "selected line");
+        for operation in [
+            json!({"method":"stage","paths":["selected.txt"]}),
+            json!({"method":"copilot_generate_commit_message"}),
+            json!({"method":"copilot_generate_commit_message","account":{"host":"github.com","login":"alice","id":1,"token":"not-allowed"}}),
+        ] {
+            assert!(
+                backend
+                    .admit_copilot(vec![json!({"repository_path":root,"operation":operation})])
+                    .is_err()
+            );
+        }
+        let job = backend.admit_copilot(vec![json!({"repository_path":root,"operation":{"method":"copilot_generate_commit_message","account":{"host":"github.com","login":"alice","id":1},"source":"working_tree","paths":["selected.txt"]}})]).unwrap();
+        assert!(
+            backend
+                .read(job)
+                .unwrap_err()
+                .to_string()
+                .contains("No GitHub account")
+        );
+        assert!(backend.admit_copilot(vec![json!({"repository_path":"relative","operation":{"method":"copilot_commit_diff_detail","path":"x"}})]).is_err());
+        assert!(backend.admit_copilot(vec![json!({"repository_path":root,"operation":{"method":"copilot_commit_diff_detail","path":"x"},"deadline_ms":330001})]).is_err());
+        let id = uuid::Uuid::new_v4();
+        let mut request = preview();
+        request["request_id"] = json!(id);
+        let job = backend.admit_copilot(vec![request.clone()]).unwrap();
+        assert!(backend.admit_copilot(vec![request]).is_err());
+        backend.cancel(&[json!({"request_id":id})]).unwrap();
+        assert!(
+            matches!(backend.read(job), Err(AppError::Coded { code, .. }) if code == "cancelled")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn trust_repository_uses_the_native_job() {

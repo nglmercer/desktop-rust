@@ -21,7 +21,7 @@ from support.fixture import BINARY
 from support.lfs import cached, pointer
 from support.process import alive
 from repository_accounts import Accounts, ALICE, BOB, ENV, NAMED, OTHER, NONE, EFFECTIVE, call, clean
-from repository_context import private, stop, wait_for
+from support.repository_context import private, stop, wait_for
 
 
 def optional_tool(name, variable, package):
@@ -208,62 +208,19 @@ if action=='get':
         subprocess.run([real_git, 'config', '--file', str(self.global_config), 'credential.helper', self.helper_command], check=True)
         subprocess.run([real_git, 'config', '--file', str(self.global_config), 'http.sslCAInfo', str(service.certificate)], check=True)
         wrapper = root/'bin/git'
-        wrapper.write_text(f'#!{sys.executable}\n'+f'REAL_GIT={real_git!r}\n'+r'''import json,os,subprocess,sys,time
-from pathlib import Path
-args=sys.argv[1:];remaining=iter(args);command=None
-for argument in remaining:
- if argument in ['-C','-c','--git-dir','--work-tree','--namespace']:next(remaining,None)
- elif not argument.startswith('-'):command=argument;break
-scenario=json.loads(Path(os.environ['CONTEXT_SCENARIO']).read_text())
-secrets=[user['token'] for user in scenario['users'].values()]+[scenario['environment']['token']]
-row={'command':command,'argv_clean':not any(secret in argument for secret in secrets for argument in args),'alice_environment_clean':scenario['users']['AliceCase']['token'] not in os.environ.values()}
-credential_input=None
-if command=='credential':
- chunks=[]
- while True:
-  line=sys.stdin.buffer.readline(65537);chunks.append(line)
-  if line in [b'',b'\n',b'\r\n']:break
- credential_input=b''.join(chunks)
- row['routing']={}
- for line in credential_input.splitlines():
-  key,separator,value=line.partition(b'=')
-  if separator and key in [b'protocol',b'host',b'path']:
-   text=value.decode('utf-8','replace')
-   for secret in secrets:text=text.replace(secret,'[redacted]')
-   row['routing'][key.decode()]=text[:1024]
- row['cwd']=os.getcwd()
-with open(os.environ['CREDENTIALS_GIT_LOG'],'a') as log:log.write(json.dumps(row)+'\n')
-control=json.loads(Path(os.environ['CREDENTIALS_CONTROL']).read_text())
-if control.get('gate') is not None and control['gate']==command and not os.environ.get('CREDENTIALS_GATE_CHILD'):
- Path(os.environ['CREDENTIALS_GATE_STARTED']).write_text('started');deadline=time.monotonic()+25
- while not Path(os.environ['CREDENTIALS_GATE_RELEASE']).exists() and time.monotonic()<deadline:time.sleep(.02)
- os.environ['CREDENTIALS_GATE_CHILD']='1'
-result=subprocess.run([REAL_GIT,*args],input=credential_input);sys.exit(result.returncode)
-'''); wrapper.chmod(0o700)
-        self.wrapper_kind = self.install_c_wrapper(wrapper)
+        self.wrapper_kind = self.install_rust_wrapper(wrapper)
         self.configure()
 
-    def install_c_wrapper(self, wrapper):
-        compiler = shlex.split(os.environ['CC']) if os.environ.get('CC') else [shutil.which('cc') or shutil.which('clang')]
-        if os.name != 'posix' or not compiler or not compiler[0]: return 'python'
-        directory = self.root/'wrapper-config'; directory.mkdir(mode=0o700)
-        def literal(value):
-            return '"'+''.join('\\%03o' % byte for byte in os.fsencode(value))+'"'
-        header = ''.join('#define '+name+' '+literal(value)+'\n' for name, value in [
-            ('FIXTURE_REAL_GIT', self.real_git), ('FIXTURE_ALICE', ALICE),
-            ('FIXTURE_BOB', BOB), ('FIXTURE_ENV', ENV)])
-        private(directory/'git_credentials_wrapper_config.h', header)
-        compiled = wrapper.with_name('git-compiled')
-        try:
-            result = subprocess.run([*compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-                                     '-I', str(directory), str(Path(__file__).with_name('git_credentials_wrapper.c')),
-                                     '-o', str(compiled)], capture_output=True, timeout=40)
-            if result.returncode == 0:
-                compiled.chmod(0o700); compiled.replace(wrapper); return 'c'
-        except (OSError, subprocess.TimeoutExpired): pass
-        compiled.unlink(missing_ok=True)
-        print('TOOLS: C Git fixture wrapper unavailable; using Python fallback', flush=True)
-        return 'python'
+    def install_rust_wrapper(self, wrapper):
+        project = Path(__file__).resolve().parents[2]
+        subprocess.run(['cargo', 'build', '-p', 'desktop-cli', '--example', 'git_credentials_wrapper', '--locked'],
+                       cwd=project, check=True, capture_output=True, timeout=120)
+        config = self.root/'git-wrapper-config.json'
+        private(config, json.dumps({'real_git': self.real_git, 'alice': ALICE, 'bob': BOB, 'environment': ENV}))
+        self.env['CREDENTIALS_WRAPPER_CONFIG'] = str(config)
+        shutil.copyfile(BINARY.parent/'examples/git_credentials_wrapper', wrapper)
+        wrapper.chmod(0o700)
+        return 'rust'
 
     def configure(self, **changes):
         super().configure(host=self.service.host, **changes)

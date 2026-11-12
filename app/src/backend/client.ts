@@ -35,6 +35,112 @@ export interface BackendRequestOptions {
   readonly signal?: AbortSignal
 }
 
+export type BackendGitPath = string | { readonly bytes: ReadonlyArray<number> }
+
+export interface ICopilotAccount {
+  readonly host: string
+  readonly login: string
+  readonly id: number
+}
+
+export interface ICopilotCommitOptions {
+  readonly paths?: ReadonlyArray<BackendGitPath>
+  readonly system_prompt?: string
+  readonly source?: 'staged' | 'working_tree'
+  readonly partial_selections?: ReadonlyArray<{
+    readonly path: BackendGitPath
+    readonly basis: string
+    readonly lines: ReadonlyArray<number>
+  }>
+  readonly amend_head?: string
+  readonly rule_descriptions?: ReadonlyArray<string>
+  readonly account?: ICopilotAccount
+  readonly model?: string
+  readonly reasoning_effort?: 'low' | 'medium' | 'high' | 'xhigh'
+  readonly timeout_ms?: number
+}
+
+export interface ICopilotCommitDiff {
+  readonly path: BackendGitPath
+  readonly basis: string
+  readonly kind: string
+  readonly can_select: boolean
+  readonly hunks: ReadonlyArray<{
+    readonly old_start: number
+    readonly old_count: number
+    readonly new_start: number
+    readonly new_count: number
+    readonly lines: ReadonlyArray<{
+      readonly id: number
+      readonly kind: string
+      readonly text: string
+      readonly old_line: number | null
+      readonly new_line: number | null
+      readonly no_newline: boolean
+    }>
+  }>
+}
+
+function isBackendGitPath(value: unknown): value is BackendGitPath {
+  return (
+    typeof value === 'string' ||
+    (isRecord(value) &&
+      Array.isArray(value.bytes) &&
+      value.bytes.every(
+        byte => Number.isInteger(byte) && byte >= 0 && byte <= 255
+      ))
+  )
+}
+
+function isCopilotCommitDiff(value: unknown): value is ICopilotCommitDiff {
+  const count = (entry: unknown) =>
+    typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0
+  const lineNumber = (entry: unknown) => entry === null || count(entry)
+  return (
+    isRecord(value) &&
+    isBackendGitPath(value.path) &&
+    typeof value.basis === 'string' &&
+    value.basis.length > 0 &&
+    typeof value.kind === 'string' &&
+    typeof value.can_select === 'boolean' &&
+    Array.isArray(value.hunks) &&
+    value.hunks.every(
+      hunk =>
+        isRecord(hunk) &&
+        count(hunk.old_start) &&
+        count(hunk.old_count) &&
+        count(hunk.new_start) &&
+        count(hunk.new_count) &&
+        Array.isArray(hunk.lines) &&
+        hunk.lines.every(
+          line =>
+            isRecord(line) &&
+            count(line.id) &&
+            (line.kind === 'context' ||
+              line.kind === 'added' ||
+              line.kind === 'deleted') &&
+            typeof line.text === 'string' &&
+            lineNumber(line.old_line) &&
+            lineNumber(line.new_line) &&
+            typeof line.no_newline === 'boolean'
+        )
+    )
+  )
+}
+
+function copilotDeadline(
+  timeout: number | undefined,
+  options: BackendRequestOptions
+): BackendRequestOptions {
+  return options.deadlineMs === undefined &&
+    timeout !== undefined &&
+    Number.isInteger(timeout) &&
+    timeout >= 1 &&
+    timeout <= 300_000
+    ? { ...options, deadlineMs: Math.max(170_000, timeout + 30_000) }
+    : options
+}
+
 export class BackendError extends Error implements IBackendError {
   readonly code: string
   readonly retryable: boolean
@@ -149,10 +255,19 @@ class WryTransport {
         retryable: true,
       })
     }
+    if (method.startsWith('copilot_')) {
+      throw new BackendError({
+        code: 'unsupported',
+        message:
+          'Use a repository-scoped Copilot operation in the desktop shell',
+        retryable: false,
+      })
+    }
     if (
       opts.repositoryId !== undefined ||
       opts.accountId !== undefined ||
       (method !== 'read' &&
+        method !== 'copilot' &&
         (opts.signal !== undefined || opts.deadlineMs !== undefined))
     ) {
       throw new BackendError({
@@ -162,7 +277,7 @@ class WryTransport {
       })
     }
     const channel = `desktop.backend.${method}`
-    if (method === 'read') {
+    if (method === 'read' || method === 'copilot') {
       if (opts.signal && !this.capabilities().cancel) {
         throw new BackendError({
           code: 'unsupported',
@@ -170,11 +285,12 @@ class WryTransport {
           retryable: false,
         })
       }
-      const deadline = opts.deadlineMs ?? 60_000
-      if (!Number.isInteger(deadline) || deadline < 1 || deadline > 60_000) {
+      const maximum = method === 'read' ? 60_000 : 330_000
+      const deadline = opts.deadlineMs ?? (method === 'read' ? 60_000 : 170_000)
+      if (!Number.isInteger(deadline) || deadline < 1 || deadline > maximum) {
         throw new BackendError({
           code: 'invalid_request',
-          message: 'deadlineMs must be between 1 and 60000',
+          message: `deadlineMs must be between 1 and ${maximum}`,
           retryable: false,
         })
       }
@@ -194,13 +310,19 @@ class WryTransport {
             try {
               if (this.capabilities().cancel) this.cancel(requestId)
             } finally {
-              reject(new BackendError({ code, message, retryable: true }))
+              reject(
+                new BackendError({
+                  code,
+                  message,
+                  retryable: method === 'read',
+                })
+              )
             }
           })
-        const abort = () => cancel('cancelled', 'Repository read cancelled')
+        const abort = () => cancel('cancelled', 'Backend operation cancelled')
         opts.signal?.addEventListener('abort', abort, { once: true })
         timer = setTimeout(
-          () => cancel('ETIMEDOUT', 'Repository read timed out'),
+          () => cancel('ETIMEDOUT', 'Backend operation timed out'),
           deadline
         )
         try {
@@ -1244,9 +1366,9 @@ export class BackendClient {
   }
 
   // ---------------------------------------------------------------------------
-  // Copilot — the store's assistant flows go through the Rust service.
-  // These helpers keep the SDK surface behind the backend: the renderer
-  // never spawns `copilot-runtime` directly when a transport is present.
+  // Copilot — typed operations exposed by the Rust service. The existing
+  // renderer assistant flows still use the SDK until their account, model,
+  // provider, rules and diff-selection behavior has migrated.
   // ---------------------------------------------------------------------------
 
   copilotProbe(
@@ -1259,11 +1381,16 @@ export class BackendClient {
   }
 
   copilotCreateSession(
-    opts: { model?: string; reasoning_effort?: string } = {}
+    opts: {
+      model?: string
+      reasoning_effort?: string
+      account?: ICopilotAccount
+    } = {}
   ): Promise<{ id: string; connection_id: string; model: string }> {
     return this.request('copilot_create_session', {
       model: opts.model,
       reasoning_effort: opts.reasoning_effort,
+      account: opts.account,
     })
   }
 
@@ -1290,14 +1417,104 @@ export class BackendClient {
     )
   }
 
+  copilotCommitDiffDetail(
+    path: BackendGitPath,
+    opts: BackendRequestOptions = {}
+  ): Promise<ICopilotCommitDiff> {
+    return this.request('copilot_commit_diff_detail', { path }, opts)
+  }
+
+  private async repositoryCopilot(
+    repositoryPath: string,
+    method: 'copilot_commit_diff_detail' | 'copilot_generate_commit_message',
+    params: Record<string, unknown>,
+    options: BackendRequestOptions
+  ): Promise<unknown> {
+    if (this.transport === 'wry') {
+      return this.wry!.request(
+        'copilot',
+        { repository_path: repositoryPath, operation: { ...params, method } },
+        options
+      )
+    }
+    return this.repositoryRead(repositoryPath, method, params, options)
+  }
+
+  async copilotCommitDiffForRepository(
+    repositoryPath: string,
+    path: BackendGitPath,
+    options: BackendRequestOptions = {}
+  ): Promise<ICopilotCommitDiff> {
+    const result = await this.repositoryCopilot(
+      repositoryPath,
+      'copilot_commit_diff_detail',
+      { path },
+      options
+    )
+    if (!isCopilotCommitDiff(result)) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid Copilot diff response',
+        retryable: false,
+      })
+    }
+    return result
+  }
+
+  async copilotGenerateForRepository(
+    repositoryPath: string,
+    opts: ICopilotCommitOptions & { readonly account: ICopilotAccount },
+    options: BackendRequestOptions = {}
+  ): Promise<{ summary: string; description: string; basis: string }> {
+    const result = await this.repositoryCopilot(
+      repositoryPath,
+      'copilot_generate_commit_message',
+      { ...opts, paths: opts.paths ?? [] },
+      copilotDeadline(opts.timeout_ms, options)
+    )
+    if (
+      !isRecord(result) ||
+      typeof result.summary !== 'string' ||
+      result.summary.trim().length === 0 ||
+      typeof result.description !== 'string' ||
+      (result.basis !== 'staged_diff' && result.basis !== 'working_tree_diff')
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid Copilot commit message response',
+        retryable: false,
+      })
+    }
+    return {
+      summary: result.summary,
+      description: result.description,
+      basis: result.basis,
+    }
+  }
+
   copilotGenerateCommitMessage(
-    opts: { paths?: string[]; system_prompt?: string } = {},
+    opts: ICopilotCommitOptions = {},
     backendOpts: BackendRequestOptions = {}
   ): Promise<{ summary: string; description: string; basis: string }> {
+    const requestOptions =
+      this.transportKind === 'ws'
+        ? copilotDeadline(opts.timeout_ms, backendOpts)
+        : backendOpts
     return this.request(
       'copilot_generate_commit_message',
-      { paths: opts.paths ?? [], system_prompt: opts.system_prompt },
-      backendOpts
+      {
+        paths: opts.paths ?? [],
+        system_prompt: opts.system_prompt,
+        source: opts.source,
+        partial_selections: opts.partial_selections,
+        amend_head: opts.amend_head,
+        rule_descriptions: opts.rule_descriptions,
+        account: opts.account,
+        model: opts.model,
+        reasoning_effort: opts.reasoning_effort,
+        timeout_ms: opts.timeout_ms,
+      },
+      requestOptions
     )
   }
 }

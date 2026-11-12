@@ -8,6 +8,33 @@ pub enum GitPath {
     Bytes { bytes: Vec<u8> },
 }
 
+/// Source of the changes summarized by Copilot.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CopilotDiffSource {
+    #[default]
+    Staged,
+    WorkingTree,
+}
+
+/// A reviewed HEAD-to-working-tree line selection.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CopilotLineSelection {
+    pub path: GitPath,
+    pub basis: String,
+    pub lines: Vec<usize>,
+}
+
+/// A selected GitHub identity; credentials remain in GitHub CLI storage.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CopilotAccount {
+    pub host: String,
+    pub login: String,
+    pub id: u64,
+}
+
 /// Inputs explicitly reviewed before publishing a local repository.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -481,6 +508,8 @@ pub enum Operation {
         model: Option<String>,
         #[serde(default)]
         reasoning_effort: Option<String>,
+        #[serde(default)]
+        account: Option<CopilotAccount>,
     },
     CopilotSendMessage {
         session_id: String,
@@ -491,11 +520,30 @@ pub enum Operation {
     CopilotCloseSession {
         session_id: String,
     },
+    CopilotCommitDiffDetail {
+        path: GitPath,
+    },
     CopilotGenerateCommitMessage {
         #[serde(default)]
         paths: Vec<GitPath>,
         #[serde(default)]
         system_prompt: Option<String>,
+        #[serde(default)]
+        source: CopilotDiffSource,
+        #[serde(default)]
+        partial_selections: Vec<CopilotLineSelection>,
+        #[serde(default)]
+        amend_head: Option<String>,
+        #[serde(default)]
+        rule_descriptions: Vec<String>,
+        #[serde(default)]
+        account: Option<CopilotAccount>,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        reasoning_effort: Option<String>,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
     },
 }
 

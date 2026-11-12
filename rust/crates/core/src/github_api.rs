@@ -124,6 +124,12 @@ pub(crate) struct Session {
     account: Option<ExpectedAccount>,
 }
 impl Session {
+    /// Borrow the verified credential for an operation that owns this session.
+    /// The caller must keep it out of diagnostics and serialized responses.
+    pub(crate) fn credential(&self) -> &str {
+        &self.token
+    }
+
     /// Capture the effective environment/store token without refreshing it.
     /// Cancellation remains an outer error; all other command failures are
     /// sanitized inner results, including the original nonzero exit status.
@@ -568,7 +574,7 @@ fn token_arguments(host: &str, login: Option<&str>) -> Vec<OsString> {
     arguments
 }
 
-fn valid_login(login: &str) -> bool {
+pub(crate) fn valid_login(login: &str) -> bool {
     !login.is_empty()
         && login.len() <= 256
         && !login.starts_with('-')

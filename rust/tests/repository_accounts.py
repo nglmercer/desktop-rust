@@ -11,7 +11,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from support.fixture import BINARY
-from repository_context import Suite, private, stop, wait_for
+from support.repository_context import Suite, private, stop, wait_for
 from support.bridge import WebSocket
 
 ALICE = 'synthetic-assigned-alice-private'

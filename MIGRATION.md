@@ -23,13 +23,11 @@ application logic is still TypeScript in `app/`.
 | Browser / WebSocket transport for Termux | typed transport | authenticated bridge; no browser UI | real-bridge authentication, events, cancellation and reconnect test; browser entry still returns 503 |
 | Copilot parity, multi-account Git auth, installers, updater | partial | partial | pending |
 
-The headless core has an experimental native Copilot turn transport, enabled
-only with `DESKTOP_COPILOT_NATIVE_TURN=1`. It uses the runtime's framed RPC
-protocol and falls back to the older send/event protocol only after a
-method-not-found response. Native sessions stay in memory until explicitly
-closed or their repository handle is dropped. Live authenticated parity and
-restart recovery have not been verified; the existing
-SDK wrapper remains the default until those gates pass. The renderer continues
+The headless core uses a native Copilot turn transport. It uses the runtime's
+framed RPC protocol and falls back to the older send/event protocol only after
+a method-not-found response. Sessions stay in memory until explicitly closed
+or their repository handle is dropped. Live authenticated parity and restart
+recovery have not been verified. The renderer continues
 to use its account-scoped SDK path for commit messages: the headless Copilot
 service does not yet preserve the selected account, provider, model and rules.
 Runtime discovery maps Rust targets to the SDK's platform names and selects

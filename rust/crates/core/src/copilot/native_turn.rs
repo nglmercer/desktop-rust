@@ -1,4 +1,4 @@
-//! Experimental one-turn client for the pinned runtime's JSON-RPC protocol.
+//! Session client for the pinned runtime's JSON-RPC protocol.
 //! It never retries a request: a failed or cancelled turn may have run remotely.
 use super::{RuntimeInfo, check_protocol_version, connect_rpc, ping_rpc, read_rpc_frame};
 use anyhow::{Context, Result, bail, ensure};
@@ -194,7 +194,7 @@ async fn turn_rpc(
 ) -> Result<Value> {
     let session = uuid::Uuid::new_v4().to_string();
     validate_prompt(&session, prompt)?;
-    open_session_rpc(reader, writer, &session, model, None).await?;
+    open_session_rpc(reader, writer, &session, model, None, None).await?;
     send_message_rpc(reader, writer, &session, model, prompt).await
 }
 
@@ -215,6 +215,7 @@ async fn open_session_rpc(
     session: &str,
     model: &str,
     reasoning_effort: Option<&str>,
+    commit_system_message: Option<&str>,
 ) -> Result<()> {
     let version = match connect_rpc(reader, writer).await? {
         Some(version) => version,
@@ -229,12 +230,32 @@ async fn open_session_rpc(
     if let Some(effort) = reasoning_effort {
         params["reasoningEffort"] = json!(effort);
     }
+    if let Some(message) = commit_system_message {
+        params["systemMessage"] = json!({"mode":"append", "content":message});
+        params["availableTools"] = json!([]);
+        params["enableSessionStore"] = json!(false);
+        params["clientName"] = json!("github/desktop:commit-message-generation");
+    }
     let created = request(reader, writer, 2, "session.create", params, None).await?;
     let created = required_reply(created, "session.create")?;
     ensure!(
         created["sessionId"] == session,
         "Copilot session identity mismatch"
     );
+    if commit_system_message.is_some() {
+        required_reply(
+            request(
+                reader,
+                writer,
+                4,
+                "session.options.update",
+                json!({"sessionId":session,"coauthorEnabled":false}),
+                None,
+            )
+            .await?,
+            "session.options.update",
+        )?;
+    }
     Ok(())
 }
 
@@ -289,8 +310,17 @@ pub(crate) struct NativeSession {
     stdout: tokio::process::ChildStdout,
     pub(crate) id: String,
     pub(crate) model: String,
+    pub(crate) account_basis: String,
     usable: bool,
     _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+pub(crate) struct SessionOptions<'a> {
+    pub model: &'a str,
+    pub reasoning_effort: Option<&'a str>,
+    pub commit_system_message: Option<&'a str>,
+    pub account_basis: String,
+    pub host: Option<&'a str>,
 }
 
 impl NativeSession {
@@ -298,8 +328,7 @@ impl NativeSession {
         runtime: &RuntimeInfo,
         cwd: &Path,
         token: &str,
-        model: &str,
-        reasoning_effort: Option<&str>,
+        options: SessionOptions<'_>,
         permit: tokio::sync::OwnedSemaphorePermit,
     ) -> Result<Self> {
         crate::cancellation::Cancellation::current().check()?;
@@ -307,7 +336,7 @@ impl NativeSession {
         let mut command = tokio::process::Command::new(&runtime.binary);
         #[cfg(unix)]
         command.process_group(0);
-        let mut child = command
+        command
             .args([
                 "--headless",
                 "--no-auto-update",
@@ -316,7 +345,16 @@ impl NativeSession {
                 "COPILOT_SDK_AUTH_TOKEN",
                 "--no-auto-login",
             ])
-            .env("COPILOT_SDK_AUTH_TOKEN", token)
+            .env_remove("COPILOT_TOKEN")
+            .env_remove("GH_TOKEN")
+            .env_remove("GITHUB_TOKEN")
+            .env_remove("GH_ENTERPRISE_TOKEN")
+            .env_remove("GITHUB_ENTERPRISE_TOKEN")
+            .env("COPILOT_SDK_AUTH_TOKEN", token);
+        if let Some(host) = options.host {
+            command.env("GH_HOST", host);
+        }
+        let mut child = command
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -339,7 +377,8 @@ impl NativeSession {
             stdin,
             stdout,
             id: uuid::Uuid::new_v4().to_string(),
-            model: model.to_owned(),
+            model: options.model.to_owned(),
+            account_basis: options.account_basis,
             usable: true,
             _permit: permit,
         };
@@ -350,7 +389,8 @@ impl NativeSession {
                 &mut session.stdin,
                 &session.id,
                 &session.model,
-                reasoning_effort,
+                options.reasoning_effort,
+                options.commit_system_message,
             ),
         ))
         .await?
@@ -465,12 +505,15 @@ mod tests {
             .unwrap();
         assert!(status.success());
         let repo = crate::Repository::open(&root).await.unwrap();
+        let basis = repo.account_state().await.unwrap().view.basis;
         let handle = repo
             .create_native_copilot_session(
                 &info,
                 "native-session-test-token",
                 Some("chosen-model"),
                 Some("high"),
+                &basis,
+                crate::copilot_bridge::CopilotSessionContext::default(),
             )
             .await
             .unwrap();
@@ -528,6 +571,37 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn changed_repository_remote_closes_the_session_before_another_turn() {
+        let (root, repo, id) = test_session().await;
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args([
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/other/repo.git"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let error = repo
+            .execute(crate::Operation::CopilotSendMessage {
+                session_id: id,
+                message: "first".into(),
+                timeout_ms: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("account changed"));
+        assert!(repo.native_copilot_sessions.lock().await.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn failed_turn_discards_the_session_without_replay() {
         let (root, repo, id) = test_session().await;
         let result = repo
@@ -557,8 +631,16 @@ mod tests {
             platform: "test".into(),
             arch: "test".into(),
         };
+        let basis = repo.account_state().await.unwrap().view.basis;
         let error = repo
-            .create_native_copilot_session(&missing, "test", None, None)
+            .create_native_copilot_session(
+                &missing,
+                "test",
+                None,
+                None,
+                &basis,
+                crate::copilot_bridge::CopilotSessionContext::default(),
+            )
             .await
             .unwrap_err();
         assert!(
@@ -716,6 +798,7 @@ mod tests {
             "session-1",
             "chosen-model",
             Some("high"),
+            None,
         )
         .await
         .unwrap();

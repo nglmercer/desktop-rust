@@ -22,7 +22,7 @@ from support.fixture import BINARY
 from git_credentials import Credentials, optional_tool, process_descendants
 from support.process import alive
 from repository_accounts import Accounts, ALICE, BOB, ENV, SECRET, NAMED, OTHER, NONE, EFFECTIVE, clean
-from repository_context import private, stop, wait_for
+from support.repository_context import private, stop, wait_for
 
 
 TOKENS = (ALICE, BOB, ENV, SECRET)
@@ -269,24 +269,8 @@ if args[:2]==['pr','create']:
 print(json.dumps({'unexpected':kind}));sys.exit(96)
 '''); gh.chmod(0o700)
         wrapper = root/'bin/git'
-        wrapper.write_text(f'#!{sys.executable}\n'+f'REAL_GIT={self.real_git!r}\n'+r'''import json,os,sys
-from pathlib import Path
-args=sys.argv[1:];c=json.loads(Path(os.environ['CONTEXT_SCENARIO']).read_text())
-secrets=[user['token'] for user in c['users'].values()]+[c['environment']['token'],c['secret']]
-iterator=iter(args);command=None;tail=[]
-for arg in iterator:
- if arg in ['-c','-C','--git-dir','--work-tree','--namespace']:next(iterator,None)
- elif not arg.startswith('-'):command=arg;tail=list(iterator);break
-row={'command':command,'from_gh':os.environ.get('CREATE_FROM_GH')=='1',
- 'argv_clean':not any(secret in value for secret in secrets for value in args),
- 'alice_environment_clean':not any(c['users']['AliceCase']['token'] in value for value in os.environ.values())}
-with open(os.environ['CREATE_GIT_LOG'],'a') as out:out.write(json.dumps(row)+'\n')
-if command in ['fetch','push','pull','clone'] or (command=='ls-remote' and '--get-url' not in tail) or (command=='remote' and any(value in tail for value in ['update','prune','-f','--fetch'])):sys.exit(97)
-os.execv(REAL_GIT,[REAL_GIT,*args])
-'''); wrapper.chmod(0o700)
-        # The shared C logger keeps per-command instrumentation cheap. Its exec
-        # target is an additional local-only guard, so unexpected transfers can
-        # never reach the public remote even if the product regresses.
+        # The Rust logger delegates to a local-only guard so unexpected
+        # transfers cannot reach a public remote.
         guard = root/'bin/git-local-only'
         shell = shutil.which('sh'); assert shell
         guard.write_text('#!'+shell+'\n'+'''command=; skip=0
@@ -306,7 +290,7 @@ esac
 exec '''+shlex.quote(self.real_git)+''' "$@"
 '''); guard.chmod(0o700)
         actual_git = self.real_git; self.real_git = str(guard)
-        try: self.wrapper_kind = Credentials.install_c_wrapper(self, wrapper)
+        try: self.wrapper_kind = Credentials.install_rust_wrapper(self, wrapper)
         finally: self.real_git = actual_git
     def seed_unborn(self, name):
         self.configure(); self.service.reset()

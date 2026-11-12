@@ -117,13 +117,260 @@ impl Side {
     }
 }
 
+fn normalized_selection_path(path: GitPath) -> Result<std::ffi::OsString> {
+    let path = validate_path(path)?;
+    Ok(Path::new(&path)
+        .components()
+        .collect::<PathBuf>()
+        .into_os_string())
+}
+
 impl Repository {
+    async fn snapshot_head_index(
+        &self,
+        scratch: &Scratch,
+    ) -> Result<(process::RawOutput, process::RawOutput)> {
+        let head = self
+            .run(&args(&["rev-parse", "--verify", "--quiet", "HEAD"]))
+            .await?;
+        anyhow::ensure!(
+            matches!(head.code, 0 | 1),
+            "cannot resolve HEAD for selected changes"
+        );
+        let branch = self
+            .run(&args(&["symbolic-ref", "--quiet", "HEAD"]))
+            .await?;
+        anyhow::ensure!(
+            matches!(branch.code, 0 | 1),
+            "cannot resolve branch for selected changes"
+        );
+        let base = if head.code == 0 {
+            args(&["read-tree", std::str::from_utf8(&head.stdout)?.trim()])
+        } else {
+            args(&["read-tree", "--empty"])
+        };
+        let initialized =
+            process::run_git(&self.path, &base, None, Some(&scratch.alternate_index)).await?;
+        anyhow::ensure!(
+            initialized.code == 0,
+            "cannot initialize selected-change snapshot"
+        );
+        Ok((head, branch))
+    }
+
+    async fn ensure_snapshot_head(
+        &self,
+        head: &process::RawOutput,
+        branch: &process::RawOutput,
+    ) -> Result<()> {
+        let now = self
+            .run(&args(&["rev-parse", "--verify", "--quiet", "HEAD"]))
+            .await?;
+        let current = self
+            .run(&args(&["symbolic-ref", "--quiet", "HEAD"]))
+            .await?;
+        anyhow::ensure!(
+            head.code == now.code
+                && head.stdout == now.stdout
+                && branch.code == current.code
+                && branch.stdout == current.stdout,
+            "HEAD or branch changed while capturing selected changes; retry"
+        );
+        Ok(())
+    }
+
+    /// Preview selectable changes against HEAD regardless of the live index.
+    pub(crate) async fn copilot_commit_diff_detail(&self, path: GitPath) -> Result<Value> {
+        let path = normalized_selection_path(path)?;
+        let scratch = Scratch::new(&self.index_path().await?)?;
+        let (head, branch) = self.snapshot_head_index(&scratch).await?;
+        let original = read_index(&scratch.alternate_index)?;
+        let (view, _, _) = self
+            .capture_diff(&path, false, &original, &scratch, true)
+            .await?;
+        self.ensure_snapshot_head(&head, &branch).await?;
+        Ok(serde_json::to_value(view)?)
+    }
+
+    /// Snapshot reviewed working-tree selections in a private index based on
+    /// HEAD, without changing the caller's real index or working tree.
+    pub(crate) async fn selected_worktree_patch(
+        &self,
+        paths: Vec<GitPath>,
+        partial: Vec<crate::CopilotLineSelection>,
+        amend_head: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        anyhow::ensure!(
+            !paths.is_empty() || !partial.is_empty() || amend_head.is_some(),
+            "select at least one working-tree file"
+        );
+        let mut path_bytes = Vec::new();
+        let mut names = HashSet::new();
+        for path in paths {
+            let path = normalized_selection_path(path)?;
+            let absolute = self.path.join(&path);
+            if let Ok(metadata) = fs::symlink_metadata(&absolute) {
+                anyhow::ensure!(
+                    !metadata.is_dir(),
+                    "select individual files, not directories"
+                );
+            }
+            anyhow::ensure!(
+                names.insert(path.as_encoded_bytes().to_vec()),
+                "selected paths must not overlap"
+            );
+            path_bytes.extend_from_slice(path.as_encoded_bytes());
+            path_bytes.push(0);
+            anyhow::ensure!(
+                path_bytes.len() <= 1024 * 1024,
+                "selected paths are too large"
+            );
+        }
+        let scratch = Scratch::new(&self.index_path().await?)?;
+        let (head, branch) = self.snapshot_head_index(&scratch).await?;
+        let head_oid = std::str::from_utf8(&head.stdout)?.trim();
+        let parent = if let Some(expected) = amend_head {
+            anyhow::ensure!(
+                head.code == 0 && expected == head_oid,
+                "HEAD changed since the amend request was prepared"
+            );
+            let result = self
+                .run(&args(&[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &format!("{head_oid}^"),
+                ]))
+                .await?;
+            anyhow::ensure!(result.code == 0, "cannot amend a commit without a parent");
+            Some(String::from_utf8(result.stdout)?.trim().to_owned())
+        } else {
+            None
+        };
+        let original = read_index(&scratch.alternate_index)?;
+        let mut instructions = Vec::new();
+        for selection in partial {
+            let path = normalized_selection_path(selection.path)?;
+            anyhow::ensure!(
+                names.insert(path.as_encoded_bytes().to_vec()),
+                "selected paths must not overlap"
+            );
+            anyhow::ensure!(
+                !selection.lines.is_empty(),
+                "select at least one changed line"
+            );
+            let (view, before, after) = self
+                .capture_diff(&path, false, &original, &scratch, true)
+                .await?;
+            anyhow::ensure!(
+                view.can_select,
+                "This diff does not support line selection; use whole-file staging"
+            );
+            anyhow::ensure!(
+                view.basis == selection.basis,
+                "File or HEAD changed; reload the diff and select lines again"
+            );
+            let selected: HashSet<_> = selection.lines.into_iter().collect();
+            let valid: HashSet<_> = view
+                .hunks
+                .iter()
+                .flat_map(|hunk| &hunk.lines)
+                .filter(|line| matches!(line.kind, "added" | "deleted"))
+                .map(|line| line.id)
+                .collect();
+            anyhow::ensure!(
+                selected.is_subset(&valid),
+                "selection contains a context or unknown line"
+            );
+            let desired = select_content(&before.bytes, &view.hunks, &selected, false)?;
+            let destination_exists = after.exists() || !desired.is_empty();
+            let (mode, oid) = if destination_exists {
+                let mode = before
+                    .entry
+                    .as_ref()
+                    .or(after.entry.as_ref())
+                    .context("missing file mode")?
+                    .mode
+                    .clone();
+                (
+                    mode,
+                    self.hash_selection(&path, desired, view.selection_lfs)
+                        .await?,
+                )
+            } else {
+                let length = before
+                    .entry
+                    .as_ref()
+                    .context("file is no longer tracked")?
+                    .oid
+                    .len();
+                ("0".to_owned(), "0".repeat(length))
+            };
+            instructions.extend_from_slice(format!("{mode} {oid}\t").as_bytes());
+            instructions.extend_from_slice(path.as_encoded_bytes());
+            instructions.push(0);
+            anyhow::ensure!(
+                instructions.len() <= 1024 * 1024,
+                "selected paths are too large"
+            );
+        }
+        if !path_bytes.is_empty() {
+            let updated = process::run_git(
+                &self.path,
+                &args(&[
+                    "update-index",
+                    "--add",
+                    "--remove",
+                    "--replace",
+                    "-z",
+                    "--stdin",
+                ]),
+                Some(path_bytes),
+                Some(&scratch.alternate_index),
+            )
+            .await?;
+            anyhow::ensure!(
+                updated.code == 0,
+                "cannot snapshot selected working-tree files"
+            );
+        }
+        if !instructions.is_empty() {
+            let updated = process::run_git(
+                &self.path,
+                &args(&["update-index", "-z", "--index-info"]),
+                Some(instructions),
+                Some(&scratch.alternate_index),
+            )
+            .await?;
+            anyhow::ensure!(updated.code == 0, "cannot snapshot selected lines");
+        }
+        let mut command = args(&[
+            "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+        ]);
+        if let Some(parent) = parent {
+            command.push(parent.into());
+        }
+        command.push("--".into());
+        let patch =
+            process::run_git(&self.path, &command, None, Some(&scratch.alternate_index)).await?;
+        anyhow::ensure!(
+            patch.code == 0,
+            "cannot compare selected working-tree files"
+        );
+        self.ensure_snapshot_head(&head, &branch).await?;
+        Ok(patch.stdout)
+    }
+
     pub(crate) async fn diff_detail(&self, path: GitPath, staged: bool) -> Result<Value> {
         let path = validate_path(path)?;
         let scratch = Scratch::new(&self.index_path().await?)?;
         let index_before = read_index(&scratch.index_path)?;
         let (view, _, _) = self
-            .capture_diff(&path, staged, &index_before, &scratch)
+            .capture_diff(&path, staged, &index_before, &scratch, false)
             .await?;
         if read_index(&scratch.index_path)? != index_before {
             bail!("Index changed while loading diff; reload the file");
@@ -147,7 +394,7 @@ impl Repository {
         let original = read_index(&index_path)?;
         let scratch = Scratch::new(&index_path)?;
         let (view, before, after) = self
-            .capture_diff(&path, staged, &original, &scratch)
+            .capture_diff(&path, staged, &original, &scratch, false)
             .await?;
         if !view.can_select {
             bail!("This diff does not support line selection; use whole-file staging");
@@ -233,7 +480,9 @@ impl Repository {
         let index_path = self.index_path().await?;
         let original = read_index(&index_path)?;
         let scratch = Scratch::new(&index_path)?;
-        let (view, before, after) = self.capture_diff(path, false, &original, &scratch).await?;
+        let (view, before, after) = self
+            .capture_diff(path, false, &original, &scratch, false)
+            .await?;
         if view.basis != basis {
             bail!("File, attributes, or index changed; reload the diff");
         }
@@ -366,6 +615,7 @@ impl Repository {
         staged: bool,
         original_index: &Option<Vec<u8>>,
         scratch: &Scratch,
+        head_index: bool,
     ) -> Result<(View, Side, Side)> {
         // ls-files excludes ignored metadata and traversals through symlink directories.
         let mut allowed = args(&[
@@ -387,7 +637,12 @@ impl Repository {
         {
             bail!("path is not a tracked or untracked repository file");
         }
-        let index_entry = self.index_entry(path).await?;
+        let index_entry = self
+            .index_entry_at(
+                path,
+                head_index.then_some(scratch.alternate_index.as_path()),
+            )
+            .await?;
         let mut before = if staged {
             let renamed = self
                 .run(&args(&[
@@ -412,11 +667,13 @@ impl Repository {
             )
             .await?
         } else {
-            self.blob_side(if self.intent_to_add(path, index_entry.is_some()).await? {
-                None
-            } else {
-                index_entry.clone()
-            })
+            self.blob_side(
+                if !head_index && self.intent_to_add(path, index_entry.is_some()).await? {
+                    None
+                } else {
+                    index_entry.clone()
+                },
+            )
             .await?
         };
         let mut after = if staged {
@@ -877,9 +1134,13 @@ impl Repository {
     }
 
     async fn index_entry(&self, path: &OsStr) -> Result<Option<Entry>> {
+        self.index_entry_at(path, None).await
+    }
+
+    async fn index_entry_at(&self, path: &OsStr, index: Option<&Path>) -> Result<Option<Entry>> {
         let mut command = args(&["ls-files", "--stage", "-z", "--"]);
         command.push(path.to_owned());
-        let output = self.run(&command).await?;
+        let output = process::run_git(&self.path, &command, None, index).await?;
         ensure_success(&output)?;
         let mut found = None;
         for record in output
@@ -1136,7 +1397,13 @@ impl Scratch {
     fn new(index_path: &Path) -> Result<Self> {
         let parent = index_path.parent().context("index has no parent")?;
         let directory = parent.join(format!("desktop-diff-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&directory)?;
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(&directory)?;
         Ok(Self {
             index_path: index_path.to_owned(),
             alternate_index: directory.join("index"),
@@ -1324,6 +1591,67 @@ fn select_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn selected_worktree_patch_handles_unborn_head_without_changing_index() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-selected-diff-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(
+            root.join("selected"),
+            b"selected content\nexcluded content\n",
+        )
+        .unwrap();
+        fs::write(root.join("other"), b"unrelated staged content\n").unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["add", "--", "other"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let patch = repo
+            .selected_worktree_patch(vec![GitPath::Text("selected".into())], vec![], None)
+            .await
+            .unwrap();
+        let patch = String::from_utf8(patch).unwrap();
+        assert!(patch.contains("+selected content"));
+        assert!(!patch.contains("unrelated staged content"));
+        let preview = repo
+            .copilot_commit_diff_detail(GitPath::Text("selected".into()))
+            .await
+            .unwrap();
+        let first_line = preview["hunks"][0]["lines"][0]["id"].as_u64().unwrap() as usize;
+        let partial = repo
+            .selected_worktree_patch(
+                vec![],
+                vec![crate::CopilotLineSelection {
+                    path: GitPath::Text("selected".into()),
+                    basis: preview["basis"].as_str().unwrap().to_owned(),
+                    lines: vec![first_line],
+                }],
+                None,
+            )
+            .await
+            .unwrap();
+        let partial = String::from_utf8(partial).unwrap();
+        assert!(partial.contains("+selected content"));
+        assert!(!partial.contains("excluded content"));
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn preserves_final_newline_changes_in_both_directions() {
