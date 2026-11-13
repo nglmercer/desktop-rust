@@ -1,21 +1,19 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it, mock } from 'node:test'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import { setImmediate } from 'node:timers/promises'
 import { enableShortLivedTokens } from '../../src/lib/feature-flag'
 import { getVersion } from '../../src/ui/lib/app-proxy'
 
 const guid = '3a4c329f-8d73-4347-9784-04a978fe48db'
 let guidError: Error | undefined
-mock.module('../../src/lib/get-renderer-guid', {
-  namedExports: {
-    getRendererGUID: async () => {
-      if (guidError !== undefined) {
-        throw guidError
-      }
-      return guid
-    },
+vi.mock('../../src/lib/get-renderer-guid', () => ({
+  getRendererGUID: async () => {
+    if (guidError !== undefined) {
+      throw guidError
+    }
+    return guid
   },
-})
+}))
 
 async function checkRollout(endpoint = 'https://api.github.com') {
   const { shouldRequestShortLivedTokens } = await import(
@@ -39,6 +37,7 @@ describe('short-lived token rollout', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     Object.assign(globalThis, {
       __DEV__: development,
       __RELEASE_CHANNEL__: channel,
@@ -51,7 +50,7 @@ describe('short-lived token rollout', () => {
   })
 
   for (const build of ['production', 'beta', 'development', 'preview']) {
-    it(`uses the ${build} build's opt-in before consulting Central, but never for GHES`, async t => {
+    it(`uses the ${build} build's opt-in before consulting Central, but never for GHES`, async () => {
       Object.assign(globalThis, {
         __DEV__: build === 'development',
         __RELEASE_CHANNEL__: build === 'beta' ? 'beta' : 'production',
@@ -62,9 +61,11 @@ describe('short-lived token rollout', () => {
       const optedIn = build !== 'production'
       assert.strictEqual(enableShortLivedTokens(), optedIn)
       guidError = new Error('Opted-in builds should not read the GUID')
-      const fetch = t.mock.method(globalThis, 'fetch', async () => {
-        throw new Error('Unexpected Central request')
-      })
+      const fetch = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async () => {
+          throw new Error('Unexpected Central request')
+        })
 
       for (const endpoint of [
         'https://api.github.com',
@@ -76,7 +77,7 @@ describe('short-lived token rollout', () => {
         await checkRollout('https://enterprise.example.com/api/v3'),
         false
       )
-      assert.strictEqual(fetch.mock.callCount(), 0)
+      assert.strictEqual(fetch.mock.calls.length, 0)
     })
   }
 
@@ -85,55 +86,55 @@ describe('short-lived token rollout', () => {
     'https://api.customer.ghe.com',
   ]) {
     for (const enabled of [false, true]) {
-      it(`uses Central's ${enabled} decision for ${endpoint}`, async t => {
-        const fetch = t.mock.method(
-          globalThis,
-          'fetch',
-          async (input: RequestInfo | URL, init?: RequestInit) => {
-            assert.ok(typeof input === 'string')
-            const url = new URL(input)
-            assert.strictEqual(
-              url.origin + url.pathname,
-              'https://central.github.com/api/features/desktop/desktop/short-lived-tokens'
-            )
-            assert.deepStrictEqual(
-              [...url.searchParams],
-              [
-                ['guid', guid],
-                ['version', getVersion()],
-              ]
-            )
-            assert.strictEqual(init?.method, 'GET')
-            assert.strictEqual(init.cache, 'no-store')
-            assert.strictEqual(init.redirect, 'error')
-            assert.strictEqual(init.credentials, 'omit')
-            assert.strictEqual(
-              new Headers(init.headers).get('Authorization'),
-              null
-            )
-            assert.strictEqual(
-              new Headers(init.headers).get('Accept'),
-              'application/json'
-            )
-            assert.ok(init.signal)
-            return Response.json({ enabled })
-          }
-        )
+      it(`uses Central's ${enabled} decision for ${endpoint}`, async () => {
+        const fetch = vi
+          .spyOn(globalThis, 'fetch')
+          .mockImplementation(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+              assert.ok(typeof input === 'string')
+              const url = new URL(input)
+              assert.strictEqual(
+                url.origin + url.pathname,
+                'https://central.github.com/api/features/desktop/desktop/short-lived-tokens'
+              )
+              assert.deepStrictEqual(
+                [...url.searchParams],
+                [
+                  ['guid', guid],
+                  ['version', getVersion()],
+                ]
+              )
+              assert.strictEqual(init?.method, 'GET')
+              assert.strictEqual(init.cache, 'no-store')
+              assert.strictEqual(init.redirect, 'error')
+              assert.strictEqual(init.credentials, 'omit')
+              assert.strictEqual(
+                new Headers(init.headers).get('Authorization'),
+                null
+              )
+              assert.strictEqual(
+                new Headers(init.headers).get('Accept'),
+                'application/json'
+              )
+              assert.ok(init.signal)
+              return Response.json({ enabled })
+            }
+          )
         assert.strictEqual(await checkRollout(endpoint), enabled)
-        assert.strictEqual(fetch.mock.callCount(), 1)
+        assert.strictEqual(fetch.mock.calls.length, 1)
       })
     }
   }
 
-  it('skips Central for GitHub Enterprise Server', async t => {
-    const fetch = t.mock.method(globalThis, 'fetch', async () => {
+  it('skips Central for GitHub Enterprise Server', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw new Error('Unexpected Central request')
     })
     assert.strictEqual(
       await checkRollout('https://enterprise.example.com/api/v3'),
       false
     )
-    assert.strictEqual(fetch.mock.callCount(), 0)
+    assert.strictEqual(fetch.mock.calls.length, 0)
   })
 
   for (const value of [
@@ -147,62 +148,66 @@ describe('short-lived token rollout', () => {
   ]) {
     it(`logs and falls back for invalid response ${JSON.stringify(
       value
-    )}`, async t => {
-      t.mock.method(globalThis, 'fetch', async () => Response.json(value))
-      const warn = t.mock.method(log, 'warn')
+    )}`, async () => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+        Response.json(value)
+      )
+      const warn = vi.spyOn(log, 'warn')
       assert.strictEqual(await checkRollout(), false)
-      assert.strictEqual(warn.mock.callCount(), 1)
+      assert.strictEqual(warn.mock.calls.length, 1)
     })
   }
 
   for (const status of [400, 404, 500, 503]) {
-    it(`logs and falls back for HTTP ${status}`, async t => {
-      t.mock.method(globalThis, 'fetch', async () =>
+    it(`logs and falls back for HTTP ${status}`, async () => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
         Response.json({ enabled: true }, { status })
       )
-      const warn = t.mock.method(log, 'warn')
+      const warn = vi.spyOn(log, 'warn')
       assert.strictEqual(await checkRollout(), false)
-      assert.strictEqual(warn.mock.callCount(), 1)
+      assert.strictEqual(warn.mock.calls.length, 1)
     })
   }
 
-  it('logs and falls back for invalid JSON', async t => {
-    t.mock.method(globalThis, 'fetch', async () => new Response('invalid'))
-    const warn = t.mock.method(log, 'warn')
+  it('logs and falls back for invalid JSON', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => new Response('invalid')
+    )
+    const warn = vi.spyOn(log, 'warn')
     assert.strictEqual(await checkRollout(), false)
-    assert.strictEqual(warn.mock.callCount(), 1)
+    assert.strictEqual(warn.mock.calls.length, 1)
   })
 
-  it('logs and falls back for network failure', async t => {
-    t.mock.method(globalThis, 'fetch', async () => {
+  it('logs and falls back for network failure', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw new Error('Network unavailable')
     })
-    const warn = t.mock.method(log, 'warn')
+    const warn = vi.spyOn(log, 'warn')
     assert.strictEqual(await checkRollout(), false)
-    assert.strictEqual(warn.mock.callCount(), 1)
+    assert.strictEqual(warn.mock.calls.length, 1)
   })
 
-  it('logs and falls back if the installation GUID cannot be read', async t => {
+  it('logs and falls back if the installation GUID cannot be read', async () => {
     guidError = new Error('GUID unavailable')
-    const fetch = t.mock.method(globalThis, 'fetch', async () =>
-      Response.json({ enabled: true })
-    )
-    const warn = t.mock.method(log, 'warn')
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ enabled: true }))
+    const warn = vi.spyOn(log, 'warn')
     assert.strictEqual(await checkRollout(), false)
-    assert.strictEqual(fetch.mock.callCount(), 0)
-    assert.strictEqual(warn.mock.callCount(), 1)
+    assert.strictEqual(fetch.mock.calls.length, 0)
+    assert.strictEqual(warn.mock.calls.length, 1)
   })
 
   for (const stalledPhase of ['request', 'body']) {
-    it(`falls back when the five-second timeout aborts the ${stalledPhase}`, async t => {
+    it(`falls back when the five-second timeout aborts the ${stalledPhase}`, async () => {
       const controller = new AbortController()
-      const timeout = t.mock.method(AbortSignal, 'timeout', (delay: number) => {
-        assert.strictEqual(delay, 5_000)
-        return controller.signal
-      })
-      t.mock.method(
-        globalThis,
-        'fetch',
+      const timeout = vi
+        .spyOn(AbortSignal, 'timeout')
+        .mockImplementation((delay: number) => {
+          assert.strictEqual(delay, 5_000)
+          return controller.signal
+        })
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
         async (_input: RequestInfo | URL, init?: RequestInit) => {
           const signal = init?.signal
           assert.strictEqual(signal, controller.signal)
@@ -216,21 +221,21 @@ describe('short-lived token rollout', () => {
             return aborted
           }
           const response = Response.json({ enabled: true })
-          t.mock.method(response, 'json', () => aborted)
+          vi.spyOn(response, 'json').mockImplementation(() => aborted)
           return response
         }
       )
-      const warn = t.mock.method(log, 'warn')
+      const warn = vi.spyOn(log, 'warn')
       const pending = checkRollout()
       await setImmediate()
-      assert.strictEqual(timeout.mock.callCount(), 1)
-      assert.strictEqual(warn.mock.callCount(), 0)
+      assert.strictEqual(timeout.mock.calls.length, 1)
+      assert.strictEqual(warn.mock.calls.length, 0)
       controller.abort(
         new DOMException('The operation timed out.', 'TimeoutError')
       )
       assert.strictEqual(await pending, false)
       assert.strictEqual(controller.signal.aborted, true)
-      assert.strictEqual(warn.mock.callCount(), 1)
+      assert.strictEqual(warn.mock.calls.length, 1)
     })
   }
 })
