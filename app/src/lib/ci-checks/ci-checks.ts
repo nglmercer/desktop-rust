@@ -1,14 +1,14 @@
-import { Account } from '../../models/account'
-import { GitHubRepository } from '../../models/github-repository'
+import type { Account } from '../../models/account'
+import type { GitHubRepository } from '../../models/github-repository'
 import {
   API,
   APICheckConclusion,
   APICheckStatus,
-  IAPIRefCheckRun,
-  IAPIRefStatusItem,
-  IAPIWorkflowJobStep,
-  IAPIWorkflowJobs,
-  IAPIWorkflowRun,
+  type IAPIRefCheckRun,
+  type IAPIRefStatusItem,
+  type IAPIWorkflowJobStep,
+  type IAPIWorkflowJobs,
+  type IAPIWorkflowRun,
 } from '../api'
 import { supportsRetrieveActionWorkflowByCheckSuiteId } from '../endpoint-capabilities'
 import {
@@ -327,7 +327,7 @@ export async function getLatestPRWorkflowRunsLogsForCheckRun(
   checkRuns: ReadonlyArray<IRefCheck>
 ): Promise<ReadonlyArray<IRefCheck>> {
   const jobsCache = new Map<number, IAPIWorkflowJobs | null>()
-  const mappedCheckRuns = new Array<IRefCheck>()
+  const mappedCheckRuns: IRefCheck[] = []
   for (const cr of checkRuns) {
     if (cr.actionsWorkflow === undefined) {
       mappedCheckRuns.push(cr)
@@ -436,7 +436,7 @@ async function getCheckRunActionsWorkflowRunsByCheckSuiteId(
     return checkRuns
   }
 
-  const mappedCheckRuns = new Array<IRefCheck>()
+  const mappedCheckRuns: IRefCheck[] = []
   const actionsCache = new Map<number, IAPIWorkflowRun | null>()
   for (const cr of checkRuns) {
     if (cr.checkSuiteId === null) {
@@ -517,7 +517,7 @@ function mapActionWorkflowsRunsToCheckRuns(
     return checkRuns
   }
 
-  const mappedCheckRuns = new Array<IRefCheck>()
+  const mappedCheckRuns: IRefCheck[] = []
   for (const cr of checkRuns) {
     const matchingWR = actionWorkflowRuns.find(
       wr => wr.check_suite_id === cr.checkSuiteId
@@ -544,7 +544,7 @@ export function getFormattedCheckRunDuration(
   checkRun: IAPIRefCheckRun | IAPIWorkflowJobStep
 ) {
   const duration = getCheckDurationInMilliseconds(checkRun)
-  return isNaN(duration) ? '' : formatPreciseDuration(duration)
+  return Number.isNaN(duration) ? '' : formatPreciseDuration(duration)
 }
 
 /**
@@ -555,7 +555,7 @@ export function getFormattedCheckRunLongDuration(
   checkRun: IAPIRefCheckRun | IAPIWorkflowJobStep
 ) {
   const duration = getCheckDurationInMilliseconds(checkRun)
-  return isNaN(duration) ? '' : formatLongPreciseDuration(duration)
+  return Number.isNaN(duration) ? '' : formatLongPreciseDuration(duration)
 }
 
 /**
