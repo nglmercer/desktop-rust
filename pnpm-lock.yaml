@@ -509,9 +509,6 @@ importers:
       electron-devtools-installer:
         specifier: ^4.0.0
         version: 4.0.0
-      webpack-hot-middleware:
-        specifier: ^2.10.0
-        version: 2.26.1
 
 packages:
 

@@ -79,7 +79,6 @@
   "devDependencies": {
     "@testing-library/dom": "8.20.1",
     "@testing-library/react": "12.1.5",
-    "electron-devtools-installer": "^4.0.0",
-    "webpack-hot-middleware": "^2.10.0"
+    "electron-devtools-installer": "^4.0.0"
   }
 }
