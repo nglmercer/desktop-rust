@@ -4,7 +4,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { createProxyProcessServer } from 'process-proxy'
 import type { IGitExecutionOptions } from '../git/core'
-import { getRepoHooks } from './get-repo-hooks'
+import { getRepoHooks, getRepoHooksPath } from './get-repo-hooks'
 import { createHooksProxy } from './hooks-proxy'
 import { getShellEnv } from './get-shell-env'
 import { quoteGitConfigParameter } from './git-config-parameters'
@@ -44,6 +44,8 @@ export async function withHooksEnv<T>(
     return fn(opts?.env)
   }
 
+  const originalHooksPath = await getRepoHooksPath(path, opts.env)
+
   const ext = __WIN32__ ? '.exe' : ''
   const processProxyPath = join(__dirname, `process-proxy${ext}`)
 
@@ -62,7 +64,8 @@ export async function withHooksEnv<T>(
     tmpHooksDir,
     opts?.onHookProgress,
     opts?.onHookFailure,
-    opts?.env?.GIT_CONFIG_PARAMETERS
+    opts?.env?.GIT_CONFIG_PARAMETERS,
+    originalHooksPath
   )
 
   const server = createProxyProcessServer(

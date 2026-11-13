@@ -10,7 +10,8 @@ import { pipeline } from 'stream/promises'
 import { promisify } from 'util'
 import memoizeOne from 'memoize-one'
 import which from 'which'
-import { createWriteStream } from 'fs'
+import { createReadStream, createWriteStream } from 'fs'
+import { spawnTraditionalHook } from './traditional-hook'
 
 const execFileAsync = promisify(execFile)
 
@@ -146,7 +147,8 @@ export const createHooksProxy = (
   tmpHooksDir: string,
   onHookProgress?: HookCallbackOptions['onHookProgress'],
   onHookFailure?: HookCallbackOptions['onHookFailure'],
-  capturedGitParameters?: string
+  capturedGitParameters?: string,
+  originalHooksPath?: string
 ) => {
   return async (conn: Connection) => {
     const startTime = Date.now()
@@ -247,7 +249,7 @@ export const createHooksProxy = (
       code: number | null
       signal: NodeJS.Signals | null
     }>((resolve, reject) => {
-      const child = spawn(gitPath, args, {
+      const options = {
         cwd: proxyCwd,
         // GITHUB_DESKTOP lets hooks know they're run from GitHub Desktop.
         // See https://github.com/desktop/desktop/issues/19001
@@ -260,15 +262,26 @@ export const createHooksProxy = (
             : { GIT_CONFIG_PARAMETERS: capturedGitParameters }),
         },
         signal: abortController.signal,
-      })
-        .on('close', (code, signal) => resolve({ code, signal }))
-        .on('error', err => reject(err))
+      }
+      const child = !__WIN32__ && originalHooksPath !== undefined
+        ? spawnTraditionalHook(join(originalHooksPath, hookName), proxyArgs.slice(1), options)
+        : spawn(gitPath, args, options)
+      child.on('close', (code, signal) => resolve({ code, signal }))
+      child.on('error', err => reject(err))
 
-      // git-hook run takes care of ensuring we only get hook output on stderr
-      // https://github.com/git/git/blob/4cf919bd7b946477798af5414a371b23fd68bf93/hook.c#L73C6-L73C22
+      // Both the Git runner and the POSIX wrapper route hook output to stderr.
       child.stderr.pipe(conn.stderr, { end: false }).on('error', reject)
       child.stderr.on('data', data => terminalOutput.push(data))
-      conn.stdin.pipe(child.stdin).on('error', reject)
+      child.stdin.on('error', error => {
+        if (!('code' in error) || (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED')) reject(error)
+      })
+      if (!__WIN32__ && originalHooksPath !== undefined && stdinPath !== undefined) {
+        const input = createReadStream(stdinPath).on('error', reject)
+        child.stdin.on('close', () => input.destroy())
+        input.pipe(child.stdin)
+      } else {
+        conn.stdin.pipe(child.stdin)
+      }
     })
 
     const dur = `after ${((Date.now() - startTime) / 1000).toFixed(2)}s`

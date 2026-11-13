@@ -1,5 +1,5 @@
 import { exec } from 'dugite'
-import { access, constants, readdir } from 'fs/promises'
+import { access, constants, readdir, stat } from 'fs/promises'
 import { basename, join, resolve } from 'path'
 
 const isExecutable = (path: string) =>
@@ -73,6 +73,13 @@ const getConfigValue = (
   env?: Record<string, string | undefined>
 ) => git(['config', '-z', '--get', key], path, env).then(x => x.split('\0')[0])
 
+/** Resolve the same traditional hook directory used for discovery. */
+export const getRepoHooksPath = async (
+  path: string,
+  env?: Record<string, string | undefined>
+) => resolve(path, await getConfigValue(path, 'core.hooksPath', env)
+  .catch(() => getHooksPath(path, env)))
+
 /**
  * Returns the names of executable Git hooks found in the given repository.
  *
@@ -87,12 +94,10 @@ export async function* getRepoHooks(
   filter?: string[],
   env?: Record<string, string | undefined>
 ) {
-  const hooksPath = await getConfigValue(path, 'core.hooksPath', env)
-    .catch(() => getHooksPath(path, env))
-    .then(p => resolve(path, p))
+  const hooksPath = await getRepoHooksPath(path, env)
 
   const files = await readdir(hooksPath, { withFileTypes: true })
-    .then(entries => entries.filter(x => x.isFile()))
+    .then(entries => entries.filter(x => x.isFile() || (!__WIN32__ && x.isSymbolicLink())))
     .catch(() => [])
 
   const matchAll = filter?.includes('*')
@@ -100,11 +105,15 @@ export async function* getRepoHooks(
   for (const file of files) {
     const hookName = basename(file.name, '.exe')
 
-    if (matchAll || filter?.includes(hookName) === false) {
+    if (!matchAll && filter?.includes(hookName) === false) {
       continue
     }
 
     if (!knownHooks.includes(hookName)) {
+      continue
+    }
+
+    if (file.isSymbolicLink() && !(await stat(join(file.parentPath, file.name)).then(x => x.isFile()).catch(() => false))) {
       continue
     }
 

@@ -1,4 +1,6 @@
 [
+  "app/test/unit/hooks-discovery-test.ts",
+  "app/test/unit/traditional-hook-test.ts",
   "app/test/unit/rust-working-image-routing-test.ts",
   "app/test/unit/blob-image-buffer-test.ts",
   "app/test/unit/stores/worktree-move-selection-test.ts",
