@@ -2,7 +2,8 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { closeSync, existsSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { randomUUID } from 'node:crypto'
 import frontMatter from 'front-matter'
 import { createRequire } from 'module'
 import { realpathSync } from 'fs'
@@ -38,6 +39,98 @@ const staticDirName =
     ? 'win32'
     : 'linux'
 
+function isInside(root: string, target: string): boolean {
+  const relative = path.relative(root, target)
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+}
+
+/** Create output directories without following links beneath the trusted root. */
+function ensureOutputDirectory(trustedRoot: string, destination: string) {
+  const root = path.resolve(trustedRoot)
+  const directory = path.resolve(destination)
+  if (!isInside(root, directory)) throw new Error('Output directory escapes its trusted root')
+  let current = root
+  for (const part of path.relative(root, directory).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part)
+    try {
+      const stat = lstatSync(current)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe output directory: ${current}`)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      mkdirSync(current)
+    }
+  }
+}
+
+/** Publish a file without opening any pre-existing output symlink. */
+function publishOutputFile(destination: string, contents: string | Buffer, mode?: number) {
+  const temporary = path.join(path.dirname(destination), `.desktop-${randomUUID()}.tmp`)
+  const handle = openSync(temporary, 'wx')
+  let closed = false
+  try {
+    writeFileSync(handle, contents)
+    if (mode !== undefined && process.platform !== 'win32') fchmodSync(handle, mode & 0o777)
+    closeSync(handle)
+    closed = true
+    renameSync(temporary, destination)
+  } finally {
+    if (!closed) closeSync(handle)
+    rmSync(temporary, { force: true })
+  }
+}
+
+function copyOutputFile(source: string, destination: string) {
+  const handle = openSync(source, 'r')
+  try {
+    const metadata = fstatSync(handle)
+    if (!metadata.isFile()) throw new Error(`Unsupported bundled resource: ${source}`)
+    publishOutputFile(destination, readFileSync(handle), metadata.mode)
+  } finally {
+    closeSync(handle)
+  }
+}
+
+function writeOutputFile(destination: string, contents: string) {
+  publishOutputFile(destination, contents)
+}
+
+/** Copy bundled emoji while rejecting links and excluding Unicode images. */
+function copyEmojiImages(source: string, destination: string, output: string) {
+  ensureOutputDirectory(output, destination)
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    if (entry.name === 'unicode') continue
+    const from = path.join(source, entry.name)
+    const to = path.join(destination, entry.name)
+    if (entry.isDirectory()) copyEmojiImages(from, to, output)
+    else if (entry.isFile()) copyOutputFile(from, to)
+    else throw new Error(`Unsupported bundled emoji resource: ${from}`)
+  }
+}
+
+/** Materialize template symlinks without following existing output links. */
+export function copyGitignoreTemplates(source: string, destination: string, trustedRoot = path.dirname(destination)) {
+  const root = realpathSync(source)
+  const anchor = path.resolve(trustedRoot)
+  const output = path.resolve(destination)
+  if (!isInside(anchor, output)) throw new Error('Output directory escapes its trusted root')
+  const canonicalOutput = path.resolve(realpathSync(anchor), path.relative(anchor, output))
+  if (isInside(root, canonicalOutput) || isInside(canonicalOutput, root)) {
+    throw new Error('Gitignore source and output directories overlap')
+  }
+  ensureOutputDirectory(anchor, output)
+  for (const name of readdirSync(source)) {
+    if (!name.endsWith('.gitignore')) continue
+    const resolved = realpathSync(path.join(source, name))
+    const relative = path.relative(root, resolved)
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error(`Gitignore template escapes its source directory: ${name}`)
+    }
+    // A previous build may have left an absolute symlink in the output. Copy
+    // into a new file and replace the directory entry so it is never followed.
+    copyOutputFile(resolved, path.join(destination, name))
+  }
+}
+
 /**
  * The git submodules the renderer's static resources come from. Without them
  * the bundle would silently miss emoji and gitignore templates, so the build
@@ -67,15 +160,25 @@ function requireSubmodules(): Plugin {
  * maps are written beside it only when DESKTOP_VITE_SOURCEMAP is set, and then
  * they are moved out to out/vite-sourcemaps.
  */
-function moveSourceMaps(outDir: string): Plugin {
-  const mapsDir = path.resolve(outDir, '..', 'vite-sourcemaps')
+function outputRoot(outDir: string): string {
+  return isInside(__dirname, outDir) ? __dirname : path.dirname(outDir)
+}
+
+export function moveSourceMaps(): Plugin {
+  let outDir: string
   return {
     name: 'desktop-move-sourcemaps',
     apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir)
+    },
     closeBundle() {
       if (!process.env.DESKTOP_VITE_SOURCEMAP) {
         return
       }
+      const mapsDir = path.resolve(outDir, '..', 'vite-sourcemaps')
+      const trustedRoot = outputRoot(outDir)
+      ensureOutputDirectory(trustedRoot, outDir)
       const walk = (directory: string) => {
         for (const entry of readdirSync(directory, { withFileTypes: true })) {
           const file = path.join(directory, entry.name)
@@ -83,7 +186,7 @@ function moveSourceMaps(outDir: string): Plugin {
             walk(file)
           } else if (entry.name.endsWith('.map')) {
             const target = path.join(mapsDir, path.relative(outDir, file))
-            mkdirSync(path.dirname(target), { recursive: true })
+            ensureOutputDirectory(trustedRoot, path.dirname(target))
             renameSync(file, target)
           }
         }
@@ -98,30 +201,29 @@ function moveSourceMaps(outDir: string): Plugin {
  * loads by URL (images, stylesheets). Directories under static/ are data the
  * renderer read through `fs`; those are served by the Rust backend instead.
  */
-function copyStaticResources(outDir: string): Plugin {
+export function copyStaticResources(platformDirectory = staticDirName): Plugin {
+  let outDir: string
   return {
     name: 'desktop-copy-static',
     apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir)
+    },
     closeBundle() {
-      const destination = path.join(outDir, 'static')
-      mkdirSync(destination, { recursive: true })
+      const trustedRoot = outputRoot(outDir)
+      ensureOutputDirectory(trustedRoot, outDir)
+      const output = realpathSync(outDir)
+      const destination = path.join(output, 'static')
+      ensureOutputDirectory(output, destination)
       // copyEmoji() in script/build.ts: the database plus the images of
       // GitHub's custom emoji (unicode ones render as text).
       const gemoji = path.resolve(__dirname, 'gemoji')
-      cpSync(path.join(gemoji, 'db/emoji.json'), path.join(outDir, 'emoji.json'))
-      cpSync(path.join(gemoji, 'images/emoji'), path.join(outDir, 'emoji'), {
-        recursive: true,
-        filter: source => path.basename(source) !== 'unicode',
-      })
+      copyOutputFile(path.join(gemoji, 'db/emoji.json'), path.join(output, 'emoji.json'))
+      copyEmojiImages(path.join(gemoji, 'images/emoji'), path.join(output, 'emoji'), output)
 
       // The gitignore templates offered when creating a repository.
       const gitignores = path.resolve(__dirname, 'app/static/common/gitignore')
-      mkdirSync(path.join(destination, 'gitignore'), { recursive: true })
-      for (const name of readdirSync(gitignores)) {
-        if (name.endsWith('.gitignore')) {
-          cpSync(path.join(gitignores, name), path.join(destination, 'gitignore', name))
-        }
-      }
+      copyGitignoreTemplates(gitignores, path.join(destination, 'gitignore'), output)
 
       // generateLicenseMetadata() in script/build.ts.
       const chooseALicense = path.resolve(__dirname, 'app/static/common/choosealicense.com')
@@ -137,8 +239,8 @@ function copyStaticResources(outDir: string): Plugin {
           body: `${body.trim()}\n`,
         }))
         .filter(license => !license.hidden)
-      writeFileSync(path.join(destination, 'available-licenses.json'), JSON.stringify(licenses))
-      writeFileSync(
+      writeOutputFile(path.join(destination, 'available-licenses.json'), JSON.stringify(licenses))
+      writeOutputFile(
         path.join(destination, 'LICENSE.choosealicense.md'),
         'GitHub Desktop uses licensing information provided by choosealicense.com.\n\n' +
           'The bundle in available-licenses.json has been generated from a source list provided at ' +
@@ -147,11 +249,11 @@ function copyStaticResources(outDir: string): Plugin {
           readFileSync(path.join(chooseALicense, 'LICENSE.md'), 'utf8')
       )
 
-      for (const dir of ['common', staticDirName]) {
+      for (const dir of ['common', platformDirectory]) {
         const source = path.resolve(__dirname, 'app/static', dir)
         for (const entry of readdirSync(source, { withFileTypes: true })) {
           if (entry.isFile()) {
-            cpSync(path.join(source, entry.name), path.join(destination, entry.name))
+            copyOutputFile(path.join(source, entry.name), path.join(destination, entry.name))
           }
         }
       }
@@ -167,8 +269,8 @@ export default defineConfig({
   plugins: [
     react(),
     requireSubmodules(),
-    copyStaticResources(outDir),
-    moveSourceMaps(outDir),
+    copyStaticResources(),
+    moveSourceMaps(),
     nodePolyfills({
       include: ['util','buffer','crypto','assert','events','querystring','timers','string_decoder'],
       exclude: ['fs/promises','stream/promises','stream/consumers','fs','stream'],

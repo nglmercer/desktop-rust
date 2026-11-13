@@ -130,8 +130,41 @@ export class EmojiFilter implements INodeFilter {
     if (cached !== undefined) {
       return cached
     }
-    const imageBuffer = await readFile(fileURLToPath(filePath))
-    const b64src = imageBuffer.toString('base64')
+    const url = new URL(filePath)
+    let imageBuffer: Uint8Array
+    if (url.protocol === 'file:') {
+      // Electron loads the renderer from file:. The Rust renderers serve it
+      // from their own origin and must not turn an emoji URL into an
+      // arbitrary filesystem read through the web filesystem shim.
+      if (document.location.protocol !== 'file:') {
+        throw new Error('File emoji URLs require the Electron renderer')
+      }
+      imageBuffer = await readFile(fileURLToPath(url))
+    } else {
+      // The Rust shell serves the same bundled emoji through the renderer's
+      // origin. Restrict reads to that bundle instead of fetching arbitrary
+      // URLs supplied in an emoji map.
+      const root = new URL('emoji/', document.baseURI)
+      const relative = url.pathname.slice(root.pathname.length)
+      if (
+        url.protocol !== root.protocol ||
+        url.host !== root.host ||
+        url.username !== '' ||
+        url.password !== '' ||
+        url.search !== '' ||
+        url.hash !== '' ||
+        !url.pathname.startsWith(root.pathname) ||
+        !/^[a-zA-Z0-9_+-]+\.png$/.test(relative)
+      ) {
+        throw new Error('Invalid bundled emoji URL')
+      }
+      const response = await fetch(url.toString(), { redirect: 'error' })
+      if (!response.ok) {
+        throw new Error('Could not load bundled emoji')
+      }
+      imageBuffer = new Uint8Array(await response.arrayBuffer())
+    }
+    const b64src = Buffer.from(imageBuffer).toString('base64')
     const uri = `data:image/png;base64,${b64src}`
     this.emojiBase64URICache.set(filePath, uri)
 

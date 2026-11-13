@@ -328,5 +328,7 @@
   "app/test/unit/copilot-conflict-context-native-test.ts",
   "app/test/unit/git/assisted-commit-completion-test.ts",
   "app/test/unit/branch-pruner-test.ts",
-  "script/main-build.test.ts"
+  "script/main-build.test.ts",
+  "app/test/unit/markdown-emoji-bundle-test.ts",
+  "script/vite-static-assets.test.ts"
 ]

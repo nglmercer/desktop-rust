@@ -59,6 +59,11 @@ installer lazily. Build tests exercise channel combinations and relocated,
 simulated addons; Electron development and production bundles opened a window
 under Linux/Xvfb after relocation. Real macOS/Windows addons, packaging and
 architectures still require verification before switching the main build.
+The web build copies bundled resources and source maps to the configured output
+directory, materializes gitignore template links, and preserves executable
+permissions. Markdown custom emoji load from the bundled renderer origin on
+WebSocket; Chromium covered the real resource path. Wry's custom-protocol
+fetch still requires validation in an actual webview.
 
 The loopback WebSocket client is tested against the Rust bridge for login,
 events, cancellation and reconnect. The browser entry currently returns 503:
