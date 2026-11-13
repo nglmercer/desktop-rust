@@ -591,6 +591,8 @@ impl Backend {
                 Operation::CheckoutPreview { .. }
                     | Operation::Checkout { basis: Some(_), .. }
                     | Operation::RendererCheckoutDirect { .. }
+                    | Operation::RendererDetachPreview { .. }
+                    | Operation::RendererDetach { .. }
             )
         {
             return Err(AppError::BadArgs(
@@ -1390,7 +1392,8 @@ impl Backend {
                     }
                     | GitInfoOperation::BranchCheckout {
                         operation: Operation::Checkout { .. }
-                            | Operation::RendererCheckoutDirect { .. },
+                            | Operation::RendererCheckoutDirect { .. }
+                            | Operation::RendererDetach { .. },
                         ..
                     }
             )
@@ -2911,6 +2914,37 @@ esac
         assert_eq!(
             checkout(json!({"method":"renderer_checkout_direct","branch":current,"basis":back["basis"],"allow_file_protocol":false})).unwrap()
                 ["checked_out"],
+            true
+        );
+        let head = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let head = std::str::from_utf8(&head.stdout).unwrap().trim();
+        let detach = checkout(json!({"method":"renderer_detach_preview","commit":head})).unwrap();
+        assert_eq!(detach["target"]["detached"], true);
+        assert_eq!(
+            checkout(json!({"method":"renderer_detach","commit":head,"basis":detach["basis"]}))
+                .unwrap()["checked_out"],
+            true
+        );
+        assert!(
+            !Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["symbolic-ref", "--quiet", "HEAD"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let back = checkout(json!({"method":"checkout_preview","branch":current})).unwrap();
+        assert_eq!(
+            checkout(
+                json!({"method":"renderer_checkout_direct","branch":current,"basis":back["basis"]})
+            )
+            .unwrap()["checked_out"],
             true
         );
         assert!(

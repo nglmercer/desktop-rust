@@ -974,6 +974,54 @@ fn checkout_previews_reject_stale_inputs_and_handle_worktrees_and_remote_refs() 
 }
 
 #[test]
+fn detached_checkout_pins_review_and_preserves_local_changes() {
+    for options in [&[][..], &["--object-format=sha256"][..]] {
+        let f = Fixture::with_options(options);
+        f.write("file", "first\n");
+        f.git(&["add", "--", "file"]);
+        f.git(&["commit", "-qm", "first"]);
+        let first = f.git_text(&["rev-parse", "HEAD"]);
+        f.write("file", "second\n");
+        f.git(&["add", "--", "file"]);
+        f.git(&["commit", "-qm", "second"]);
+        let head = f.git_text(&["rev-parse", "HEAD"]);
+        let review = f.rpc(json!({"method":"renderer_detach_preview","commit":first}));
+        f.write("local", "untracked\n");
+        f.fails(json!({"method":"renderer_detach","commit":first,"basis":review["basis"]}));
+        assert_eq!(f.git_text(&["rev-parse", "HEAD"]), head);
+        let review = f.rpc(json!({"method":"renderer_detach_preview","commit":first}));
+        f.write("file", "local edit\n");
+        let review_with_edit = f.rpc(json!({"method":"renderer_detach_preview","commit":first}));
+        f.fails(json!({"method":"renderer_detach","commit":first,"basis":review["basis"]}));
+        f.fails(
+            json!({"method":"renderer_detach","commit":first,"basis":review_with_edit["basis"]}),
+        );
+        assert_eq!(
+            fs::read_to_string(f.repo.join("file")).unwrap(),
+            "local edit\n"
+        );
+        f.write("file", "second\n");
+        let review = f.rpc(json!({"method":"renderer_detach_preview","commit":first}));
+        f.rpc(json!({"method":"renderer_detach","commit":first,"basis":review["basis"]}));
+        assert_eq!(f.git_text(&["rev-parse", "HEAD"]), first);
+        assert!(
+            !f.command("git")
+                .arg("-C")
+                .arg(&f.repo)
+                .args(["symbolic-ref", "--quiet", "HEAD"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(
+            fs::read_to_string(f.repo.join("local")).unwrap(),
+            "untracked\n"
+        );
+        f.fails(json!({"method":"renderer_detach_preview","commit":"HEAD^"}));
+    }
+}
+
+#[test]
 fn direct_checkout_scopes_file_protocol_to_submodule_update() {
     let child = Fixture::new();
     child.write("file", "module content\n");

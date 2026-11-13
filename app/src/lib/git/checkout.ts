@@ -180,6 +180,12 @@ export async function checkoutCommit(
 ): Promise<true> {
   const title = `Checking out ${__DARWIN__ ? 'Commit' : 'commit'}`
   const target = shortenSHA(commit.sha)
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    progressCallback?.({ kind: 'checkout', title, description: title, value: 0, target })
+    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().checkoutDetachedCommit(repository.path, commit.sha, allowFileProtocol), true)
+    progressCallback?.({ kind: 'checkout', title, description: 'Submodules updated', value: 1, target })
+    return true
+  }
   const opts = await getCheckoutOpts(
     repository,
     title,

@@ -2361,6 +2361,24 @@ export class BackendClient {
     if (!isRecord(value) || value.code !== 0 || value.checked_out !== true || typeof value.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.receipt_id)) throw new BackendError({ code: 'checkout_unconfirmed', message: 'Checkout did not complete; inspect the branch and checkout history before retrying', retryable: false })
   }
 
+  async checkoutDetachedCommit(repositoryPath: string, commit: string, allowFileProtocol: boolean): Promise<void> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit)) throw new BackendError({ code: 'invalid_request', message: 'A complete commit object ID is required', retryable: false })
+    const call = (method: 'renderer_detach_preview' | 'renderer_detach', extra: Record<string, unknown> = {}) =>
+      this.transport === 'wry'
+        ? this.request('git_info', { operation: { type: 'branch_checkout', repository_path: repositoryPath, operation: { method, commit, ...extra } } })
+        : this.repositoryRead(repositoryPath, method, { commit, ...extra })
+    const preview = await call('renderer_detach_preview')
+    if (!isRecord(preview) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis) || !isRecord(preview.target) || preview.target.detached !== true || preview.target.oid !== commit) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit checkout review', retryable: false })
+    let value: unknown
+    try { value = await call('renderer_detach', { basis: preview.basis, allow_file_protocol: allowFileProtocol }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect HEAD, the working tree and checkout history before retrying`, retryable: false })
+    }
+    if (isRecord(value) && value.code === 0 && value.unchanged === true) return
+    if (!isRecord(value) || value.code !== 0 || value.checked_out !== true || typeof value.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.receipt_id)) throw new BackendError({ code: 'checkout_unconfirmed', message: 'Commit checkout outcome is uncertain; inspect HEAD and checkout history', retryable: false })
+  }
+
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
     if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })

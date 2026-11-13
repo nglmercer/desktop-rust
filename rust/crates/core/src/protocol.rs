@@ -631,6 +631,15 @@ pub enum Operation {
         #[serde(default)]
         allow_file_protocol: bool,
     },
+    RendererDetachPreview {
+        commit: String,
+    },
+    RendererDetach {
+        commit: String,
+        basis: String,
+        #[serde(default)]
+        allow_file_protocol: bool,
+    },
     CheckoutHistory,
     AcknowledgeCheckout {
         receipt_id: String,

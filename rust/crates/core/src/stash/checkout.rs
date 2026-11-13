@@ -58,6 +58,8 @@ struct Target {
     oid: String,
     remote: bool,
     #[serde(default)]
+    detached: bool,
+    #[serde(default)]
     creation: Option<Creation>,
 }
 struct Plan {
@@ -210,6 +212,7 @@ impl Repository {
                 reference: entry["ref"].as_str().context("missing local ref")?.into(),
                 oid: entry["oid"].as_str().context("missing local tip")?.into(),
                 remote: false,
+                detached: false,
                 creation: None,
             });
         }
@@ -277,6 +280,7 @@ impl Repository {
             reference: entry["ref"].as_str().unwrap_or_default().into(),
             oid: entry["oid"].as_str().unwrap_or_default().into(),
             remote: true,
+            detached: false,
             creation: None,
         })
     }
@@ -350,6 +354,33 @@ impl Repository {
         let target = self.checkout_target(request).await?;
         Box::pin(self.checkout_plan_for(target)).await
     }
+    async fn detach_plan(&self, commit: &str) -> Result<Plan> {
+        anyhow::ensure!(
+            (commit.len() == 40 || commit.len() == 64)
+                && commit
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "A complete commit object ID is required"
+        );
+        let resolved = self.resolve_commit(commit).await?;
+        anyhow::ensure!(
+            resolved == commit,
+            "Commit does not resolve to the requested object"
+        );
+        let target = Target {
+            request: commit.into(),
+            branch: commit.into(),
+            reference: String::new(),
+            oid: commit.into(),
+            remote: false,
+            detached: true,
+            creation: None,
+        };
+        Box::pin(self.checkout_plan_for(target)).await
+    }
+    pub(crate) async fn detach_preview(&self, commit: &str) -> Result<Value> {
+        Ok(self.detach_plan(commit).await?.view)
+    }
     async fn checkout_plan_for(&self, target: Target) -> Result<Plan> {
         if target.remote {
             self.branch_destination_direct(&format!("refs/heads/{}", target.branch))
@@ -368,14 +399,16 @@ impl Repository {
         let target_stash = stashes
             .entries
             .iter()
-            .find(|entry| entry.branch.as_deref() == Some(&target.branch));
+            .find(|entry| !target.detached && entry.branch.as_deref() == Some(&target.branch));
         let worktrees = Box::pin(self.worktrees()).await?;
         let occupied = worktrees
             .as_array()
             .context("invalid worktree list")?
             .iter()
             .find(|entry| {
-                entry["branch"].as_str() == Some(format!("refs/heads/{}", target.branch).as_str())
+                !target.detached
+                    && entry["branch"].as_str()
+                        == Some(format!("refs/heads/{}", target.branch).as_str())
                     && entry["head"].as_str() != Some("0000000000000000000000000000000000000000")
                     && match serde_json::from_value::<GitPath>(entry["path"].clone()) {
                         Ok(GitPath::Bytes { bytes }) => {
@@ -402,7 +435,13 @@ impl Repository {
             .creation
             .as_ref()
             .is_none_or(|creation| creation.request.checkout);
-        let view = json!({"basis":basis,"name_rules":target.creation.as_ref().and_then(|creation| creation.name_rules.as_ref()),"target":target,"source_branch":source_branch,"source_head":source_head,"dirty":switching&&!files.is_empty(),"files":files,"operation":if switching {capture["snapshot"]["operation"].clone()} else {Value::Null},"conflicted":switching&&files.iter().any(|file|file["conflicted"]==true),"can_leave":source_branch.is_some()&&source_head.is_some(),"same_branch":target.creation.is_none()&&source_ref.as_deref()==Some(format!("refs/heads/{}",target.branch).as_str()),"source_stash":source_stash,"target_stash":target_stash,"occupied_worktree":occupied});
+        let same = if target.detached {
+            source_ref.is_none() && source_head.as_deref() == Some(&target.oid)
+        } else {
+            target.creation.is_none()
+                && source_ref.as_deref() == Some(format!("refs/heads/{}", target.branch).as_str())
+        };
+        let view = json!({"basis":basis,"name_rules":target.creation.as_ref().and_then(|creation| creation.name_rules.as_ref()),"target":target,"source_branch":source_branch,"source_head":source_head,"dirty":switching&&!files.is_empty(),"files":files,"operation":if switching {capture["snapshot"]["operation"].clone()} else {Value::Null},"conflicted":switching&&files.iter().any(|file|file["conflicted"]==true),"can_leave":source_branch.is_some()&&source_head.is_some(),"same_branch":same,"source_stash":source_stash,"target_stash":target_stash,"occupied_worktree":occupied});
         Ok(Plan {
             view,
             target,
@@ -419,6 +458,13 @@ impl Repository {
         write_receipt(base.to_owned(), receipt.clone()).await
     }
     async fn checkout_target_current(&self, target: &Target) -> Result<()> {
+        if target.detached {
+            anyhow::ensure!(
+                self.resolve_commit(&target.oid).await? == target.oid,
+                "Checkout commit changed or is unavailable"
+            );
+            return Ok(());
+        }
         if target
             .creation
             .as_ref()
@@ -443,7 +489,9 @@ impl Repository {
     }
     async fn checkout_native(&self, target: &Target) -> Result<process::RawOutput> {
         self.checkout_target_current(target).await?;
-        let command = if target.remote {
+        let command = if target.detached {
+            args(&["switch", "--detach", "--", &target.oid])
+        } else if target.remote {
             args(&[
                 "switch",
                 "--no-track",
@@ -487,7 +535,7 @@ impl Repository {
         anyhow::ensure!(
             identity
                 == (
-                    Some(format!("refs/heads/{}", target.branch)),
+                    (!target.detached).then(|| format!("refs/heads/{}", target.branch)),
                     (!target.oid.is_empty()).then(|| target.oid.clone())
                 ),
             "Branch/HEAD changed during checkout; inspect the current repository before restoring saved changes"
@@ -601,6 +649,29 @@ impl Repository {
         anyhow::ensure!(
             plan.view["basis"] == basis,
             "Checkout files, branch, stash list, target or settings changed; review again"
+        );
+        Box::pin(self.checkout_execute_id(
+            plan,
+            ChangesStrategy::AskForConfirmation,
+            false,
+            false,
+            uuid::Uuid::new_v4().to_string(),
+            true,
+            allow_file_protocol,
+        ))
+        .await
+    }
+    pub(crate) async fn detach_reviewed(
+        &self,
+        commit: &str,
+        basis: &str,
+        allow_file_protocol: bool,
+    ) -> Result<Value> {
+        let _lock = self.stash_lock().await?;
+        let plan = self.detach_plan(commit).await?;
+        anyhow::ensure!(
+            plan.view["basis"] == basis,
+            "Checkout files, commit or settings changed; review again"
         );
         Box::pin(self.checkout_execute_id(
             plan,

@@ -106,6 +106,7 @@ impl Repository {
             reference,
             oid,
             remote: false,
+            detached: false,
             creation: Some(Creation {
                 request,
                 start_ref,
@@ -147,6 +148,9 @@ impl Repository {
         })
     }
     pub(super) async fn refresh_checkout_plan(&self, target: &Target) -> Result<Plan> {
+        if target.detached {
+            return Box::pin(self.detach_plan(&target.oid)).await;
+        }
         match &target.creation {
             Some(creation) => {
                 Box::pin(self.create_branch_plan(&target.branch, creation.request.clone())).await

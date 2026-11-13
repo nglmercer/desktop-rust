@@ -1128,8 +1128,10 @@ callers that switch before deleting a branch or return after cherry-pick. Its
 reviewed direct mode lets Git reject overwritten local changes without
 automatically creating a stash. A per-call file-protocol choice is confined to
 the submodule update; interrupted operations still require inspecting the
-checkout receipt and repository. Commit checkout and live progress remain
-separate gaps.
+checkout receipt and repository. Detached commit checkout now uses the same
+reviewed direct path, pinned to a complete commit object ID, and runs the
+submodule update with the same per-call file-protocol setting. Live progress
+remains a separate gap.
 
 `AppStore.createBranchCore` creates a branch with an optional start point and
 no-track choice, then delegates switching to the normal checkout workflow. The
