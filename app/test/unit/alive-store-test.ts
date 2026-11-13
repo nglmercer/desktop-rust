@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { before, describe, it, mock } from 'node:test'
+import { afterEach, beforeAll, describe, it, vi } from 'vitest'
 import { setImmediate } from 'node:timers/promises'
 import { Account } from '../../src/models/account'
 import { API } from '../../src/lib/api'
@@ -45,16 +45,18 @@ async function waitFor(condition: () => boolean) {
 describe('AliveStore', () => {
   let AliveStoreClass: typeof AliveStore
 
-  before(async () => {
-    mock.module('@github/alive-client', {
-      namedExports: { AliveSession: FakeAliveSession },
-    })
+  beforeAll(async () => {
     AliveStoreClass = (await import('../../src/lib/stores/alive-store'))
       .AliveStore
   })
 
-  it('keeps a separate session for each account on the same endpoint', async t => {
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+  afterEach(() => {
+    vi.restoreAllMocks()
+    FakeAliveSession.instances.length = 0
+  })
+
+  it('keeps a separate session for each account on the same endpoint', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         getAliveWebSocketURL: async () => `wss://alive/${account.login}`,
         getAliveDesktopChannel: async () => ({
@@ -92,3 +94,5 @@ describe('AliveStore', () => {
     assert.deepStrictEqual(bobSession.topics, ['bob'])
   })
 })
+
+vi.mock('@github/alive-client', () => ({ AliveSession: FakeAliveSession }))
