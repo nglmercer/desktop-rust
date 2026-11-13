@@ -62,9 +62,6 @@ importers:
       eslint-plugin-json:
         specifier: ^2.1.1
         version: 2.1.2
-      eslint-plugin-prettier:
-        specifier: ^3.1.4
-        version: 3.4.1(eslint-config-prettier@6.15.0(eslint@8.57.1(supports-color@8.1.1)))(eslint@8.57.1(supports-color@8.1.1))(prettier@2.8.8)
       eslint-plugin-react:
         specifier: ^7.37.5
         version: 7.37.5(eslint@8.57.1(supports-color@8.1.1))
@@ -231,9 +228,6 @@ importers:
       '@types/plist':
         specifier: ^3.0.2
         version: 3.0.5
-      '@types/prettier':
-        specifier: ^2.0.1
-        version: 2.7.3
       '@types/react':
         specifier: ^16.14.62
         version: 16.14.70
@@ -1768,9 +1762,6 @@ packages:
   '@types/plist@3.0.5':
     resolution: {integrity: sha512-E6OCaRmAe4WDmWNsL/9RMqdkkzDCY1etutkflWk4c+AcjDU07Pcz1fQwTX0TQz+Pxqn9i4L1TU3UFpjnrcDgxA==}
 
-  '@types/prettier@2.7.3':
-    resolution: {integrity: sha512-+68kP9yzs4LMp7VNh8gdzMSPZFL44MLGqiHWvttYJe+6qnuVr4Ek9wSBQoveqY/r+LwjCcU29kNVkidwim+kYA==}
-
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
 
@@ -3054,17 +3045,6 @@ packages:
   eslint-plugin-no-only-tests@3.4.0:
     resolution: {integrity: sha512-4S3/9Nb7A2tiMcpzEQE9bQSlpeOz6WJkgryBuou/SA8W2x2c8Zf4j0NvTKBjv6qNhF9T79tmkecm/0CHqV0UGg==}
     engines: {node: '>=5.0.0'}
-
-  eslint-plugin-prettier@3.4.1:
-    resolution: {integrity: sha512-htg25EUYUeIhKHXjOinK4BgCcDwtLHjqaxCDsMy5nbnUMkKFvIhMVCp+5GFUXQ4Nr8lBsPqtGAqBenbpFqAA2g==}
-    engines: {node: '>=6.0.0'}
-    peerDependencies:
-      eslint: '>=5.0.0'
-      eslint-config-prettier: '*'
-      prettier: '>=1.13.0'
-    peerDependenciesMeta:
-      eslint-config-prettier:
-        optional: true
 
   eslint-plugin-prettier@5.5.7:
     resolution: {integrity: sha512-WjHyn3GrFd+ZR0rzsLiM4zJZ35PZMOE0SUIxzGmnWNG0126yNfJKJzObmmkYDwHJfGlkz3PSlzyG9ez/LJntwg==}
@@ -6910,8 +6890,6 @@ snapshots:
       '@types/node': 22.10.9
       xmlbuilder: 15.1.1
 
-  '@types/prettier@2.7.3': {}
-
   '@types/prop-types@15.7.15': {}
 
   '@types/qs@6.15.1': {}
@@ -8530,14 +8508,6 @@ snapshots:
       string.prototype.includes: 2.0.1
 
   eslint-plugin-no-only-tests@3.4.0: {}
-
-  eslint-plugin-prettier@3.4.1(eslint-config-prettier@6.15.0(eslint@8.57.1(supports-color@8.1.1)))(eslint@8.57.1(supports-color@8.1.1))(prettier@2.8.8):
-    dependencies:
-      eslint: 8.57.1(supports-color@8.1.1)
-      prettier: 2.8.8
-      prettier-linter-helpers: 1.0.1
-    optionalDependencies:
-      eslint-config-prettier: 6.15.0(eslint@8.57.1(supports-color@8.1.1))
 
   eslint-plugin-prettier@5.5.7(@types/eslint@8.56.12)(eslint-config-prettier@10.1.8(eslint@8.57.1(supports-color@8.1.1)))(eslint@8.57.1(supports-color@8.1.1))(prettier@3.9.10):
     dependencies:

@@ -14,7 +14,6 @@ If you wish to add a new rule specific to the project, ensure that there isn't a
  - `eslint-plugin-babel`
  - `eslint-plugin-jsdoc`
  - `eslint-plugin-json`
- - `eslint-plugin-prettier`
  - `eslint-plugin-react`
  
 This project supports two different kinds of ESLint plugins, based on what you are interested in linting:
