@@ -1,15 +1,12 @@
 import assert from 'node:assert'
-import { describe, it, mock } from 'node:test'
+import { afterEach, describe, it, onTestFinished, vi } from 'vitest'
 import { ipcRenderer } from 'electron'
 import { MockIPC } from '../helpers/mock-ipc'
-import { mockNotification } from '../helpers/mock-notification'
 
 let nativeNotificationsSupported = true
-mock.module('desktop-notifications', {
-  namedExports: {
-    supportsNotifications: () => nativeNotificationsSupported,
-  },
-})
+vi.mock('desktop-notifications', () => ({
+  supportsNotifications: () => nativeNotificationsSupported,
+}))
 
 async function getSystemNotificationsPermission() {
   const module = await import(
@@ -18,19 +15,26 @@ async function getSystemNotificationsPermission() {
   return module.getSystemNotificationsPermission()
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
 describe('system notification permission', () => {
   for (const permission of ['granted', 'denied', 'default'] as const) {
     for (const windows of [false, true]) {
       it(`normalizes native ${permission} permission on ${
         windows ? 'Windows' : 'macOS'
-      } without requesting it`, async t => {
+      } without requesting it`, async () => {
         const previousWindows = __WIN32__
         Object.assign(globalThis, { __WIN32__: windows })
-        t.after(() => Object.assign(globalThis, { __WIN32__: previousWindows }))
+        onTestFinished(() =>
+          Object.assign(globalThis, { __WIN32__: previousWindows })
+        )
         nativeNotificationsSupported = true
         const ipc = new MockIPC()
         ipc.onInvoke('get-notifications-permission', async () => permission)
-        t.mock.method(ipcRenderer, 'invoke', ipc.invoke.bind(ipc))
+        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
 
         assert.strictEqual(
           await getSystemNotificationsPermission(),
@@ -43,52 +47,52 @@ describe('system notification permission', () => {
       })
     }
 
-    it(`reads HTML5 ${permission} permission without native IPC`, async t => {
+    it(`reads HTML5 ${permission} permission without native IPC`, async () => {
       nativeNotificationsSupported = false
-      mockNotification(t, { permission })
-      const invoke = t.mock.method(ipcRenderer, 'invoke')
+      vi.stubGlobal('Notification', { permission })
+      const invoke = vi.spyOn(ipcRenderer, 'invoke')
 
       assert.strictEqual(
         await getSystemNotificationsPermission(),
         permission === 'granted'
       )
-      assert.strictEqual(invoke.mock.callCount(), 0)
+      assert.strictEqual(invoke.mock.calls.length, 0)
     })
   }
 
-  it('reports null when neither notification API is available', async t => {
+  it('reports null when neither notification API is available', async () => {
     nativeNotificationsSupported = false
-    mockNotification(t, undefined)
+    vi.stubGlobal('Notification', undefined)
     assert.strictEqual(await getSystemNotificationsPermission(), null)
   })
 
-  it('reports null and logs native permission lookup failures', async t => {
+  it('reports null and logs native permission lookup failures', async () => {
     nativeNotificationsSupported = true
     const error = new Error('Permission lookup failed')
-    t.mock.method(ipcRenderer, 'invoke', async () => {
+    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(async () => {
       throw error
     })
-    const warn = t.mock.method(log, 'warn')
+    const warn = vi.spyOn(log, 'warn')
 
     assert.strictEqual(await getSystemNotificationsPermission(), null)
-    assert.deepStrictEqual(warn.mock.calls[0].arguments, [
+    assert.deepStrictEqual(warn.mock.calls[0], [
       'Failed to read system notification permission',
       error,
     ])
   })
 
-  it('reports null and logs HTML5 permission lookup failures', async t => {
+  it('reports null and logs HTML5 permission lookup failures', async () => {
     nativeNotificationsSupported = false
     const error = new Error('Permission lookup failed')
-    mockNotification(t, {
+    vi.stubGlobal('Notification', {
       get permission() {
         throw error
       },
     })
-    const warn = t.mock.method(log, 'warn')
+    const warn = vi.spyOn(log, 'warn')
 
     assert.strictEqual(await getSystemNotificationsPermission(), null)
-    assert.deepStrictEqual(warn.mock.calls[0].arguments, [
+    assert.deepStrictEqual(warn.mock.calls[0], [
       'Failed to read system notification permission',
       error,
     ])

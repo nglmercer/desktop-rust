@@ -1,22 +1,32 @@
 import assert from 'node:assert'
-import { before, beforeEach, describe, it, mock } from 'node:test'
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  it,
+  onTestFinished,
+  vi,
+} from 'vitest'
 import { ipcRenderer } from 'electron'
 import { MockIPC } from '../helpers/mock-ipc'
-import { mockNotification } from '../helpers/mock-notification'
 import { notificationCallbacks } from '../../src/lib/notifications/notification-handler'
 
 let nativeNotificationsSupported = true
-mock.module('desktop-notifications', {
-  namedExports: {
-    supportsNotifications: () => nativeNotificationsSupported,
-  },
-})
+vi.mock('desktop-notifications', () => ({
+  supportsNotifications: () => nativeNotificationsSupported,
+}))
 
 let showNotification: typeof import('../../src/lib/notifications/show-notification').showNotification
-before(async () => {
+beforeAll(async () => {
   ;({ showNotification } = await import(
     '../../src/lib/notifications/show-notification'
   ))
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('showNotification', () => {
@@ -29,15 +39,17 @@ describe('showNotification', () => {
     for (const windows of [false, true]) {
       it(`counts native ${permission} permission on ${
         windows ? 'Windows' : 'macOS'
-      }`, async t => {
+      }`, async () => {
         const previousWindows = __WIN32__
         Object.assign(globalThis, { __WIN32__: windows })
-        t.after(() => Object.assign(globalThis, { __WIN32__: previousWindows }))
+        onTestFinished(() =>
+          Object.assign(globalThis, { __WIN32__: previousWindows })
+        )
 
         const ipc = new MockIPC()
         ipc.onInvoke('show-notification', async () => 'notification-id')
         ipc.onInvoke('get-notifications-permission', async () => permission)
-        t.mock.method(ipcRenderer, 'invoke', ipc.invoke.bind(ipc))
+        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
         const onClick = () => {}
 
         assert.strictEqual(
@@ -56,11 +68,11 @@ describe('showNotification', () => {
     }
   }
 
-  it('does not count native failures or register a click callback', async t => {
+  it('does not count native failures or register a click callback', async () => {
     const ipc = new MockIPC()
     ipc.onInvoke('show-notification', async () => null)
-    t.mock.method(ipcRenderer, 'invoke', ipc.invoke.bind(ipc))
-    const warn = t.mock.method(log, 'warn')
+    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
+    const warn = vi.spyOn(log, 'warn')
 
     assert.strictEqual(
       await showNotification({
@@ -72,11 +84,11 @@ describe('showNotification', () => {
     )
     assert.strictEqual(notificationCallbacks.size, 0)
     assert.strictEqual(ipc.invokes.length, 1)
-    assert.strictEqual(warn.mock.callCount(), 1)
+    assert.strictEqual(warn.mock.calls.length, 1)
   })
 
-  it('propagates IPC failures', async t => {
-    t.mock.method(ipcRenderer, 'invoke', async () => {
+  it('propagates IPC failures', async () => {
+    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(async () => {
       throw new Error('Notification IPC failed')
     })
     await assert.rejects(
@@ -85,14 +97,14 @@ describe('showNotification', () => {
     )
   })
 
-  it('does not count native submission with unknown permission', async t => {
+  it('does not count native submission with unknown permission', async () => {
     const ipc = new MockIPC()
     ipc.onInvoke('show-notification', async () => 'notification-id')
     ipc.onInvoke('get-notifications-permission', async () => {
       throw new Error('Permission lookup failed')
     })
-    t.mock.method(ipcRenderer, 'invoke', ipc.invoke.bind(ipc))
-    const warn = t.mock.method(log, 'warn')
+    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
+    const warn = vi.spyOn(log, 'warn')
     assert.strictEqual(
       await showNotification({
         title: 'Title',
@@ -101,14 +113,14 @@ describe('showNotification', () => {
       }),
       false
     )
-    assert.strictEqual(warn.mock.callCount(), 1)
+    assert.strictEqual(warn.mock.calls.length, 1)
     assert.strictEqual(notificationCallbacks.size, 1)
   })
 
-  it('does not count notifications when neither API is available', async t => {
+  it('does not count notifications when neither API is available', async () => {
     nativeNotificationsSupported = false
-    mockNotification(t, undefined)
-    const warn = t.mock.method(log, 'warn')
+    vi.stubGlobal('Notification', undefined)
+    const warn = vi.spyOn(log, 'warn')
     assert.strictEqual(
       await showNotification({
         title: 'Title',
@@ -117,10 +129,10 @@ describe('showNotification', () => {
       }),
       false
     )
-    assert.strictEqual(warn.mock.callCount(), 1)
+    assert.strictEqual(warn.mock.calls.length, 1)
   })
 
-  it('logs synchronous HTML5 creation failures and returns false', async t => {
+  it('logs synchronous HTML5 creation failures and returns false', async () => {
     nativeNotificationsSupported = false
     const error = new DOMException(
       'Notifications are not allowed',
@@ -129,24 +141,24 @@ describe('showNotification', () => {
     function Notification() {
       throw error
     }
-    mockNotification(t, Notification)
-    const warn = t.mock.method(log, 'warn')
-    const onClick = t.mock.fn()
+    vi.stubGlobal('Notification', Notification)
+    const warn = vi.spyOn(log, 'warn')
+    const onClick = vi.fn()
 
     assert.strictEqual(
       await showNotification({ title: 'Title', body: 'Body', onClick }),
       false
     )
-    assert.strictEqual(onClick.mock.callCount(), 0)
+    assert.strictEqual(onClick.mock.calls.length, 0)
     assert.strictEqual(notificationCallbacks.size, 0)
-    assert.deepStrictEqual(warn.mock.calls[0].arguments, [
+    assert.deepStrictEqual(warn.mock.calls[0], [
       'Failed to create system notification',
       error,
     ])
   })
 
   for (const event of ['show', 'error'] as const) {
-    it(`waits for the HTML5 ${event} event`, async t => {
+    it(`waits for the HTML5 ${event} event`, async () => {
       nativeNotificationsSupported = false
       const notification = {
         onclick: () => {},
@@ -156,7 +168,7 @@ describe('showNotification', () => {
       function Notification() {
         return notification
       }
-      mockNotification(t, Notification)
+      vi.stubGlobal('Notification', Notification)
       const ipc = new MockIPC()
       const sendDescriptor = Object.getOwnPropertyDescriptor(
         ipcRenderer,
@@ -166,15 +178,15 @@ describe('showNotification', () => {
         configurable: true,
         value: ipc.send.bind(ipc),
       })
-      t.after(() => {
+      onTestFinished(() => {
         if (sendDescriptor === undefined) {
           Reflect.deleteProperty(ipcRenderer, 'send')
         } else {
           Object.defineProperty(ipcRenderer, 'send', sendDescriptor)
         }
       })
-      const onClick = t.mock.fn()
-      const warn = t.mock.method(log, 'warn')
+      const onClick = vi.fn()
+      const warn = vi.spyOn(log, 'warn')
       let settled = false
       const result = showNotification({
         title: 'Title',
@@ -194,10 +206,10 @@ describe('showNotification', () => {
       }
 
       assert.strictEqual(await result, event === 'show')
-      assert.strictEqual(warn.mock.callCount(), event === 'error' ? 1 : 0)
+      assert.strictEqual(warn.mock.calls.length, event === 'error' ? 1 : 0)
       if (event === 'show') {
         notification.onclick()
-        assert.strictEqual(onClick.mock.callCount(), 1)
+        assert.strictEqual(onClick.mock.calls.length, 1)
         assert.strictEqual(ipc.getSends('focus-window').length, 1)
       }
     })

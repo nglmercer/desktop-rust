@@ -238,5 +238,7 @@
   "app/test/unit/main-process-proxy-test.ts",
   "app/test/unit/oauth-token-test.ts",
   "app/test/unit/short-lived-token-rollout-test.ts",
-  "app/test/unit/web-path-test.ts"
+  "app/test/unit/web-path-test.ts",
+  "app/test/unit/show-notification-test.ts",
+  "app/test/unit/notification-permission-test.ts"
 ]
