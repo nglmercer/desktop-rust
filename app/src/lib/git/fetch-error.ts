@@ -14,6 +14,10 @@ const errorKinds: Record<FetchErrorKind, DugiteError> = {
   https_repository_not_found: DugiteError.HTTPSRepositoryNotFound,
   ssh_repository_not_found: DugiteError.SSHRepositoryNotFound,
   lock_file_exists: DugiteError.LockFileAlreadyExists,
+  bad_config_value: DugiteError.BadConfigValue,
+  no_submodule_mapping: DugiteError.NoSubmoduleMapping,
+  submodule_repository_does_not_exist: DugiteError.SubmoduleRepositoryDoesNotExist,
+  invalid_submodule_sha: DugiteError.InvalidSubmoduleSHA,
 }
 
 export class NativeFetchError extends GitError {

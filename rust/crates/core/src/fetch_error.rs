@@ -5,7 +5,12 @@
 
 fn classify_stream(output: &[u8]) -> Option<&'static str> {
     let text = String::from_utf8_lossy(output);
-    if text.contains("[EPOLICYKEYAGE]")
+    if (text.contains("fatal: bad numeric config value '")
+        || text.contains("fatal: bad boolean config value '"))
+        && text.contains("' for '")
+    {
+        Some("bad_config_value")
+    } else if text.contains("[EPOLICYKEYAGE]")
         && text.contains("fatal: Could not read from remote repository.")
     {
         Some("ssh_key_unverified")
@@ -32,6 +37,21 @@ fn classify_stream(output: &[u8]) -> Option<&'static str> {
         Some("https_repository_not_found")
     } else if text.contains("ERROR: Repository not found") {
         Some("ssh_repository_not_found")
+    } else if text.contains("No submodule mapping found in .gitmodules for path '")
+        || text.contains("no submodule mapping found in .gitmodules for path '")
+    {
+        Some("no_submodule_mapping")
+    } else if text.contains("fatal: repository '")
+        && text.contains("' does not exist")
+        && text.contains("fatal: clone of '")
+        && text.contains("' into submodule path '")
+    {
+        Some("submodule_repository_does_not_exist")
+    } else if text.contains("Fetched in submodule path '")
+        && text.contains("', but it did not contain ")
+        && text.contains("Direct fetching of that commit failed.")
+    {
+        Some("invalid_submodule_sha")
     } else if text.contains("Another git process seems to be running in this repository, e.g.") {
         Some("lock_file_exists")
     } else {
@@ -107,6 +127,22 @@ mod tests {
             (
                 "Another git process seems to be running in this repository, e.g.",
                 "lock_file_exists",
+            ),
+            (
+                "fatal: bad boolean config value 'secret' for 'x.y'",
+                "bad_config_value",
+            ),
+            (
+                "No submodule mapping found in .gitmodules for path 'secret'",
+                "no_submodule_mapping",
+            ),
+            (
+                "fatal: repository 'secret' does not exist\nfatal: clone of 'secret' into submodule path 'secret' failed",
+                "submodule_repository_does_not_exist",
+            ),
+            (
+                "Fetched in submodule path 'secret', but it did not contain abc. Direct fetching of that commit failed.",
+                "invalid_submodule_sha",
             ),
         ] {
             assert_eq!(classify(message.as_bytes(), b"", None), Some(expected));

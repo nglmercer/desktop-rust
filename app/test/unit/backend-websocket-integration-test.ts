@@ -24,6 +24,7 @@ import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BackendClient } from '../../src/backend/client'
+import type { Repository } from '../../src/models/repository'
 import { getReviewedCopilotLines, getReviewedDiffLines } from '../../src/lib/copilot/commit-selection'
 import { DiffParser } from '../../src/lib/diff-parser'
 import {
@@ -37,6 +38,16 @@ import {
 } from '../../src/models/status'
 
 const enabled = process.env.DESKTOP_TEST_BRIDGE === '1'
+const route = vi.hoisted(() => ({ client: undefined as BackendClient | undefined }))
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({}))
+vi.mock('../../src/backend/client', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/backend/client')>()),
+  backend: () => {
+    if (!route.client) throw new Error('No integration backend selected')
+    return route.client
+  },
+}))
 interface IDom {
   readonly window: Window & typeof globalThis & { close(): void }
 }
@@ -81,6 +92,7 @@ async function waitFor(
 }
 
 afterEach(async () => {
+  route.client = undefined
   for (const value of clients.splice(0)) value.close()
   dom?.window.close()
   dom = undefined
@@ -115,7 +127,10 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(sessionUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#token=/)
       dom = new JSDOM('', { url: sessionUrl })
       vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket)
+      vi.stubGlobal('location', dom.window.location)
       const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+      route.client = client
+      const { fetch: fetchRemote } = await import('../../src/lib/git/fetch')
       const source = path.join(directory, 'source'); const repository = path.join(directory, 'repository')
       execFileSync('git', ['init', '-q', '-b', 'main', source])
       execFileSync('git', ['-C', source, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'base'])
@@ -123,12 +138,15 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args], { encoding: 'utf8' }).trim()
       git('remote', 'add', '--', '--test', source)
       await expect(client.fetchRepositoryRemote(repository, '--test', '/wrong/path', false)).rejects.toThrow()
-      const progress = vi.fn()
-      await client.fetchRepositoryRemote(repository, '--test', source, false, false, undefined, progress)
-      expect(progress).toHaveBeenCalled()
-      expect(progress.mock.calls.some(([chunk]) => chunk.stream === 'stderr')).toBe(true)
+      const actionProgress = vi.fn()
+      await fetchRemote({ path: repository, gitHubRepository: null } as Repository, { name: '--test', url: source }, actionProgress, true, false)
+      expect(actionProgress).toHaveBeenCalledWith(expect.objectContaining({ kind: 'fetch', remote: '--test', value: 0 }))
+      expect(actionProgress.mock.calls.some(([value]) => typeof value.description === 'string')).toBe(true)
       expect(git('rev-parse', 'refs/remotes/--test/main')).toBe(execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim())
       expect(await readFile(path.join(repository, '.git', 'FETCH_HEAD'), 'utf8')).toContain('branch')
+      const missing = path.join(directory, 'missing-remote')
+      git('remote', 'add', 'missing', missing)
+      await expect(fetchRemote({ path: repository, gitHubRepository: null } as Repository, { name: 'missing', url: missing })).rejects.toMatchObject({ name: 'GitError', result: { exitCode: expect.any(Number) } })
     }, 90_000)
 
     it('fast-forwards reviewed tracking branches without touching FETCH_HEAD', async () => {

@@ -213,6 +213,18 @@ pub(crate) fn safe_url(value: &str) -> bool {
     if value.is_empty() || value.len() > 16384 || value.chars().any(char::is_control) {
         return false;
     }
+    // Git accepts an IPv6 literal in brackets in SCP-style remote syntax.
+    // Permit only the credential-free or conventional `git@` forms, and parse
+    // the literal rather than admitting arbitrary text between brackets.
+    let scp = value.strip_prefix("git@").unwrap_or(value);
+    if let Some(rest) = scp.strip_prefix('[') {
+        let Some((host, path)) = rest.split_once("]:") else {
+            return false;
+        };
+        return host.parse::<std::net::Ipv6Addr>().is_ok()
+            && !path.is_empty()
+            && !path.contains(['?', '#']);
+    }
     if let Some(rest) = value.strip_prefix("git@") {
         let Some((host, path)) = rest.split_once(':') else {
             return false;
@@ -411,31 +423,45 @@ mod tests {
             &["config", "core.sshCommand", ssh.to_str().unwrap()],
         );
         git(&target, &["config", "ssh.variant", "simple"]);
-        let url = format!("desktop-scp-test.invalid:{}", source.display());
-        git(&target, &["remote", "add", "origin", &url]);
         let repository = crate::Repository::open(&target).await.unwrap();
-        let request: crate::RendererFetchRequest = serde_json::from_value(serde_json::json!({
-            "remote":"origin", "expected_url":url, "recurse_submodules":false,
-        }))
-        .unwrap();
-        let preview = repository
-            .execute(crate::Operation::RendererFetchPreview {
-                request: request.clone(),
-            })
-            .await
+        for (name, host) in [
+            ("origin", "desktop-scp-test.invalid"),
+            ("ipv6", "[::1]"),
+            ("ipv6git", "git@[::1]"),
+        ] {
+            let url = format!("{host}:{}", source.display());
+            git(&target, &["remote", "add", name, &url]);
+            let discovered = super::safe_remote_url(&target, name).await.unwrap();
+            assert_eq!(
+                discovered,
+                serde_json::json!({"kind":"resolved", "url":url})
+            );
+            let request: crate::RendererFetchRequest = serde_json::from_value(serde_json::json!({
+                "remote":name, "expected_url":url, "recurse_submodules":false,
+            }))
             .unwrap();
-        let result = repository
-            .execute(crate::Operation::RendererFetch {
-                request,
-                basis: preview["basis"].as_str().unwrap().to_owned(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(result["code"], 0);
-        assert_eq!(
-            git(&target, &["rev-parse", "refs/remotes/origin/main"]),
-            git(&source, &["rev-parse", "HEAD"])
-        );
+            let preview = repository
+                .execute(crate::Operation::RendererFetchPreview {
+                    request: request.clone(),
+                })
+                .await
+                .unwrap();
+            let result = repository
+                .execute(crate::Operation::RendererFetch {
+                    request,
+                    basis: preview["basis"].as_str().unwrap().to_owned(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(result["code"], 0, "{name}");
+            assert_eq!(
+                git(
+                    &target,
+                    &["rev-parse", &format!("refs/remotes/{name}/main")]
+                ),
+                git(&source, &["rev-parse", "HEAD"])
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -465,6 +491,8 @@ mod tests {
             "git@github.com:owner/repo.git",
             "github.com:owner/repo.git",
             "ssh-host.example:/srv/repo.git",
+            "[::1]:/srv/repo.git",
+            "git@[2001:db8::1]:team/repo.git",
             "ssh://git@github.com/owner/repo",
             "/tmp/repo",
         ] {
@@ -476,6 +504,10 @@ mod tests {
             "https://host/repo#secret",
             "ssh://token@host/repo",
             "token@host:repo",
+            "token@[::1]:repo",
+            "git@[not-ipv6]:repo",
+            "git@[::1]:",
+            "git@[::1]:repo?token=secret",
             "ext::command",
             "-host:repo",
             "host:repo?token=secret",

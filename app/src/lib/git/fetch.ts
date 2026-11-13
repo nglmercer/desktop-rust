@@ -7,6 +7,8 @@ import { ITrackingBranch } from '../../models/branch'
 import { envForRemoteOperation } from './environment'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
+import { FetchStreamProgressParser } from '../progress/fetch-stream'
+import { fetchFailureToGitError } from './fetch-error'
 
 async function getFetchArgs(
   remote: string,
@@ -48,6 +50,44 @@ export async function fetch(
   isBackgroundTask = false,
   recurseSubmodules = true
 ): Promise<void> {
+  // The browser WebSocket transport has no desktop.io.git-exec bridge. Wry
+  // and Electron retain their existing route until native fetch has equivalent
+  // URL and diagnostic coverage.
+  if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
+    const title = `Fetching ${remote.name}`
+    const parser = progressCallback === undefined ? undefined : new FetchStreamProgressParser(progress => {
+      if (progress.kind === 'context' && !progress.text.startsWith('remote: Counting objects')) {
+        return
+      }
+      progressCallback({
+        kind: 'fetch',
+        title,
+        description: progress.kind === 'progress' ? progress.details.text : progress.text,
+        value: progress.percent,
+        remote: remote.name,
+      })
+    })
+    progressCallback?.({ kind: 'fetch', title, value: 0, remote: remote.name })
+    let failure
+    try {
+      failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+        backend().fetchRepositoryRemote(
+          repository.path,
+          remote.name,
+          remote.url,
+          recurseSubmodules,
+          isBackgroundTask,
+          repository.gitHubRepository?.owner.login,
+          parser === undefined ? undefined : chunk => parser.push(chunk)
+        ), true)
+    } finally {
+      parser?.finish()
+    }
+    if (failure !== undefined) {
+      throw fetchFailureToGitError(failure, repository.path, remote.name)
+    }
+    return
+  }
   let opts: IGitStringExecutionOptions = {
     successExitCodes: new Set([0]),
     env: await envForRemoteOperation(remote.url),

@@ -36,6 +36,18 @@ describe('native fetch errors', () => {
     expect(error.message).toContain('exit code 128')
   })
 
+  it.each([
+    ['bad_config_value', DugiteError.BadConfigValue, 'configuration'],
+    ['no_submodule_mapping', DugiteError.NoSubmoduleMapping, 'submodule'],
+    ['submodule_repository_does_not_exist', DugiteError.SubmoduleRepositoryDoesNotExist, 'submodule'],
+    ['invalid_submodule_sha', DugiteError.InvalidSubmoduleSHA, 'submodule'],
+  ] as const)('reports %s without exposing Git output', (errorKind, expected, description) => {
+    const error = fetchFailureToGitError({ exitCode: 128, errorKind }, '/repo', 'origin')
+    expect(error.result.gitError).toBe(expected)
+    expect(error.message.toLowerCase()).toContain(description)
+    expect(error.result.stderr).toBe('')
+  })
+
   it('opens SAML reauthorization for the reviewed repository owner without remote text', async () => {
     const owner = new Owner('example', 'https://api.github.com', 1)
     const repository = new Repository('/repo', 1, new GitHubRepository('project', owner, 1), false)

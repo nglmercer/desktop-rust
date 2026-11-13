@@ -2468,23 +2468,24 @@ Nested submodule operations do not inherit the parent repository's assigned
 account grant. Independent writers can race review and Git's ref locks; remote
 network fetch and cross-platform parity remain open.
 
-Named remote fetch has an experimental reviewed native operation; application
-routing is disabled until platform, error-handling, and progress parity are
-resolved. The operation binds the selected
-configured remote and effective URL, refs, configuration, worktrees and
-`FETCH_HEAD`, then uses Git's normal prune and submodule recursion options.
+Named remote fetch routes through the reviewed native operation in the browser
+WebSocket transport, which has no legacy Git execution bridge. Wry and Electron
+retain their existing paths while platform, URL, and error-detail parity remain
+open. The operation binds the selected configured remote and effective URL,
+refs, configuration, worktrees and `FETCH_HEAD`, then uses Git's normal prune
+and submodule recursion options.
 It rejects symlinked or multiply linked `FETCH_HEAD` on Unix. Git and independent
-writers can still race the final review. URLs rejected by the safe-remote policy
-(including credential-bearing URLs and SSH usernames other than `git`) are
-unsupported. Windows uses a handle-based hardlink and reparse-point check for
-existing `FETCH_HEAD` files; native Windows runtime verification remains open.
+writers can still race the final review. Some URL forms rejected by the
+safe-remote policy remain unsupported. Windows uses a handle-based hardlink and
+reparse-point check for existing `FETCH_HEAD` files; native Windows runtime
+verification remains open.
 Background requests pass the existing credential-manager interaction policy,
 and common failures, including a matching SAML owner, are classified without
-returning Git diagnostics. Request-scoped Git and LFS progress is available to
-the experimental client, with bounded best-effort delivery that can drop
-chunks. LFS progress uses a private temporary file; Windows verifies its ACL
+returning Git diagnostics; unclassified errors and full remote details remain
+unavailable. Request-scoped Git and LFS progress uses bounded best-effort
+delivery that can drop chunks. LFS progress uses a private temporary file; Windows verifies its ACL
 and omits capture if the filesystem does not enforce it. Real Git LFS transfer
-and native Windows capture have not been verified. Full error details and
-nested-submodule credential parity remain open. A `FETCH_HEAD` larger than
+and native Windows capture have not been verified. Nested-submodule credential
+parity remains open. A `FETCH_HEAD` larger than
 8 MiB cannot be reviewed. Arbitrary refspec fetches still use their existing
 path.
