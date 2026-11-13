@@ -699,6 +699,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "webkit2gtk",
  "wry",

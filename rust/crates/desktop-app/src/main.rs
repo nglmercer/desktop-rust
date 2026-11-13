@@ -23,6 +23,7 @@ mod bridge;
 mod host;
 mod instance;
 mod menu;
+mod navigation;
 mod protocol;
 
 use std::sync::{Arc, Mutex};
@@ -249,11 +250,21 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_initialization_script(host_env_script())
         .with_initialization_script(INIT_SCRIPT)
         .with_navigation_handler(|url| {
-            url.starts_with("desktop://")
-                || url.starts_with("http://desktop.")
-                || url.starts_with("https://desktop.")
-                || url.starts_with("about:")
+            if navigation::internal(&url) {
+                return true;
+            }
+            if navigation::external(&url) {
+                desktop_core::platform::open_external(&url);
+            }
+            false
         })
+        .with_new_window_req_handler(|url, _| {
+            if navigation::external(&url) {
+                desktop_core::platform::open_external(&url);
+            }
+            wry::NewWindowResponse::Deny
+        })
+        .with_download_started_handler(|_, _| false)
         .with_devtools(true)
         .with_url(APP_URL);
 
