@@ -1,4 +1,5 @@
-import { describe, it, beforeEach, afterEach } from 'node:test'
+import 'fake-indexeddb/auto'
+import { describe, it, beforeEach, afterEach, onTestFinished, vi } from 'vitest'
 import assert from 'node:assert'
 import { join } from 'path'
 import { RepositoriesStore } from '../../src/lib/stores/repositories-store'
@@ -7,6 +8,9 @@ import { IAPIFullRepository, getDotComAPIEndpoint } from '../../src/lib/api'
 import { assertIsRepositoryWithGitHubRepository } from '../../src/models/repository'
 import { Account } from '../../src/models/account'
 import { PullRequestDatabase } from '../../src/lib/databases/pull-request-database'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('RepositoriesStore', () => {
   let repoDb = new TestRepositoriesDatabase()
@@ -384,7 +388,7 @@ describe('RepositoriesStore', () => {
       )
     })
 
-    it('keeps PR base and head records and stored PR data account-specific', async t => {
+    it('keeps PR base and head records and stored PR data account-specific', async () => {
       const alice = await repositoriesStore.upsertGitHubRepository(
         endpoint,
         apiRepo,
@@ -422,7 +426,7 @@ describe('RepositoriesStore', () => {
       const db = new PullRequestDatabase('AccountIsolationPullRequests')
       await db.delete()
       await db.open()
-      t.after(() => db.delete())
+      onTestFinished(() => db.delete())
       await db.putPullRequests([
         {
           number: 1,

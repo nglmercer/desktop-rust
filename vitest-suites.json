@@ -229,5 +229,7 @@
   "app/test/unit/ui/pull-request-quick-view-test.tsx",
   "app/test/unit/ui/repository-account-test.tsx",
   "app/test/unit/repository-matching-test.ts",
-  "app/test/unit/tutorial-repository-accounts-test.ts"
+  "app/test/unit/tutorial-repository-accounts-test.ts",
+  "app/test/unit/repositories-database-test.ts",
+  "app/test/unit/repositories-store-test.ts"
 ]

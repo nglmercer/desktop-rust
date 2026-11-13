@@ -1,4 +1,5 @@
-import { describe, it } from 'node:test'
+import 'fake-indexeddb/auto'
+import { describe, it, onTestFinished } from 'vitest'
 import assert from 'node:assert'
 import {
   RepositoriesDatabase,
@@ -8,12 +9,12 @@ import {
 } from '../../src/lib/databases'
 
 describe('RepositoriesDatabase', () => {
-  it('migrates legacy metadata to an unassigned scope without trusting old permissions', async t => {
+  it('migrates legacy metadata to an unassigned scope without trusting old permissions', async () => {
     const name = 'AccountScopedRepositoriesMigration'
     let db = new RepositoriesDatabase(name, 9)
     await db.delete()
     await db.open()
-    t.after(() => db.delete())
+    onTestFinished(() => db.delete())
     const id = await db.gitHubRepositories.add({
       ownerID: 1,
       name: 'repo',
