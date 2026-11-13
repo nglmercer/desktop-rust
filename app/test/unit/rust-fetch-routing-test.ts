@@ -37,9 +37,14 @@ describe('Rust fetch routing', () => {
     mocks.proxy.mockReset().mockResolvedValue(undefined)
     mocks.git.mockResolvedValue(undefined)
   })
-  afterEach(() => vi.unstubAllEnvs())
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    Reflect.deleteProperty(window, '__desktop')
+  })
 
-  it('routes WebSocket fetch with recursion, background, owner, and streamed progress', async () => {
+  it.each(['ws', 'wry'])('routes %s fetch with recursion, background, owner, and streamed progress', async transport => {
+    mocks.transport = transport
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invokeWithProgress: vi.fn() } })
     mocks.fetch.mockImplementation(async (_path, _remote, _url, _recurse, _background, _owner, onProgress) => {
       onProgress({ stream: 'stderr', data: btoa('Receiving objects: 50% (1/2)\r') })
     })
@@ -52,7 +57,8 @@ describe('Rust fetch routing', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('converts completed failures and never retries uncertain outcomes via Git', async () => {
+  it.each(['ws', 'wry'])('converts completed failures and never retries uncertain %s outcomes via Git', async transport => {
+    mocks.transport = transport
     const failure = { exitCode: 128, errorKind: 'https_authentication_failed' }
     mocks.fetch.mockResolvedValueOnce(failure).mockRejectedValueOnce(new Error('outcome uncertain'))
     await expect(fetch(repository, remote)).rejects.toThrow('classified fetch failure')
@@ -73,11 +79,35 @@ describe('Rust fetch routing', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it.each(['wry', 'none'])('keeps the existing %s Git path for ordinary fetch', async transport => {
-    mocks.transport = transport
+  it('keeps the existing Electron Git path for ordinary fetch', async () => {
+    mocks.transport = 'none'
     await fetch(repository, remote, undefined, false, false)
     expect(mocks.fetch).not.toHaveBeenCalled()
     expect(mocks.git).toHaveBeenCalledWith(['fetch', '--prune', '--recurse-submodules=no', '--', 'origin'], '/repo', 'fetch', expect.any(Object))
+  })
+
+  it('falls back from ordinary Wry fetch only for unsupported pre-mutation review', async () => {
+    mocks.transport = 'wry'
+    mocks.fetch.mockRejectedValueOnce(new mocks.PreviewUnsupported())
+    await fetch(repository, remote, undefined, false, false)
+    expect(mocks.git).toHaveBeenCalledWith(['fetch', '--prune', '--recurse-submodules=no', '--', 'origin'], '/repo', 'fetch', expect.any(Object))
+    mocks.git.mockClear()
+    mocks.fetch.mockRejectedValueOnce(new Error('outcome uncertain'))
+    await expect(fetch(repository, remote)).rejects.toThrow('outcome uncertain')
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('uses legacy ordinary Wry fetch if a proxy or older progress host requires it', async () => {
+    mocks.transport = 'wry'
+    mocks.proxy.mockResolvedValueOnce({ https_proxy: 'http://proxy.invalid:8080' })
+    await fetch(repository, remote)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.git).toHaveBeenCalledTimes(1)
+    mocks.git.mockClear()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: {} })
+    await fetch(repository, remote, vi.fn())
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.git).toHaveBeenCalledTimes(1)
   })
 
   it('uses the legacy refspec path without a backend', async () => {

@@ -10,6 +10,30 @@ import { withRepositoryGitOperation } from './repository-operation'
 import { FetchStreamProgressParser } from '../progress/fetch-stream'
 import { fetchFailureToGitError } from './fetch-error'
 
+/** Select the native route before mutation, preserving proxy and older-host behavior. */
+async function canFetchNatively(
+  remoteUrl: string,
+  needsProgress: boolean
+): Promise<boolean> {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const transport = backend().transportKind
+  if (transport === 'ws') {
+    return true
+  }
+  if (transport !== 'wry') {
+    return false
+  }
+  if (needsProgress && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
+    return false
+  }
+  if (['http_proxy', 'https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY'].some(key => key in process.env)) {
+    return false
+  }
+  return (await envForProxy(remoteUrl)) === undefined
+}
+
 async function getFetchArgs(
   remote: string,
   progressCallback: ((progress: IFetchProgress) => void) | undefined,
@@ -50,10 +74,9 @@ export async function fetch(
   isBackgroundTask = false,
   recurseSubmodules = true
 ): Promise<void> {
-  // The browser WebSocket transport has no desktop.io.git-exec bridge. Wry
-  // and Electron retain their existing route until native fetch has equivalent
-  // URL and diagnostic coverage.
-  if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
+  // Wry falls back only before a mutation when the reviewed route cannot
+  // preserve the existing proxy or progress behavior.
+  if (await canFetchNatively(remote.url, progressCallback !== undefined)) {
     const title = `Fetching ${remote.name}`
     const parser = progressCallback === undefined ? undefined : new FetchStreamProgressParser(progress => {
       if (progress.kind === 'context' && !progress.text.startsWith('remote: Counting objects')) {
@@ -68,9 +91,8 @@ export async function fetch(
       })
     })
     progressCallback?.({ kind: 'fetch', title, value: 0, remote: remote.name })
-    let failure
     try {
-      failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      const failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
         backend().fetchRepositoryRemote(
           repository.path,
           remote.name,
@@ -80,13 +102,17 @@ export async function fetch(
           repository.gitHubRepository?.owner.login,
           parser === undefined ? undefined : chunk => parser.push(chunk)
         ), true)
+      if (failure !== undefined) {
+        throw fetchFailureToGitError(failure, repository.path, remote.name)
+      }
+      return
+    } catch (error) {
+      if (backend().transportKind !== 'wry' || !(error instanceof FetchPreviewUnsupported)) {
+        throw error
+      }
     } finally {
       parser?.finish()
     }
-    if (failure !== undefined) {
-      throw fetchFailureToGitError(failure, repository.path, remote.name)
-    }
-    return
   }
   let opts: IGitStringExecutionOptions = {
     successExitCodes: new Set([0]),
@@ -146,10 +172,7 @@ export async function fetchRefspec(
 ): Promise<void> {
   // The legacy Git path injects an OS/PAC proxy that the native transport
   // cannot yet receive. Choose it before starting a native mutation.
-  const isWry = typeof window !== 'undefined' && backend().transportKind === 'wry'
-  const inheritedProxy = isWry && ['http_proxy', 'https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY'].some(key => key in process.env)
-  const wryProxy = isWry && !inheritedProxy ? await envForProxy(remote.url) : undefined
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none' && !inheritedProxy && wryProxy === undefined) {
+  if (await canFetchNatively(remote.url, false)) {
     try {
       const failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
         backend().fetchRepositoryRemote(repository.path, remote.name, remote.url, true, false, repository.gitHubRepository?.owner.login, undefined, refspec), true)

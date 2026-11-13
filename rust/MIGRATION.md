@@ -2551,9 +2551,11 @@ account grant. Independent writers can race review and Git's ref locks; remote
 network fetch and cross-platform parity remain open.
 
 Named remote fetch routes through the reviewed native operation in the browser
-WebSocket transport, which has no legacy Git execution bridge. Wry and Electron
-retain their existing paths while platform, URL, and error-detail parity remain
-open. The operation binds the selected configured remote and effective URL,
+WebSocket transport and Wry. Wry chooses its existing Git path before mutation
+when an inherited or OS/PAC proxy needs injection, an older host lacks progress
+support, or the URL review reports an unsupported form. Electron retains its
+existing path while platform, URL, and error-detail parity remain open. The
+operation binds the selected configured remote and effective URL,
 refs, configuration, worktrees and `FETCH_HEAD`, then uses Git's normal prune
 and submodule recursion options.
 It rejects symlinked or multiply linked `FETCH_HEAD` on Unix. Git and independent
