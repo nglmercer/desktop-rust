@@ -52,11 +52,27 @@ describe.each(['wry', 'ws'])('Rust merge-base lookup via %s', transport => {
     ['up_to_date', MergeResult.AlreadyUpToDate],
   ] as const)('routes reviewed merge result %s', async (outcome, result) => {
     const repository = { path: '/repo' } as Repository
-    const expected = { sourceRef: 'refs/heads/-topic', sourceHead: 'a'.repeat(40), currentRef: 'refs/heads/main', currentHead: 'b'.repeat(40) }
+    const expected = {
+      sourceRef: 'refs/heads/-topic',
+      sourceHead: 'a'.repeat(40),
+      currentRef: 'refs/heads/main',
+      currentHead: 'b'.repeat(40),
+    }
     mocks.start.mockResolvedValue(outcome)
-    await expect(merge(repository, '-topic', { squash: true, noVerify: true }, expected)).resolves.toBe(result)
-    expect(mocks.start).toHaveBeenCalledWith('/repo', { source_ref: expected.sourceRef, source_head: expected.sourceHead, current_ref: expected.currentRef, current_head: expected.currentHead, squash: true, no_verify: true })
+    await expect(
+      merge(repository, '-topic', { squash: true, noVerify: true }, expected)
+    ).resolves.toBe(result)
+    expect(mocks.start).toHaveBeenCalledWith('/repo', {
+      source_ref: expected.sourceRef,
+      source_head: expected.sourceHead,
+      current_ref: expected.currentRef,
+      current_head: expected.currentHead,
+      squash: true,
+      no_verify: true,
+    })
     expect(mocks.git).not.toHaveBeenCalled()
-    await expect(merge(repository, '-topic')).rejects.toThrow('Refresh the current and source branches')
+    await expect(merge(repository, '-topic')).rejects.toThrow(
+      'Refresh the current and source branches'
+    )
   })
 })

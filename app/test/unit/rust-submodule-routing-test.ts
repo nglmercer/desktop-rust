@@ -61,7 +61,12 @@ import {
   updateSubmodulesAfterOperation,
 } from '../../src/lib/git/submodule'
 import { checkoutIndex } from '../../src/lib/git/checkout-index'
-import { GitResetMode, reset, resetPaths, unstageAll } from '../../src/lib/git/reset'
+import {
+  GitResetMode,
+  reset,
+  resetPaths,
+  unstageAll,
+} from '../../src/lib/git/reset'
 import { unstageAllFiles } from '../../src/lib/git/rm'
 import { checkoutPaths } from '../../src/lib/git/checkout'
 import { stageFiles } from '../../src/lib/git/update-index'
@@ -295,7 +300,14 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
   })
   it('fast-forwards reviewed tracking branches through Rust', async () => {
     const repository = { path: '/repo' } as Repository
-    const branches = [{ ref: 'refs/heads/feature', sha: 'a'.repeat(40), upstreamRef: 'refs/remotes/origin/feature', upstreamSha: 'b'.repeat(40) }]
+    const branches = [
+      {
+        ref: 'refs/heads/feature',
+        sha: 'a'.repeat(40),
+        upstreamRef: 'refs/remotes/origin/feature',
+        upstreamSha: 'b'.repeat(40),
+      },
+    ]
     await fastForwardBranches(repository, [])
     expect(mocks.fastForward).not.toHaveBeenCalled()
     await fastForwardBranches(repository, branches, false)
@@ -307,11 +319,22 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
   it('routes reviewed mixed reset and undo through Rust', async () => {
     const repository = { path: '/repo' } as Repository
     const target = 'a'.repeat(40)
-    const expected = { head: 'b'.repeat(40), branch: 'refs/heads/main', undo: true }
-    await expect(reset(repository, GitResetMode.Mixed, target, expected)).resolves.toBe(true)
-    expect(mocks.mixedReset).toHaveBeenCalledWith('/repo', { target, ...expected })
+    const expected = {
+      head: 'b'.repeat(40),
+      branch: 'refs/heads/main',
+      undo: true,
+    }
+    await expect(
+      reset(repository, GitResetMode.Mixed, target, expected)
+    ).resolves.toBe(true)
+    expect(mocks.mixedReset).toHaveBeenCalledWith('/repo', {
+      target,
+      ...expected,
+    })
     expect(mocks.git).not.toHaveBeenCalled()
-    await expect(reset(repository, GitResetMode.Mixed, target)).rejects.toThrow('Refresh the current branch')
+    await expect(reset(repository, GitResetMode.Mixed, target)).rejects.toThrow(
+      'Refresh the current branch'
+    )
   })
   it('removes index entries without resetting to HEAD', async () => {
     const repository = { path: '/repo' } as Repository

@@ -57,12 +57,28 @@ describe.each(['wry', 'ws'])('Rust worktree routing via %s', transport => {
   it('routes create, remove, and move through reviewed native operations', async () => {
     const repository = { path: '/repo' } as Repository
     mocks.mutate.mockResolvedValue(undefined)
-    await addWorktree(repository, '/linked', { createBranch: 'topic', commitish: 'HEAD' })
+    await addWorktree(repository, '/linked', {
+      createBranch: 'topic',
+      commitish: 'HEAD',
+    })
     await removeWorktree('/repo', '/linked', true)
     await moveWorktree(repository, '/linked', '/moved')
-    expect(mocks.mutate).toHaveBeenNthCalledWith(1, '/repo', { kind: 'add', path: '/linked', create_branch: 'topic', commitish: 'HEAD' })
-    expect(mocks.mutate).toHaveBeenNthCalledWith(2, '/repo', { kind: 'remove', path: '/linked', force: true })
-    expect(mocks.mutate).toHaveBeenNthCalledWith(3, '/repo', { kind: 'move', from: '/linked', to: '/moved' })
+    expect(mocks.mutate).toHaveBeenNthCalledWith(1, '/repo', {
+      kind: 'add',
+      path: '/linked',
+      create_branch: 'topic',
+      commitish: 'HEAD',
+    })
+    expect(mocks.mutate).toHaveBeenNthCalledWith(2, '/repo', {
+      kind: 'remove',
+      path: '/linked',
+      force: true,
+    })
+    expect(mocks.mutate).toHaveBeenNthCalledWith(3, '/repo', {
+      kind: 'move',
+      from: '/linked',
+      to: '/moved',
+    })
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

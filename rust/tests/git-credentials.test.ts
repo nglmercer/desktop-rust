@@ -46,12 +46,23 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
         recurse_submodules: false,
         is_background_task: true,
       }
-      const preview = suite.rpc(repo, 'renderer_remote_head_preview', { request })
+      const preview = suite.rpc(repo, 'renderer_remote_head_preview', {
+        request,
+      })
       assert.equal(typeof preview.basis, 'string')
       suite.clearTransport()
-      assert.equal(suite.rpc(repo, 'renderer_remote_head', { request, basis: preview.basis }).code, 0)
+      assert.equal(
+        suite.rpc(repo, 'renderer_remote_head', {
+          request,
+          basis: preview.basis,
+        }).code,
+        0
+      )
       suite.assertActor()
-      assert.equal(repo.git('symbolic-ref', 'refs/remotes/origin/HEAD').toString().trim(), 'refs/remotes/origin/main')
+      assert.equal(
+        repo.git('symbolic-ref', 'refs/remotes/origin/HEAD').toString().trim(),
+        'refs/remotes/origin/main'
+      )
       suite.assertPrivateStorage(repo)
     })
 

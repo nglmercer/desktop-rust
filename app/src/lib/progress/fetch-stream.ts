@@ -32,7 +32,12 @@ export class FetchStreamProgressParser {
   ) {}
 
   private newState(): StreamState {
-    return { decoder: new TextDecoder(), line: '', afterCarriageReturn: false, droppingLine: false }
+    return {
+      decoder: new TextDecoder(),
+      line: '',
+      afterCarriageReturn: false,
+      droppingLine: false,
+    }
   }
 
   public push(chunk: FetchProgressChunk): void {

@@ -36,8 +36,15 @@ describe.each(['wry', 'ws'])('Rust reflog reads via %s', transport => {
     mocks.transport = transport
   })
   it('reads author identities in bounded batches and detects duplicates across batches', async () => {
-    const revisions = Array.from({ length: 501 }, (_, index) => index.toString(16).padStart(40, '0'))
-    mocks.authors.mockImplementation(async (_path, values: string[]) => values.map(oid => ({ oid: oid.toLowerCase(), identity: 'Test <test@example.invalid> 100 +0000' })))
+    const revisions = Array.from({ length: 501 }, (_, index) =>
+      index.toString(16).padStart(40, '0')
+    )
+    mocks.authors.mockImplementation(async (_path, values: string[]) =>
+      values.map(oid => ({
+        oid: oid.toLowerCase(),
+        identity: 'Test <test@example.invalid> 100 +0000',
+      }))
+    )
     const authors = await getAuthors(repository, revisions)
     expect(authors).toHaveLength(501)
     expect(authors[0].name).toBe('Test')
@@ -46,7 +53,9 @@ describe.each(['wry', 'ws'])('Rust reflog reads via %s', transport => {
     expect(mocks.authors.mock.calls[1][1]).toHaveLength(1)
     mocks.authors.mockClear()
     const duplicate = [...revisions.slice(0, 500), revisions[10].toUpperCase()]
-    await expect(getAuthors(repository, duplicate)).rejects.toThrow('Commit to author mismatch')
+    await expect(getAuthors(repository, duplicate)).rejects.toThrow(
+      'Commit to author mismatch'
+    )
     expect(mocks.git).not.toHaveBeenCalled()
   })
   it('preserves recent checkout order and excludes renamed branches', async () => {
