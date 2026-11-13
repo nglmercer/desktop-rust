@@ -234,6 +234,7 @@ let hadGlobalResizeObserver = false
 let originalGlobalResizeObserver: typeof ResizeObserver | undefined
 let hadWindowResizeObserver = false
 let originalWindowResizeObserver: typeof ResizeObserver | undefined
+const originalGetClientRects = Element.prototype.getClientRects
 
 beforeEach(() => {
   hadGlobalResizeObserver = 'ResizeObserver' in globalThis
@@ -245,12 +246,30 @@ beforeEach(() => {
 
   Object.assign(globalThis, { ResizeObserver: TestListResizeObserver })
 
+  // JSDOM does not calculate layout. Give connected controls a visible
+  // rectangle so focus-trap can exercise the picker as it does in a browser.
+  Element.prototype.getClientRects = function () {
+    if (!this.isConnected) {
+      return originalGetClientRects.call(this)
+    }
+    const rect = new DOMRect(0, 0, 365, 360)
+    return {
+      0: rect,
+      length: 1,
+      item: index => (index === 0 ? rect : null),
+      *[Symbol.iterator]() {
+        yield rect
+      },
+    }
+  }
+
   if (typeof window !== 'undefined') {
     Object.assign(window, { ResizeObserver: TestListResizeObserver })
   }
 })
 
 afterEach(() => {
+  Element.prototype.getClientRects = originalGetClientRects
   if (hadGlobalResizeObserver) {
     Object.assign(globalThis, { ResizeObserver: originalGlobalResizeObserver })
   } else {
