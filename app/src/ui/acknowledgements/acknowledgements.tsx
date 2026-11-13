@@ -27,8 +27,24 @@ interface ILicense {
 
 type Licenses = { [key: string]: ILicense }
 
+function isLicenses(value: unknown): value is Licenses {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  return Object.values(value).every(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return false
+    }
+    return ['repository', 'sourceText', 'license'].every(key => {
+      const field = (entry as Record<string, unknown>)[key]
+      return field === undefined || typeof field === 'string'
+    })
+  })
+}
+
 interface IAcknowledgementsState {
   readonly licenses: Licenses | null
+  readonly failed: boolean
 }
 
 /** The component which displays the licenses for packages used in the app. */
@@ -39,32 +55,44 @@ export class Acknowledgements extends React.Component<
   public constructor(props: IAcknowledgementsProps) {
     super(props)
 
-    this.state = { licenses: null }
+    this.state = { licenses: null, failed: false }
   }
 
   public async componentDidMount() {
-    const path = Path.join(await getAppPath(), 'static', 'licenses.json')
+    let appPath: string
+    try {
+      appPath = await getAppPath()
+    } catch (error) {
+      log.error('Error locating licenses', error)
+      this.setState({ failed: true })
+      return
+    }
+    const path = Path.join(appPath, 'static', 'licenses.json')
     Fs.readFile(path, 'utf8', (err, data) => {
       if (err) {
         log.error('Error loading licenses', err)
+        this.setState({ failed: true })
         return
       }
 
-      const parsed = JSON.parse(data)
-      if (!parsed) {
-        log.warn(`Couldn't parse licenses!`)
-        return
+      try {
+        const parsed = JSON.parse(data)
+        if (!isLicenses(parsed)) {
+          throw new Error('Invalid license list')
+        }
+        this.setState({ licenses: parsed })
+      } catch (error) {
+        log.error('Error parsing licenses', error)
+        this.setState({ failed: true })
       }
-
-      this.setState({ licenses: parsed })
     })
   }
 
   private renderLicenses(licenses: Licenses) {
     const elements = []
-    for (const [index, key] of Object.keys(licenses).sort().entries()) {
-      // The first entry is Desktop itself. We don't need to thank us.
-      if (index === 0) {
+    for (const key of Object.keys(licenses).sort()) {
+      // Desktop's own notice is shown separately above the dependency list.
+      if (key === `desktop@${this.props.applicationVersion}`) {
         continue
       }
 
@@ -109,7 +137,9 @@ export class Acknowledgements extends React.Component<
     if (licenses) {
       const key = `desktop@${this.props.applicationVersion}`
       const entry = licenses[key]
-      desktopLicense = <p className="license-text">{entry.sourceText}</p>
+      if (entry?.sourceText) {
+        desktopLicense = <p className="license-text">{entry.sourceText}</p>
+      }
     }
 
     return (
@@ -131,7 +161,13 @@ export class Acknowledgements extends React.Component<
 
           <p>GitHub Desktop also distributes these libraries:</p>
 
-          {licenses ? this.renderLicenses(licenses) : <Loading />}
+          {licenses ? (
+            this.renderLicenses(licenses)
+          ) : this.state.failed ? (
+            <p>License notices could not be loaded.</p>
+          ) : (
+            <Loading />
+          )}
         </DialogContent>
 
         <DefaultDialogFooter />

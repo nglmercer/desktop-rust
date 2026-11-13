@@ -8,6 +8,7 @@ import frontMatter from 'front-matter'
 import { createRequire } from 'module'
 import { realpathSync } from 'fs'
 import { fileURLToPath } from 'url'
+import { createLicenseDump } from './script/licenses/update-license-dump'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -209,12 +210,18 @@ export function copyStaticResources(platformDirectory = staticDirName): Plugin {
     configResolved(config) {
       outDir = path.resolve(config.root, config.build.outDir)
     },
-    closeBundle() {
+    async closeBundle() {
       const trustedRoot = outputRoot(outDir)
       ensureOutputDirectory(trustedRoot, outDir)
       const output = realpathSync(outDir)
       const destination = path.join(output, 'static')
       ensureOutputDirectory(output, destination)
+      // Keep the acknowledgements dialog available in the standalone web
+      // renderer as well as in packaged Electron builds.
+      writeOutputFile(
+        path.join(destination, 'licenses.json'),
+        JSON.stringify(await createLicenseDump(__dirname))
+      )
       // copyEmoji() in script/build.ts: the database plus the images of
       // GitHub's custom emoji (unicode ones render as text).
       const gemoji = path.resolve(__dirname, 'gemoji')

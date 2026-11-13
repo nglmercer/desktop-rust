@@ -90,6 +90,12 @@ describe('Vite gitignore template copying', () => {
       })
       assert.ok(existsSync(path.join(output, 'emoji.json')))
       assert.ok(existsSync(path.join(output, 'emoji/shipit.png')))
+      const notices = JSON.parse(
+        readFileSync(path.join(output, 'static/licenses.json'), 'utf8')
+      )
+      const { version } = JSON.parse(readFileSync('app/package.json', 'utf8'))
+      assert.ok(notices[`desktop@${version}`]?.sourceText)
+      assert.ok(Object.keys(notices).some(key => key.startsWith('react@')))
       assert.ok(
         lstatSync(
           path.join(output, 'static/gitignore/Clojure.gitignore')

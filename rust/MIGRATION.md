@@ -68,6 +68,12 @@ integration probe exercises the full `readEmoji` to `EmojiFilter` path using
 `DESKTOP_WRY_WEBVIEW_TEST=1 node --import tsx script/test.mts rust/tests/wry-emoji-webview.test.ts`
 after building the web renderer and debug desktop-app binary; it requires Xvfb
 and Linux user/mount namespaces. macOS and Windows webviews remain unverified.
+The web build also generates `static/licenses.json` using the same dependency
+inventory and policy check as Electron, so the acknowledgements dialog can show
+those notices. This is not a complete attribution audit: in the current pnpm
+layout that legacy inventory misses some transitive and root-only dependencies,
+and it does not include Rust crates. A complete inventory for shipped web and
+native artifacts remains required before the legacy release pipeline is removed.
 
 The loopback WebSocket client is tested against the Rust bridge for login,
 events, cancellation and reconnect. The browser entry currently returns 503:

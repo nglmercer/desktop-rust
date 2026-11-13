@@ -50,12 +50,9 @@ const assertValidLicensesIn = async (dir: string) => {
   }
 }
 
-export async function updateLicenseDump(
-  projectRoot: string,
-  outRoot: string
-): Promise<void> {
+/** Collect the Desktop and dependency notices used by packaged renderers. */
+export async function createLicenseDump(projectRoot: string) {
   const appRoot = path.join(projectRoot, 'app')
-  const outPath = path.join(outRoot, 'static', 'licenses.json')
 
   await assertValidLicensesIn(projectRoot)
   await assertValidLicensesIn(appRoot)
@@ -78,6 +75,16 @@ export async function updateLicenseDump(
     source: `https://github.com/desktop/desktop/blob/release-${appVersion}/LICENSE`,
     sourceText: licenseText,
   }
+
+  return summary
+}
+
+export async function updateLicenseDump(
+  projectRoot: string,
+  outRoot: string
+): Promise<void> {
+  const outPath = path.join(outRoot, 'static', 'licenses.json')
+  const summary = await createLicenseDump(projectRoot)
 
   await writeFile(outPath, JSON.stringify(summary), { encoding: 'utf8' })
 }
