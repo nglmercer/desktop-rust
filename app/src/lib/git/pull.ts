@@ -61,6 +61,9 @@ export async function pull(
       'pre-commit',
       'post-rewrite',
     ],
+    onHookProgress: options?.onHookProgress,
+    onHookFailure: options?.onHookFailure,
+    onTerminalOutputAvailable: options?.onTerminalOutputAvailable,
   }
 
   if (options?.progressCallback) {
