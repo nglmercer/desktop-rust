@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  transport: 'wry', state: vi.fn(), git: vi.fn(), commits: vi.fn(), status: vi.fn(), stage: vi.fn(),
+  transport: 'wry', state: vi.fn(), git: vi.fn(), commits: vi.fn(), status: vi.fn(), stage: vi.fn(), continueRebase: vi.fn(),
   scope: vi.fn(async (_path: string, _kind: string, work: () => Promise<unknown>) => work()),
 }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRebaseState: mocks.state }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRebaseState: mocks.state, continueRepositoryRebase: mocks.continueRebase }) }))
 vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: mocks.scope }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 vi.mock('../../src/lib/git/status', () => ({ getStatus: mocks.status }))
@@ -45,5 +45,19 @@ describe.each(['wry', 'ws'])('Rust rebase state through %s', transport => {
     mocks.state.mockResolvedValue(null)
     await expect(continueRebase(repository, [])).resolves.toBe(RebaseResult.Aborted)
     expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('continues a reviewed rebase with empty=%s', async empty => {
+    mocks.state.mockResolvedValue({ head: hash, progress })
+    mocks.status.mockResolvedValue({ workingDirectory: { files: empty ? [] : [{ status: { kind: 'modified' } }] } })
+    mocks.continueRebase.mockResolvedValue('complete')
+    await expect(continueRebase(repository, [])).resolves.toBe(RebaseResult.CompletedWithoutError)
+    expect(mocks.continueRebase).toHaveBeenCalledWith('/repo', hash, empty, false)
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('rejects a custom editor before staging', async () => {
+    await expect(continueRebase(repository, [], new Map(), { gitEditor: 'custom' })).rejects.toThrow('Custom rebase editors')
+    expect(mocks.stage).not.toHaveBeenCalled()
   })
 })

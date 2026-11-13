@@ -2581,6 +2581,26 @@ export class BackendClient {
     if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the squash'}; inspect the repository`, retryable: false })
   }
 
+  /** Continue a reviewed rebase without replaying an uncertain result. */
+  async continueRepositoryRebase(repositoryPath: string, expected: string, empty: boolean, noVerify: boolean): Promise<'complete' | 'conflict'> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expected)) throw new BackendError({ code: 'invalid_request', message: 'A reviewed rebase is required', retryable: false })
+    const call = (method: 'renderer_rebase_continue_preview' | 'renderer_rebase_continue', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'continue_rebase', repository_path: repositoryPath, operation: { method, expected, ...extra } } })
+      : this.repositoryRead(repositoryPath, method, { expected, ...extra })
+    const preview = await call('renderer_rebase_continue_preview')
+    if (!isRecord(preview) || preview.head !== expected || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid rebase review', retryable: false })
+    let result: unknown
+    try { result = await call('renderer_rebase_continue', { basis: preview.basis, empty, no_verify: noVerify }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect rebase state and history before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Rebase outcome is uncertain; inspect the repository', retryable: false })
+    if (result.code === 0 && result.outcome === 'complete') return 'complete'
+    if (result.code !== 0 && result.outcome === 'conflict') return 'conflict'
+    throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to continue rebase'}; inspect the repository`, retryable: false })
+  }
+
   /** Continue a reviewed cherry-pick without replaying an uncertain result. */
   async continueRepositoryCherryPick(repositoryPath: string, expected: string, empty: boolean): Promise<'complete' | 'conflict'> {
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expected)) throw new BackendError({ code: 'invalid_request', message: 'A reviewed cherry-pick is required', retryable: false })

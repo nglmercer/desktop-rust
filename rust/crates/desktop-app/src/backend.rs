@@ -145,6 +145,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    ContinueRebase {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -435,6 +439,9 @@ impl Backend {
         | GitInfoOperation::ContinueCherryPick {
             repository_path, ..
         }
+        | GitInfoOperation::ContinueRebase {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -638,6 +645,17 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported cherry-pick continuation operation".into(),
+            ));
+        }
+        if let GitInfoOperation::ContinueRebase { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererRebaseContinuePreview { .. }
+                    | Operation::RendererRebaseContinue { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported rebase continuation operation".into(),
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
@@ -1410,6 +1428,10 @@ impl Backend {
                         operation: Operation::RendererCherryPickContinue { .. },
                         ..
                     }
+                    | GitInfoOperation::ContinueRebase {
+                        operation: Operation::RendererRebaseContinue { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1577,6 +1599,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::ContinueCherryPick { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::ContinueRebase { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1841,6 +1870,36 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn wry_continues_reviewed_rebase() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-rebase-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let run = |args: &[&str]| Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+            let git = |args: &[&str]| { let out = run(args); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
+            git(&["init", "-q", "-b", "main"]);
+            git(&["config", "user.name", "Test"]); git(&["config", "user.email", "test@example.invalid"]);
+            fs::write(root.join("file"), "base\n").unwrap(); git(&["add", "file"]); git(&["commit", "-qm", "base"]);
+            git(&["switch", "-qc", "source"]);
+            fs::write(root.join("file"), "source\n").unwrap(); git(&["commit", "-qam", "source"]);
+            let target = git(&["rev-parse", "HEAD"]);
+            git(&["switch", "-q", "main"]);
+            fs::write(root.join("file"), "main\n").unwrap(); git(&["commit", "-qam", "main"]);
+            git(&["switch", "-q", "source"]);
+            assert!(!run(&["rebase", "main"]).status.success());
+            fs::write(root.join("file"), "resolved\n").unwrap(); git(&["add", "file"]);
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"continue_rebase","repository_path":root,"operation":operation}})]);
+            assert!(route(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(route(json!({"method":"renderer_rebase_continue_preview","expected":target})).unwrap()).unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_rebase_continue","expected":target,"basis":"bad","empty":false,"no_verify":false})).unwrap()).is_err());
+            let result = backend.read(route(json!({"method":"renderer_rebase_continue","expected":target,"basis":preview["basis"],"empty":false,"no_verify":false})).unwrap()).unwrap();
+            assert_eq!(result["outcome"], "complete");
+            assert_eq!(git(&["show", "HEAD:file"]), "resolved");
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
     }
 
     #[test]
@@ -4082,6 +4141,15 @@ esac
         );
         let rebase_head = "b".repeat(40);
         fs::write(first.join(".git/REBASE_HEAD"), format!("{rebase_head}\n")).unwrap();
+        assert!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":first,"method":"renderer_rebase_state"})
+                ])
+                .unwrap()
+                .is_null()
+        );
+        fs::create_dir(first.join(".git/rebase-apply")).unwrap();
         assert_eq!(
             backend
                 .read_args(vec![
@@ -4091,6 +4159,7 @@ esac
             rebase_head
         );
         assert!(backend.admit(vec![json!({"repository_path":first,"method":"renderer_rebase_state","kind":"working"})]).is_err());
+        fs::remove_dir(first.join(".git/rebase-apply")).unwrap();
         fs::remove_file(first.join(".git/REBASE_HEAD")).unwrap();
         let pick_head = "a".repeat(40);
         fs::write(

@@ -466,6 +466,12 @@ export async function continueRebase(
   manualResolutions: ReadonlyMap<string, ManualConflictResolution> = new Map(),
   opts?: RebaseInteractiveOptions
 ): Promise<RebaseResult> {
+  const native = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  if (native && opts?.gitEditor !== undefined && opts.gitEditor !== ':') {
+    throw new Error('Custom rebase editors are not supported by the native backend')
+  }
+  const expectedHead = native ? await readRebaseHead(repository) : undefined
+  if (native && expectedHead === null) return RebaseResult.Aborted
   const trackedFiles = files.filter(f => {
     return f.status.kind !== AppFileStatusKind.Untracked
   })
@@ -497,6 +503,9 @@ export async function continueRebase(
   const rebaseCurrentCommit = await readRebaseHead(repository)
   if (rebaseCurrentCommit === null) {
     return RebaseResult.Aborted
+  }
+  if (native && expectedHead !== rebaseCurrentCommit) {
+    throw new Error('Rebase changed; refresh before continuing')
   }
 
   const trackedFilesAfter = status.workingDirectory.files.filter(
@@ -536,6 +545,12 @@ export async function continueRebase(
     onTerminalOutputAvailable: opts?.onTerminalOutputAvailable,
     onHookFailure: opts?.onHookFailure,
     onHookProgress: opts?.onHookProgress,
+  }
+
+  if (native && expectedHead !== undefined && expectedHead !== null) {
+    const result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().continueRepositoryRebase(repository.path, expectedHead, trackedFilesAfter.length === 0, opts?.noVerify === true), true)
+    return result === 'complete' ? RebaseResult.CompletedWithoutError : RebaseResult.ConflictsEncountered
   }
 
   if (trackedFilesAfter.length === 0) {

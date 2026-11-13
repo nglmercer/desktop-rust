@@ -606,6 +606,21 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.checkoutDetachedCommit('/repo', oid, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
   })
 
+  it('reviews rebase continuation and never replays an interrupted mutation', async () => {
+    const head = 'a'.repeat(40)
+    const preview = { head, basis: 'b'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ outcome: 'complete', code: 0, stdout: '', stderr: '' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.continueRepositoryRebase('/repo', head, true, false)).resolves.toBe('complete')
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'continue_rebase', repository_path: '/repo', operation: { method: 'renderer_rebase_continue', expected: head, basis: preview.basis, empty: true, no_verify: false } } }))
+    invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ outcome: 'conflict', code: 1, stdout: '', stderr: '' })
+    await expect(client.continueRepositoryRebase('/repo', head, false, false)).resolves.toBe('conflict')
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.continueRepositoryRebase('/repo', head, false, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('inspect rebase state') })
+    expect(invoke).toHaveBeenCalledTimes(6)
+  })
+
   it('reviews cherry-pick continuation and never replays an interrupted mutation', async () => {
     const head = 'a'.repeat(40)
     const preview = { head, basis: 'b'.repeat(64) }

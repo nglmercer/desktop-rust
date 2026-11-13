@@ -48,40 +48,18 @@ pub struct OperationState {
 impl Repository {
     pub(crate) async fn status_context(&self) -> Result<Value> {
         let directory = self.git_directory().await?;
-        let rebase = if directory.join("REBASE_HEAD").exists() {
-            let read = |name: &str| -> Option<String> {
-                use std::io::Read;
-                let path = directory.join("rebase-merge").join(name);
-                let mut options = fs::OpenOptions::new();
-                options.read(true);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::OpenOptionsExt;
-                    options.custom_flags(libc::O_NONBLOCK);
-                }
-                let file = options.open(path).ok()?;
-                let metadata = file.metadata().ok()?;
-                if !metadata.is_file() || metadata.len() > 8192 {
-                    return None;
-                }
-                let mut bytes = Vec::new();
-                file.take(8193).read_to_end(&mut bytes).ok()?;
-                if bytes.len() > 8192 {
-                    return None;
-                }
-                Some(String::from_utf8_lossy(&bytes).into_owned())
-            };
-            match (read("orig-head"), read("head-name"), read("onto")) {
-                (Some(original), Some(branch), Some(base)) => {
-                    let branch = branch
-                        .strip_prefix("refs/heads/")
-                        .map_or(branch.clone(), |name| name.trim().to_owned());
-                    json!({"originalBranchTip":original.trim(), "targetBranch":branch, "baseBranchTip":base.trim()})
-                }
-                _ => Value::Null,
+        let state = self.renderer_rebase_state().await?;
+        let progress = &state["progress"];
+        let rebase = match (
+            progress["original"].as_str(),
+            progress["branch"].as_str(),
+            progress["onto"].as_str(),
+        ) {
+            (Some(original), Some(branch), Some(base)) => {
+                let branch = branch.strip_prefix("refs/heads/").map_or(branch, str::trim);
+                json!({"originalBranchTip":original.trim(), "targetBranch":branch, "baseBranchTip":base.trim()})
             }
-        } else {
-            Value::Null
+            _ => Value::Null,
         };
         Ok(json!({
             "mergeHeadFound":directory.join("MERGE_HEAD").exists(),
@@ -160,7 +138,29 @@ impl Repository {
             "invalid rebase head"
         );
         let progress = read_progress(&root)?;
+        // Git may leave REBASE_HEAD behind after finishing. Require a live
+        // rebase directory rather than treating that stale pseudoref as an
+        // active operation. `rebase-apply/applying` denotes git am instead.
+        let apply_state = || -> Result<(bool, bool)> {
+            let apply = match root.open_dir_nofollow("rebase-apply") {
+                Ok(dir) => dir,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok((false, false));
+                }
+                Err(error) => return Err(error.into()),
+            };
+            Ok((
+                true,
+                read_operation_file(&apply, "applying", 128)?.is_none(),
+            ))
+        };
+        let apply = apply_state()?;
+        anyhow::ensure!(progress.is_none() || !apply.0, "Ambiguous rebase state");
+        if progress.is_none() && !apply.1 {
+            return Ok(Value::Null);
+        }
         if read_progress(&root)? != progress
+            || apply_state()? != apply
             || read_operation_file(&root, "REBASE_HEAD", 128)?
                 .as_deref()
                 .map(str::trim)
@@ -449,12 +449,27 @@ mod cherry_pick_state_tests {
         let git_dir = root.join(".git");
         let head = "a".repeat(40);
         fs::write(git_dir.join("REBASE_HEAD"), format!("{head}\n")).unwrap();
+        assert_eq!(repo.renderer_rebase_state().await.unwrap(), Value::Null);
+        assert!(repo.status_context().await.unwrap()["rebaseInternalState"].is_null());
+        fs::create_dir(git_dir.join("rebase-apply")).unwrap();
         assert_eq!(
             repo.renderer_rebase_state().await.unwrap(),
             json!({"head":head,"progress":null})
         );
+        fs::write(git_dir.join("rebase-apply/applying"), "1\n").unwrap();
+        assert_eq!(repo.renderer_rebase_state().await.unwrap(), Value::Null);
+        fs::remove_dir_all(git_dir.join("rebase-apply")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&git_dir, git_dir.join("rebase-apply")).unwrap();
+            assert!(repo.renderer_rebase_state().await.is_err());
+            fs::remove_file(git_dir.join("rebase-apply")).unwrap();
+        }
         let rebase = git_dir.join("rebase-merge");
         fs::create_dir(&rebase).unwrap();
+        fs::create_dir(git_dir.join("rebase-apply")).unwrap();
+        assert!(repo.renderer_rebase_state().await.is_err());
+        fs::remove_dir(git_dir.join("rebase-apply")).unwrap();
         for (name, content) in [
             ("orig-head", format!("{head}\n")),
             ("head-name", "refs/heads/topic\n".into()),
@@ -467,6 +482,10 @@ mod cherry_pick_state_tests {
         let state = repo.renderer_rebase_state().await.unwrap();
         assert_eq!(state["progress"]["current"], "2\n");
         assert_eq!(state["progress"]["total"], "4\n");
+        assert_eq!(
+            repo.status_context().await.unwrap()["rebaseInternalState"],
+            json!({"originalBranchTip":head,"targetBranch":"topic","baseBranchTip":head})
+        );
         fs::remove_file(rebase.join("head-name")).unwrap();
         assert!(repo.renderer_rebase_state().await.unwrap()["progress"]["branch"].is_null());
         fs::write(rebase.join("end"), vec![b'x'; 8193]).unwrap();

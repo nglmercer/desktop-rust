@@ -101,7 +101,7 @@ impl Repository {
         } else {
             args(&["-c", "core.editor=true", "cherry-pick", "--continue"])
         };
-        let output = process::run_bound_cherry_pick(&self.path, &command).await?;
+        let output = process::run_bound_noninteractive(&self.path, &command).await?;
         let unmerged = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
         anyhow::ensure!(unmerged.code == 0, "Cannot inspect cherry-pick outcome");
         let state = self.renderer_cherry_pick_state().await?;

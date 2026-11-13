@@ -2400,3 +2400,14 @@ subsequent conflicts without retrying uncertain outcomes. Empty resolutions
 retain the previous empty-commit behavior. External Git writers can race the
 review and Git's own locks; streaming progress, interactive hook failures,
 the start operation, Electron fallback and cross-platform parity remain open.
+
+## Rebase continuation
+
+The Wry and WebSocket renderers continue reviewed merge-backend rebases through
+Rust. The backend checks the selected rebase head, resolved index, worktree and
+sequencer state before running Git, preserves the empty-resolution skip behavior,
+and reports subsequent conflicts and uncertain interruptions. State reads now
+ignore a stale REBASE_HEAD when no rebase directory is active. External Git
+writers may race the review and Git's locks; apply-backend continuation, custom
+editors, live progress, interactive hook failures, the start operation, Electron
+fallback and cross-platform parity remain open.

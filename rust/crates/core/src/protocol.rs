@@ -289,6 +289,15 @@ pub enum Operation {
         basis: String,
         empty: bool,
     },
+    RendererRebaseContinuePreview {
+        expected: String,
+    },
+    RendererRebaseContinue {
+        expected: String,
+        basis: String,
+        empty: bool,
+        no_verify: bool,
+    },
     RenameBranchPreview {
         name: String,
         new_name: String,
