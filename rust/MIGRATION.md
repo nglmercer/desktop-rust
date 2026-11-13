@@ -2608,7 +2608,8 @@ filters run with that credential scope.
 New clone intents use a private v2 journal separate from the version-1
 registry and earlier clone journal. With `report_recovery_status`,
 `list_clone_recoveries` marks conflicting and older intents for manual
-inspection; the default response keeps its earlier shape. Recovery only
+inspection. Recovery listings expose only the ID, phase and paths, with
+optional recovery status; stored URLs, accounts and certificates stay private. Recovery only
 resumes a ready v2 publication after rechecking its actor, origin, current HOME-sensitive path,
 parent and directory identities, and reviewed contents.
 Interrupted downloads and checkouts require inspection and are not replayed.
@@ -2634,15 +2635,16 @@ Linux HTTPS tests with real Git LFS verify checkout using the selected account
 and rejection of an LFS endpoint belonging to another repository. When Git LFS
 is installed, assigned-account operations currently require Unicode storage
 paths for log isolation, even when the repository has no LFS objects. Android
-and cross-platform parity remain to be verified. The browser clone
-dialog offers an explicit selected-account HTTPS mode without submodules; it
+and cross-platform parity remain to be verified. The Wry and browser clone
+dialogues offer an explicit selected-account HTTPS mode without submodules; it
 requires the same account in GitHub CLI and an absent destination. Completed
 clones remain unselected and must be added explicitly. The dialog lists pending
 recoveries and resumes eligible text-path records, while byte-path records are
 displayed for manual inspection because renderer resource reservations require
-text paths. The original clone option remains the default. Wry and Electron do
-not yet use this route; recursive submodule account scopes and full clone error
-detail remain open.
+text paths. The original clone option remains the default and Electron does not
+yet use this route; recursive submodule account scopes and full clone error
+detail remain open. A real Wry WebKit integration test exercises HTTPS clone
+progress, preservation of an obstructing destination, and recovery.
 
 The WebSocket clone endpoint can optionally report request-owned Git progress.
 It forwards only fixed phase labels and numeric percentages, discarding raw

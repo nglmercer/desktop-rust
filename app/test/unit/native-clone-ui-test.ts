@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const request = vi.hoisted(() => vi.fn())
+const route = vi.hoisted(() => ({ kind: 'ws' }))
 const reservations = vi.hoisted(() => ({ active: [] as string[] }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ request }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ request, transportKind: route.kind }) }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
   canonicalMutationPath: async (path: string) => `/canonical${path}`,
   withRepositoryGitResourceMutation: async (
@@ -29,6 +30,7 @@ import {
 describe('native clone UI requests', () => {
   beforeEach(() => {
     request.mockReset()
+    route.kind = 'ws'
   })
 
   it('preserves the selected Enterprise account port', () => {
@@ -62,6 +64,25 @@ describe('native clone UI requests', () => {
       report_progress: true,
       report_retained_staging: true,
     })
+  })
+
+  it('routes Wry clones and recovery through the typed host', async () => {
+    route.kind = 'wry'
+    const id = '11111111-1111-1111-1111-111111111111'
+    const account = { host: 'github.com', login: 'alice', id: 12 }
+    request
+      .mockResolvedValueOnce({ kind: 'clone_completed_unselected', record: { path: '/repo' }, retained_staging: '/stage' })
+      .mockResolvedValueOnce([{ id, destination: '/repo', stage: '/stage', recoverable: true }])
+      .mockResolvedValueOnce({ path: '/repo', retained_staging: '/stage' })
+    await nativeClone('https://github.com/a/b', '/repo', account, 'main', () => {})
+    expect(request.mock.calls[0][0]).toBe('git_info')
+    expect(request.mock.calls[0][1]).toEqual({ operation: { type: 'clone_selected', url: 'https://github.com/a/b', path: '/repo', account, default_branch: 'main' } })
+    expect(request.mock.calls[0][2].deadlineMs).toBe(3_600_000)
+    expect(await listNativeCloneRecoveries()).toHaveLength(1)
+    expect(request.mock.calls[1]).toEqual(['git_info', { operation: { type: 'list_clone_recoveries' } }])
+    await recoverNativeClone(id, '/repo', '/stage')
+    expect(request.mock.calls[2][0]).toBe('git_info')
+    expect(request.mock.calls[2][1]).toEqual({ operation: { type: 'recover_clone', recovery_id: id } })
   })
 
   it('shows only fixed progress categories', () => {

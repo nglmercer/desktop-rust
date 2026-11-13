@@ -86,6 +86,16 @@ enum GitInfoOperation {
     Read {},
     Version {},
     GlobalConfigPath {},
+    CloneSelected {
+        url: String,
+        path: desktop_backend::GitPath,
+        default_branch: Option<String>,
+        account: desktop_backend::CloneAccount,
+    },
+    ListCloneRecoveries {},
+    RecoverClone {
+        recovery_id: String,
+    },
     ReleaseComparisonSnapshot {
         snapshot_id: String,
     },
@@ -403,7 +413,50 @@ impl Drop for ReadJob {
     }
 }
 
+fn retained_clone_path(path: &Path) -> Value {
+    let value = match path.to_str() {
+        Some(text) => desktop_backend::GitPath::Text(text.to_owned()),
+        None => desktop_backend::GitPath::Bytes {
+            bytes: path.as_os_str().as_encoded_bytes().to_vec(),
+        },
+    };
+    serde_json::json!(value)
+}
+
 impl Backend {
+    async fn clone_selected(
+        &self,
+        url: String,
+        path: desktop_backend::GitPath,
+        default_branch: Option<String>,
+        account: desktop_backend::CloneAccount,
+    ) -> Result<Value> {
+        let registry = self.registry.clone().ok_or_else(|| AppError::msg("Clone registry is unavailable"))?;
+        let destination = desktop_backend::directory_path(path).map_err(|error| AppError::msg(error.to_string()))?;
+        let assigned = desktop_backend::AccountAssignment::Assigned {
+            host: account.host.to_ascii_lowercase(),
+            login: account.login.clone(),
+            id: account.id,
+        };
+        let repo = desktop_backend::clone_repository_selected(
+            registry.clone(), &url, &destination,
+            desktop_backend::CloneOptions { branch: None, default_branch, recursive: false, report_progress: true }, account,
+        ).await.map_err(|error| AppError::msg(error.to_string()))?;
+        let finish: Result<Value> = async {
+            let account_view = repo.execute(Operation::RepositoryAccount).await.map_err(|error| AppError::msg(error.to_string()))?;
+            let bound = account_view["scope_id"].as_str().ok_or_else(|| AppError::msg("Clone account binding is unavailable"))?;
+            let record_root = repo.path().to_owned();
+            let record = desktop_backend::cancellation::blocking(move || registry.record_for_path(&record_root)).await.map_err(|error| AppError::msg(error.to_string()))?
+                .ok_or_else(|| AppError::msg("Clone account is unavailable"))?;
+            if record.id != bound || record.account.assignment != assigned {
+                return Err(AppError::msg("Clone account changed after completion"));
+            }
+            let staging = repo.retained_clone_staging().ok_or_else(|| AppError::msg("Clone staging path is unavailable"))?;
+            Ok(serde_json::json!({"kind":"clone_completed_unselected", "record":record, "retained_staging":retained_clone_path(staging)}))
+        }.await;
+        finish.map_err(|_| AppError::msg("Clone completed and was saved; inspect the destination before retrying"))
+    }
+
     #[cfg(test)]
     fn read_args(&self, args: Vec<Value>) -> Result<Value> {
         self.read(self.admit(args)?)
@@ -934,12 +987,20 @@ impl Backend {
         {
             return Err(AppError::BadArgs("unsupported tag operation".into()));
         }
+        if matches!(request.operation, GitInfoOperation::CloneSelected { .. } | GitInfoOperation::ListCloneRecoveries {} | GitInfoOperation::RecoverClone { .. }) && self.registry.is_none() {
+            return Err(AppError::BadArgs("Clone registry is unavailable".into()));
+        }
+        if let GitInfoOperation::RecoverClone { recovery_id } = &request.operation {
+            if !uuid::Uuid::parse_str(recovery_id).is_ok_and(|value| value.to_string() == *recovery_id) {
+                return Err(AppError::BadArgs("Invalid clone recovery ID".into()));
+            }
+        }
         let is_fetch = matches!(
             &request.operation,
             GitInfoOperation::FetchRemote {
                 operation: Operation::RendererFetch { .. } | Operation::RendererRemoteHead { .. },
                 ..
-            }
+            } | GitInfoOperation::CloneSelected { .. } | GitInfoOperation::RecoverClone { .. }
         );
         let maximum = if is_fetch { 3_600_000 } else { 60_000 };
         let duration = request.deadline_ms.unwrap_or(maximum);
@@ -1559,7 +1620,7 @@ impl Backend {
             }) | BackendOperation::GitInfo(GitInfoOperation::FetchRemote {
                 operation: Operation::RendererFetch { .. },
                 ..
-            })
+            }) | BackendOperation::GitInfo(GitInfoOperation::CloneSelected { .. })
         ) {
             progress
         } else {
@@ -1708,6 +1769,10 @@ impl Backend {
             job.operation,
             BackendOperation::GitInfo(GitInfoOperation::InitializeRepository { .. })
         );
+        let clone_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::CloneSelected { .. } | GitInfoOperation::RecoverClone { .. })
+        );
         let lfs_write = matches!(
             job.operation,
             BackendOperation::GitInfo(
@@ -1734,6 +1799,21 @@ impl Backend {
                         return match operation {
                             GitInfoOperation::Version {} => desktop_backend::git_version().await.map(serde_json::Value::String),
                             GitInfoOperation::GlobalConfigPath {} => desktop_backend::git_global_config_path().await.map(serde_json::Value::String),
+                            GitInfoOperation::CloneSelected { url, path, default_branch, account } => {
+                                return self.clone_selected(url, path, default_branch, account).await;
+                            }
+                            GitInfoOperation::ListCloneRecoveries {} => {
+                                let registry = self.registry.clone().ok_or_else(|| AppError::msg("Clone registry is unavailable"))?;
+                                desktop_backend::cancellation::blocking(move || registry.clone_recovery_records()).await
+                            }
+                            GitInfoOperation::RecoverClone { recovery_id } => {
+                                let registry = self.registry.clone().ok_or_else(|| AppError::msg("Clone registry is unavailable"))?;
+                                let (record, staging) = desktop_backend::recover_selected_clone_with_staging(registry, &recovery_id).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut value = serde_json::to_value(record).map_err(|_| AppError::msg("Clone was recovered and saved; inspect the destination before retrying"))?;
+                                value.as_object_mut().ok_or_else(|| AppError::msg("Clone was recovered and saved; inspect the destination before retrying"))?
+                                    .insert("retained_staging".into(), retained_clone_path(&staging));
+                                return Ok(value);
+                            }
                             GitInfoOperation::LfsStatus {} => {
                                 let cwd = std::env::current_dir().map_err(|error| AppError::msg(error.to_string()))?;
                                 desktop_backend::lfs_tool_status(&cwd).await
@@ -2049,11 +2129,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if recovery_write { "Git operation cancelled; inspect the repository before retrying" } else if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if recovery_write { "Git operation cancelled; inspect the repository before retrying" } else if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if clone_write { "Clone cancelled; inspect the destination and recovery history before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if recovery_write { "Git operation timed out; inspect the repository before retrying" } else if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if recovery_write { "Git operation timed out; inspect the repository before retrying" } else if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if clone_write { "Clone timed out; inspect the destination and recovery history before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         });

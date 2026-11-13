@@ -205,6 +205,9 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !
       const pending = await bounded(client.request('list_clone_recoveries')) as Array<Record<string, unknown>>
       const record = pending.find(row => row.destination === destination)
       assert.equal(record?.phase, 'ready')
+      assert.deepEqual(Object.keys(record ?? {}).sort(), ['destination', 'id', 'phase', 'stage'])
+      assert.ok(!JSON.stringify(pending).includes(url))
+      assert.ok(!JSON.stringify(pending).includes('AliceCase'))
       assert.equal(Object.hasOwn(record ?? {}, 'recoverable'), false)
       assert.equal(Object.hasOwn(record ?? {}, 'conflicted'), false)
       const withStatus = await bounded(client.request('list_clone_recoveries', { report_recovery_status: true })) as Array<Record<string, unknown>>

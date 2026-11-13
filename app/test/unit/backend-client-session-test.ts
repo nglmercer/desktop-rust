@@ -19,6 +19,36 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('treats interrupted Wry clone and recovery mutations as non-retryable', async () => {
+    const invoke = vi.fn().mockRejectedValue({ code: 'cancelled', message: 'interrupted', retryable: true })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    for (const operation of [
+      { type: 'clone_selected', url: 'https://github.com/a/b', path: '/repo', account: { host: 'github.com', login: 'alice', id: 1 } },
+      { type: 'recover_clone', recovery_id: '11111111-1111-1111-1111-111111111111' },
+    ]) {
+      await expect(client.request('git_info', { operation })).rejects.toMatchObject({ code: 'cancelled', retryable: false })
+      expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation, deadline_ms: 3_600_000 }))
+    }
+  })
+
+  it('reports cancellation of an in-flight Wry clone as uncertain', async () => {
+    const invoke = vi.fn(() => new Promise(() => {}))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const controller = new AbortController()
+    const operation = { type: 'clone_selected', url: 'https://github.com/a/b', path: '/repo', account: { host: 'github.com', login: 'alice', id: 1 } }
+    const result = new BackendClient().request('git_info', { operation }, { signal: controller.signal })
+    controller.abort()
+    await expect(result).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('recovery history') })
+  })
+
+  it('reports a Wry clone timeout as uncertain', async () => {
+    const invoke = vi.fn(() => new Promise(() => {}))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const operation = { type: 'clone_selected', url: 'https://github.com/a/b', path: '/repo', account: { host: 'github.com', login: 'alice', id: 1 } }
+    await expect(new BackendClient().request('git_info', { operation }, { deadlineMs: 1 })).rejects.toMatchObject({ code: 'ETIMEDOUT', retryable: false, message: expect.stringContaining('recovery history') })
+  })
+
   it('rejects oversized working-file snapshots before requesting chunks', async () => {
     const client = new BackendClient()
     const id = '12345678-1234-4234-8234-123456789abc'

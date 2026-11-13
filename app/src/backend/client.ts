@@ -419,8 +419,10 @@ class WryTransport {
       const fetchMutation = method === 'git_info' && isRecord(params) &&
         isRecord(params.operation) && params.operation.type === 'fetch_remote' &&
         isRecord(params.operation.operation) && (params.operation.operation.method === 'renderer_fetch' || params.operation.operation.method === 'renderer_remote_head')
-      const maximum = fetchMutation ? 3_600_000 : method === 'copilot' ? 330_000 : 60_000
-      const deadline = opts.deadlineMs ?? (fetchMutation ? 3_600_000 : method === 'copilot' ? 170_000 : 60_000)
+      const cloneMutation = method === 'git_info' && isRecord(params) &&
+        isRecord(params.operation) && (params.operation.type === 'clone_selected' || params.operation.type === 'recover_clone')
+      const maximum = fetchMutation || cloneMutation ? 3_600_000 : method === 'copilot' ? 330_000 : 60_000
+      const deadline = opts.deadlineMs ?? (fetchMutation || cloneMutation ? 3_600_000 : method === 'copilot' ? 170_000 : 60_000)
       if (!Number.isInteger(deadline) || deadline < 1 || deadline > maximum) {
         throw new BackendError({
           code: 'invalid_request',
@@ -492,7 +494,7 @@ class WryTransport {
         params.operation.type === 'commit_checkpoint' && isRecord(params.operation.operation) &&
         typeof params.operation.operation.method === 'string' &&
         ['prepare_selected_commit', 'publish_selected_commit', 'recover_published_commit_checkpoint', 'close_unchanged_commit_checkpoint', 'forget_commit_checkpoint'].includes(params.operation.operation.method)
-      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite || recoveryWrite
+      const mutating = cloneMutation || identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite || recoveryWrite
       const nativeError = (error: unknown): BackendError => {
         const result = toBackendError(error)
         if (!mutating || !result.retryable) return result
@@ -537,7 +539,9 @@ class WryTransport {
         const abort = () =>
           cancel(
             'cancelled',
-            identityWrite
+            cloneMutation
+              ? 'Clone cancelled; inspect the destination and recovery history before retrying'
+              : identityWrite
               ? 'Git identity update cancelled; inspect Git settings before retrying'
               : settingsWrite
               ? 'Git setting update cancelled; inspect Git settings before retrying'
@@ -564,7 +568,9 @@ class WryTransport {
           () =>
             cancel(
               'ETIMEDOUT',
-              identityWrite
+              cloneMutation
+                ? 'Clone timed out; inspect the destination and recovery history before retrying'
+                : identityWrite
                 ? 'Git identity update timed out; inspect Git settings before retrying'
                 : settingsWrite
                 ? 'Git setting update timed out; inspect Git settings before retrying'

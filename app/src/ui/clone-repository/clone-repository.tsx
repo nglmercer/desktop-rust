@@ -99,6 +99,7 @@ interface ICloneRepositoryProps {
 
 interface ICloneRepositoryState {
   readonly nativeSelectedClone: boolean
+  readonly nativeOperation: boolean
   readonly nativeProgress: string | null
   readonly nativeMessage: string | null
   readonly nativeRecoveries: ReadonlyArray<INativeCloneRecovery>
@@ -213,6 +214,7 @@ export class CloneRepository extends React.Component<
   )
 
   private mounted = false
+  private pathValidationGeneration = 0
 
   /**
    * The account whose repositories the GitHub tab's selection and filter
@@ -234,6 +236,7 @@ export class CloneRepository extends React.Component<
 
     this.state = {
       nativeSelectedClone: false,
+      nativeOperation: false,
       nativeProgress: null,
       nativeMessage: null,
       nativeRecoveries: [],
@@ -283,7 +286,7 @@ export class CloneRepository extends React.Component<
 
   public componentDidMount() {
     this.mounted = true
-    if (backend().transportKind === 'ws') {
+    if (backend().transportKind !== 'none') {
       void this.refreshNativeRecoveries()
     }
     const initialURL = this.props.initialURL
@@ -296,6 +299,7 @@ export class CloneRepository extends React.Component<
 
   public componentWillUnmount(): void {
     this.mounted = false
+    this.pathValidationGeneration++
     this.checkIsTopMostDialog(false)
   }
 
@@ -321,6 +325,7 @@ export class CloneRepository extends React.Component<
         onDismissed={this.props.onDismissed}
         loading={this.state.loading}
         disabled={this.state.loading}
+        dismissDisabled={this.state.nativeOperation}
       >
         <TabBar
           onTabClicked={this.onTabClicked}
@@ -332,7 +337,7 @@ export class CloneRepository extends React.Component<
 
         {error ? <DialogError>{error.message}</DialogError> : null}
 
-        {backend().transportKind === 'ws' &&
+        {backend().transportKind !== 'none' &&
         this.props.selectedTab === CloneRepositoryTab.GitHub ? (
           <label>
             <input
@@ -351,7 +356,7 @@ export class CloneRepository extends React.Component<
         {this.state.nativeMessage !== null ? (
           <p role="status">{this.state.nativeMessage}</p>
         ) : null}
-        {backend().transportKind === 'ws' &&
+        {backend().transportKind !== 'none' &&
         this.state.nativeRecoveries.length > 0 ? (
           <div>
             <p>Interrupted clones</p>
@@ -441,7 +446,7 @@ export class CloneRepository extends React.Component<
   }
 
   private onNativeModeChanged = (event: React.FormEvent<HTMLInputElement>) => {
-    this.setState({ nativeSelectedClone: event.currentTarget.checked })
+    this.setState({ nativeSelectedClone: event.currentTarget.checked }, this.validatePath)
   }
 
   private refreshNativeRecoveries = async () => {
@@ -479,7 +484,7 @@ export class CloneRepository extends React.Component<
     ) {
       return
     }
-    this.setState({ loading: true, nativeMessage: null })
+    this.setState({ loading: true, nativeMessage: null, nativeOperation: true })
     try {
       const result = await recoverNativeClone(
         id,
@@ -490,11 +495,12 @@ export class CloneRepository extends React.Component<
         this.setState({
           nativeMessage: `Recovered ${result.path}. Add it as an existing repository to open it. Private staging retained at ${result.staging}.`,
           loading: false,
+          nativeOperation: false,
         })
       }
     } catch (error) {
       if (this.mounted) {
-        this.setState({ loading: false })
+        this.setState({ loading: false, nativeOperation: false })
         this.setSelectedTabState({
           error: new Error(
             `${error.message} Inspect the destination before retrying.`
@@ -738,6 +744,8 @@ export class CloneRepository extends React.Component<
   }
 
   private validatePath = async () => {
+    const generation = ++this.pathValidationGeneration
+    const tab = this.props.selectedTab
     const tabState = this.getSelectedTabState()
     const { path, url, error } = tabState
     const { initialPath } = this.state
@@ -754,7 +762,7 @@ export class CloneRepository extends React.Component<
       // We only care about the result if the path hasn't
       // changed since we went async
       const newTabState = this.getSelectedTabState()
-      if (newTabState.path === path) {
+      if (generation === this.pathValidationGeneration && this.props.selectedTab === tab && newTabState.path === path) {
         this.setSelectedTabState({ error: pathValidation, path })
       }
     }
@@ -880,6 +888,17 @@ export class CloneRepository extends React.Component<
           'Finish or cancel the assisted commit run before cloning into this directory.'
         )
       }
+      if (
+        backend().transportKind !== 'none' &&
+        this.props.selectedTab === CloneRepositoryTab.GitHub &&
+        this.state.nativeSelectedClone
+      ) {
+        // This is only an early UI check. The native clone operation itself
+        // validates and reserves the destination before contacting a remote.
+        return await backend().pathExists(Path.resolve(path))
+          ? new Error('This mode requires a destination that does not yet exist.')
+          : null
+      }
       const directoryFiles = await readdir(path)
 
       if (directoryFiles.length === 0) {
@@ -953,34 +972,37 @@ export class CloneRepository extends React.Component<
   }
 
   private clone = async () => {
-    this.setState({ loading: true })
-
     // Capture what's being cloned before going async, so that changes made
     // while the clone is being prepared can't mix one account's repository
     // with another account.
     const request = this.getCloneRequest()
     const { path } = request
+    const nativeOperation = backend().transportKind !== 'none' &&
+      request.tab === CloneRepositoryTab.GitHub && this.state.nativeSelectedClone
+    this.setState({ loading: true, nativeOperation })
 
     if (path == null) {
       const error = new Error(`Directory could not be created at this path.`)
-      this.setState({ loading: false })
+      this.setState({ loading: false, nativeOperation: false })
       this.setSelectedTabState({ error })
       return
     }
 
     const pathError = await this.validateClonePath(path)
+    if (!this.mounted) return
     if (pathError !== null) {
-      this.setState({ loading: false })
+      this.setState({ loading: false, nativeOperation: false })
       this.setSelectedTabState({ error: pathError })
       return
     }
 
     const cloneInfo = await this.resolveCloneInfo(request)
+    if (!this.mounted) return
     if (!cloneInfo) {
       const error = new Error(
         `We couldn't find that repository. Check that you are logged in, the network is accessible, and the URL or repository alias are spelled correctly.`
       )
-      this.setState({ loading: false })
+      this.setState({ loading: false, nativeOperation: false })
       this.setSelectedTabState({ error })
       return
     }
@@ -988,35 +1010,22 @@ export class CloneRepository extends React.Component<
     const { url, defaultBranch } = cloneInfo
 
     const currentPathError = await this.validateClonePath(path)
+    if (!this.mounted) return
     if (currentPathError !== null) {
-      this.setState({ loading: false })
+      this.setState({ loading: false, nativeOperation: false })
       this.setSelectedTabState({ error: currentPathError })
       return
     }
-    if (
-      backend().transportKind === 'ws' &&
-      request.tab === CloneRepositoryTab.GitHub &&
-      this.state.nativeSelectedClone
-    ) {
+    if (nativeOperation) {
       const account = request.account
       if (account === null) {
-        this.setState({ loading: false })
+        this.setState({ loading: false, nativeOperation: false })
         this.setSelectedTabState({
           error: new Error('Choose an account to clone.'),
         })
         return
       }
       try {
-        try {
-          await readdir(path)
-          throw new Error(
-            'This mode requires a destination that does not yet exist.'
-          )
-        } catch (error) {
-          if (error.code !== 'ENOENT') {
-            throw error
-          }
-        }
         const host = nativeCloneAccountHost(account.endpoint)
         const result = await nativeClone(
           url.trim(),
@@ -1032,13 +1041,14 @@ export class CloneRepository extends React.Component<
         if (this.mounted) {
           this.setState({
             loading: false,
+            nativeOperation: false,
             nativeProgress: null,
             nativeMessage: `Cloned ${result.path}. Add it as an existing repository to open it. Private staging retained at ${result.staging}.`,
           })
         }
       } catch (error) {
         if (this.mounted) {
-          this.setState({ loading: false, nativeProgress: null })
+          this.setState({ loading: false, nativeProgress: null, nativeOperation: false })
           this.setSelectedTabState({
             error: new Error(
               `${error.message} Inspect the destination before retrying.`

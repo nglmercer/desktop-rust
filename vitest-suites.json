@@ -333,6 +333,8 @@
   "script/vite-static-assets.test.ts",
   "app/test/unit/menu-event-test.ts",
   "rust/tests/wry-emoji-webview.test.ts",
+  "rust/tests/wry-selected-clone.test.ts",
   "app/test/unit/git/assisted-commit-push-git-semantics-test.ts",
-  "app/test/unit/acknowledgements-test.tsx"
+  "app/test/unit/acknowledgements-test.tsx",
+  "app/test/unit/native-clone-dialog-test.tsx"
 ]

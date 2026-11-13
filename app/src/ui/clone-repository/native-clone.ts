@@ -47,9 +47,10 @@ export interface INativeCloneRecovery {
 export async function listNativeCloneRecoveries(): Promise<
   ReadonlyArray<INativeCloneRecovery>
 > {
-  const result = await backend().request('list_clone_recoveries', {
-    report_recovery_status: true,
-  })
+  const client = backend()
+  const result = client.transportKind === 'wry'
+    ? await client.request('git_info', { operation: { type: 'list_clone_recoveries' } })
+    : await client.request('list_clone_recoveries', { report_recovery_status: true })
   if (!Array.isArray(result)) {
     throw new Error('Unable to read clone recovery history.')
   }
@@ -125,17 +126,18 @@ async function nativeCloneReserved(
   defaultBranch: string | undefined,
   onProgress: (text: string) => void
 ): Promise<{ readonly path: string; readonly staging: string }> {
-  const result = await backend().request(
-    'clone_repository',
-    {
+  const client = backend()
+  const options = {
       url,
       path,
       account,
       default_branch: defaultBranch,
-      recursive: false,
-      report_progress: true,
-      report_retained_staging: true,
-    },
+  }
+  const result = await client.request(
+    client.transportKind === 'wry' ? 'git_info' : 'clone_repository',
+    client.transportKind === 'wry'
+      ? { operation: { type: 'clone_selected', ...options } }
+      : { ...options, recursive: false, report_progress: true, report_retained_staging: true },
     {
       deadlineMs: 3_600_000,
       onProgress: chunk => {
@@ -185,9 +187,12 @@ export async function recoverNativeClone(
 async function recoverNativeCloneReserved(
   id: string
 ): Promise<{ readonly path: string; readonly staging: string }> {
-  const result = await backend().request(
-    'recover_clone',
-    { recovery_id: id, report_retained_staging: true },
+  const client = backend()
+  const result = await client.request(
+    client.transportKind === 'wry' ? 'git_info' : 'recover_clone',
+    client.transportKind === 'wry'
+      ? { operation: { type: 'recover_clone', recovery_id: id } }
+      : { recovery_id: id, report_retained_staging: true },
     { deadlineMs: 3_600_000 }
   )
   if (!isRecord(result)) {

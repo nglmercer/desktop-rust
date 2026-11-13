@@ -640,7 +640,9 @@ impl Registry {
             let recoverable = !conflicted && intent.parent_identity.is_some() && intent.phase == "ready";
             let mut value = serde_json::to_value(intent)?;
             let object = value.as_object_mut().context("Invalid clone recovery record")?;
-            object.remove("parent_identity");
+            // Recovery UIs need only the paths and phase. URL, account, file
+            // identities and certificates remain private to the journal.
+            object.retain(|key, _| matches!(key.as_str(), "id" | "phase" | "stage" | "destination"));
             object.insert("recoverable".into(), serde_json::Value::Bool(recoverable));
             object.insert("conflicted".into(), serde_json::Value::Bool(conflicted));
             Ok(value)
@@ -2484,7 +2486,12 @@ mod tests {
         next.parent_identity = Some((1, 1));
         fixture.registry.begin_clone_intent(next).unwrap();
         assert_eq!(fixture.registry.read().unwrap().clone_intents.len(), 2);
-        assert!(fixture.registry.clone_recovery_records().unwrap().as_array().unwrap().iter().all(|record| record["recoverable"] == false));
+        let records = fixture.registry.clone_recovery_records().unwrap();
+        assert!(records.as_array().unwrap().iter().all(|record| record["recoverable"] == false));
+        for record in records.as_array().unwrap() {
+            let keys = record.as_object().unwrap().keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(keys, ["id", "phase", "stage", "destination", "recoverable", "conflicted"].into_iter().collect());
+        }
         assert_eq!(fs::read(fixture.registry.clone_intents_path()).unwrap(), legacy);
         let error = recover_selected_clone_unavailable_implementation(fixture.registry.clone(), &intent.id).await.err().expect("legacy intent must not be recovered");
         assert!(error.to_string().contains("manual inspection"));
