@@ -49,6 +49,7 @@ mod paths;
 mod remote_discovery;
 pub use remote_discovery::{ManagedRemoteAction, safe_fetch_remotes, safe_remote_url};
 mod refs;
+mod renderer_cherry_pick;
 mod renderer_revert;
 pub use refs::symbolic_ref;
 mod repository_discovery;
@@ -626,6 +627,18 @@ impl Repository {
             }
             Operation::RendererRevertPreview { commit } => {
                 return self.renderer_revert_preview(&commit).await;
+            }
+            Operation::RendererCherryPickContinuePreview { expected } => {
+                return self.renderer_cherry_pick_continue_preview(&expected).await;
+            }
+            Operation::RendererCherryPickContinue {
+                expected,
+                basis,
+                empty,
+            } => {
+                return self
+                    .renderer_cherry_pick_continue(&expected, &basis, empty)
+                    .await;
             }
             Operation::RendererRevert { commit, basis } => {
                 return self.renderer_revert(&commit, &basis).await;
@@ -1253,6 +1266,8 @@ impl Repository {
             | RendererDetach { .. }
             | RendererRevertPreview { .. }
             | RendererRevert { .. }
+            | RendererCherryPickContinuePreview { .. }
+            | RendererCherryPickContinue { .. }
             | CheckoutHistory
             | AcknowledgeCheckout { .. } => unreachable!("handled by execute"),
             CreateBranch { .. } | CreateBranchPreview { .. } => unreachable!("handled by execute"),

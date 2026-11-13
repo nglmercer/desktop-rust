@@ -379,6 +379,11 @@ export async function continueCherryPick(
   manualResolutions: ReadonlyMap<string, ManualConflictResolution> = new Map(),
   progressCallback?: (progress: IMultiCommitOperationProgress) => void
 ): Promise<CherryPickResult> {
+  const native = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  const expectedState = native
+    ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryCherryPickState(repository.path), true)
+    : undefined
+  if (native && expectedState === null) return CherryPickResult.UnableToStart
   // only stage files related to cherry pick
   const trackedFiles = files.filter(f => {
     return f.status.kind !== AppFileStatusKind.Untracked
@@ -445,6 +450,12 @@ export async function continueCherryPick(
   const trackedFilesAfter = status.workingDirectory.files.filter(
     f => f.status.kind !== AppFileStatusKind.Untracked
   )
+
+  if (native && expectedState != null) {
+    const outcome = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().continueRepositoryCherryPick(repository.path, expectedState.head, trackedFilesAfter.length === 0), true)
+    return outcome === 'complete' ? CherryPickResult.CompletedWithoutError : CherryPickResult.ConflictsEncountered
+  }
 
   if (trackedFilesAfter.length === 0) {
     log.warn(

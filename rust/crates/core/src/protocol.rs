@@ -281,6 +281,14 @@ pub enum Operation {
         kind: RecoveryKind,
         action: RecoveryAction,
     },
+    RendererCherryPickContinuePreview {
+        expected: String,
+    },
+    RendererCherryPickContinue {
+        expected: String,
+        basis: String,
+        empty: bool,
+    },
     RenameBranchPreview {
         name: String,
         new_name: String,

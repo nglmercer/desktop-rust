@@ -318,6 +318,13 @@ pub(crate) async fn run_bound_checkout(path: &Path, args: &[OsString]) -> Result
     run_command(path, bound_git_command(), args, None, 2 * 1024 * 1024, None).await
 }
 
+/// Continue a cherry-pick without invoking an inherited interactive editor.
+pub(crate) async fn run_bound_cherry_pick(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    let mut command = bound_git_command();
+    command.env("GIT_EDITOR", ":");
+    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+}
+
 /// Discover a repository without inherited command-scoped Git configuration.
 pub(crate) async fn run_bound_discovery(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     let mut command = bound_git_command();

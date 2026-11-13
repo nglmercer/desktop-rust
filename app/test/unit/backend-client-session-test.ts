@@ -606,6 +606,23 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.checkoutDetachedCommit('/repo', oid, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
   })
 
+  it('reviews cherry-pick continuation and never replays an interrupted mutation', async () => {
+    const head = 'a'.repeat(40)
+    const preview = { head, basis: 'b'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ outcome: 'complete', code: 0, stdout: '', stderr: '' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.continueRepositoryCherryPick('/repo', head, false)).resolves.toBe('complete')
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'continue_cherry_pick', repository_path: '/repo', operation: { method: 'renderer_cherry_pick_continue', expected: head, basis: preview.basis, empty: false } } }))
+    invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ outcome: 'conflict', code: 1, stdout: '', stderr: '' })
+    await expect(client.continueRepositoryCherryPick('/repo', head, false)).resolves.toBe('conflict')
+    invoke.mockResolvedValueOnce({ ...preview, head: 'c'.repeat(40) })
+    await expect(client.continueRepositoryCherryPick('/repo', head, false)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.continueRepositoryCherryPick('/repo', head, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('inspect cherry-pick state') })
+    expect(invoke).toHaveBeenCalledTimes(7)
+  })
+
   it('binds revert to the reviewed branch and reports conflicts without replay', async () => {
     const commit = 'a'.repeat(40)
     const head = 'b'.repeat(40)

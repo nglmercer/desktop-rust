@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  transport: 'wry', state: vi.fn(), context: vi.fn(), git: vi.fn(), commit: vi.fn(), status: vi.fn(), stage: vi.fn(),
+  transport: 'wry', state: vi.fn(), context: vi.fn(), git: vi.fn(), commit: vi.fn(), status: vi.fn(), stage: vi.fn(), continuePick: vi.fn(),
   scope: vi.fn(async (_path: string, _kind: string, work: () => Promise<unknown>) => work()),
 }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryCherryPickState: mocks.state, repositoryStatusContext: mocks.context }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryCherryPickState: mocks.state, repositoryStatusContext: mocks.context, continueRepositoryCherryPick: mocks.continuePick }) }))
 vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: mocks.scope }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 vi.mock('../../src/lib/git/status', () => ({ getStatus: mocks.status }))
@@ -52,6 +52,19 @@ describe.each(['wry', 'ws'])('Rust cherry-pick state through %s', transport => {
     mocks.status.mockResolvedValue({ workingDirectory: { files: [] } })
     mocks.context.mockResolvedValue({ isCherryPickingHeadFound: false })
     await expect(continueCherryPick(repository, [])).resolves.toBe(CherryPickResult.UnableToStart)
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { files: [{ path: 'changed', status: { kind: 'Modified' } }], empty: false, outcome: 'conflict', result: CherryPickResult.ConflictsEncountered },
+    { files: [], empty: true, outcome: 'complete', result: CherryPickResult.CompletedWithoutError },
+  ])('continues the selected cherry-pick with empty=$empty', async ({ files, empty, outcome, result }) => {
+    mocks.state.mockResolvedValue({ head, sequence: null })
+    mocks.context.mockResolvedValue({ isCherryPickingHeadFound: true })
+    mocks.status.mockResolvedValue({ workingDirectory: { files } })
+    mocks.continuePick.mockResolvedValue(outcome)
+    await expect(continueCherryPick(repository, files as any)).resolves.toBe(result)
+    expect(mocks.continuePick).toHaveBeenCalledWith('/repo', head, empty)
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

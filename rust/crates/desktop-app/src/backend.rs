@@ -141,6 +141,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    ContinueCherryPick {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -428,6 +432,9 @@ impl Backend {
         | GitInfoOperation::FinishMergeCommit {
             repository_path, ..
         }
+        | GitInfoOperation::ContinueCherryPick {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -620,6 +627,17 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported merge completion operation".into(),
+            ));
+        }
+        if let GitInfoOperation::ContinueCherryPick { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererCherryPickContinuePreview { .. }
+                    | Operation::RendererCherryPickContinue { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported cherry-pick continuation operation".into(),
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
@@ -1388,6 +1406,10 @@ impl Backend {
             BackendOperation::GitInfo(
                 GitInfoOperation::AbortGitOperation { .. }
                     | GitInfoOperation::FinishMergeCommit { .. }
+                    | GitInfoOperation::ContinueCherryPick {
+                        operation: Operation::RendererCherryPickContinue { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1548,6 +1570,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::FinishMergeCommit { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::ContinueCherryPick { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1812,6 +1841,39 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn wry_continues_reviewed_cherry_pick() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            use std::{fs, process::Command};
+            let root = std::env::temp_dir().join(format!("desktop-wry-pick-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let run = |args: &[&str]| Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+            let git = |args: &[&str]| { let out = run(args); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
+            git(&["init", "-q", "-b", "main"]);
+            git(&["config", "user.name", "Test"]);
+            git(&["config", "user.email", "test@example.invalid"]);
+            fs::write(root.join("file"), "base\n").unwrap();
+            git(&["add", "file"]); git(&["commit", "-qm", "base"]);
+            git(&["switch", "-qc", "source"]);
+            fs::write(root.join("file"), "source\n").unwrap(); git(&["commit", "-qam", "source"]);
+            let target = git(&["rev-parse", "HEAD"]);
+            git(&["switch", "-q", "main"]);
+            fs::write(root.join("file"), "destination\n").unwrap(); git(&["commit", "-qam", "destination"]);
+            assert!(!run(&["cherry-pick", &target]).status.success());
+            fs::write(root.join("file"), "resolution\n").unwrap(); git(&["add", "file"]);
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"continue_cherry_pick","repository_path":root,"operation":operation}})]);
+            assert!(route(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(route(json!({"method":"renderer_cherry_pick_continue_preview","expected":target})).unwrap()).unwrap();
+            let basis = preview["basis"].as_str().unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_cherry_pick_continue","expected":target,"basis":"bad","empty":false})).unwrap()).is_err());
+            let result = backend.read(route(json!({"method":"renderer_cherry_pick_continue","expected":target,"basis":basis,"empty":false})).unwrap()).unwrap();
+            assert_eq!(result["outcome"], "complete");
+            assert_eq!(git(&["show", "HEAD:file"]), "resolution");
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
     }
 
     #[cfg(unix)]

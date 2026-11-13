@@ -2235,7 +2235,7 @@ app's models/stores/UI/platform integrations also require audit.
 | `revert.ts`                          | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `rm.ts`                              | Removing all index entries uses typed Rust on Wry and WebSocket; conflict removal and Electron fallback remain                                                                                                   |
 | `show.ts`                            | Pending semantic audit and replacement                                                                                                                                                                            |
-| `spawn.ts`                           | Partial: bounded capture, cancellation, Unix groups, timeout and signals; streaming and Windows process trees pending                                                                                             |
+| `spawn.ts`                           | Removed: no production callers remain; Rust streaming and Windows process-tree support remain pending                                                                                                             |
 | `squash.ts`                          | Pending semantic audit and replacement                                                                                                                                                                            |
 | `stage.ts`                           | Partial; inspect corresponding typed operation and integration coverage                                                                                                                                           |
 | `stash.ts`                           | Partial: structured listing, saved files/index, branch markers/move, reviewed apply/pop/drop, checkout leave/bring and rename reassociation implemented; remaining callers/platform audit pending                 |
@@ -2390,3 +2390,13 @@ or abort. Interrupted outcomes require inspection before retrying. External
 Git writers can still race the review, progress currently reports only start
 and finish, and interactive hook-failure handling remains to be migrated. The
 Electron path and cross-platform parity remain legacy-removal gates.
+
+## Cherry-pick continuation
+
+The Wry and WebSocket renderers continue reviewed cherry-picks through Rust.
+The native operation verifies the selected cherry-pick head, resolved index,
+worktree and sequencer state, invokes Git with its editor disabled, and reports
+subsequent conflicts without retrying uncertain outcomes. Empty resolutions
+retain the previous empty-commit behavior. External Git writers can race the
+review and Git's own locks; streaming progress, interactive hook failures,
+the start operation, Electron fallback and cross-platform parity remain open.
