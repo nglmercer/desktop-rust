@@ -1,10 +1,10 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 import { CopilotCommitPanel } from '../../../src/ui/changes/copilot-commit-panel'
 import { AssistedCommitRunState } from '../../../src/models/assisted-commit-run'
 import { ErrorWithMetadata } from '../../../src/lib/error-with-metadata'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import { PushProgressParser } from '../../../src/lib/progress'
 
 describe('Copilot commit run panel', () => {

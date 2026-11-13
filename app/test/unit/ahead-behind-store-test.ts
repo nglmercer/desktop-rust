@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { describe, it, beforeEach } from 'vitest'
 import assert from 'node:assert'
 import { AheadBehindStore } from '../../src/lib/stores/ahead-behind-store'
 import { Repository } from '../../src/models/repository'

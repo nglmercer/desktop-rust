@@ -1,4 +1,7 @@
 [
+  "app/test/unit/ahead-behind-store-test.ts",
+  "app/test/unit/copilot-assisted-commit-test.ts",
+  "app/test/unit/ui/copilot-commit-panel-test.tsx",
   "app/test/unit/credential-sessions-test.ts",
   "app/test/unit/web-open-path-test.ts",
   "rust/tests/wry-packaged.test.ts",
