@@ -8,7 +8,11 @@ import {
 } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Repository } from '../../src/models/repository'
-import type { WorkingDirectoryFileChange } from '../../src/models/status'
+import {
+  AppFileStatusKind,
+  WorkingDirectoryFileChange,
+} from '../../src/models/status'
+import { DiffSelection, DiffSelectionType } from '../../src/models/diff'
 import type { Dispatcher } from '../../src/ui/dispatcher'
 
 const mocks = vi.hoisted(() => ({ preview: vi.fn(), discard: vi.fn() }))
@@ -68,8 +72,12 @@ import { DiscardChanges } from '../../src/ui/discard-changes/discard-changes-dia
 
 const repository = { path: '/repo' } as Repository
 const files = [
-  { path: 'new', id: 'new' },
-] as ReadonlyArray<WorkingDirectoryFileChange>
+  new WorkingDirectoryFileChange(
+    'new',
+    { kind: AppFileStatusKind.Untracked },
+    DiffSelection.fromInitialSelection(DiffSelectionType.All)
+  ),
+]
 const dispatcher = { discardChanges: mocks.discard } as unknown as Dispatcher
 afterEach(() => {
   cleanup()

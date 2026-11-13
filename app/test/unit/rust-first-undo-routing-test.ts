@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repository } from '../../src/models/repository'
-import type { Commit } from '../../src/models/commit'
+import { Commit } from '../../src/models/commit'
+import { CommitIdentity } from '../../src/models/commit-identity'
 import type { IAppShell } from '../../src/lib/app-shell'
 import type { IStatsStore } from '../../src/lib/stats'
 import { AppFileStatusKind } from '../../src/models/status'
@@ -51,12 +52,23 @@ describe('first-commit undo routing', () => {
     gitHubRepository: null,
   } as Repository
   const oid = 'a'.repeat(40)
-  const commit = {
-    sha: oid,
-    parentSHAs: [],
-    summary: 'first',
-    body: '',
-  } as Commit
+  const author = new CommitIdentity(
+    'Test',
+    'test@example.invalid',
+    new Date(0),
+    0
+  )
+  const commit = new Commit(
+    oid,
+    oid.slice(0, 7),
+    'first',
+    '',
+    author,
+    author,
+    [],
+    [],
+    []
+  )
   beforeEach(() => vi.clearAllMocks())
 
   it.each([

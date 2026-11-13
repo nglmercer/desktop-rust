@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repository } from '../../src/models/repository'
-import type { WorkingDirectoryFileChange } from '../../src/models/status'
-import { AppFileStatusKind } from '../../src/models/status'
-import { DiffSelectionType, type ITextDiff } from '../../src/models/diff'
+import {
+  AppFileStatusKind,
+  WorkingDirectoryFileChange,
+} from '../../src/models/status'
+import {
+  DiffSelection,
+  DiffSelectionType,
+  type ITextDiff,
+} from '../../src/models/diff'
 
 const mocks = vi.hoisted(() => ({
   transport: 'wry',
@@ -175,25 +181,29 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
   })
   it('stages full selections in rename, update and deletion order', async () => {
     const repository = { path: '/repo' } as Repository
-    const selected = { getSelectionType: () => DiffSelectionType.All }
-    const partial = { getSelectionType: () => DiffSelectionType.Partial }
+    const selected = DiffSelection.fromInitialSelection(DiffSelectionType.All)
+    const partial = selected.withLineSelection(0, false)
     const files = [
-      {
-        path: 'new',
-        status: { kind: AppFileStatusKind.Renamed, oldPath: 'old' },
-        selection: selected,
-      },
-      {
-        path: 'gone',
-        status: { kind: AppFileStatusKind.Deleted },
-        selection: selected,
-      },
-      {
-        path: 'partial',
-        status: { kind: AppFileStatusKind.Modified },
-        selection: partial,
-      },
-    ] as ReadonlyArray<WorkingDirectoryFileChange>
+      new WorkingDirectoryFileChange(
+        'new',
+        {
+          kind: AppFileStatusKind.Renamed,
+          oldPath: 'old',
+          renameIncludesModifications: true,
+        },
+        selected
+      ),
+      new WorkingDirectoryFileChange(
+        'gone',
+        { kind: AppFileStatusKind.Deleted },
+        selected
+      ),
+      new WorkingDirectoryFileChange(
+        'partial',
+        { kind: AppFileStatusKind.Modified },
+        partial
+      ),
+    ]
     mocks.updateIndex.mockResolvedValue(undefined)
     mocks.applyPatch.mockResolvedValue(undefined)
     await stageFiles(repository, files)
@@ -212,23 +222,25 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
   })
   it('retains a recreated rename source only when separately selected', async () => {
     const repository = { path: '/repo' } as Repository
-    const partial = { getSelectionType: () => DiffSelectionType.Partial }
-    const all = { getSelectionType: () => DiffSelectionType.All }
+    const all = DiffSelection.fromInitialSelection(DiffSelectionType.All)
+    const partial = all.withLineSelection(0, false)
     const files = [
-      {
-        id: 'rename',
-        path: 'new',
-        status: { kind: AppFileStatusKind.Renamed, oldPath: 'old' },
-        selection: partial,
-      },
-      {
-        id: 'source',
-        path: 'old',
-        status: { kind: AppFileStatusKind.Untracked },
-        selection: all,
-      },
-    ] as ReadonlyArray<WorkingDirectoryFileChange>
-    const certified = new Map([['rename', {} as ITextDiff]])
+      new WorkingDirectoryFileChange(
+        'new',
+        {
+          kind: AppFileStatusKind.Renamed,
+          oldPath: 'old',
+          renameIncludesModifications: true,
+        },
+        partial
+      ),
+      new WorkingDirectoryFileChange(
+        'old',
+        { kind: AppFileStatusKind.Untracked },
+        all
+      ),
+    ]
+    const certified = new Map([[files[0].id, {} as ITextDiff]])
     mocks.updateIndex.mockResolvedValue(undefined)
     mocks.applyPatch.mockResolvedValue(undefined)
     await stageFiles(repository, files, certified)
@@ -236,28 +248,32 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
     expect(mocks.applyPatch).toHaveBeenCalledWith(
       repository,
       files[0],
-      certified.get('rename'),
+      certified.get(files[0].id),
       true
     )
   })
   it('stages a partial recreated source after its rename', async () => {
     const repository = { path: '/repo' } as Repository
-    const partial = { getSelectionType: () => DiffSelectionType.Partial }
-    const source = {
-      id: 'source',
-      path: 'old',
-      status: { kind: AppFileStatusKind.Untracked },
-      selection: partial,
-    } as WorkingDirectoryFileChange
-    const rename = {
-      id: 'rename',
-      path: 'new',
-      status: { kind: AppFileStatusKind.Renamed, oldPath: 'old' },
-      selection: partial,
-    } as WorkingDirectoryFileChange
+    const partial = DiffSelection.fromInitialSelection(
+      DiffSelectionType.All
+    ).withLineSelection(0, false)
+    const source = new WorkingDirectoryFileChange(
+      'old',
+      { kind: AppFileStatusKind.Untracked },
+      partial
+    )
+    const rename = new WorkingDirectoryFileChange(
+      'new',
+      {
+        kind: AppFileStatusKind.Renamed,
+        oldPath: 'old',
+        renameIncludesModifications: true,
+      },
+      partial
+    )
     const diff = {} as ITextDiff
     mocks.applyPatch.mockResolvedValue(undefined)
-    await stageFiles(repository, [source, rename], new Map([['rename', diff]]))
+    await stageFiles(repository, [source, rename], new Map([[rename.id, diff]]))
     expect(mocks.applyPatch.mock.calls).toEqual([
       [repository, rename, diff, false],
       [repository, source, undefined, false],
@@ -266,21 +282,29 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
   })
   it('rejects cyclic rename selections before changing the index', async () => {
     const repository = { path: '/repo' } as Repository
-    const partial = { getSelectionType: () => DiffSelectionType.Partial }
+    const partial = DiffSelection.fromInitialSelection(
+      DiffSelectionType.All
+    ).withLineSelection(0, false)
     const files = [
-      {
-        id: 'a',
-        path: 'a',
-        status: { kind: AppFileStatusKind.Renamed, oldPath: 'b' },
-        selection: partial,
-      },
-      {
-        id: 'b',
-        path: 'b',
-        status: { kind: AppFileStatusKind.Renamed, oldPath: 'a' },
-        selection: partial,
-      },
-    ] as ReadonlyArray<WorkingDirectoryFileChange>
+      new WorkingDirectoryFileChange(
+        'a',
+        {
+          kind: AppFileStatusKind.Renamed,
+          oldPath: 'b',
+          renameIncludesModifications: true,
+        },
+        partial
+      ),
+      new WorkingDirectoryFileChange(
+        'b',
+        {
+          kind: AppFileStatusKind.Renamed,
+          oldPath: 'a',
+          renameIncludesModifications: true,
+        },
+        partial
+      ),
+    ]
     await expect(stageFiles(repository, files)).rejects.toThrow(
       'Overlapping renamed selections'
     )
