@@ -92,5 +92,12 @@
   "app/test/unit/preferences-git-save-test.ts",
   "app/test/unit/rust-canonical-path-test.ts",
   "script/draft-release/format-json.test.ts",
-  "script/highlighter-build.test.ts"
+  "script/highlighter-build.test.ts",
+  "app/test/unit/git/push-terminal-chunk-test.ts",
+  "app/test/unit/git/create-tail-stream-test.ts",
+  "app/test/unit/git/create-terminal-stream-test.ts",
+  "app/test/unit/git/environment-test.ts",
+  "app/test/unit/progress/git-test.ts",
+  "app/test/unit/progress/lfs-test.ts",
+  "app/test/unit/progress/clone-test.ts"
 ]

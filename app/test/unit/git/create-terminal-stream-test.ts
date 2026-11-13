@@ -1,4 +1,5 @@
-import { describe, it } from 'node:test'
+// @vitest-environment node
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'

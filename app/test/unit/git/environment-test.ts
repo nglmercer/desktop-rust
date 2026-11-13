@@ -1,4 +1,5 @@
-import { describe, it } from 'node:test'
+// @vitest-environment node
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { envForProxy } from '../../../src/lib/git/environment'
 

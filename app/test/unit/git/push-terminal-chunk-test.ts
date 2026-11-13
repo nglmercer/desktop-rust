@@ -1,4 +1,5 @@
-import { describe, it } from 'node:test'
+// @vitest-environment node
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { pushTerminalChunk } from '../../../src/lib/git/push-terminal-chunk'
 
