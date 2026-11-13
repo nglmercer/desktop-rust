@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { describe, it, beforeEach } from 'vitest'
 import assert from 'node:assert'
 import { updateChangedFiles } from '../../../../src/lib/stores/updates/changes-state'
 import {

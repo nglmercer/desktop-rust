@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { AppFileStatusKind } from '../../src/models/status'
 import { DiffSelectionType } from '../../src/models/diff'

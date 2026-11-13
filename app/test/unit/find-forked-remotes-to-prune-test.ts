@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { findForkedRemotesToPrune } from '../../src/lib/stores/helpers/find-forked-remotes-to-prune'
 import { Branch, BranchType } from '../../src/models/branch'

@@ -192,5 +192,13 @@
   "app/test/unit/ui/issues-autocompletion-provider-test.tsx",
   "app/test/unit/ui/copilot-animation-test.tsx",
   "app/test/unit/ui/test-copilot-snapshot-card-dialog-test.tsx",
-  "app/test/unit/ui/commit-message-warning-dialogs-test.tsx"
+  "app/test/unit/ui/commit-message-warning-dialogs-test.tsx",
+  "app/test/unit/filter-changes-logic-test.ts",
+  "app/test/unit/octicon-test.ts",
+  "app/test/unit/squirrel-error-parser-test.ts",
+  "app/test/unit/copilot-in-memory-session-fs-provider-test.ts",
+  "app/test/unit/is-application-bundle-test.ts",
+  "app/test/unit/find-forked-remotes-to-prune-test.ts",
+  "app/test/unit/stores/updates/update-conflict-state-test.ts",
+  "app/test/unit/stores/updates/update-changed-files-test.ts"
 ]

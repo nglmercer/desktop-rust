@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { iconForRepository } from '../../src/ui/octicons'
 import * as octicons from '../../src/ui/octicons/octicons.generated'
