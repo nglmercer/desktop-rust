@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
-import { describe, it, mock } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import { WebContents } from 'electron'
 import { createAuthenticatedImageTokenResolver } from '../../src/main-process/authenticated-image-token-resolver'
 import { addTrustedIPCSender } from '../../src/main-process/trusted-ipc-sender'
@@ -8,7 +8,7 @@ import { addTrustedIPCSender } from '../../src/main-process/trusted-ipc-sender'
 let nextWebContentsId = 1
 
 function createRenderer(trusted = true) {
-  const send = mock.fn()
+  const send = vi.fn()
   const events = new EventEmitter()
   const renderer = {
     id: nextWebContentsId++,
@@ -28,7 +28,7 @@ describe('authenticated image token resolver', () => {
     const resolver = createAuthenticatedImageTokenResolver(() => renderer)
     const first = resolver.resolveToken('https://api.github.com', 'old-one')
     const second = resolver.resolveToken('https://api.github.com', 'old-two')
-    assert.deepStrictEqual(send.mock.calls[0].arguments, [
+    assert.deepStrictEqual(send.mock.calls[0], [
       'resolve-image-token',
       0,
       'https://api.github.com',
@@ -106,7 +106,7 @@ describe('authenticated image token resolver', () => {
       resolver.resolveToken('endpoint', 'old-token'),
       /^Error: Image authentication unavailable$/
     )
-    assert.strictEqual(send.mock.callCount(), 0)
+    assert.strictEqual(send.mock.calls.length, 0)
   })
 
   it('does not accept replies from a destroyed renderer', async () => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it, mock } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import {
   BeforeSendResponse,
   OnBeforeSendHeadersListenerDetails,
@@ -59,7 +59,7 @@ describe('authenticated image filter', () => {
   ]) {
     it(`resolves a fresh token before authorizing ${url}`, async () => {
       const { ordered, request } = createWebRequest()
-      const resolver = mock.fn(async () => 'fresh-access-token')
+      const resolver = vi.fn(async () => 'fresh-access-token')
       const updateAccounts = installAuthenticatedImageFilter(ordered, resolver)
       updateAccounts([
         { endpoint: 'https://api.github.com', token: 'old-access-token' },
@@ -74,7 +74,7 @@ describe('authenticated image filter', () => {
         Accept: 'image/png',
         Authorization: 'token fresh-access-token',
       })
-      assert.deepStrictEqual(resolver.mock.calls[0].arguments, [
+      assert.deepStrictEqual(resolver.mock.calls[0], [
         url.includes('enterprise.example')
           ? 'https://enterprise.example/api/v3'
           : 'https://api.github.com',
@@ -92,25 +92,25 @@ describe('authenticated image filter', () => {
   ]) {
     it(`does not resolve or attach credentials to ${url}`, async () => {
       const { ordered, request } = createWebRequest()
-      const resolver = mock.fn(async () => 'fresh-access-token')
+      const resolver = vi.fn(async () => 'fresh-access-token')
       installAuthenticatedImageFilter(
         ordered,
         resolver
       )([{ endpoint: 'https://api.github.com', token: 'old-access-token' }])
       const response = await request(url)
-      assert.strictEqual(resolver.mock.callCount(), 0)
+      assert.strictEqual(resolver.mock.calls.length, 0)
       assert.deepStrictEqual(response.requestHeaders, { Accept: 'image/png' })
     })
   }
 
   it('does not resolve credentials when signed out', async () => {
     const { ordered, request } = createWebRequest()
-    const resolver = mock.fn(async () => 'fresh-access-token')
+    const resolver = vi.fn(async () => 'fresh-access-token')
     installAuthenticatedImageFilter(ordered, resolver)
     const response = await request(
       'https://github.com/user-attachments/assets/image'
     )
-    assert.strictEqual(resolver.mock.callCount(), 0)
+    assert.strictEqual(resolver.mock.calls.length, 0)
     assert.deepStrictEqual(response.requestHeaders, { Accept: 'image/png' })
   })
 
@@ -119,13 +119,13 @@ describe('authenticated image filter', () => {
     installAuthenticatedImageFilter(ordered, async () => {
       throw new Error('refresh failed')
     })([{ endpoint: 'https://api.github.com', token: 'old-access-token' }])
-    const laterFilter = mock.fn(async () => ({}))
+    const laterFilter = vi.fn(async () => ({}))
     ordered.onBeforeSendHeaders.addEventListener(laterFilter)
     assert.deepStrictEqual(
       await request('https://github.com/user-attachments/assets/image'),
       { cancel: true }
     )
-    assert.strictEqual(laterFilter.mock.callCount(), 0)
+    assert.strictEqual(laterFilter.mock.calls.length, 0)
   })
 
   for (const token of [null, 'replacement-access-token']) {
@@ -226,11 +226,11 @@ describe('authenticated image filter', () => {
     ordered.onBeforeSendHeaders.addEventListener(async () => ({
       cancel: true,
     }))
-    const laterFilter = mock.fn(async () => ({}))
+    const laterFilter = vi.fn(async () => ({}))
     ordered.onBeforeSendHeaders.addEventListener(laterFilter)
     assert.deepStrictEqual(await request('https://example.com/image'), {
       cancel: true,
     })
-    assert.strictEqual(laterFilter.mock.callCount(), 0)
+    assert.strictEqual(laterFilter.mock.calls.length, 0)
   })
 })

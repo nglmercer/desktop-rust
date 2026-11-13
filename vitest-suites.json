@@ -216,5 +216,8 @@
   "app/test/unit/desktop-console-transport-test.ts",
   "app/test/unit/ui/dropdown-select-button-test.tsx",
   "app/test/unit/database-migration-test.ts",
-  "app/test/unit/ui/small-action-and-dialog-surfaces-test.tsx"
+  "app/test/unit/ui/small-action-and-dialog-surfaces-test.tsx",
+  "app/test/unit/authenticated-image-filter-test.ts",
+  "app/test/unit/authenticated-image-token-handler-test.ts",
+  "app/test/unit/authenticated-image-token-resolver-test.ts"
 ]
