@@ -36,11 +36,11 @@ describe('Vite Electron main build', () => {
       assert.match(command, /vite build -c vite\.main\.config\.ts/)
       assert.match(
         command,
-        /webpack --config app\/webpack\.(?:development|production)\.ts/
+        /webpack-cli\/bin\/cli\.js --disable-interpret --config app\/webpack\.(?:development|production)\.ts/
       )
       assert.ok(
         command.indexOf('vite.main.config.ts') <
-          command.indexOf('webpack --config')
+          command.indexOf('webpack-cli/bin/cli.js')
       )
     }
     for (const configs of [developmentConfigs, productionConfigs]) {

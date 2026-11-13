@@ -1,0 +1,271 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
+
+const spawn = vi.hoisted(() =>
+  vi.fn((..._args: unknown[]) => ({ status: 0, stdout: '', stderr: '' }))
+)
+vi.mock('node:child_process', () => ({
+  spawnSync: spawn,
+  default: { spawnSync: spawn },
+}))
+import { copilotPlatform, packageRust } from './package-rust'
+
+const roots: string[] = []
+const host =
+  process.platform === 'darwin'
+    ? 'macos'
+    : process.platform === 'win32'
+    ? 'windows'
+    : 'linux'
+const suffix = process.platform === 'win32' ? '.exe' : ''
+const report = process.report?.getReport() as
+  | { header?: { glibcVersionRuntime?: string } }
+  | undefined
+const linuxMusl =
+  host === 'linux' &&
+  report !== undefined &&
+  !report.header?.glibcVersionRuntime
+const sdkPlatform = copilotPlatform(host, linuxMusl)
+
+function write(root: string, file: string, content = 'test'): void {
+  const full = path.join(root, file)
+  mkdirSync(path.dirname(full), { recursive: true })
+  writeFileSync(full, content)
+}
+
+function fixture(): string {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'package-rust-test-'))
+  roots.push(root)
+  write(
+    root,
+    'app/package.json',
+    JSON.stringify({
+      productName: 'Test Desktop',
+      version: '1.2.3',
+      bundleID: 'org.test',
+      dependencies: { '@github/copilot-sdk': '1.2.3' },
+    })
+  )
+  for (const file of [
+    'node_modules/vite/bin/vite.js',
+    `rust/target/debug/desktop-rs${suffix}`,
+    `rust/target/debug/github-desktop-rs${suffix}`,
+    'out/vite-dist/index.html',
+    'out/vite-dist/highlighter.js',
+    'gemoji/db/emoji.json',
+    'LICENSE',
+  ])
+    write(root, file)
+  write(
+    root,
+    'rust/crates/core/src/copilot.rs',
+    'pub const COPILOT_SDK_VERSION: &str = "1.2.3";'
+  )
+  write(root, 'out/vite-dist/assets/renderer.js', 'renderer')
+  return root
+}
+
+beforeEach(() => {
+  spawn.mockImplementation((...args: unknown[]) => {
+    const [command, values, options] = args as [
+      string,
+      string[],
+      { cwd: string }
+    ]
+    if (command === 'rustc') {
+      const rustArch = process.arch === 'x64' ? 'x86_64' : 'aarch64'
+      const rustOs =
+        host === 'macos'
+          ? 'apple-darwin'
+          : host === 'windows'
+          ? 'pc-windows-msvc'
+          : linuxMusl
+          ? 'unknown-linux-musl'
+          : 'unknown-linux-gnu'
+      return { status: 0, stdout: `host: ${rustArch}-${rustOs}\n`, stderr: '' }
+    }
+    if (command === 'cargo') {
+      const name = values.includes('desktop-cli')
+        ? 'desktop-rs'
+        : 'github-desktop-rs'
+      const directory = process.env.FAKE_BAD_ARTIFACT
+        ? 'rust/target/other/debug'
+        : 'rust/target/debug'
+      const executable = path.join(options.cwd, directory, `${name}${suffix}`)
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          reason: 'compiler-artifact',
+          target: { name },
+          executable,
+        }),
+        stderr: '',
+      }
+    }
+    return { status: 0, stdout: '', stderr: '' }
+  })
+})
+
+afterEach(() => {
+  for (const root of roots.splice(0))
+    rmSync(root, { recursive: true, force: true })
+  vi.clearAllMocks()
+  vi.unstubAllEnvs()
+})
+
+describe('Rust packaging', () => {
+  it('builds and stages the actual shell and embedded browser UI', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    const root = fixture()
+    const sdk = `app/node_modules/@github/copilot-sdk-${sdkPlatform}-${process.arch}/prebuilds/${sdkPlatform}-${process.arch}`
+    write(root, `${sdk}/copilot-runtime${suffix}`, 'runtime')
+    write(root, `${sdk}/runtime.node`, 'addon')
+    write(
+      root,
+      `app/node_modules/@github/copilot-sdk-${sdkPlatform}-${process.arch}/package.json`,
+      JSON.stringify({
+        name: `@github/copilot-sdk-${sdkPlatform}-${process.arch}`,
+        version: '1.2.3',
+      })
+    )
+    const output = packageRust(root)
+    expect(
+      readFileSync(path.join(output, 'ui/assets/renderer.js'), 'utf8')
+    ).toBe('renderer')
+    expect(
+      readFileSync(
+        path.join(
+          output,
+          'bin/copilot-sdk/prebuilds',
+          `${sdkPlatform}-${process.arch}`,
+          `copilot-runtime${suffix}`
+        ),
+        'utf8'
+      )
+    ).toBe('runtime')
+    expect(
+      JSON.parse(readFileSync(path.join(output, 'meta/package.json'), 'utf8'))
+    ).toMatchObject({ platform: host, executable: `bin/desktop-rs${suffix}` })
+    expect(spawn.mock.calls.map(call => call[1])).toEqual([
+      ['-vV'],
+      [path.join(root, 'node_modules/vite/bin/vite.js'), 'build'],
+      [
+        path.join(root, 'node_modules/vite/bin/vite.js'),
+        'build',
+        '-c',
+        'vite.highlighter.config.ts',
+      ],
+      [
+        'build',
+        '--locked',
+        '-p',
+        'desktop-cli',
+        '--features',
+        'embedded-ui',
+        '--message-format=json-render-diagnostics',
+      ],
+      [
+        'build',
+        '--locked',
+        '-p',
+        'desktop-app',
+        '--message-format=json-render-diagnostics',
+      ],
+    ])
+  })
+
+  it('rejects an unrelated target before building', () => {
+    const root = fixture()
+    const other = host === 'linux' ? 'windows' : 'linux'
+    expect(() => packageRust(root, other)).toThrow(
+      'build on the target platform'
+    )
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('uses the SDK platform names expected by the Rust runtime', () => {
+    expect(copilotPlatform('macos', false)).toBe('darwin')
+    expect(copilotPlatform('windows', false)).toBe('win32')
+    expect(copilotPlatform('linux', true)).toBe('linuxmusl')
+  })
+
+  it('rejects a Cargo artifact for another target instead of using a stale binary', () => {
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    vi.stubEnv('FAKE_BAD_ARTIFACT', '1')
+    expect(() => packageRust(fixture())).toThrow('expected host binary')
+  })
+
+  it('rejects a mismatched installed SDK version', () => {
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    const root = fixture()
+    const name = `copilot-sdk-${sdkPlatform}-${process.arch}`
+    write(
+      root,
+      `app/node_modules/@github/${name}/package.json`,
+      JSON.stringify({ name: `@github/${name}`, version: '0.0.1' })
+    )
+    expect(() => packageRust(root)).toThrow('Unexpected Copilot SDK package')
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'copies a linked SDK independently of the checkout',
+    () => {
+      vi.stubEnv('CARGO_TARGET_DIR', '')
+      const root = fixture()
+      const name = `copilot-sdk-${sdkPlatform}-${process.arch}`
+      const source = `sdk-source`
+      write(
+        root,
+        `${source}/package.json`,
+        JSON.stringify({ name: `@github/${name}`, version: '1.2.3' })
+      )
+      write(
+        root,
+        `${source}/prebuilds/${sdkPlatform}-${process.arch}/copilot-runtime${suffix}`,
+        'runtime'
+      )
+      write(
+        root,
+        `${source}/prebuilds/${sdkPlatform}-${process.arch}/runtime.node`,
+        'addon'
+      )
+      const link = path.join(root, 'app/node_modules/@github', name)
+      mkdirSync(path.dirname(link), { recursive: true })
+      symlinkSync(path.join(root, source), link, 'dir')
+      const output = packageRust(root)
+      rmSync(path.join(root, source), { recursive: true })
+      expect(
+        readFileSync(
+          path.join(
+            output,
+            'bin/copilot-sdk/prebuilds',
+            `${sdkPlatform}-${process.arch}`,
+            `copilot-runtime${suffix}`
+          ),
+          'utf8'
+        )
+      ).toBe('runtime')
+    }
+  )
+
+  it('preserves an existing package if a required input is absent', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    const root = fixture()
+    const previous = `dist/Test Desktop-dev-${host}-${process.arch}/previous`
+    write(root, previous, 'keep')
+    rmSync(path.join(root, 'out/vite-dist/highlighter.js'))
+    expect(() => packageRust(root)).toThrow('highlighter.js')
+    expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
+  })
+})

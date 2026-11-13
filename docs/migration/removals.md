@@ -19,7 +19,7 @@ Commit de retirada: (pendiente Fase final)
 Ruta retirada: rust/Cargo.toml + rust/Cargo.lock (workspace shell)
 Responsabilidad anterior: workspace shell separado (desktop-core legacy + desktop-app)
 Reemplazo conectado: Cargo.toml raíz consolidado (un solo workspace, un solo lock)
-Consumidores, imports dinámicos y scripts revisados: .github/workflows/rust.yml, script/package-rust.sh, MIGRATION.md, rust/README.md
+Consumidores, imports dinámicos y scripts revisados: .github/workflows/rust.yml, script/package-rust.ts, MIGRATION.md, rust/README.md
 Datos o formatos que deben seguir siendo compatibles: MSRV 1.85, edition, features, perfiles, dependencias heredadas propias del shell
 Prueba o recorrido que acredita la sustitución: cargo metadata (raíz) single workspace; build CLI/core/bridge sin GTK via default-members; shell build explícito en CI
 Commit de retirada: (pendiente)

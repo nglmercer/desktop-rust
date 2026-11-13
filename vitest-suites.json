@@ -1,4 +1,5 @@
 [
+  "script/package-rust.test.ts",
   "app/test/unit/git/branch-test.ts",
   "app/test/unit/git/reflog-test.ts",
   "app/test/unit/git/gitignore-test.ts",
@@ -330,6 +331,7 @@
   "app/test/unit/git/assisted-commit-completion-test.ts",
   "app/test/unit/branch-pruner-test.ts",
   "script/main-build.test.ts",
+  "script/tsx-build-tools.test.ts",
   "app/test/unit/markdown-emoji-bundle-test.ts",
   "script/vite-static-assets.test.ts",
   "app/test/unit/menu-event-test.ts",

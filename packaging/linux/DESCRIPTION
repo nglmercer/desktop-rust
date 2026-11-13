@@ -1,4 +1,4 @@
-# Linux package notes (see script/package-rust.sh)
-# Produces dist/GitHub Desktop-linux-x64/bin/desktop-rs + bin/github-desktop-rs (when GTK available)
+# Linux package notes (see script/package-rust.ts)
+# Produces dist/GitHub Desktop-linux-x64/bin/desktop-rs + bin/github-desktop-rs (GTK required)
 # No system download of Git/LFS at runtime — detected, reported if absent.
-# Termux: same bin/desktop-rs serve as browser mode (no GTK).
+# Termux: build desktop-cli separately; the desktop package requires GTK.

@@ -20,12 +20,7 @@ describe('npm commands', () => {
     const root = resolve(__dirname, '..')
     const result = spawnSync(
       process.execPath,
-      [
-        require.resolve('ts-node/dist/bin.js'),
-        '-P',
-        'script/tsconfig.json',
-        'script/post-install.ts',
-      ],
+      ['--import', 'tsx', 'script/post-install.ts'],
       {
         cwd: root,
         encoding: 'utf8',
@@ -51,12 +46,7 @@ describe('npm commands', () => {
     )
     const result = spawnSync(
       process.execPath,
-      [
-        require.resolve('ts-node/dist/bin.js'),
-        '-P',
-        'script/tsconfig.json',
-        'script/post-install.ts',
-      ],
+      ['--import', 'tsx', 'script/post-install.ts'],
       {
         cwd: root,
         encoding: 'utf8',

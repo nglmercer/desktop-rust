@@ -5,7 +5,7 @@
  * of truth for version computation, tag discovery, and changelog aggregation.
  *
  * Usage (from repo root):
- *   npm exec -- ts-node -P script/tsconfig.json script/draft-release/ci.ts <command> [args]
+ *   node --import tsx script/draft-release/ci.ts <command> [args]
  *
  * Commands:
  *   version <channel>

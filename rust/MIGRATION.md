@@ -12,6 +12,22 @@ wrappers, native Electron modules, and their obsolete build/test/release
 pipeline must be removed after verified replacement. Keeping both
 implementations indefinitely is not the final architecture.
 
+`node --import tsx script/package-rust.ts` now builds the Vite assets, the
+CLI with `embedded-ui`, and the active Wry shell before staging the package.
+It refuses cross-platform labels, retains an existing package if preparation
+fails, and no longer builds the older `desktop-native` host. On Linux the
+staged CLI was run outside the checkout and served the embedded renderer.
+This is a development package, not proof of complete platform packaging or
+third-party license inventory. The desktop package requires Wry dependencies;
+headless Termux builds remain a separate path.
+
+Build and release scripts now use `tsx` rather than a direct `ts-node`
+dependency. Both remaining Webpack configurations were exercised with the
+new loader, but the complete Electron build is still blocked locally by
+missing native modules. `tsx` transpiles without type-checking; the existing
+`compile:script` configuration currently fails on unrelated project-wide
+JSX/global type errors and does not yet replace that implicit check.
+
 ## Removal gates
 
 - [ ] Inventory and replace every user-visible legacy workflow, including

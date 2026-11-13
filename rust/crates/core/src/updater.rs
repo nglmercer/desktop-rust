@@ -1,5 +1,5 @@
 //! Check for updates — real implementation replacing `check_for_updates()`
-//! stub. Speaks to a Rust-owned update service (see `script/package-rust.sh`)
+//! stub. Speaks to a Rust-owned update service (see `script/package-rust.ts`)
 //! with metadata per version/channel/OS/arch carrying URL, size, hash and a
 //! verifiable signature descriptor. Verifies authenticity; a hash served
 //! alongside the binary is not a replacement for signature verification —

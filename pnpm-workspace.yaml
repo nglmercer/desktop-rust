@@ -1,5 +1,8 @@
 packages:
   - "app"
+# Builds must never implicitly run dependency install hooks. Install explicitly
+# with --frozen-lockfile --ignore-scripts before building the Rust frontend.
+verifyDepsBeforeRun: warn
 minimumReleaseAgeExclude:
   - '@biomejs/biome@2.6.7'
   - '@biomejs/cli-android-arm64@2.6.7'
