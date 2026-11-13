@@ -363,8 +363,12 @@ impl Repository {
 
 #[cfg(all(test, windows))]
 mod windows_tests {
-    use super::fetch_head_certificate;
-    use std::fs;
+    use super::file_certificate;
+    use std::{fs, path::Path};
+
+    fn fetch_head_certificate(directory: &Path) -> anyhow::Result<Vec<u8>> {
+        file_certificate(directory, Path::new("FETCH_HEAD"), 8 * 1024 * 1024)
+    }
 
     #[test]
     fn checks_existing_fetch_head_and_rejects_hard_links() {
