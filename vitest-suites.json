@@ -1,4 +1,5 @@
 [
+  "rust/tests/push-hook-decision.test.ts",
   "rust/tests/push-lfs.test.ts",
   "app/test/unit/rust-push-routing-test.ts",
   "script/package-rust.test.ts",

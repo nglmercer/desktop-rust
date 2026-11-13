@@ -234,6 +234,7 @@ export async function push(
                   options?.onHookProgress !== undefined ||
                   options?.onHookFailure !== undefined ||
                   options?.onTerminalOutputAvailable !== undefined,
+                interactive_hook_decision: options?.onHookFailure !== undefined,
               },
               !needsStreaming
                 ? undefined
@@ -303,7 +304,13 @@ export async function push(
               },
               options?.onHookProgress === undefined
                 ? undefined
-                : controller.signal
+                : controller.signal,
+              options?.onHookFailure === undefined
+                ? undefined
+                : output =>
+                    withoutRepositoryGitAccess(() =>
+                      options.onHookFailure!('pre-push', Buffer.from(output))
+                    )
             ),
           true
         )

@@ -13,6 +13,11 @@ pub struct HookProgress {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub enum CommitEvent {
     Hook(HookProgress),
+    /// A single-use decision belongs only to the request receiving this event.
+    HookDecision {
+        decision_id: String,
+        output: String,
+    },
     Output {
         checkpoint_id: String,
         stream: &'static str,

@@ -507,7 +507,7 @@ pub(crate) async fn run_bound_remote_fetch(
     is_background_task: bool,
     report_progress: bool,
 ) -> Result<RawOutput> {
-    run_bound_remote_operation(path, args, is_background_task, report_progress, false)
+    run_bound_remote_operation(path, args, is_background_task, report_progress, false, None)
         .await
         .map(|(output, _)| output)
 }
@@ -519,8 +519,17 @@ pub(crate) async fn run_bound_remote_push(
     args: &[OsString],
     report_progress: bool,
     observe_hooks: bool,
+    hook_proxy: Option<crate::hook_proxy::HookProxy>,
 ) -> Result<(RawOutput, bool)> {
-    run_bound_remote_operation(path, args, false, report_progress, observe_hooks).await
+    run_bound_remote_operation(
+        path,
+        args,
+        false,
+        report_progress,
+        observe_hooks,
+        hook_proxy,
+    )
+    .await
 }
 
 async fn run_bound_remote_operation(
@@ -529,6 +538,7 @@ async fn run_bound_remote_operation(
     is_background_task: bool,
     report_progress: bool,
     observe_hooks: bool,
+    mut hook_proxy: Option<crate::hook_proxy::HookProxy>,
 ) -> Result<(RawOutput, bool)> {
     let mut command = bound_git_command();
     #[cfg(unix)]
@@ -583,6 +593,17 @@ async fn run_bound_remote_operation(
         live.clone(),
     );
     tokio::pin!(work);
+    // Keep this future alive across progress ticks: dropping an in-flight
+    // decision would revoke its capability while Git is waiting for it.
+    let decisions = async {
+        match hook_proxy.as_mut() {
+            Some(proxy) => loop {
+                proxy.decide().await?;
+            },
+            None => std::future::pending::<anyhow::Result<()>>().await,
+        }
+    };
+    tokio::pin!(decisions);
     let mut redactor = crate::stream_redaction::StreamRedactor::new();
     let mut tick = tokio::time::interval(Duration::from_millis(200));
     let emit = |bytes: Vec<u8>| {
@@ -599,6 +620,7 @@ async fn run_bound_remote_operation(
     let result = loop {
         tokio::select! {
             result = &mut work => break result,
+            decision = &mut decisions => break decision.and_then(|()| unreachable!()),
             _ = tick.tick(), if lfs.is_some() => {
                 if let Some(file) = &mut lfs {
                     let bytes = file.read_new().unwrap_or_default();

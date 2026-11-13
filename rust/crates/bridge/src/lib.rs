@@ -300,7 +300,14 @@ enum ApplicationOperation {
 #[derive(Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum ControlOperation {
-    Cancel { request_id: u64 },
+    Cancel {
+        request_id: u64,
+    },
+    HookDecision {
+        request_id: u64,
+        decision_id: String,
+        ignore_failure: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -1154,6 +1161,20 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
         let response = match request {
             Some(Rpc {
                 id,
+                operation:
+                    ApplicationOperation::Control(ControlOperation::HookDecision {
+                        request_id,
+                        decision_id,
+                        ignore_failure,
+                    }),
+                ..
+            }) => {
+                let accepted = active.as_ref().is_some_and(|job| job.id == request_id)
+                    && desktop_core::hook_decision::resolve(&decision_id, ignore_failure);
+                json!({"id":id,"result":{"accepted":accepted}})
+            }
+            Some(Rpc {
+                id,
                 operation: ApplicationOperation::Control(ControlOperation::Cancel { request_id }),
                 ..
             }) => {
@@ -1213,6 +1234,12 @@ fn commit_event_value(
     match event {
         CommitEvent::Hook(event) => {
             json!({"event":"commit_hook_progress","request_id":request_id,"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status})
+        }
+        CommitEvent::HookDecision {
+            decision_id,
+            output,
+        } => {
+            json!({"event":"hook_decision", "request_id":request_id, "decision_id":decision_id, "output":output})
         }
         CommitEvent::Output {
             checkpoint_id,

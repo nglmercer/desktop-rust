@@ -3042,6 +3042,7 @@ mod tests {
                             if checkpoint_id == checkpoint && stream == "stderr" && data == "bGl2ZS1vdXRwdXQ=" { saw_output = true; }
                         }
                         desktop_backend::hook_progress::CommitEvent::FetchOutput { .. } => {}
+                        desktop_backend::hook_progress::CommitEvent::HookDecision { .. } => {}
                     }
                 }
                 backend.cancel(&[json!({"request_id":request_id})]).unwrap();

@@ -22,7 +22,19 @@ pub use repo_rules::{NameRuleFailure, NameRulesActor, NameRulesPolicy};
 mod branch_policy;
 pub mod cancellation;
 pub mod comparison_snapshots;
+pub mod hook_decision;
 pub mod hook_progress;
+#[cfg(unix)]
+mod hook_proxy;
+#[cfg(not(unix))]
+mod hook_proxy {
+    pub(crate) struct HookProxy;
+    impl HookProxy {
+        pub(crate) async fn decide(&mut self) -> anyhow::Result<()> {
+            anyhow::bail!("interactive hooks are unavailable on this platform")
+        }
+    }
+}
 #[cfg(unix)]
 mod hook_trace;
 pub use branch_policy::{BranchPermissions, BranchPolicy, DefaultBranch};

@@ -655,6 +655,13 @@ class WryTransport {
     }
     this.bridge.send('desktop.backend.cancel', { request_id: requestId })
   }
+
+  public hookDecision(decisionId: string, ignoreFailure: boolean): void {
+    this.bridge.send('desktop.backend.hook_decision', {
+      decision_id: decisionId,
+      ignore_failure: ignoreFailure,
+    })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -857,7 +864,7 @@ class WebSocketTransport {
           }
           return
         }
-        if (data.event === 'commit_hook_progress' || data.event === 'commit_output') {
+        if (data.event === 'commit_hook_progress' || data.event === 'commit_output' || data.event === 'hook_decision') {
           if (Number.isSafeInteger(data.request_id)) {
             try { this.pending.get(data.request_id!)?.onCommitEvent?.(data) } catch { /* Ignore callback errors. */ }
           }
@@ -1110,6 +1117,18 @@ class WebSocketTransport {
       )
     } catch {
       // The socket may close between the readiness check and send.
+    }
+  }
+
+  public hookDecision(requestId: number, decisionId: string, ignoreFailure: boolean): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !Number.isSafeInteger(requestId) || requestId < 1) {
+      return
+    }
+    try {
+      this.socket.send(JSON.stringify({ id: this.nextId++, method: 'hook_decision', request_id: requestId, decision_id: decisionId, ignore_failure: ignoreFailure }))
+    } catch {
+      // Closing the transport cancels the owning push, rather than approving it.
+      this.socket.close()
     }
   }
 
@@ -3069,7 +3088,8 @@ export class BackendClient {
     readonly no_verify: boolean
     readonly report_progress: boolean
     readonly require_hook_callbacks: boolean
-  }, onProgress?: (chunk: FetchProgressChunk) => void, checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>, onHookProgress?: (event: ICommitHookProgress) => void, signal?: AbortSignal): Promise<PushFailure | undefined> {
+    readonly interactive_hook_decision?: boolean
+  }, onProgress?: (chunk: FetchProgressChunk) => void, checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>, onHookProgress?: (event: ICommitHookProgress) => void, signal?: AbortSignal, onHookFailure?: (output: Uint8Array) => Promise<'abort' | 'ignore'>): Promise<PushFailure | undefined> {
     if ((onProgress || request.require_hook_callbacks) && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
       throw new BackendError({ code: 'unsupported', message: 'Native push progress is unavailable', retryable: false })
     }
@@ -3081,6 +3101,21 @@ export class BackendClient {
         onCommitEvent: request.require_hook_callbacks ? (event: unknown) => {
           if (isRecord(event) && event.event === 'commit_hook_progress' && event.checkpoint_id === 'push' && event.hook_name === 'pre-push' && (event.status === 'started' || event.status === 'finished' || event.status === 'failed')) {
             onHookProgress?.({ hookName: event.hook_name, status: event.status })
+          } else if (isRecord(event) && event.event === 'hook_decision' && typeof event.decision_id === 'string' && /^[0-9a-f-]{36}$/.test(event.decision_id)) {
+            const decisionId = event.decision_id
+            const requestId = event.request_id
+            const respond = (ignore: boolean) => {
+              if (this.transport === 'wry') {
+                this.wry!.hookDecision(decisionId, ignore)
+              } else if (this.transport === 'ws' && typeof requestId === 'number') {
+                this.ws!.hookDecision(requestId, decisionId, ignore)
+              }
+            }
+            try {
+              if (typeof event.output !== 'string' || event.output.length > 32768) { respond(false); return }
+              const output = Uint8Array.from(atob(event.output), character => character.charCodeAt(0))
+              Promise.resolve(onHookFailure?.(output) ?? 'abort').then(value => respond(value === 'ignore'), () => respond(false))
+            } catch { respond(false) }
           }
         } : undefined,
       } : {}

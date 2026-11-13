@@ -2,7 +2,7 @@
 //! race Git after the final review; an interrupted push must not be retried
 //! without inspecting the destination.
 use crate::{RendererPushRequest, Repository, args, process};
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -366,11 +366,47 @@ impl Repository {
             "Pre-push hook changed; refresh before continuing"
         );
         let trace_hooks = self.push_hook_trace_available(request).await?;
+        ensure!(
+            !request.interactive_hook_decision || request.require_hook_callbacks,
+            "interactive hooks require request-owned progress"
+        );
+        #[cfg(unix)]
+        let proxy = if request.interactive_hook_decision && !request.no_verify {
+            let hook = self.pre_push_hook_path().await?;
+            let shell = self.run(&args(&["var", "GIT_SHELL_PATH"])).await?;
+            ensure!(shell.code == 0, "Cannot resolve Git shell");
+            let shell = shell.stdout.strip_suffix(b"\n").unwrap_or(&shell.stdout);
+            let proxy = crate::hook_proxy::HookProxy::create(
+                hook.parent().context("Invalid hook path")?,
+                shell,
+            )?;
+            ensure!(
+                self.renderer_push_review(request).await?.0 == basis,
+                "Push context changed; refresh before continuing"
+            );
+            if let Some(proxy) = &proxy {
+                let mut options = proxy.configuration();
+                options.extend(command);
+                command = options;
+            }
+            proxy
+        } else {
+            None
+        };
+        #[cfg(not(unix))]
+        let proxy = {
+            ensure!(
+                !request.interactive_hook_decision,
+                "interactive hooks are unavailable on this platform"
+            );
+            None
+        };
         let (output, hook_failed) = process::run_bound_remote_push(
             &self.path,
             &command,
             request.report_progress,
             trace_hooks,
+            proxy,
         )
         .await?;
         Ok(
@@ -429,6 +465,7 @@ mod tests {
                 no_verify: false,
                 report_progress: false,
                 require_hook_callbacks: false,
+                interactive_hook_decision: false,
             };
             (Self(root), request)
         }
@@ -436,6 +473,367 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_pre_push_ignores_only_the_reviewed_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let hooks = src.join(".git/hooks");
+        let marker = fixture.0.join("events");
+        let color = fixture.0.join("hook-color");
+        let pre_push = hooks.join("pre-push");
+        fs::write(
+            &pre_push,
+            format!(
+                "#!/bin/sh\nprintf 'pre\\n' >> '{}'; git config color.ui > '{}'; echo 'review this failure' >&2; exit 17\n",
+                marker.display(), color.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&pre_push, fs::Permissions::from_mode(0o755)).unwrap();
+        let reference = hooks.join("reference-transaction");
+        fs::write(
+            &reference,
+            format!(
+                "#!/bin/sh\nprintf 'ref-%s\\n' \"$1\" >> '{}'; cat >/dev/null\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&reference, fs::Permissions::from_mode(0o755)).unwrap();
+        request.require_hook_callbacks = true;
+        request.interactive_hook_decision = true;
+        request.report_progress = true;
+        let repo = Repository::open(&src).await.unwrap();
+        let preview = repo.renderer_push_preview(&request).await.unwrap();
+        let basis = preview["basis"].as_str().unwrap().to_owned();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let operation = tokio::spawn(crate::hook_progress::scope(sender, 7, async move {
+            repo.renderer_push(&request, &basis).await
+        }));
+        let decision = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                if let Some((
+                    7,
+                    crate::hook_progress::CommitEvent::HookDecision {
+                        decision_id,
+                        output,
+                    },
+                )) = receiver.recv().await
+                {
+                    use base64::Engine as _;
+                    assert!(
+                        String::from_utf8(
+                            base64::engine::general_purpose::STANDARD
+                                .decode(output)
+                                .unwrap()
+                        )
+                        .unwrap()
+                        .contains("review this failure")
+                    );
+                    break decision_id;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        // Progress ticks must not cancel the outstanding decision.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(crate::hook_decision::resolve(&decision, true));
+        assert!(!crate::hook_decision::resolve(&decision, true));
+        let result = operation.await.unwrap().unwrap();
+        assert_eq!(result["code"], 0);
+        let events = fs::read_to_string(marker).unwrap();
+        assert_eq!(fs::read_to_string(color).unwrap().trim(), "false");
+        assert_eq!(events.matches("pre\n").count(), 1);
+        assert!(events.contains("ref-prepared\n") && events.contains("ref-committed\n"));
+        assert_eq!(
+            git(
+                &fixture.0.join("remote.git"),
+                &["rev-parse", "refs/heads/main"]
+            ),
+            git(&src, &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_pre_push_rejection_and_cancellation_do_not_publish() {
+        use std::os::unix::fs::PermissionsExt;
+        for cancel_instead in [false, true] {
+            let (fixture, mut request) = Fixture::new();
+            let src = fixture.0.join("source");
+            let hook = src.join(".git/hooks/pre-push");
+            fs::write(&hook, "#!/bin/sh\necho failed >&2\nexit 1\n").unwrap();
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+            request.require_hook_callbacks = true;
+            request.interactive_hook_decision = true;
+            let repo = Repository::open(&src).await.unwrap();
+            let basis = repo.renderer_push_preview(&request).await.unwrap()["basis"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+            let cancellation = crate::cancellation::Cancellation::default();
+            let task = tokio::spawn(cancellation.clone().scope(crate::hook_progress::scope(
+                sender,
+                9,
+                async move { repo.renderer_push(&request, &basis).await },
+            )));
+            let decision = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                while let Some((_, event)) = receiver.recv().await {
+                    if let crate::hook_progress::CommitEvent::HookDecision { decision_id, .. } =
+                        event
+                    {
+                        return decision_id;
+                    }
+                }
+                panic!("decision not requested");
+            })
+            .await
+            .unwrap();
+            if cancel_instead {
+                cancellation.cancel();
+            } else {
+                assert!(crate::hook_decision::resolve(&decision, false));
+            }
+            let result = tokio::time::timeout(std::time::Duration::from_secs(10), task)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(result.is_err() || result.unwrap()["code"] != 0);
+            assert!(!crate::hook_decision::resolve(&decision, true));
+            assert!(
+                !Command::new("git")
+                    .current_dir(fixture.0.join("remote.git"))
+                    .args(["show-ref", "--verify", "refs/heads/main"])
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_push_observes_reference_hook_installed_during_decision() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let hook = src.join(".git/hooks/pre-push");
+        fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        request.require_hook_callbacks = true;
+        request.interactive_hook_decision = true;
+        let repo = Repository::open(&src).await.unwrap();
+        let basis = repo.renderer_push_preview(&request).await.unwrap()["basis"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let task = tokio::spawn(crate::hook_progress::scope(sender, 10, async move {
+            repo.renderer_push(&request, &basis).await
+        }));
+        let decision = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            while let Some((_, event)) = receiver.recv().await {
+                if let crate::hook_progress::CommitEvent::HookDecision { decision_id, .. } = event {
+                    return decision_id;
+                }
+            }
+            panic!("decision not requested");
+        })
+        .await
+        .unwrap();
+        let marker = fixture.0.join("reference-ran");
+        let reference = src.join(".git/hooks/reference-transaction");
+        fs::write(
+            &reference,
+            format!(
+                "#!/bin/sh\necho called >> '{}'\ncat >/dev/null\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&reference, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(crate::hook_decision::resolve(&decision, true));
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(20), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()["code"],
+            0
+        );
+        assert!(marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_push_skips_reference_hook_removed_during_decision() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let pre = src.join(".git/hooks/pre-push");
+        let reference = src.join(".git/hooks/reference-transaction");
+        fs::write(&pre, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::write(&reference, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&pre, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&reference, fs::Permissions::from_mode(0o755)).unwrap();
+        request.require_hook_callbacks = true;
+        request.interactive_hook_decision = true;
+        let repo = Repository::open(&src).await.unwrap();
+        let basis = repo.renderer_push_preview(&request).await.unwrap()["basis"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let task = tokio::spawn(crate::hook_progress::scope(sender, 13, async move {
+            repo.renderer_push(&request, &basis).await
+        }));
+        let decision = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            while let Some((_, event)) = receiver.recv().await {
+                if let crate::hook_progress::CommitEvent::HookDecision { decision_id, .. } = event {
+                    return decision_id;
+                }
+            }
+            panic!("decision not requested");
+        })
+        .await
+        .unwrap();
+        fs::remove_file(reference).unwrap();
+        assert!(crate::hook_decision::resolve(&decision, true));
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(20), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            git(
+                &fixture.0.join("remote.git"),
+                &["rev-parse", "refs/heads/main"]
+            ),
+            git(&src, &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_pre_push_drains_large_successful_hook_output() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let hook = src.join(".git/hooks/pre-push");
+        fs::write(&hook, "#!/bin/sh\nhead -c 1572864 /dev/zero\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        request.require_hook_callbacks = true;
+        request.interactive_hook_decision = true;
+        let repo = Repository::open(&src).await.unwrap();
+        let basis = repo.renderer_push_preview(&request).await.unwrap()["basis"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (sender, _receiver) = tokio::sync::mpsc::channel(64);
+        let result = crate::hook_progress::scope(sender, 11, repo.renderer_push(&request, &basis))
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(
+            git(
+                &fixture.0.join("remote.git"),
+                &["rev-parse", "refs/heads/main"]
+            ),
+            git(&src, &["rev-parse", "HEAD"])
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_push_requests_one_decision_for_each_destination() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let second = fixture.0.join("second.git");
+        fs::create_dir(&second).unwrap();
+        git(&second, &["init", "--bare", "-q"]);
+        let first = fixture.0.join("remote.git");
+        git(
+            &src,
+            &[
+                "remote",
+                "set-url",
+                "--add",
+                "--push",
+                "origin",
+                first.to_str().unwrap(),
+            ],
+        );
+        git(
+            &src,
+            &[
+                "remote",
+                "set-url",
+                "--add",
+                "--push",
+                "origin",
+                second.to_str().unwrap(),
+            ],
+        );
+        let marker = fixture.0.join("pre-push-count");
+        let hook = src.join(".git/hooks/pre-push");
+        fs::write(
+            &hook,
+            format!("#!/bin/sh\necho called >> '{}'\nexit 1\n", marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        request.require_hook_callbacks = true;
+        request.interactive_hook_decision = true;
+        let repo = Repository::open(&src).await.unwrap();
+        let basis = repo.renderer_push_preview(&request).await.unwrap()["basis"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let task = tokio::spawn(crate::hook_progress::scope(sender, 12, async move {
+            repo.renderer_push(&request, &basis).await
+        }));
+        for _ in 0..2 {
+            let decision = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                while let Some((_, event)) = receiver.recv().await {
+                    if let crate::hook_progress::CommitEvent::HookDecision { decision_id, .. } =
+                        event
+                    {
+                        return decision_id;
+                    }
+                }
+                panic!("decision not requested");
+            })
+            .await
+            .unwrap();
+            assert!(crate::hook_decision::resolve(&decision, true));
+        }
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(20), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(fs::read_to_string(marker).unwrap().lines().count(), 2);
+        for remote in [first, second] {
+            assert_eq!(
+                git(&remote, &["rev-parse", "refs/heads/main"]),
+                git(&src, &["rev-parse", "HEAD"])
+            );
         }
     }
 

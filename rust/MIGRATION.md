@@ -2592,8 +2592,27 @@ request-owned started/finished/failed events through the native transports.
 The hook path, executable identity, permissions and bounded contents are
 included in the review; cancellation terminates the Git process group. A
 real Git LFS 3.6.1 pre-push hook uploaded an LFS object to a local remote over
-the authenticated WebSocket bridge. Hook failures do not trigger a blind
-retry; the interactive option to ignore one failed hook remains unsupported.
+the authenticated WebSocket bridge. On Unix, a request with an interactive
+hook callback can now decide whether to ignore each failed pre-push hook while
+the original Git push remains running. Each decision is request-owned and
+single-use; rejection, cancellation, disconnection or expiration does not
+approve the failure. Other standard hooks are delegated to their original paths.
+No push is retried to apply the decision.
+
+The interactive path is covered by Linux tests against real local Git
+repositories, including multiple destinations, cancellation, changes to a
+reference-transaction hook, and a successful hook with 1.5 MiB of output. A
+real authenticated WebSocket bridge and renderer client test covers approval,
+rejection, cancellation, a late decision, and attempts to resolve another
+session's or request's decision. The Wry webview has **not** yet been tested
+end-to-end for this flow. macOS behavior also remains to be verified.
+
+The existing 120-second Git command deadline starts before the hook executes,
+so a slow hook leaves less time to decide. Existing command output remains
+limited to 2 MiB. The interactive path drains hook output and retains a bounded
+prefix for the decision, sending at most 24 KiB after redaction. It requires
+the Unix `tee`, `dd` and `cat` utilities and `/dev/stderr`. Interactive hook
+decisions are unavailable on non-Unix targets.
 Configured `hook.*` commands are rejected before mutation until their external
 executables and ordering can be reviewed. When a user-configured Trace2
 destination prevents isolated hook observation, or on non-Unix platforms,

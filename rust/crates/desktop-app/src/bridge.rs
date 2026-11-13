@@ -330,6 +330,17 @@ impl Bridge {
     }
 
     fn admit_send(&self, channel: String, args: Vec<Value>, bytes: usize) {
+        if channel == "desktop.backend.hook_decision" {
+            if let Some(value) = args.first() {
+                if let (Some(id), Some(ignore)) = (
+                    value.get("decision_id").and_then(Value::as_str),
+                    value.get("ignore_failure").and_then(Value::as_bool),
+                ) {
+                    desktop_backend::hook_decision::resolve(id, ignore);
+                }
+            }
+            return;
+        }
         if channel == "desktop.backend.cancel" {
             if let Err(error) = self.backend.cancel(&args) {
                 tracing::warn!(%error, "invalid backend cancellation");
@@ -594,6 +605,14 @@ fn run_channel(
                 desktop_backend::hook_progress::CommitEvent::Hook(event) => {
                     if let Some((proxy, id)) = &progress_target {
                         let _ = proxy.send_event(AppEvent::RpcProgress { id: *id, payload: json!({"event":"commit_hook_progress","checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}) });
+                    }
+                }
+                desktop_backend::hook_progress::CommitEvent::HookDecision {
+                    decision_id,
+                    output,
+                } => {
+                    if let Some((proxy, id)) = &progress_target {
+                        let _ = proxy.send_event(AppEvent::RpcProgress { id: *id, payload: json!({"event":"hook_decision","decision_id":decision_id,"output":output}) });
                     }
                 }
                 desktop_backend::hook_progress::CommitEvent::Output {

@@ -1141,6 +1141,8 @@ pub struct RendererPushRequest {
     pub no_verify: bool,
     pub report_progress: bool,
     pub require_hook_callbacks: bool,
+    #[serde(default)]
+    pub interactive_hook_decision: bool,
 }
 
 impl std::fmt::Debug for RendererPushRequest {
@@ -1156,6 +1158,7 @@ impl std::fmt::Debug for RendererPushRequest {
             .field("no_verify", &self.no_verify)
             .field("report_progress", &self.report_progress)
             .field("require_hook_callbacks", &self.require_hook_callbacks)
+            .field("interactive_hook_decision", &self.interactive_hook_decision)
             .finish()
     }
 }
