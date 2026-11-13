@@ -2231,6 +2231,26 @@ export class BackendClient {
     if (!isRecord(result) || result.code !== 0 || result.created !== true || result.checked_out !== false || typeof result.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.receipt_id)) throw new BackendError({ code: 'invalid_response', message: 'Branch creation outcome is uncertain; inspect the branch and checkout recovery history', retryable: false })
   }
 
+  async deleteRepositoryBranch(repositoryPath: string, name: string, expectedTip: string): Promise<void> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedTip)) throw new BackendError({ code: 'invalid_request', message: 'A reviewed branch tip is required', retryable: false })
+    const ref = `refs/heads/${name}`
+    const params = { name: ref, to_checkout: null, upstream: null }
+    const call = (method: 'delete_branch_preview' | 'delete_branch', extra: Record<string, unknown> = {}) =>
+      this.transport === 'wry'
+        ? this.request('git_info', { operation: { type: 'branch_deletion', repository_path: repositoryPath, operation: { method, ...params, ...extra } } })
+        : this.repositoryRead(repositoryPath, method, { ...params, ...extra })
+    const preview = await call('delete_branch_preview')
+    if (!isRecord(preview) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis) || !isRecord(preview.branch) || preview.branch.ref !== ref || preview.branch.oid !== expectedTip || preview.current !== false || preview.checkout !== null || preview.in_use_worktree !== null) throw new BackendError({ code: 'branch_changed', message: 'Branch or checkout changed; refresh before deleting', retryable: false })
+    let result: unknown
+    try {
+      result = await call('delete_branch', { basis: preview.basis, ref_only: true, force: true })
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the branch and deletion recovery history before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || result.code !== 0 || typeof result.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.receipt_id) || result.backup_ref !== `refs/desktop/deleted-branches/${result.receipt_id}`) throw new BackendError({ code: 'invalid_response', message: 'Branch deletion outcome is uncertain; inspect the branch and deletion recovery history', retryable: false })
+  }
+
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
     if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })

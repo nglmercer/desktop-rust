@@ -113,6 +113,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    BranchDeletion {
+        repository_path: String,
+        operation: Operation,
+    },
     AbortGitOperation {
         repository_path: String,
         operation: Operation,
@@ -387,6 +391,9 @@ impl Backend {
         | GitInfoOperation::BranchCreation {
             repository_path, ..
         }
+        | GitInfoOperation::BranchDeletion {
+            repository_path, ..
+        }
         | GitInfoOperation::AbortGitOperation {
             repository_path, ..
         }
@@ -509,6 +516,28 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported branch creation operation".into(),
+            ));
+        }
+        if let GitInfoOperation::BranchDeletion { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::DeleteBranchPreview {
+                    to_checkout: None,
+                    upstream: None,
+                    ..
+                } | Operation::DeleteBranch {
+                    to_checkout: None,
+                    upstream: None,
+                    ref_only: true,
+                    basis: Some(_),
+                    replace_stash: false,
+                    restore_index: false,
+                    ..
+                }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported branch deletion operation".into(),
             ));
         }
         if let GitInfoOperation::FinishMergeCommit { operation, .. } = &request.operation
@@ -1288,6 +1317,10 @@ impl Backend {
                         operation: Operation::CreateBranch { .. },
                         ..
                     }
+                    | GitInfoOperation::BranchDeletion {
+                        operation: Operation::DeleteBranch { .. },
+                        ..
+                    }
             )
         );
         let checkpoint_write = matches!(
@@ -1371,6 +1404,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchCreation { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::BranchDeletion { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2726,6 +2766,28 @@ esac
         );
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":{"method":"create_branch","name":"unsafe","checkout":true,"basis":plan["basis"]}}})]).is_err());
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":{"method":"create_branch","name":"unsafe","checkout":false}}})]).is_err());
+        let delete = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"branch_deletion","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        let deletion = delete(json!({"method":"delete_branch_preview","name":"refs/heads/native-created","to_checkout":null,"upstream":null})).unwrap();
+        assert_eq!(deletion["current"], false);
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_deletion","repository_path":root,"operation":{"method":"delete_branch","name":"native-created","to_checkout":null,"upstream":null,"basis":deletion["basis"]}}})]).is_err());
+        let deleted = delete(json!({"method":"delete_branch","name":"refs/heads/native-created","to_checkout":null,"upstream":null,"ref_only":true,"force":true,"basis":deletion["basis"]})).unwrap();
+        assert_eq!(deleted["code"], 0);
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args([
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    deleted["backup_ref"].as_str().unwrap()
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
         let stale =
             branch(json!({"method":"create_branch_preview","name":"stale","checkout":false}))
                 .unwrap();

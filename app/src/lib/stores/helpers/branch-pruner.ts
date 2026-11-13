@@ -242,7 +242,7 @@ export class BranchPruner {
 
       if (options.deleteBranch) {
         const isDeleted = await gitStore.performFailableOperation(() =>
-          deleteLocalBranch(this.repository, branchName)
+          deleteLocalBranch(this.repository, branchName, mergedBranches.get(branchCanonicalRef))
         )
 
         if (isDeleted) {

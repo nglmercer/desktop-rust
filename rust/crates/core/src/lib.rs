@@ -710,6 +710,7 @@ impl Repository {
             Operation::DeleteBranch {
                 name,
                 to_checkout,
+                ref_only,
                 force,
                 strategy,
                 basis,
@@ -722,6 +723,7 @@ impl Repository {
                         &name,
                         stash::checkout::DeletionRequest {
                             to_checkout,
+                            ref_only,
                             force,
                             strategy,
                             basis,

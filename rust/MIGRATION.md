@@ -1168,6 +1168,13 @@ platform evidence still require auditing before legacy module removal.
 
 ## Reviewed local branch deletion evidence
 
+The upstream renderer's local-delete helper and automatic branch pruner now
+use the reviewed Rust operation on Wry and WebSocket. Both pass the branch tip
+they observed; a moved ref is rejected before deletion. The adapter requests a
+ref-only deletion, and the core rejects that request if it would switch or
+delete the current branch. Recovery refs and deletion receipts are retained;
+the existing upstream renderer still needs a native recovery interface.
+
 Audit of the legacy delete dialog, `deleteBranchCore` and fallback-branch choice
 found that the raw Rust `branch -d` command omitted current-branch switching and
 explicit unmerged deletion. The new local service reviews the selected ref/tip,

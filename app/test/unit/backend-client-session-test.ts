@@ -482,6 +482,25 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenCalledTimes(4)
   })
 
+  it('binds branch deletion to the observed tip and refuses stale or current branches', async () => {
+    const oid = 'b'.repeat(40)
+    const preview = { basis: 'a'.repeat(64), branch: { ref: 'refs/heads/feature', oid }, current: false, checkout: null, in_use_worktree: null }
+    const id = '12345678-1234-4234-8234-123456789abc'
+    const invoke = vi.fn(async (): Promise<unknown> => preview)
+    invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 0, receipt_id: id, backup_ref: `refs/desktop/deleted-branches/${id}` })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.deleteRepositoryBranch('/repo', 'feature', oid)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'branch_deletion', repository_path: '/repo', operation: { method: 'delete_branch', name: 'refs/heads/feature', to_checkout: null, upstream: null, basis: 'a'.repeat(64), ref_only: true, force: true } } }))
+    invoke.mockResolvedValueOnce(preview)
+    await expect(client.deleteRepositoryBranch('/repo', 'feature', 'c'.repeat(40))).rejects.toMatchObject({ code: 'branch_changed' })
+    invoke.mockResolvedValueOnce({ ...preview, current: true })
+    await expect(client.deleteRepositoryBranch('/repo', 'feature', oid)).rejects.toMatchObject({ code: 'branch_changed' })
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.deleteRepositoryBranch('/repo', 'feature', oid)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('deletion recovery history') })
+    expect(invoke).toHaveBeenCalledTimes(6)
+  })
+
   it('reads complete blobs through the Rust transport', async () => {
     const oid = 'a'.repeat(40)
     const contents = Buffer.alloc(1024 * 1024 + 3, 0xab)
@@ -500,7 +519,7 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenCalledTimes(2)
   }, 30_000)
 
-  it('routes the application branch creation call through Rust', async () => {
+  it('routes application branch creation and deletion through Rust', async () => {
     vi.resetModules()
     const invoke = vi.fn().mockResolvedValueOnce({ basis: 'a'.repeat(64) }).mockResolvedValueOnce({ code: 0, created: true, checked_out: false, receipt_id: '12345678-1234-4234-8234-123456789abc' })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
@@ -509,9 +528,13 @@ describe('backend Copilot session cleanup', () => {
     vi.doMock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: (_path: string, _kind: string, run: () => unknown) => run() }))
     vi.doMock('../../src/lib/git/environment', () => ({ envForRemoteOperation: vi.fn() }))
     vi.doMock('../../src/lib/git/update-ref', () => ({ deleteRef: vi.fn() }))
-    const { createBranch } = await import('../../src/lib/git/branch')
+    const { createBranch, deleteLocalBranch } = await import('../../src/lib/git/branch')
     await createBranch({ path: '/repo' } as any, 'feature', 'origin/main', true)
-    expect(invoke).toHaveBeenCalledTimes(2)
+    const oid = 'b'.repeat(40)
+    const id = '12345678-1234-4234-8234-123456789abc'
+    invoke.mockResolvedValueOnce({ basis: 'c'.repeat(64), branch: { ref: 'refs/heads/feature', oid }, current: false, checkout: null, in_use_worktree: null }).mockResolvedValueOnce({ code: 0, receipt_id: id, backup_ref: `refs/desktop/deleted-branches/${id}` })
+    await expect(deleteLocalBranch({ path: '/repo' } as any, 'feature', oid)).resolves.toBe(true)
+    expect(invoke).toHaveBeenCalledTimes(4)
     expect(legacyGit).not.toHaveBeenCalled()
   })
 

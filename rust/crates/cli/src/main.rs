@@ -1086,7 +1086,7 @@ async fn run(mut cli: Cli) -> Result<()> {
                 },
                 _=>unreachable!("validated strategy"),
             };
-            run_operation(&cli.repo, &repository_scope,Operation::DeleteBranch {name,to_checkout,force,strategy,basis,replace_stash,restore_index,upstream},true).await
+            run_operation(&cli.repo, &repository_scope,Operation::DeleteBranch {name,to_checkout,ref_only:false,force,strategy,basis,replace_stash,restore_index,upstream},true).await
         },
         Action::RemoteDeletionTargets => run_operation(&cli.repo, &repository_scope,Operation::RemoteDeletionTargets,true).await,
         Action::DeleteRemoteBranch {remote,branch,preview,basis,expected,fetch_backup} => {

@@ -671,6 +671,8 @@ pub enum Operation {
         name: String,
         to_checkout: Option<String>,
         #[serde(default)]
+        ref_only: bool,
+        #[serde(default)]
         force: bool,
         #[serde(default)]
         strategy: ChangesStrategy,

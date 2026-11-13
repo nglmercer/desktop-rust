@@ -160,6 +160,18 @@ const LEAVE: &str = "StashOnCurrentBranch";
 const BRING: &str = "MoveToNewBranch";
 
 #[test]
+fn ref_only_deletion_cannot_switch_or_delete_current_branch() {
+    let s = Suite::new();
+    let repo = s.seed("ref-only", &[]);
+    s.git(&repo, &["switch", "-qc", "victim"]);
+    let result = s.delete(&repo, "victim", json!({"force":true,"ref_only":true}), true);
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Ref-only branch deletion"));
+    assert_eq!(s.git(&repo, &["branch", "--show-current"]), "victim");
+    assert!(s.exists(&repo, "victim"));
+    assert_eq!(s.entries(&repo), json!([]));
+}
+
+#[test]
 fn reviewed_deletion_recovery_and_dirty_checkout() {
     let s = Suite::new();
     let repo = s.seed("normal", &[]);

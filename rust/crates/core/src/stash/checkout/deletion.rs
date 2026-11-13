@@ -21,6 +21,7 @@ use std::{
 
 pub(crate) struct DeletionRequest {
     pub(crate) to_checkout: Option<String>,
+    pub(crate) ref_only: bool,
     pub(crate) force: bool,
     pub(crate) strategy: ChangesStrategy,
     pub(crate) basis: Option<String>,
@@ -579,6 +580,10 @@ impl Repository {
                 "Branch deletion context changed; review again"
             );
         }
+        anyhow::ensure!(
+            !request.ref_only || (plan.checkout.is_none() && plan.view["current"] == false),
+            "Ref-only branch deletion cannot switch or delete the current branch"
+        );
         anyhow::ensure!(
             plan.view["in_use_worktree"].is_null(),
             "Branch is registered in another working tree; open or release that worktree before deleting"

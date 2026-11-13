@@ -114,8 +114,19 @@ export async function renameBranch(
  */
 export async function deleteLocalBranch(
   repository: Repository,
-  branchName: string
+  branchName: string,
+  expectedTip?: string
 ): Promise<true> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    if (expectedTip === undefined) throw new Error('A reviewed branch tip is required')
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().deleteRepositoryBranch(repository.path, branchName, expectedTip),
+      true
+    )
+    return true
+  }
   await git(['branch', '-D', branchName], repository.path, 'deleteLocalBranch')
   return true
 }

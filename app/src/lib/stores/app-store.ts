@@ -5882,7 +5882,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     branch: Branch,
     includeUpstream?: boolean
   ): Promise<void> {
-    await deleteLocalBranch(repository, branch.name)
+    await deleteLocalBranch(repository, branch.name, branch.tip.sha)
 
     if (
       includeUpstream === true &&
