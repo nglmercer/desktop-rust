@@ -38,7 +38,7 @@ import {
   getCleanedEnforcedRuleDescriptions,
   migrateCopilotModelSelectionsToAccounts,
 } from './copilot-store'
-import { backend } from '../../backend/client'
+import { backend, BackendError } from '../../backend/client'
 import { RepositorySelectionQueue } from '../../backend/repository-selection'
 import { discardBatchWithoutDialog, discardReviewedSelection } from '../git/reviewed-discard'
 import { reviewSelectedCommit } from '../git/selected-commit-review'
@@ -640,6 +640,8 @@ const selectedCopilotModelsByAccountKey = 'selected-copilot-models-by-account'
 export const showChangesFilterDefault = true
 
 export class AppStore extends TypedBaseStore<IAppState> {
+  private repositorySelectionRevision = 0
+  private requestedRepositorySelection: Repository | CloningRepository | null | undefined
   private readonly browserRepositorySelection = new RepositorySelectionQueue(async path => {
     if (path === null) {
       await backend().selectBrowserRepository(null)
@@ -2357,11 +2359,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
   public async _selectRepository(
     repository: Repository | CloningRepository | null
   ): Promise<Repository | null> {
+    const selectionRevision = ++this.repositorySelectionRevision
+    this.requestedRepositorySelection = repository
     if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
       try {
         const current = await this.browserRepositorySelection.select(repository instanceof Repository ? repository.path : null)
         if (!current) return null
       } catch (error) {
+        if (selectionRevision === this.repositorySelectionRevision) this.requestedRepositorySelection = this.selectedRepository
         this.emitError(error)
         return null
       }
@@ -3229,6 +3234,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
   private updateRepositorySelectionAfterRepositoriesChanged() {
     const selectedRepository = this.selectedRepository
+    const requested = this.requestedRepositorySelection
+    if (requested !== undefined && (requested?.constructor !== selectedRepository?.constructor || requested?.id !== selectedRepository?.id || (requested instanceof Repository && selectedRepository instanceof Repository && requested.path !== selectedRepository.path))) return
+    // A move updates the saved path before it is safe to follow that path.
+    // Let moveCurrentWorktree reconcile it after checking newer user choices.
+    if (selectedRepository instanceof Repository && this.movingWorktrees.has(getRepositoryStateKey(selectedRepository))) return
     let newSelectedRepository: Repository | CloningRepository | null =
       this.selectedRepository
     if (selectedRepository) {
@@ -7374,6 +7384,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
     repository: Repository,
     worktree: WorktreeEntry
   ): Promise<Repository> {
+    const selectionRevision = ++this.repositorySelectionRevision
+    this.requestedRepositorySelection = this.selectedRepository
     const type = await getRepositoryType(worktree.path).catch(e => {
       log.error('Could not determine repository type', e)
       return { kind: 'missing' } as RepositoryType
@@ -7401,13 +7413,15 @@ export class AppStore extends TypedBaseStore<IAppState> {
         ? await this.findMainWorktreePath(worktree.path)
         : undefined
 
-    const result = await this.repositoriesStore.switchWorktree(
-      repository,
-      worktree.path,
-      missing,
-      gitDir,
-      mainWorktreePath
-    )
+    const key = getRepositoryStateKey(repository)
+    const ownsSuppression = !this.movingWorktrees.has(key)
+    if (ownsSuppression) this.movingWorktrees.add(key)
+    let result: Awaited<ReturnType<RepositoriesStore['switchWorktree']>>
+    try {
+      result = await this.repositoriesStore.switchWorktree(repository, worktree.path, missing, gitDir, mainWorktreePath)
+    } finally {
+      if (ownsSuppression) this.movingWorktrees.delete(key)
+    }
 
     // A store kept from when this worktree was last selected may predate an
     // account change, so it's adopted before seeding the current data.
@@ -7418,7 +7432,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       worktree
     )
 
-    await this._selectRepository(result.repository)
+    if (this.repositorySelectionRevision === selectionRevision) await this._selectRepository(result.repository)
 
     this.statsStore.increment('worktreeSwitchCount')
 
@@ -7514,6 +7528,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
     try {
       await removeWorktree(repository.path, worktreePath, options.force)
     } catch (e) {
+      if (e instanceof BackendError && (e.code === 'worktree_outcome_uncertain' || e.code === 'worktree_review_failed')) {
+        this.emitError(e)
+        return
+      }
       this._closePopup(PopupType.DeleteWorktree)
       this._closePopup(PopupType.DeleteWorktreeFailed)
       this._showPopup({
@@ -7555,6 +7573,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
     assertRepositoryGitAvailable(worktreePath)
     const isCurrentWorktree = repository.path === worktreePath
     const key = getRepositoryStateKey(repository)
+    const selectionRevision = this.repositorySelectionRevision
+    const savedWorktree = this.repositories.find(candidate => candidate.path === worktreePath)
+    const savedKey = savedWorktree === undefined ? undefined : getRepositoryStateKey(savedWorktree)
     if (
       isCurrentWorktree &&
       (this.isRepositoryBusy(repository) || this.movingWorktrees.has(key))
@@ -7566,6 +7587,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     if (isCurrentWorktree) {
       this.movingWorktrees.add(key)
     }
+    if (savedKey !== undefined) this.movingWorktrees.add(savedKey)
     try {
       return await this.assistedCommits.state.withDestruction(
         worktreePath,
@@ -7582,6 +7604,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       if (isCurrentWorktree) {
         this.movingWorktrees.delete(key)
       }
+      if (savedKey !== undefined) this.movingWorktrees.delete(savedKey)
+      if (this.repositorySelectionRevision === selectionRevision) this.updateRepositorySelectionAfterRepositoriesChanged()
     }
   }
 
@@ -7591,7 +7615,30 @@ export class AppStore extends TypedBaseStore<IAppState> {
     newPath: string
   ): Promise<void> {
     if (repository.path !== worktreePath) {
+      const saved = this.repositories.find(candidate => candidate.path === worktreePath)
+      if (saved !== undefined && this.repositories.some(candidate => candidate.path === newPath && candidate.id !== saved.id)) {
+        throw new Error('The destination is already saved as another repository. Remove that saved entry before moving the worktree.')
+      }
       await moveWorktree(repository, worktreePath, newPath)
+      if (saved !== undefined) {
+        const current = this.repositories.find(candidate => candidate.id === saved.id)
+        if (current !== undefined && current.path !== worktreePath) {
+          throw new Error('The worktree moved, but its saved repository changed. Inspect the new location before retrying.')
+        }
+        if (current !== undefined) {
+          const selectionRevision = this.repositorySelectionRevision
+          let result: Awaited<ReturnType<RepositoriesStore['switchWorktree']>>
+          try { result = await this.repositoriesStore.switchWorktree(current, newPath) }
+          catch (error) { throw new Error('The worktree moved, but its saved repository could not be updated. Inspect the new location before retrying.', { cause: error }) }
+          if (result.existingRepository) throw new Error('The worktree moved, but the destination has another saved repository. Inspect both entries before retrying.')
+          this.repositoryStateCache.transferState(current, result.repository)
+          this.gitStoreCache.transfer(current, result.repository)
+          this.adoptRepository(result.repository)
+          if (this.repositorySelectionRevision === selectionRevision && this.selectedRepository instanceof Repository && this.selectedRepository.id === current.id && this.selectedRepository.path === current.path) {
+            await this._selectRepository(result.repository)
+          }
+        }
+      }
       await this._refreshWorktrees(repository)
       return
     }
@@ -7604,15 +7651,15 @@ export class AppStore extends TypedBaseStore<IAppState> {
     worktreePath: string,
     newPath: string
   ): Promise<void> {
+    const selectionRevision = this.repositorySelectionRevision
     await moveWorktree(repository, worktreePath, newPath)
 
     // The worktree being renamed is the currently selected one, so switch to
     // its new path so that the subsequent refresh (and any further git calls)
     // operate on the renamed directory rather than the now non-existing one.
-    const result = await this.repositoriesStore.switchWorktree(
-      repository,
-      newPath
-    )
+    let result: Awaited<ReturnType<RepositoriesStore['switchWorktree']>>
+    try { result = await this.repositoriesStore.switchWorktree(repository, newPath) }
+    catch (error) { throw new Error('The worktree moved, but its saved repository could not be updated. Inspect the new location before retrying.', { cause: error }) }
 
     // Renaming changes the repository's path, which is part of the key used
     // by the state and GitStore caches. Carry the existing state over to the
@@ -7622,7 +7669,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.gitStoreCache.transfer(repository, result.repository)
     this.adoptRepository(result.repository)
 
-    await this._selectRepository(result.repository)
+    if (this.repositorySelectionRevision === selectionRevision && this.selectedRepository instanceof Repository && this.selectedRepository.id === repository.id && this.selectedRepository.path === repository.path) {
+      await this._selectRepository(result.repository)
+    }
     await this._refreshWorktrees(result.repository)
   }
 

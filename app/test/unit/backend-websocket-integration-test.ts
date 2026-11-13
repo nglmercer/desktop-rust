@@ -119,6 +119,36 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('reviews worktree lifecycle and relocates the selected saved record', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-worktree-bridge-'))
+      const registryPath = path.join(directory, 'registry.json')
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', registryPath, 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      const sessionUrl = line.startsWith('Open ') ? line.slice(5) : ''
+      dom = new JSDOM('', { url: sessionUrl })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
+      const main = path.join(directory, 'main'); const linked = path.join(directory, 'linked'); const moved = path.join(directory, 'moved')
+      await client.request('init_repository', { path: main }); await client.selectBrowserRepository(main)
+      const git = (...args: string[]) => execFileSync('git', ['-C', main, ...args], { encoding: 'utf8' }).trim()
+      git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false'); git('commit', '--allow-empty', '-qm', 'initial')
+      await client.mutateRepositoryWorktree(main, { kind: 'add', path: linked, create_branch: 'feature', commitish: null })
+      await client.selectBrowserRepository(linked)
+      const before = JSON.parse(await readFile(registryPath, 'utf8'))
+      const saved = before.records.find((entry: { path: string }) => entry.path === linked)
+      expect(saved).toBeDefined()
+      await client.mutateRepositoryWorktree(linked, { kind: 'move', from: linked, to: moved })
+      const after = JSON.parse(await readFile(registryPath, 'utf8'))
+      expect(after.records.find((entry: { id: string }) => entry.id === saved.id).path).toBe(moved)
+      await client.selectBrowserRepository(main)
+      await writeFile(path.join(moved, 'untracked'), 'keep')
+      await expect(client.mutateRepositoryWorktree(main, { kind: 'remove', path: moved, force: false })).rejects.toMatchObject({ code: 'git_error' })
+      expect(await readFile(path.join(moved, 'untracked'), 'utf8')).toBe('keep')
+      await client.mutateRepositoryWorktree(main, { kind: 'remove', path: moved, force: true })
+      await expect(readFile(path.join(moved, 'untracked'))).rejects.toMatchObject({ code: 'ENOENT' })
+    }, 90_000)
+
     it('renders comparison diffs through the Rust bridge', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-compare-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })

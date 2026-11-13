@@ -1854,6 +1854,22 @@ export class BackendClient {
     return value
   }
 
+  async mutateRepositoryWorktree(repositoryPath: string, action: { kind: 'add'; path: string; create_branch: string | null; commitish: string | null } | { kind: 'remove'; path: string; force: boolean } | { kind: 'move'; from: string; to: string }): Promise<void> {
+    const call = (method: 'renderer_worktree_preview' | 'renderer_worktree_apply', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'worktree_mutation', repository_path: repositoryPath, operation: { method, action, ...extra } } })
+      : this.repositoryRead(repositoryPath, method, { action, ...extra })
+    let preview: unknown
+    try { preview = await call('renderer_worktree_preview') }
+    catch (error) { throw new BackendError({ code: 'worktree_review_failed', message: `Unable to review worktree; refresh before retrying: ${toBackendError(error).message}`, retryable: false }) }
+    if (!isRecord(preview) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'worktree_review_failed', message: 'Invalid worktree review; refresh before retrying', retryable: false })
+    let result: unknown
+    try { result = await call('renderer_worktree_apply', { basis: preview.basis }) }
+    catch (error) { throw new BackendError({ code: 'worktree_outcome_uncertain', message: `Worktree outcome is uncertain; inspect its location before retrying: ${toBackendError(error).message}`, retryable: false }) }
+    if (isRecord(result) && result.kind === 'refused' && typeof result.message === 'string') throw new BackendError({ code: 'git_error', message: result.message, retryable: false })
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stderr !== 'string') throw new BackendError({ code: 'worktree_outcome_uncertain', message: 'Worktree outcome is uncertain; inspect its location before retrying', retryable: false })
+    if (result.code !== 0) throw new BackendError({ code: 'worktree_outcome_uncertain', message: `Worktree operation failed; inspect its location before retrying: ${result.stderr || 'Git reported an error'}`, retryable: false })
+  }
+
   /** Read staged paths without losing Git's filename boundaries. */
   async repositoryIndexChanges(repositoryPath: string): Promise<ReadonlyArray<{ readonly path: string; readonly status: 'A' | 'D' | 'M' | 'T' | 'U' | 'X' }>> {
     const value = await this.repositoryRead(repositoryPath, 'index_changes', {})

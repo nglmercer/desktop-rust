@@ -147,6 +147,9 @@ export async function addWorktree(
   path: string,
   options: IAddWorktreeOptions = {}
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'add', path, create_branch: options.createBranch || null, commitish: options.commitish || null }), true)
+  }
   const args = ['worktree', 'add']
 
   if (options.createBranch) {
@@ -167,6 +170,9 @@ export async function removeWorktree(
   worktreePath: string,
   force: boolean = false
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(repositoryPath, 'mutation', () => backend().mutateRepositoryWorktree(repositoryPath, { kind: 'remove', path: worktreePath, force }), true)
+  }
   const args = ['worktree', 'remove']
   if (force) {
     args.push('--force')
@@ -188,6 +194,9 @@ export async function moveWorktree(
   oldPath: string,
   newPath: string
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'move', from: oldPath, to: newPath }), true)
+  }
   const mainWorktree = (await listWorktrees(repository)).find(
     wt => wt.type === 'main'
   )

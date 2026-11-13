@@ -531,6 +531,8 @@ pub enum Operation {
         new_branch: bool,
         start: Option<String>,
     },
+    RendererWorktreePreview { action: crate::renderer_worktree::WorktreeAction },
+    RendererWorktreeApply { action: crate::renderer_worktree::WorktreeAction, basis: String },
     WorktreeRemove {
         path: GitPath,
         #[serde(default)]

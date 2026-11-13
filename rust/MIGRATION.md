@@ -2024,7 +2024,17 @@ preservation, concurrent patches, WebSocket settings without a repository, and
 cross-client preference events. DOM tests exercise management controls and
 non-forcing mutations in the retired standalone frontend. Current CLI and
 bridge coverage is in `crates/cli/tests/management.rs`; the React browser
-workflow and legacy Node path adapter still need replacement and verification.
+workflow now uses reviewed Rust worktree add, move and remove on Wry and
+WebSocket. Reviews bind the registered worktree list, refs, configuration,
+source status and filesystem identities. Removal additionally hashes all
+regular-file contents, including ignored and untracked files, without
+following symlinks; it rejects directories over 100,000 entries, 2 GiB of
+regular-file content, or 128 levels of nesting. Dirty and locked removals are
+refused before Git starts; post-start failures require inspection. Moving a
+saved linked worktree relocates its record without replacing a newer selection.
+Git and external filesystem writers can still race between the last review
+and Git's mutation. Native Windows runtime and large-worktree parity remain
+to be verified; Electron retains its legacy worktree path.
 
 Native desktop platform integration, richer persistence/import of existing
 Desktop data, worktree repair/retry flows, nested submodule UI, and complete

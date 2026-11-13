@@ -458,6 +458,43 @@ impl Registry {
         updated.context("Saved repository account was not updated")
     }
 
+    /// Move a reviewed saved worktree record without stealing an unrelated
+    /// selection or replacing a destination's separately saved identity.
+    pub(crate) fn relocate_worktree_record(
+        &self,
+        source: &SavedRepositoryRecord,
+        target: PathBuf,
+        follow_current: bool,
+    ) -> Result<Option<SavedRepositoryRecord>> {
+        let mut moved = None;
+        self.update(|data| {
+            let Some(mut record) = data.record_by_id(&source.id) else {
+                return Ok(());
+            };
+            anyhow::ensure!(record.path == source.path && record.account.revision == source.account.revision, "Saved worktree account changed; reload before moving it");
+            if target == source.path {
+                moved = Some(record);
+                return Ok(());
+            }
+            anyhow::ensure!(data.record_for_path(&target).is_none(), "The destination already has a saved repository identity");
+            for path in &mut data.repositories {
+                if *path == source.path {
+                    *path = target.clone();
+                }
+            }
+            if follow_current && data.selected.as_deref() == Some(source.path.as_path()) {
+                data.selected = Some(target.clone());
+            } else if data.selected.as_deref() == Some(source.path.as_path()) {
+                data.selected = None;
+            }
+            record.path = target.clone();
+            data.persist_record(record.clone());
+            moved = Some(record);
+            Ok(())
+        })?;
+        Ok(moved)
+    }
+
     /// Keep a saved record stable while performing bounded local recovery I/O.
     pub(crate) fn with_record_lock<T>(
         &self,

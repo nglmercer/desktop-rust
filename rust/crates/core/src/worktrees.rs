@@ -47,7 +47,7 @@ impl Repository {
     pub(crate) async fn worktrees(&self) -> Result<Value> {
         Ok(serde_json::to_value(self.worktree_records().await?)?)
     }
-    async fn worktree_records(&self) -> Result<Vec<Worktree>> {
+    pub(crate) async fn worktree_records(&self) -> Result<Vec<Worktree>> {
         let output = self
             .run(&args(&["worktree", "list", "--porcelain", "-z"]))
             .await?;
@@ -56,7 +56,7 @@ impl Repository {
         }
         parse_worktrees(&output.stdout)
     }
-    fn absolute_worktree_path(&self, path: GitPath) -> Result<PathBuf> {
+    pub(crate) fn absolute_worktree_path(&self, path: GitPath) -> Result<PathBuf> {
         let value = match path {
             GitPath::Text(text) => text.into(),
             GitPath::Bytes { bytes } => os_from_bytes(&bytes)?,
@@ -71,7 +71,7 @@ impl Repository {
             self.path.join(path)
         })
     }
-    async fn known_worktree(&self, path: GitPath) -> Result<PathBuf> {
+    pub(crate) async fn known_worktree(&self, path: GitPath) -> Result<PathBuf> {
         let path = self.absolute_worktree_path(path)?;
         let canonical = path.canonicalize().unwrap_or(path.clone());
         for entry in self.worktree_records().await? {

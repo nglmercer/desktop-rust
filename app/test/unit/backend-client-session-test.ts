@@ -6,6 +6,19 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('treats post-start worktree failures as uncertain and preserves preflight refusal', async () => {
+    const invoke = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const action = { kind: 'remove' as const, path: '/linked', force: false }
+    invoke.mockResolvedValueOnce({ basis: 'a'.repeat(64) }).mockResolvedValueOnce({ kind: 'refused', message: 'Worktree is dirty' })
+    await expect(client.mutateRepositoryWorktree('/repo', action)).rejects.toMatchObject({ code: 'git_error', message: 'Worktree is dirty' })
+    invoke.mockResolvedValueOnce({ basis: 'b'.repeat(64) }).mockResolvedValueOnce({ code: 1, stderr: 'partially removed' })
+    await expect(client.mutateRepositoryWorktree('/repo', action)).rejects.toMatchObject({ code: 'worktree_outcome_uncertain', message: expect.stringContaining('inspect') })
+    invoke.mockResolvedValueOnce({ basis: 'c'.repeat(64) }).mockRejectedValueOnce(new Error('connection lost'))
+    await expect(client.mutateRepositoryWorktree('/repo', action)).rejects.toMatchObject({ code: 'worktree_outcome_uncertain' })
+  })
+
   it('releases resolution uploads after a failure and permits the next request', async () => {
     const client = new BackendClient()
     const id = '12345678-1234-4234-8234-123456789abc'

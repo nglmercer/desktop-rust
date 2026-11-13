@@ -59,6 +59,7 @@ mod renderer_merge;
 mod renderer_rebase;
 mod renderer_reset;
 mod renderer_revert;
+pub mod renderer_worktree;
 mod resolution_diff;
 pub use refs::symbolic_ref;
 mod repository_discovery;
@@ -671,6 +672,8 @@ impl Repository {
                 new_branch,
                 start,
             } => return self.worktree_add(path, branch, new_branch, start).await,
+            Operation::RendererWorktreePreview { action } => return self.renderer_worktree_preview(&action).await,
+            Operation::RendererWorktreeApply { action, basis } => return self.renderer_worktree_apply(action, &basis).await,
             Operation::WorktreeRemove { path, force } => {
                 return self.worktree_remove(path, force).await;
             }
@@ -1293,6 +1296,8 @@ impl Repository {
             | SetGitSetting { .. }
             | Worktrees
             | WorktreeAdd { .. }
+            | RendererWorktreePreview { .. }
+            | RendererWorktreeApply { .. }
             | WorktreeRemove { .. }
             | WorktreeMove { .. }
             | WorktreeLock { .. } => unreachable!("handled by execute"),

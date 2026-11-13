@@ -178,6 +178,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    WorktreeMutation {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -498,6 +502,7 @@ impl Backend {
         | GitInfoOperation::FetchRemote {
             repository_path, ..
         }
+        | GitInfoOperation::WorktreeMutation { repository_path, .. }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -788,6 +793,9 @@ impl Backend {
                 "unsupported remote fetch operation".into(),
             ));
         }
+        if let GitInfoOperation::WorktreeMutation { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererWorktreePreview { .. } | Operation::RendererWorktreeApply { .. })
+        { return Err(AppError::BadArgs("unsupported worktree operation".into())); }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
             && !matches!(
                 operation,
@@ -1614,6 +1622,7 @@ impl Backend {
                         operation: Operation::RendererFetch { .. } | Operation::RendererRemoteHead { .. },
                         ..
                     }
+                    | GitInfoOperation::WorktreeMutation { operation: Operation::RendererWorktreeApply { .. }, .. }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1833,6 +1842,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::FetchRemote { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::WorktreeMutation { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2090,6 +2106,33 @@ mod tests {
             let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":result_id}})]).unwrap();
             assert_eq!(backend.read(release).unwrap()["released"], true);
             fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn wry_reviews_and_mutates_worktrees() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-worktree-{}", uuid::Uuid::new_v4()));
+            let main = root.join("main"); let linked = root.join("linked");
+            fs::create_dir_all(&main).unwrap();
+            let git = |args: &[&str]| { let out = Command::new("git").arg("-C").arg(&main).args(args).output().unwrap(); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); };
+            git(&["init", "-q", "-b", "main"]); git(&["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "initial"]);
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"worktree_mutation","repository_path":main,"operation":operation}})]).unwrap();
+            let action = json!({"kind":"add","path":linked,"create_branch":"feature","commitish":null});
+            let preview = backend.read(route(json!({"method":"renderer_worktree_preview","action":action}))).unwrap();
+            assert_eq!(backend.read(route(json!({"method":"renderer_worktree_apply","action":action,"basis":preview["basis"]}))).unwrap()["code"], 0);
+            fs::write(linked.join("dirty"), "one").unwrap();
+            let remove = json!({"kind":"remove","path":linked,"force":false});
+            let preview = backend.read(route(json!({"method":"renderer_worktree_preview","action":remove}))).unwrap();
+            assert_eq!(backend.read(route(json!({"method":"renderer_worktree_apply","action":remove,"basis":preview["basis"]}))).unwrap()["kind"], "refused");
+            let force = json!({"kind":"remove","path":linked,"force":true});
+            let preview = backend.read(route(json!({"method":"renderer_worktree_preview","action":force}))).unwrap();
+            fs::write(linked.join("dirty"), "two").unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_worktree_apply","action":force,"basis":preview["basis"]}))).is_err());
+            let preview = backend.read(route(json!({"method":"renderer_worktree_preview","action":force}))).unwrap();
+            assert_eq!(backend.read(route(json!({"method":"renderer_worktree_apply","action":force,"basis":preview["basis"]}))).unwrap()["code"], 0);
+            assert!(!linked.exists()); fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }
 
