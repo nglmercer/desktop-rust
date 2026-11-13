@@ -8,16 +8,18 @@ import { DiffType } from '../../src/models/diff'
 import type { Repository } from '../../src/models/repository'
 
 const mocks = vi.hoisted(() => ({
-  transport: 'ws', compare: vi.fn(), changes: vi.fn(), mergeBase: vi.fn(), git: vi.fn(),
+  transport: 'ws', compare: vi.fn(), changes: vi.fn(), mergeBase: vi.fn(), git: vi.fn(), staged: vi.fn(), unstage: vi.fn(), prepare: vi.fn(), stage: vi.fn(),
   scope: vi.fn(async (_path: string, _kind: string, work: () => Promise<unknown>) => work()),
 }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCompareDiff: mocks.compare, repositoryRendererCompareChanges: mocks.changes, repositoryMergeBase: mocks.mergeBase, repositorySubmoduleDisplayUrl: async () => null }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCompareDiff: mocks.compare, repositoryRendererCompareChanges: mocks.changes, repositoryMergeBase: mocks.mergeBase, repositoryReadSnapshot: mocks.staged, repositorySubmoduleDisplayUrl: async () => null }) }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
+vi.mock('../../src/lib/git/reset', () => ({ unstageAll: mocks.unstage }))
+vi.mock('../../src/lib/git/update-index', () => ({ preparePartialStagingDiffs: mocks.prepare, stageFiles: mocks.stage }))
 vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: mocks.scope }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 vi.mock('keytar', () => ({ default: {} }))
 
-import { getBranchMergeBaseDiff, getCommitRangeDiff, getBranchMergeBaseChangedFiles, getCommitRangeChangedFiles } from '../../src/lib/git/diff'
+import { getBranchMergeBaseDiff, getCommitRangeDiff, getBranchMergeBaseChangedFiles, getCommitRangeChangedFiles, getFilesDiffText } from '../../src/lib/git/diff'
 
 let root: string
 let raw: Buffer
@@ -42,6 +44,25 @@ afterAll(() => { if (root) rmSync(root, { recursive: true, force: true }) })
 
 describe.each(['wry', 'ws'])('Rust comparison diff via %s', transport => {
   beforeEach(() => { vi.clearAllMocks(); mocks.transport = transport; mocks.compare.mockReset() })
+
+  it('reads the staged Copilot patch through a request-owned snapshot', async () => {
+    mocks.staged.mockResolvedValue(Buffer.from('selected patch'))
+    mocks.prepare.mockResolvedValue(new Map())
+    expect(await getFilesDiffText(repository, [], `${first}^`)).toBe('selected patch')
+    expect(mocks.staged).toHaveBeenCalledWith('/repo', 'renderer_staged_diff', { amend_head: first })
+    expect(mocks.unstage).toHaveBeenCalledTimes(2)
+    expect(mocks.stage).toHaveBeenCalledTimes(1)
+    expect(mocks.git).not.toHaveBeenCalled()
+    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+  })
+
+  it('retains the Git path for non-OID comparison revisions', async () => {
+    mocks.git.mockResolvedValue({ stdout: Buffer.from('legacy patch') })
+    mocks.prepare.mockResolvedValue(new Map())
+    expect(await getFilesDiffText(repository, [], 'topic^')).toBe('legacy patch')
+    expect(mocks.staged).not.toHaveBeenCalled()
+    expect(mocks.git).toHaveBeenCalledTimes(1)
+  })
 
   it('loads comparison changed files through Rust and retries an initial commit', async () => {
     mocks.mergeBase.mockResolvedValue(first)

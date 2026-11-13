@@ -128,6 +128,39 @@ impl WorkingFile {
         copy_state(file, backup)
     }
 
+    /// Read a regular worktree file without following symlinks or special files.
+    pub fn read_bounded(&self, limit: u64) -> Result<Vec<u8>> {
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let file = self.parent.open_with(&self.name, &options)?.into_std();
+        let metadata = file.metadata()?;
+        anyhow::ensure!(
+            metadata.is_file() && metadata.len() <= limit,
+            "Resolution file is not a supported regular file"
+        );
+        let mut input = file.take(limit + 1);
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 64 * 1024];
+        loop {
+            Cancellation::current().check()?;
+            let count = input.read(&mut chunk)?;
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        anyhow::ensure!(
+            bytes.len() as u64 <= limit,
+            "Resolution file exceeds the supported size"
+        );
+        Ok(bytes)
+    }
+
     pub fn stage(&self, source: &Path, expected: &FileState) -> Result<StagedFile> {
         if expected.kind == Kind::Absent {
             return Ok(StagedFile {

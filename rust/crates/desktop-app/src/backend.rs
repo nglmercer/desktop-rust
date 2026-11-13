@@ -556,12 +556,16 @@ impl Backend {
                 Operation::DiffDetail { staged: false, .. }
                     | Operation::SelectDiff { staged: false, .. }
                     | Operation::SelectRenamedDiff { .. }
+                    | Operation::RendererStagedDiff { .. }
                     | Operation::RendererWorkingDiff { .. }
                     | Operation::RendererBlobPrefix { .. }
                     | Operation::RendererBlobChunk { .. }
                     | Operation::RendererCommitDiff { .. }
                     | Operation::RendererCompareDiff { .. }
                     | Operation::RendererCompareChanges { .. }
+                    | Operation::RendererResolutionBegin
+                    | Operation::RendererResolutionAppend { .. }
+                    | Operation::RendererResolutionDiff { .. }
                     | Operation::RendererCompareDiffChunk { .. }
                     | Operation::RendererCompareDiffRelease { .. }
                     | Operation::DiscardPreview {
@@ -2063,6 +2067,29 @@ mod tests {
             fs::remove_dir_all(&root).unwrap();
             let request = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":changes_id}})]).unwrap();
             assert_eq!(backend.read(request).unwrap()["released"], true);
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn wry_resolution_preview_upload_and_read() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-resolution-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let result = Command::new("git").arg("-C").arg(&root).args(["init", "-q"]).output().unwrap(); assert!(result.status.success());
+            fs::write(root.join("[a].txt"), "working\n").unwrap();
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":operation}})]).unwrap();
+            let upload = backend.read(route(json!({"method":"renderer_resolution_begin"}))).unwrap();
+            let id = upload["id"].as_str().unwrap();
+            assert_eq!(backend.read(route(json!({"method":"renderer_resolution_append","snapshot_id":id,"offset":0,"data":"b3Vycwo="}))).unwrap()["size"], 5);
+            let preview = backend.read(route(json!({"method":"renderer_resolution_diff","snapshot_id":id,"size":5,"path":"[a].txt","stage":null,"hide_whitespace":false}))).unwrap();
+            assert_eq!(preview["kind"], "snapshot");
+            let result_id = preview["id"].as_str().unwrap();
+            let chunk = backend.read(route(json!({"method":"renderer_compare_diff_chunk","snapshot_id":result_id,"offset":0,"length":524288}))).unwrap();
+            assert!(!chunk["data"].as_str().unwrap().is_empty());
+            let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":result_id}})]).unwrap();
+            assert_eq!(backend.read(release).unwrap()["released"], true);
+            fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }
 

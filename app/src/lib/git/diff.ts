@@ -554,6 +554,13 @@ export async function getResolutionDiff(
   options: { content: string } | { stage: 'ours' | 'theirs' },
   hideWhitespaceInDiff: boolean = false
 ): Promise<IResolutionDiff> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryResolutionDiff(repository.path, filePath, options, hideWhitespaceInDiff)
+    const result = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    return buildResolutionDiff(Buffer.from(result.raw), result.oldContents, result.newContents)
+  }
   const gitStage =
     'stage' in options ? (options.stage === 'ours' ? ':2' : ':3') : undefined
 
@@ -614,44 +621,26 @@ export async function getResolutionDiff(
       encoding: 'buffer',
     })
 
-    if (!isValidBuffer(stdout)) {
-      return {
-        diff: { kind: DiffType.Unrenderable },
-        oldContents: baseContent,
-        newContents: targetContent,
-      }
-    }
-
-    const diff = diffFromRawDiffOutput(stdout)
-
-    if (isDiffTooLarge(diff)) {
-      return {
-        diff: {
-          kind: DiffType.LargeText,
-          text: diff.contents,
-          hunks: diff.hunks,
-          maxLineNumber: diff.maxLineNumber,
-          hasHiddenBidiChars: diff.hasHiddenBidiChars,
-        },
-        oldContents: baseContent,
-        newContents: targetContent,
-      }
-    }
-
-    return {
-      diff: {
-        kind: DiffType.Text,
-        text: diff.contents,
-        hunks: diff.hunks,
-        maxLineNumber: diff.maxLineNumber,
-        hasHiddenBidiChars: diff.hasHiddenBidiChars,
-      },
-      oldContents: baseContent,
-      newContents: targetContent,
-    }
+    return buildResolutionDiff(stdout, baseContent, targetContent)
   } finally {
     await unlink(tempBase).catch(() => {})
     await unlink(tempTarget).catch(() => {})
+  }
+}
+
+function buildResolutionDiff(stdout: Buffer, oldContents: string, newContents: string): IResolutionDiff {
+  if (!isValidBuffer(stdout)) return { diff: { kind: DiffType.Unrenderable }, oldContents, newContents }
+  const diff = diffFromRawDiffOutput(stdout)
+  return {
+    diff: {
+      kind: isDiffTooLarge(diff) ? DiffType.LargeText : DiffType.Text,
+      text: diff.contents,
+      hunks: diff.hunks,
+      maxLineNumber: diff.maxLineNumber,
+      hasHiddenBidiChars: diff.hasHiddenBidiChars,
+    },
+    oldContents,
+    newContents,
   }
 }
 
@@ -682,6 +671,22 @@ export async function getFilesDiffText(
   await unstageAll(repository)
 
   await stageFiles(repository, files, partialDiffs)
+
+  if (
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none' &&
+    (commitish === undefined || /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\^$/.test(commitish))
+  ) {
+    const read = () => backend().repositoryReadSnapshot(repository.path, 'renderer_staged_diff', {
+      amend_head: commitish === undefined ? null : commitish.slice(0, -1),
+    })
+    const bytes = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    await unstageAll(repository)
+    if (bytes === null) throw new Error('Unable to read staged diff')
+    return Buffer.from(bytes).toString('utf8')
+  }
 
   // `--no-ext-diff` should be provided wherever we invoke `git diff` so that any
   // diff.external program configured by the user is ignored

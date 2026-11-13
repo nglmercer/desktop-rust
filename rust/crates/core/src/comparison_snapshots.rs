@@ -56,7 +56,8 @@ struct Entry {
     expires: Instant,
     idle_ttl: Duration,
     expiry_task: Option<tokio::task::AbortHandle>,
-    _permit: Reservation,
+    permit: Option<Reservation>,
+    upload: bool,
 }
 impl Drop for Entry {
     fn drop(&mut self) {
@@ -124,7 +125,11 @@ pub(crate) async fn reserve() -> Result<Reservation> {
 }
 
 pub(crate) fn insert(repository: &str, bytes: Vec<u8>, permit: Reservation) -> Result<Value> {
-    insert_with_ttl(repository, bytes, permit, TTL)
+    insert_with_ttl(repository, bytes, permit, TTL, false)
+}
+
+pub(crate) fn insert_upload(repository: &str, permit: Reservation) -> Result<Value> {
+    insert_with_ttl(repository, Vec::new(), permit, TTL, true)
 }
 
 fn insert_with_ttl(
@@ -132,6 +137,7 @@ fn insert_with_ttl(
     bytes: Vec<u8>,
     permit: Reservation,
     ttl: Duration,
+    upload: bool,
 ) -> Result<Value> {
     ensure!(
         bytes.len() <= MAX_BYTES,
@@ -158,7 +164,8 @@ fn insert_with_ttl(
             expires: Instant::now() + ttl,
             idle_ttl: ttl,
             expiry_task: None,
-            _permit: permit,
+            permit: Some(permit),
+            upload,
         },
     );
     // Actively reclaim even if the client disappears without another request.
@@ -193,6 +200,35 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn uploads_are_ordered_private_and_released_on_close() {
+        let owner = Owner::new();
+        let other = Owner::new();
+        let id = scope(owner.clone(), async {
+            let permit = reserve().await.unwrap();
+            let upload = insert_upload("repo", permit).unwrap();
+            let id = Uuid::parse_str(upload["id"].as_str().unwrap()).unwrap();
+            assert!(append_upload("repo", id, 1, "YQ==").is_err());
+            assert!(chunk("repo", id, 0, 1).is_err());
+            assert_eq!(append_upload("repo", id, 0, "YQ==").unwrap()["size"], 1);
+            assert!(take_upload("repo", id, 2).is_err());
+            id
+        })
+        .await;
+        scope(other.clone(), async {
+            assert!(append_upload("repo", id, 1, "Yg==").is_err());
+            assert!(take_upload("repo", id, 1).is_err());
+            assert!(release_owned(&id.to_string()).is_err());
+        })
+        .await;
+        owner.close();
+        scope(owner.clone(), async {
+            assert!(take_upload("repo", id, 1).is_err());
+        })
+        .await;
+        other.close();
+    }
+
+    #[tokio::test]
     async fn snapshots_are_session_owned_and_actively_reclaimed() {
         let owner = Owner::new();
         let other = Owner::new();
@@ -204,6 +240,7 @@ mod tests {
                 b"abc\0def".to_vec(),
                 permit,
                 Duration::from_millis(400),
+                false,
             )
             .unwrap();
             let id = Uuid::parse_str(result["id"].as_str().unwrap()).unwrap();
@@ -320,6 +357,7 @@ pub(crate) fn chunk(repository: &str, id: Uuid, offset: u64, length: u32) -> Res
         entry.owner == owner && entry.repository == repository,
         "Comparison snapshot does not belong to this session"
     );
+    ensure!(!entry.upload, "Comparison upload is not readable");
     entry.expires = Instant::now() + entry.idle_ttl;
     let start = usize::try_from(offset).context("Invalid comparison offset")?;
     ensure!(start <= entry.bytes.len(), "Invalid comparison offset");
@@ -327,6 +365,81 @@ pub(crate) fn chunk(repository: &str, id: Uuid, offset: u64, length: u32) -> Res
     Ok(
         json!({"offset":start,"size":entry.bytes.len(),"data":STANDARD.encode(&entry.bytes[start..end])}),
     )
+}
+
+/// Append one bounded, ordered input chunk to this session's upload.
+pub(crate) fn append_upload(repository: &str, id: Uuid, offset: u64, data: &str) -> Result<Value> {
+    ensure!(
+        data.len() <= 64 * 1024,
+        "Comparison upload chunk exceeds its limit"
+    );
+    let bytes = STANDARD
+        .decode(data)
+        .context("Invalid comparison upload encoding")?;
+    ensure!(
+        bytes.len() <= 48 * 1024,
+        "Comparison upload chunk exceeds its limit"
+    );
+    let owner = OWNER
+        .try_with(|value| value.id)
+        .context("Comparison session expired")?;
+    let mut map = entries()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Comparison snapshot unavailable"))?;
+    if map
+        .get(&id)
+        .is_some_and(|entry| entry.expires <= Instant::now())
+    {
+        map.remove(&id);
+    }
+    let entry = map.get_mut(&id).context("Comparison upload expired")?;
+    ensure!(
+        entry.owner == owner && entry.repository == repository && entry.upload,
+        "Comparison upload does not belong to this session"
+    );
+    ensure!(
+        offset == entry.bytes.len() as u64,
+        "Comparison upload offset changed"
+    );
+    ensure!(
+        entry.bytes.len().saturating_add(bytes.len()) <= MAX_BYTES,
+        "Comparison upload exceeds its limit"
+    );
+    entry.bytes.extend_from_slice(&bytes);
+    entry.expires = Instant::now() + entry.idle_ttl;
+    Ok(json!({"size":entry.bytes.len()}))
+}
+
+/// Consume an upload without releasing its capacity reservation.
+pub(crate) fn take_upload(repository: &str, id: Uuid, size: u64) -> Result<(Vec<u8>, Reservation)> {
+    let owner = OWNER
+        .try_with(|value| value.id)
+        .context("Comparison session expired")?;
+    let mut map = entries()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Comparison snapshot unavailable"))?;
+    if map
+        .get(&id)
+        .is_some_and(|entry| entry.expires <= Instant::now())
+    {
+        map.remove(&id);
+    }
+    let entry = map.get(&id).context("Comparison upload expired")?;
+    ensure!(
+        entry.owner == owner && entry.repository == repository && entry.upload,
+        "Comparison upload does not belong to this session"
+    );
+    ensure!(
+        entry.bytes.len() as u64 == size,
+        "Comparison upload is incomplete"
+    );
+    let mut entry = map.remove(&id).expect("entry was just checked");
+    let bytes = std::mem::take(&mut entry.bytes);
+    let permit = entry
+        .permit
+        .take()
+        .context("Comparison upload lost its reservation")?;
+    Ok((bytes, permit))
 }
 
 pub(crate) fn release(repository: &str, id: Uuid) -> Result<Value> {

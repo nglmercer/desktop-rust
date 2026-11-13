@@ -6,6 +6,23 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('releases resolution uploads after a failure and permits the next request', async () => {
+    const client = new BackendClient()
+    const id = '12345678-1234-4234-8234-123456789abc'
+    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockImplementation(async (_path, method, params) => {
+      if (method === 'renderer_resolution_begin') return { kind: 'snapshot', id, size: 0 }
+      if (method === 'renderer_resolution_append') return { size: params.offset + atob(params.data).length }
+      throw new Error('preview failed')
+    })
+    const release = vi.spyOn(client as any, 'releaseComparisonSnapshot').mockResolvedValue(undefined)
+    const content = 'x'.repeat(50_000)
+    await expect(client.repositoryResolutionDiff('/repo', 'file', { content }, false)).rejects.toThrow('preview failed')
+    expect(request.mock.calls.filter(call => call[1] === 'renderer_resolution_append')).toHaveLength(3)
+    expect(release).toHaveBeenCalledWith(id)
+    await expect(client.repositoryResolutionDiff('/repo', 'file', { stage: 'ours' }, false)).rejects.toThrow('preview failed')
+    expect(release).toHaveBeenCalledTimes(2)
+  })
+
   it('reviews Wry remote HEAD before mutation and only reports unsupported during preview', async () => {
     const invoke = vi.fn()
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

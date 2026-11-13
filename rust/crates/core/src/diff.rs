@@ -14,6 +14,20 @@ use std::{
 };
 
 impl Repository {
+    /// Capture the currently staged patch for commit-message generation.
+    pub(crate) async fn renderer_staged_diff(&self, amend_head: Option<&str>) -> Result<Value> {
+        let mut command = args(&["diff", "--no-ext-diff", "--patch-with-raw", "--no-color", "--staged"]);
+        if let Some(head) = amend_head {
+            anyhow::ensure!(matches!(head.len(), 40 | 64) && head.bytes().all(|byte| byte.is_ascii_hexdigit()), "Invalid amend commit");
+            command.push(format!("{head}^").into());
+        }
+        let permit = crate::comparison_snapshots::reserve().await?;
+        let output = process::run_staged_patch(&self.path, &command).await?;
+        ensure_success(&output)?;
+        anyhow::ensure!(output.stdout.len() <= 10 * 1024 * 1024, "Diff is too large to render");
+        crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)
+    }
+
     /// Compute a tree from a private copy without refreshing the live index.
     pub(crate) async fn live_index_tree(&self) -> Result<String> {
         let index_path = self.index_path().await?;
@@ -2200,6 +2214,51 @@ fn select_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn staged_patch_snapshot_matches_git_and_preserves_index() {
+        let root = std::env::temp_dir().join(format!("desktop-staged-diff-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            std::process::Command::new("git").arg("-C").arg(&root).args(arguments).output().unwrap()
+        };
+        assert!(git(&["init", "-q"]).status.success());
+        fs::write(root.join("file"), "first\n").unwrap();
+        assert!(git(&["add", "file"]).status.success());
+        assert!(git(&["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "first"]).status.success());
+        let first = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout).unwrap().trim().to_owned();
+        fs::write(root.join("file"), "second\n").unwrap();
+        assert!(git(&["add", "file"]).status.success());
+        assert!(git(&["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "second"]).status.success());
+        let head = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout).unwrap().trim().to_owned();
+        fs::write(root.join("file"), "third\n").unwrap();
+        assert!(git(&["add", "file"]).status.success());
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let owner = crate::comparison_snapshots::Owner::new();
+        crate::comparison_snapshots::scope(owner.clone(), async {
+            for amend in [None, Some(head.as_str())] {
+                let result = repo.renderer_staged_diff(amend).await.unwrap();
+                let id = uuid::Uuid::parse_str(result["id"].as_str().unwrap()).unwrap();
+                let size = result["size"].as_u64().unwrap();
+                let chunk = crate::comparison_snapshots::chunk(&repo.id(), id, 0, size as u32).unwrap();
+                let actual = STANDARD.decode(chunk["data"].as_str().unwrap()).unwrap();
+                let mut args = vec!["diff", "--no-ext-diff", "--patch-with-raw", "--no-color", "--staged"];
+                let base = format!("{head}^");
+                if amend.is_some() { args.push(&base); }
+                assert_eq!(actual, git(&args).stdout);
+                crate::comparison_snapshots::release(&repo.id(), id).unwrap();
+            }
+            assert!(repo.renderer_staged_diff(Some(&first)).await.is_err());
+            assert!(repo.renderer_staged_diff(Some("--all")).await.is_err());
+            assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+            fs::write(root.join("large"), "x\n".repeat(5 * 1024 * 1024 + 1)).unwrap();
+            assert!(git(&["add", "large"]).status.success());
+            assert!(repo.renderer_staged_diff(None).await.unwrap_err().to_string().contains("too large"));
+        }).await;
+        owner.close();
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn selected_line_staging_preserves_other_entries_and_rejects_stale_content() {

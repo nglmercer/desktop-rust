@@ -36,6 +36,22 @@ pub async fn run(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     run_git(path, args, None, None).await
 }
 
+/// Stop a blob producer as soon as its output exceeds the preview budget.
+pub(crate) async fn run_resolution_blob(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    run_command_inner(
+        path,
+        git_native_paths(None),
+        args,
+        None,
+        crate::comparison_snapshots::MAX_BYTES as u64,
+        None,
+        Some(OutputSlice::BoundedBlob),
+        None,
+        None,
+    )
+    .await
+}
+
 /// Apply Desktop's clone transport policy after URL rewrites, including when
 /// an inherited allowlist would otherwise override Git's protocol settings.
 pub(crate) async fn run_clone(
@@ -128,6 +144,22 @@ pub(crate) async fn run_comparison_snapshot(path: &Path, args: &[OsString]) -> R
         args,
         None,
         crate::comparison_snapshots::MAX_BYTES as u64 + 1,
+        None,
+        Some(OutputSlice::PrefixAndDrain),
+        None,
+        None,
+    )
+    .await
+}
+
+/// Bound staged patch output while draining the Git process to completion.
+pub(crate) async fn run_staged_patch(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    run_command_inner(
+        path,
+        git_command(None),
+        args,
+        None,
+        10 * 1024 * 1024 + 1,
         None,
         Some(OutputSlice::PrefixAndDrain),
         None,
@@ -788,6 +820,7 @@ struct LiveOutput {
 enum OutputSlice {
     Range(u64),
     PrefixAndDrain,
+    BoundedBlob,
 }
 
 async fn run_command_inner(
@@ -871,27 +904,42 @@ async fn run_command_inner(
                         }
                     }
                     let mut bytes = Vec::new();
-                    if matches!(slice, OutputSlice::PrefixAndDrain) {
+                    if matches!(slice, OutputSlice::BoundedBlob) {
+                        return read_bounded(stdout, output_limit).await;
+                    } else if matches!(slice, OutputSlice::PrefixAndDrain) {
                         let limit = output_limit as usize;
                         let mut buffer = vec![0_u8; 64 * 1024];
                         loop {
                             let count = stdout.read(&mut buffer).await?;
-                            if count == 0 { break; }
+                            if count == 0 {
+                                break;
+                            }
                             let kept = count.min(limit - bytes.len());
                             if kept > 0 {
                                 let needed = bytes.len() + kept;
                                 if needed > bytes.capacity() {
-                                    let step = if needed <= 1024 * 1024 { 64 * 1024 } else { 1024 * 1024 };
+                                    let step = if needed <= 1024 * 1024 {
+                                        64 * 1024
+                                    } else {
+                                        1024 * 1024
+                                    };
                                     let target = needed.next_multiple_of(step).min(limit);
-                                    bytes.try_reserve_exact(target - bytes.len()).map_err(|_| {
-                                        std::io::Error::other("cannot allocate comparison snapshot")
-                                    })?;
+                                    bytes.try_reserve_exact(target - bytes.len()).map_err(
+                                        |_| {
+                                            std::io::Error::other(
+                                                "cannot allocate comparison snapshot",
+                                            )
+                                        },
+                                    )?;
                                 }
                                 bytes.extend_from_slice(&buffer[..kept]);
                             }
                         }
                     } else {
-                        (&mut stdout).take(output_limit).read_to_end(&mut bytes).await?;
+                        (&mut stdout)
+                            .take(output_limit)
+                            .read_to_end(&mut bytes)
+                            .await?;
                     }
                     Ok(bytes)
                 } else {
@@ -1200,6 +1248,48 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn clone_progress_never_forwards_split_proxy_credentials() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let live = LiveOutput {
+            sender,
+            request_id: 72,
+            checkpoint: None,
+            clone_progress: true,
+            emit_clone_progress: true,
+        };
+        let (mut writer, reader) = tokio::io::duplex(8);
+        let producer = tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            for piece in [
+                "Receiving objects: 25% https://user:pa",
+                "ss%40word@proxy.invalid\r",
+                "remote: Counting objects: 100% Basic dXNlcjpwYXNz\n",
+            ] {
+                writer.write_all(piece.as_bytes()).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        });
+        let raw = read_clone_output(reader, 1024, &live, "stderr")
+            .await
+            .unwrap();
+        producer.await.unwrap();
+        assert!(String::from_utf8(raw).unwrap().contains("pass%40word"));
+        let mut progress = Vec::new();
+        while let Ok((_, event)) = receiver.try_recv() {
+            if let crate::hook_progress::CommitEvent::FetchOutput { data, .. } = event {
+                progress.push(String::from_utf8(STANDARD.decode(data).unwrap()).unwrap());
+            }
+        }
+        assert_eq!(
+            progress,
+            [
+                "Receiving objects: 25% (25/100)\r",
+                "Counting objects: 100% (100/100)\r"
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn clone_progress_filters_secrets_and_duplicate_bursts() {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
         let live = LiveOutput {
@@ -1280,7 +1370,13 @@ mod tests {
             }
             while let Ok((_, event)) = receiver.try_recv() {
                 if let crate::hook_progress::CommitEvent::FetchOutput { data, .. } = event {
-                    assert!(!STANDARD.decode(data).unwrap().windows(6).any(|w| w == b"SECRET"));
+                    assert!(
+                        !STANDARD
+                            .decode(data)
+                            .unwrap()
+                            .windows(6)
+                            .any(|w| w == b"SECRET")
+                    );
                 }
             }
         }
@@ -1434,8 +1530,13 @@ mod tests {
             "alias.probe=!head -c 70000002 /dev/zero; echo failed >&2; exit 9",
             "probe",
         ]);
-        let output = run_comparison_snapshot(&std::env::temp_dir(), &command).await.unwrap();
-        assert_eq!(output.stdout.len(), crate::comparison_snapshots::MAX_BYTES + 1);
+        let output = run_comparison_snapshot(&std::env::temp_dir(), &command)
+            .await
+            .unwrap();
+        assert_eq!(
+            output.stdout.len(),
+            crate::comparison_snapshots::MAX_BYTES + 1
+        );
         assert_eq!(output.code, 9);
         assert!(String::from_utf8_lossy(&output.stderr).contains("failed"));
     }
@@ -1444,7 +1545,9 @@ mod tests {
     #[tokio::test]
     async fn small_comparison_capture_does_not_reserve_the_full_limit() {
         let command = crate::args(&["-c", "alias.probe=!printf small", "probe"]);
-        let output = run_comparison_snapshot(&std::env::temp_dir(), &command).await.unwrap();
+        let output = run_comparison_snapshot(&std::env::temp_dir(), &command)
+            .await
+            .unwrap();
         assert_eq!(output.stdout, b"small");
         assert!(output.stdout.capacity() <= 64 * 1024);
     }

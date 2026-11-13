@@ -511,7 +511,7 @@ impl Repository {
             _ => None,
         };
         let mut command = if stage.is_some() {
-            args(&["ls-files", "--stage", "-z", "--"])
+            args(&["--literal-pathspecs", "ls-files", "--stage", "-z", "--"])
         } else {
             let tree = self
                 .run(&args(&[
@@ -523,7 +523,7 @@ impl Repository {
                 .await?;
             ensure(&tree)?;
             let tree = String::from_utf8(tree.stdout)?.trim().to_owned();
-            args(&["ls-tree", "-z", &tree, "--"])
+            args(&["--literal-pathspecs", "ls-tree", "-z", &tree, "--"])
         };
         command.push(path.clone());
         let resolved = self.run(&command).await?;

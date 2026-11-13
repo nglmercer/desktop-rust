@@ -2522,6 +2522,17 @@ account isolation or recovery, and is not yet used by the browser
 clone workflow. Full clone error detail and a destination-scoped credential
 lease remain open.
 
+A provisional clone lease cannot inherit the existing repository-bound broker:
+the destination has no saved account record, and helper-reported Git paths do
+not authenticate a descendant process. A Git credential probe also confirmed
+that clearing the global helper does not disable a URL-specific helper. A
+selected-account clone therefore needs an isolated, reviewed Git configuration
+that accounts for URL rewrites, HTTPS redirects, TLS and proxies, followed by
+account revocation, cancellation and recovery checks. Checkout filters, hooks,
+LFS and recursive submodules must not inherit the provisional credential scope
+without their own destination policy. No selected-account clone path has been
+enabled by this investigation.
+
 The WebSocket clone endpoint can optionally report request-owned Git progress.
 It forwards only fixed phase labels and numeric percentages, discarding raw
 remote output and rewritten URLs; notifications are bounded and best effort.
@@ -2561,3 +2572,12 @@ WebSocket. Git's raw and numstat records retain rename, copy, binary and path
 information, and share the bounded, transport-owned comparison snapshots. A
 changed-file listing larger than 70,000,000 bytes fails rather than returning a
 partial list. Electron retains the existing Git path.
+
+Conflict-resolution previews use Rust on Wry and WebSocket. The host captures
+the worktree file without following symlinks, resolves the requested index
+stage using literal paths, and creates the no-index diff in a private temporary
+directory. Uploaded content and the combined old content, new content and diff
+are capped at 70,000,000 bytes; an oversized preview returns an error. Uploads
+and results share session-owned comparison snapshots with idle and disconnect
+cleanup. Electron retains its existing preview implementation. Windows native
+runtime behavior remains to be verified.

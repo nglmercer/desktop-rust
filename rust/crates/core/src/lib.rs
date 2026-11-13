@@ -59,6 +59,7 @@ mod renderer_merge;
 mod renderer_rebase;
 mod renderer_reset;
 mod renderer_revert;
+mod resolution_diff;
 pub use refs::symbolic_ref;
 mod repository_discovery;
 pub use repository_discovery::{repository_type, trust_repository};
@@ -578,6 +579,16 @@ impl Repository {
             Operation::RendererCompareChanges { before, after, merge_base } => {
                 return self.renderer_compare_changes(&before, &after, merge_base).await;
             }
+            Operation::RendererResolutionBegin => {
+                let permit = comparison_snapshots::reserve().await?;
+                return comparison_snapshots::insert_upload(&self.id(), permit);
+            }
+            Operation::RendererResolutionAppend { snapshot_id, offset, data } => {
+                return comparison_snapshots::append_upload(&self.id(), uuid::Uuid::parse_str(&snapshot_id)?, offset, &data);
+            }
+            Operation::RendererResolutionDiff { snapshot_id, size, path, stage, hide_whitespace } => {
+                return self.renderer_resolution_diff(path, stage, hide_whitespace, &snapshot_id, size).await;
+            }
             Operation::RendererCompareDiffChunk {
                 snapshot_id,
                 offset,
@@ -595,6 +606,9 @@ impl Repository {
                     &self.id(),
                     uuid::Uuid::parse_str(&snapshot_id)?,
                 );
+            }
+            Operation::RendererStagedDiff { amend_head } => {
+                return self.renderer_staged_diff(amend_head.as_deref()).await;
             }
             Operation::RendererWorkingDiff {
                 path,
@@ -1249,6 +1263,9 @@ impl Repository {
             | RendererCommit { .. }
             | RendererAuthors { .. }
             | RendererCompareChanges { .. }
+            | RendererResolutionBegin
+            | RendererResolutionAppend { .. }
+            | RendererResolutionDiff { .. }
             | RendererHistory { .. }
             | RendererRecentBranches
             | RendererBranchCheckouts { .. }
@@ -1263,6 +1280,7 @@ impl Repository {
             | RendererCompareDiff { .. }
             | RendererCompareDiffChunk { .. }
             | RendererCompareDiffRelease { .. }
+            | RendererStagedDiff { .. }
             | RendererWorkingDiff { .. }
             | RendererBlobPrefix { .. }
             | RendererBlobChunk { .. }

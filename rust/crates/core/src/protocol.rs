@@ -452,6 +452,19 @@ pub enum Operation {
         after: String,
         merge_base: bool,
     },
+    RendererResolutionBegin,
+    RendererResolutionAppend {
+        snapshot_id: String,
+        offset: u64,
+        data: String,
+    },
+    RendererResolutionDiff {
+        snapshot_id: String,
+        size: u64,
+        path: GitPath,
+        stage: Option<u8>,
+        hide_whitespace: bool,
+    },
     RendererCompareDiffChunk {
         snapshot_id: String,
         offset: u64,
@@ -459,6 +472,9 @@ pub enum Operation {
     },
     RendererCompareDiffRelease {
         snapshot_id: String,
+    },
+    RendererStagedDiff {
+        amend_head: Option<String>,
     },
     RendererWorkingDiff {
         path: GitPath,

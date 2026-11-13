@@ -1953,7 +1953,7 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_compare_changes' | 'renderer_compare_diff_chunk' | 'renderer_compare_diff_release' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_compare_changes' | 'renderer_staged_diff' | 'renderer_resolution_begin' | 'renderer_resolution_append' | 'renderer_resolution_diff' | 'renderer_compare_diff_chunk' | 'renderer_compare_diff_release' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
@@ -2029,7 +2029,64 @@ export class BackendClient {
       if (changes || !/invalid typed repository request|invalid Git identity request|unknown field [`'“]?snapshot/i.test(message)) throw error
       value = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff', params)
     }
-    if (isRecord(value) && !mergeBase && value.kind === 'bad_revision') return null
+    return this.decodeComparisonSnapshot(repositoryPath, value, !mergeBase)
+  }
+
+  async repositoryReadSnapshot(repositoryPath: string, method: 'renderer_staged_diff', params: Record<string, unknown>): Promise<Uint8Array | null> {
+    const previous = this.comparisonTurn
+    let releaseTurn!: () => void
+    this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
+    await previous
+    try {
+      const result = await this.decodeComparisonSnapshot(repositoryPath, await this.repositoryRendererRequest(repositoryPath, method, params), true, 10 * 1024 * 1024)
+      if (result !== null && !(result instanceof Uint8Array)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison snapshot', retryable: false })
+      return result
+    } finally { releaseTurn() }
+  }
+
+  async repositoryResolutionDiff(repositoryPath: string, path: string, options: { content: string } | { stage: 'ours' | 'theirs' }, hideWhitespace: boolean): Promise<{ oldContents: string; newContents: string; raw: Uint8Array }> {
+    const previous = this.comparisonTurn
+    let releaseTurn!: () => void
+    this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
+    await previous
+    let uploadId: string | undefined
+    try {
+      const content = new TextEncoder().encode('content' in options ? options.content : '')
+      if (content.length > 70_000_000) throw new BackendError({ code: 'invalid_request', message: 'Resolution content exceeds the supported size', retryable: false })
+      const upload = await this.repositoryRendererRequest(repositoryPath, 'renderer_resolution_begin', {})
+      if (!isRecord(upload) || upload.kind !== 'snapshot' || upload.size !== 0 || typeof upload.id !== 'string' || !/^[0-9a-f-]{36}$/.test(upload.id)) throw new BackendError({ code: 'invalid_response', message: 'Invalid resolution upload', retryable: false })
+      uploadId = upload.id
+      for (let offset = 0; offset < content.length;) {
+        const chunk = content.subarray(offset, offset + 24 * 1024)
+        const data = btoa(String.fromCharCode(...chunk))
+        const result = await this.repositoryRendererRequest(repositoryPath, 'renderer_resolution_append', { snapshot_id: uploadId, offset, data })
+        offset += chunk.length
+        if (!isRecord(result) || result.size !== offset) throw new BackendError({ code: 'invalid_response', message: 'Invalid resolution upload progress', retryable: false })
+      }
+      const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_resolution_diff', { snapshot_id: uploadId, size: content.length, path, stage: 'stage' in options ? (options.stage === 'ours' ? 2 : 3) : null, hide_whitespace: hideWhitespace })
+      const result = await this.decodeComparisonSnapshot(repositoryPath, value, false)
+      if (!(result instanceof Uint8Array) || result.length < 8) throw new BackendError({ code: 'invalid_response', message: 'Invalid resolution preview', retryable: false })
+      const lengths = new DataView(result.buffer, result.byteOffset, 8)
+      const oldLength = lengths.getUint32(0)
+      const newLength = lengths.getUint32(4)
+      const end = 8 + oldLength + newLength
+      if (end > result.length) throw new BackendError({ code: 'invalid_response', message: 'Invalid resolution preview lengths', retryable: false })
+      const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
+      return { oldContents: decoder.decode(result.subarray(8, 8 + oldLength)), newContents: decoder.decode(result.subarray(8 + oldLength, end)), raw: result.subarray(end) }
+    } finally {
+      if (uploadId !== undefined) await this.releaseComparisonSnapshot(uploadId)
+      releaseTurn()
+    }
+  }
+
+  private async releaseComparisonSnapshot(id: string): Promise<void> {
+    await (this.transport === 'ws'
+      ? this.request('release_comparison_snapshot', { snapshot_id: id })
+      : this.request('git_info', { operation: { type: 'release_comparison_snapshot', snapshot_id: id } })).catch(() => {})
+  }
+
+  private async decodeComparisonSnapshot(repositoryPath: string, value: unknown, allowBadRevision: boolean, maxBytes = 70_000_000): Promise<Uint8Array | { kind: 'unrenderable'; prefix: Uint8Array } | null> {
+    if (isRecord(value) && allowBadRevision && value.kind === 'bad_revision') return null
     if (isRecord(value) && value.kind === 'diff' && typeof value.data === 'string' && value.data.length <= 2_796_204 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.data)) {
       const decoded = atob(value.data)
       if (decoded.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid legacy comparison size', retryable: false })
@@ -2042,7 +2099,7 @@ export class BackendClient {
     if (!isRecord(value) || value.kind !== 'snapshot' || typeof value.id !== 'string' || !/^[0-9a-f-]{36}$/.test(value.id)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison snapshot', retryable: false })
     const id = value.id
     try {
-      if (!Number.isSafeInteger(value.size) || (value.size as number) < 0 || (value.size as number) > 70_000_000) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison size', retryable: false })
+      if (!Number.isSafeInteger(value.size) || (value.size as number) < 0 || (value.size as number) > maxBytes) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison size', retryable: false })
       const size = value.size as number
       const bytes = new Uint8Array(size)
       for (let offset = 0; offset < size;) {
@@ -2057,9 +2114,7 @@ export class BackendClient {
       return bytes
     } finally {
       // A disconnected session or failed release is reclaimed by the host's TTL.
-      await (this.transport === 'ws'
-        ? this.request('release_comparison_snapshot', { snapshot_id: id })
-        : this.request('git_info', { operation: { type: 'release_comparison_snapshot', snapshot_id: id } })).catch(() => {})
+      await this.releaseComparisonSnapshot(id)
     }
   }
 
