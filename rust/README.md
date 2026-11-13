@@ -93,8 +93,14 @@ opened through the Rust bridge before they can be launched this way. A local
 writer can change path components between the confinement check and process
 launch. If launch is interrupted, a terminal may already be open. Custom
 terminals are not supported by the Rust transport on Linux; macOS and Windows
-still use the prior renderer paths. The complete shared-UI Wry journey remains
-to be verified.
+still use the prior renderer paths. A Linux WebKitGTK/Wry integration test
+builds the shared UI, completes setup, creates a repository and opens it through
+the native Repository menu using an isolated terminal fixture. Run it after
+building the debug desktop host with
+`DESKTOP_WRY_WEBVIEW_TEST=1 npm test -- rust/tests/wry-terminal-ui.test.ts`.
+It requires Xvfb, xdotool, Linux user/mount namespaces and `/usr/bin/konsole` as
+an unmodified bind-mount target; it does not validate other terminal programs
+or platforms.
 
 ## Saved repositories, creation, and clone
 

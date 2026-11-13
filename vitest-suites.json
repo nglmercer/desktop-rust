@@ -1,4 +1,5 @@
 [
+  "rust/tests/wry-terminal-ui.test.ts",
   "app/test/unit/git/rev-parse-test.ts",
   "rust/tests/wry-open-terminal.test.ts",
   "app/test/unit/rust-terminal-dispatch-test.ts",
