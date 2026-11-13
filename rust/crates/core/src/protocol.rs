@@ -625,6 +625,12 @@ pub enum Operation {
     CheckoutPreview {
         branch: String,
     },
+    RendererCheckoutDirect {
+        branch: String,
+        basis: String,
+        #[serde(default)]
+        allow_file_protocol: bool,
+    },
     CheckoutHistory,
     AcknowledgeCheckout {
         receipt_id: String,

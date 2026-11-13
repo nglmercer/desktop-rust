@@ -78,6 +78,8 @@ struct Receipt {
     source_head: Option<String>,
     target: Target,
     strategy: ChangesStrategy,
+    #[serde(default)]
+    direct: bool,
     phase: String,
     stash_message: String,
     saved_oid: Option<String>,
@@ -497,6 +499,7 @@ impl Repository {
         target: &Target,
         base: &Path,
         receipt: &mut Receipt,
+        allow_file_protocol: bool,
     ) -> Result<()> {
         self.checkout_at_target(target).await?;
         self.checkout_phase(base, receipt, "switched").await?;
@@ -521,11 +524,12 @@ impl Repository {
             ensure_checkout(&output)?;
         }
         self.checkout_phase(base, receipt, "submodules").await?;
-        let output = process::run_checkout(
-            &self.path,
-            &args(&["submodule", "update", "--init", "--recursive"]),
-        )
-        .await?;
+        let mut command = Vec::new();
+        if allow_file_protocol {
+            command.extend(args(&["-c", "protocol.file.allow=always"]));
+        }
+        command.extend(args(&["submodule", "update", "--init", "--recursive"]));
+        let output = process::run_checkout(&self.path, &command).await?;
         ensure_checkout(&output)?;
         self.checkout_at_target(target).await
     }
@@ -586,11 +590,35 @@ impl Repository {
         self.checkout_execute(plan, strategy, replace, restore_index)
             .await
     }
+    pub(crate) async fn checkout_direct_reviewed(
+        &self,
+        request: &str,
+        basis: &str,
+        allow_file_protocol: bool,
+    ) -> Result<Value> {
+        let _lock = self.stash_lock().await?;
+        let plan = self.checkout_plan(request).await?;
+        anyhow::ensure!(
+            plan.view["basis"] == basis,
+            "Checkout files, branch, stash list, target or settings changed; review again"
+        );
+        Box::pin(self.checkout_execute_id(
+            plan,
+            ChangesStrategy::AskForConfirmation,
+            false,
+            false,
+            uuid::Uuid::new_v4().to_string(),
+            true,
+            allow_file_protocol,
+        ))
+        .await
+    }
     fn checkout_consent(
         &self,
         plan: &Plan,
         mut strategy: ChangesStrategy,
         replace: bool,
+        direct: bool,
     ) -> Result<(ChangesStrategy, Option<Value>)> {
         if plan.view["same_branch"] == true {
             return Ok((
@@ -610,10 +638,11 @@ impl Repository {
             plan.view["operation"].is_null() && plan.view["conflicted"] == false,
             "Finish or abort the current operation/conflicts before switching branches"
         );
-        if plan.view["can_leave"] == false {
+        if !direct && plan.view["can_leave"] == false {
             strategy = ChangesStrategy::MoveToNewBranch;
         }
-        if plan.view["dirty"] == true
+        if !direct
+            && plan.view["dirty"] == true
             && (strategy == ChangesStrategy::AskForConfirmation
                 || strategy == ChangesStrategy::StashOnCurrentBranch
                     && !replace
@@ -641,6 +670,8 @@ impl Repository {
             replace,
             restore_index,
             uuid::Uuid::new_v4().to_string(),
+            false,
+            false,
         ))
         .await
     }
@@ -651,11 +682,13 @@ impl Repository {
         replace: bool,
         restore_index: bool,
         id: String,
+        direct: bool,
+        allow_file_protocol: bool,
     ) -> Result<Value> {
         if let Some(creation) = &plan.target.creation {
             creation.ensure_name_rules()?;
         }
-        let (strategy, early) = self.checkout_consent(&plan, strategy, replace)?;
+        let (strategy, early) = self.checkout_consent(&plan, strategy, replace, direct)?;
         if let Some(result) = early {
             return Ok(result);
         }
@@ -676,6 +709,7 @@ impl Repository {
             source_head: plan.source_head.clone(),
             target: plan.target.clone(),
             strategy,
+            direct,
             phase: "prepared".into(),
             stash_message: format!("Desktop checkout {id} {}", super::message(branch)),
             saved_oid: None,
@@ -729,7 +763,7 @@ impl Repository {
                 switched=self.checkout_native(&plan.target).await?;
             }
             ensure_checkout(&switched)?;
-            self.checkout_finish_native(&plan.target,&base,&mut receipt).await?;
+            self.checkout_finish_native(&plan.target,&base,&mut receipt,allow_file_protocol).await?;
             if temporary {
                 self.checkout_phase(&base,&mut receipt,"applying").await?;
                 let oid=receipt.saved_oid.as_deref().context("missing temporary stash")?;

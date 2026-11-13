@@ -112,6 +112,12 @@ export async function checkoutBranch(
   allowFileProtocol: boolean = false
 ): Promise<true> {
   const title = `Checking out branch ${branch.name}`
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    progressCallback?.({ kind: 'checkout', title, description: `Switching to ${__DARWIN__ ? 'Branch' : 'branch'}`, value: 0, target: branch.name })
+    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().checkoutDirectBranch(repository.path, branch.ref, branch.tip.sha, allowFileProtocol), true)
+    progressCallback?.({ kind: 'checkout', title, description: 'Submodules updated', value: 1, target: branch.name })
+    return true
+  }
   const opts = await getCheckoutOpts(
     repository,
     title,

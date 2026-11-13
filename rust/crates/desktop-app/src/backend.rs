@@ -588,7 +588,9 @@ impl Backend {
         if let GitInfoOperation::BranchCheckout { operation, .. } = &request.operation
             && !matches!(
                 operation,
-                Operation::CheckoutPreview { .. } | Operation::Checkout { basis: Some(_), .. }
+                Operation::CheckoutPreview { .. }
+                    | Operation::Checkout { basis: Some(_), .. }
+                    | Operation::RendererCheckoutDirect { .. }
             )
         {
             return Err(AppError::BadArgs(
@@ -1387,7 +1389,8 @@ impl Backend {
                         ..
                     }
                     | GitInfoOperation::BranchCheckout {
-                        operation: Operation::Checkout { .. },
+                        operation: Operation::Checkout { .. }
+                            | Operation::RendererCheckoutDirect { .. },
                         ..
                     }
             )
@@ -2906,7 +2909,7 @@ esac
         assert_eq!(checkout(json!({"method":"checkout","branch":"refs/heads/native-created","basis":switch["basis"]})).unwrap()["checked_out"], true);
         let back = checkout(json!({"method":"checkout_preview","branch":current})).unwrap();
         assert_eq!(
-            checkout(json!({"method":"checkout","branch":current,"basis":back["basis"]})).unwrap()
+            checkout(json!({"method":"renderer_checkout_direct","branch":current,"basis":back["basis"],"allow_file_protocol":false})).unwrap()
                 ["checked_out"],
             true
         );

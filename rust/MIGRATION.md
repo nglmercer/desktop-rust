@@ -1123,6 +1123,14 @@ the edit survives. This path currently reports start/refresh progress rather
 than live Git/LFS progress; direct checkout callers, native platform behavior,
 proxy parity and the upstream recovery UI remain open.
 
+The upstream direct branch-checkout helper now also uses Rust, including the
+callers that switch before deleting a branch or return after cherry-pick. Its
+reviewed direct mode lets Git reject overwritten local changes without
+automatically creating a stash. A per-call file-protocol choice is confined to
+the submodule update; interrupted operations still require inspecting the
+checkout receipt and repository. Commit checkout and live progress remain
+separate gaps.
+
 `AppStore.createBranchCore` creates a branch with an optional start point and
 no-track choice, then delegates switching to the normal checkout workflow. The
 Rust raw `switch -c`/`branch` path has been replaced by that orchestration. A

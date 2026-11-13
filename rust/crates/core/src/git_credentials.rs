@@ -370,6 +370,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::ResolveConflict { .. }
             | Operation::Recover { .. }
             | Operation::Checkout { .. }
+            | Operation::RendererCheckoutDirect { .. }
             | Operation::Detach { .. }
             | Operation::CreateBranch { .. }
             | Operation::Discard { .. }

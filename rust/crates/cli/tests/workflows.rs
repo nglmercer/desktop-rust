@@ -974,6 +974,59 @@ fn checkout_previews_reject_stale_inputs_and_handle_worktrees_and_remote_refs() 
 }
 
 #[test]
+fn direct_checkout_scopes_file_protocol_to_submodule_update() {
+    let child = Fixture::new();
+    child.write("file", "module content\n");
+    child.git(&["add", "--", "file"]);
+    child.git(&["commit", "-qm", "module"]);
+    let parent = Fixture::new();
+    parent.write("file", "base\n");
+    parent.git(&["add", "--", "file"]);
+    parent.git(&["commit", "-qm", "base"]);
+    parent.git(&["switch", "-qc", "target"]);
+    parent.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--",
+        child.repo.to_str().unwrap(),
+        "module",
+    ]);
+    parent.git(&["add", "--all"]);
+    parent.git(&["commit", "-qm", "add submodule"]);
+    parent.git(&["submodule", "deinit", "-f", "--", "module"]);
+    parent.git(&["switch", "-q", "main"]);
+    let module_git = parent.repo.join(".git/modules/module");
+    if module_git.exists() {
+        fs::remove_dir_all(&module_git).unwrap();
+    }
+    let plan = parent.rpc(json!({"method":"checkout_preview","branch":"refs/heads/target"}));
+    parent.fails(json!({"method":"renderer_checkout_direct","branch":"refs/heads/target","basis":plan["basis"],"allow_file_protocol":false}));
+    assert_eq!(parent.git_text(&["branch", "--show-current"]), "target");
+    parent.git(&["switch", "-q", "main"]);
+    if module_git.exists() {
+        fs::remove_dir_all(&module_git).unwrap();
+    }
+    let plan = parent.rpc(json!({"method":"checkout_preview","branch":"refs/heads/target"}));
+    parent.rpc(json!({"method":"renderer_checkout_direct","branch":"refs/heads/target","basis":plan["basis"],"allow_file_protocol":true}));
+    assert_eq!(
+        fs::read_to_string(parent.repo.join("module/file")).unwrap(),
+        "module content\n"
+    );
+    assert!(
+        !parent
+            .command("git")
+            .arg("-C")
+            .arg(&parent.repo)
+            .args(["config", "--get", "protocol.file.allow"])
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+#[test]
 fn checkout_recurses_into_submodules_and_preserves_local_work() {
     let child = Fixture::new();
     child.write("file", "base\n");

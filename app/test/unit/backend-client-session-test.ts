@@ -555,7 +555,34 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenCalledTimes(4)
   })
 
+  it('uses reviewed direct checkout without silently stashing local changes', async () => {
+    const oid = 'b'.repeat(40)
+    const preview = { basis: 'a'.repeat(64), dirty: true, target: { reference: 'refs/heads/feature', oid }, source_branch: 'main', source_head: oid, source_stash: null, occupied_worktree: null }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 0, checked_out: true, receipt_id: '12345678-1234-4234-8234-123456789abc' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    await new BackendClient().checkoutDirectBranch('/repo', 'refs/heads/feature', oid, true)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'branch_checkout', repository_path: '/repo', operation: { method: 'renderer_checkout_direct', branch: 'refs/heads/feature', basis: 'a'.repeat(64), allow_file_protocol: true } } }))
+  })
+
+  it('routes the direct checkout helper through Rust', async () => {
+    vi.resetModules()
+    const oid = 'b'.repeat(40)
+    const invoke = vi.fn().mockResolvedValueOnce({ basis: 'a'.repeat(64), dirty: false, target: { reference: 'refs/heads/feature', oid }, source_branch: 'main', source_head: oid, source_stash: null, occupied_worktree: null }).mockResolvedValueOnce({ code: 0, checked_out: true, receipt_id: '12345678-1234-4234-8234-123456789abc' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const legacyGit = vi.fn()
+    vi.doMock('../../src/lib/git/core', () => ({ git: legacyGit }))
+    vi.doMock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: (_path: string, _kind: string, run: () => unknown) => run() }))
+    vi.doMock('../../src/lib/git/environment', () => ({ envForRemoteOperation: vi.fn(), getFallbackUrlForProxyResolve: vi.fn() }))
+    vi.doMock('../../src/lib/git/submodule', () => ({ updateSubmodulesAfterOperation: vi.fn() }))
+    vi.doMock('../../src/lib/progress', () => ({ CheckoutProgressParser: vi.fn(), executionOptionsWithProgress: vi.fn() }))
+    const { checkoutBranch } = await import('../../src/lib/git/checkout')
+    await expect(checkoutBranch({ path: '/repo' } as any, { name: 'feature', ref: 'refs/heads/feature', tip: { sha: oid } } as any, null)).resolves.toBe(true)
+    expect(legacyGit).not.toHaveBeenCalled()
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('reads complete blobs through the Rust transport', async () => {
+    vi.resetModules()
     const oid = 'a'.repeat(40)
     const contents = Buffer.alloc(1024 * 1024 + 3, 0xab)
     const invoke = vi.fn(async (_method: string, request: any): Promise<unknown> => {

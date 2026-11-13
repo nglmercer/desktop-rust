@@ -595,7 +595,7 @@ impl Repository {
         }
         if let Some(checkout) = &plan.checkout {
             let (_, early) =
-                self.checkout_consent(checkout, request.strategy, request.replace_stash)?;
+                self.checkout_consent(checkout, request.strategy, request.replace_stash, false)?;
             if let Some(early) = early {
                 return Ok(
                     json!({"code":2,"requires_confirmation":true,"preview":plan.view,"checkout_result":early,"stderr":"Review local changes or choose an available checkout before deleting"}),
@@ -640,7 +640,7 @@ impl Repository {
             anyhow::ensure!(self.deletion_plan(name,request.to_checkout.as_deref()).await?.view["basis"]==plan.local_basis,"Branch context changed while preparing recovery; deletion was stopped");
             if let Some(checkout)=plan.checkout {
                 self.deletion_phase(&base,&mut receipt,"switching").await?;
-                let result=self.checkout_execute_id(checkout,request.strategy,request.replace_stash,request.restore_index,receipt.checkout_receipt_id.clone().context("missing related checkout ID")?).await?;
+                let result=self.checkout_execute_id(checkout,request.strategy,request.replace_stash,request.restore_index,receipt.checkout_receipt_id.clone().context("missing related checkout ID")?,false,false).await?;
                 anyhow::ensure!(result["code"]==0,"Checkout did not complete; branch was retained");
             } else {anyhow::ensure!(self.deletion_plan(name,request.to_checkout.as_deref()).await?.view["basis"]==plan.local_basis,"Branch context changed after backup; deletion was stopped");}
             anyhow::ensure!(self.branch_settings(&receipt.name).await?==receipt.config,"Branch settings changed; deletion was stopped");

@@ -2345,6 +2345,22 @@ export class BackendClient {
     if (!isRecord(value) || value.code !== 0 || value.checked_out !== true || typeof value.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.receipt_id)) throw new BackendError({ code: 'checkout_unconfirmed', message: 'Checkout did not complete; inspect the branch and checkout history before retrying', retryable: false })
   }
 
+  async checkoutDirectBranch(repositoryPath: string, reference: string, expectedTip: string, allowFileProtocol: boolean): Promise<void> {
+    const review = await this.reviewBranchCheckout(repositoryPath, reference, expectedTip)
+    const operation = { method: 'renderer_checkout_direct', branch: reference, basis: review.basis, allow_file_protocol: allowFileProtocol }
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'branch_checkout', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the branch, working tree and checkout history before retrying`, retryable: false })
+    }
+    if (isRecord(value) && value.code === 0 && value.unchanged === true) return
+    if (!isRecord(value) || value.code !== 0 || value.checked_out !== true || typeof value.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.receipt_id)) throw new BackendError({ code: 'checkout_unconfirmed', message: 'Checkout did not complete; inspect the branch and checkout history before retrying', retryable: false })
+  }
+
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
     if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })

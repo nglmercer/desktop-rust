@@ -601,6 +601,15 @@ impl Repository {
             } => return self.worktree_lock(path, locked, reason).await,
 
             Operation::CheckoutPreview { branch } => return self.checkout_preview(&branch).await,
+            Operation::RendererCheckoutDirect {
+                branch,
+                basis,
+                allow_file_protocol,
+            } => {
+                return self
+                    .checkout_direct_reviewed(&branch, &basis, allow_file_protocol)
+                    .await;
+            }
             Operation::CheckoutHistory => return self.checkout_history().await,
             Operation::AcknowledgeCheckout { receipt_id } => {
                 return self.acknowledge_checkout(&receipt_id).await;
@@ -1216,6 +1225,7 @@ impl Repository {
             }
             Checkout { .. }
             | CheckoutPreview { .. }
+            | RendererCheckoutDirect { .. }
             | CheckoutHistory
             | AcknowledgeCheckout { .. } => unreachable!("handled by execute"),
             CreateBranch { .. } | CreateBranchPreview { .. } => unreachable!("handled by execute"),
