@@ -1,27 +1,23 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import * as React from 'react'
+import { act } from 'react-dom/test-utils'
 
-import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import { captureClipboardWrites } from '../../helpers/ui/electron'
-import {
-  advanceTimersBy,
-  enableTestTimers,
-  resetTestTimers,
-} from '../../helpers/ui/vitest-timers'
 import { CopyButton } from '../../../src/ui/copy-button'
 
 describe('CopyButton', () => {
   let clipboardCapture: ReturnType<typeof captureClipboardWrites>
 
   beforeEach(() => {
-    enableTestTimers(['setTimeout'])
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
     clipboardCapture = captureClipboardWrites()
   })
 
   afterEach(() => {
     clipboardCapture.restore()
-    resetTestTimers()
+    vi.useRealTimers()
   })
 
   it('copies content and announces the copied state before resetting', async () => {
@@ -31,21 +27,26 @@ describe('CopyButton', () => {
 
     const button = screen.getByRole('button', { name: 'Copy branch name' })
 
-    fireEvent.click(button)
+    await act(async () => {
+      fireEvent.click(button)
+    })
 
     assert.deepEqual(clipboardCapture.writes, ['refs/heads/main'])
 
-    advanceTimersBy(1000)
-
-    await waitFor(() => {
-      const liveRegion = screen.getByText(/^Copied!/, { selector: 'div' })
-      assert.ok(liveRegion.textContent?.startsWith('Copied!'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
     })
-
-    advanceTimersBy(2000)
-
-    await waitFor(() => {
-      assert.equal(screen.queryByText(/^Copied!/, { selector: 'div' }), null)
+    const liveRegion = screen.getByText(/^Copied!/, {
+      selector: '[aria-live="polite"]',
     })
+    assert.ok(liveRegion.textContent?.startsWith('Copied!'))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    assert.equal(
+      screen.queryByText(/^Copied!/, { selector: '[aria-live="polite"]' }),
+      null
+    )
   })
 })
