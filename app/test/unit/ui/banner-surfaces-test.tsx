@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { BranchAlreadyUpToDate } from '../../../src/ui/banners/branch-already-up-to-date-banner'
@@ -10,8 +10,8 @@ import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+} from '../../helpers/ui/vitest-timers'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('banner surfaces', () => {
   beforeEach(() => {

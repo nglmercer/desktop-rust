@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { AriaLiveContainer } from '../../../src/ui/accessibility/aria-live-container'
@@ -7,8 +7,8 @@ import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
-import { render } from '../../helpers/ui/render'
+} from '../../helpers/ui/vitest-timers'
+import { render } from '../../helpers/ui/vitest-render'
 
 describe('AriaLiveContainer', () => {
   beforeEach(() => {

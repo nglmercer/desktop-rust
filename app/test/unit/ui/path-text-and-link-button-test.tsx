@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, describe, it } from 'node:test'
+import { afterEach, describe, it, onTestFinished } from 'vitest'
 import * as React from 'react'
 
 import { shell } from '../../../src/lib/app-shell'
@@ -10,7 +10,7 @@ import {
   truncateMid,
   truncatePath,
 } from '../../../src/ui/lib/path-text'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 const mutableShell = shell as {
   openExternal: (path: string) => Promise<boolean>
@@ -80,11 +80,11 @@ describe('path text and link button surfaces', () => {
     assert.equal(view.container.querySelector('[role="tooltip"]'), null)
   })
 
-  it('does not exceed React update depth while looking for a fitting truncation', t => {
+  it('does not exceed React update depth while looking for a fitting truncation', () => {
     const originalGetBoundingClientRect =
       window.Element.prototype.getBoundingClientRect
 
-    t.after(() => {
+    onTestFinished(() => {
       window.Element.prototype.getBoundingClientRect =
         originalGetBoundingClientRect
     })

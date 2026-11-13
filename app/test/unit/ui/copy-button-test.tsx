@@ -1,14 +1,14 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 
-import { fireEvent, render, screen, waitFor } from '../../helpers/ui/render'
+import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
 import { captureClipboardWrites } from '../../helpers/ui/electron'
 import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
+} from '../../helpers/ui/vitest-timers'
 import { CopyButton } from '../../../src/ui/copy-button'
 
 describe('CopyButton', () => {

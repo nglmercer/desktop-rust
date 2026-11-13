@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 import { Disposable } from 'event-kit'
 
@@ -10,12 +10,12 @@ import { Owner } from '../../../src/models/owner'
 import { Repository } from '../../../src/models/repository'
 import { CIStatus } from '../../../src/ui/branches/ci-status'
 import { Dispatcher } from '../../../src/ui/dispatcher'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
+} from '../../helpers/ui/vitest-timers'
 
 const repository = new GitHubRepository(
   'desktop',

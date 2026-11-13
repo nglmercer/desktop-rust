@@ -1,18 +1,18 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { Repository } from '../../../src/models/repository'
 import { GitHubRepository } from '../../../src/models/github-repository'
 import { Owner } from '../../../src/models/owner'
 import { RepositoryListItem } from '../../../src/ui/repositories-list/repository-list-item'
-import { render, fireEvent, screen, waitFor } from '../../helpers/ui/render'
+import { render, fireEvent, screen, waitFor } from '../../helpers/ui/vitest-render'
 import { IMatches } from '../../../src/lib/fuzzy-find'
 import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
+} from '../../helpers/ui/vitest-timers'
 
 const noMatches: IMatches = { title: [], subtitle: [] }
 const fixtureRepositoryPath = '/tmp/desktop-fixture'

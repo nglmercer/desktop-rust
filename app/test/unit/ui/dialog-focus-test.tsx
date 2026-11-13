@@ -1,9 +1,9 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { Dialog, DialogStackContext } from '../../../src/ui/dialog/dialog'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 const showModalDescriptor = Object.getOwnPropertyDescriptor(
   HTMLDialogElement.prototype,

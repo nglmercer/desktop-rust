@@ -1,10 +1,13 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import * as React from 'react'
 
 import { SectionList } from '../../../src/ui/lib/list/section-list'
 import { RowIndexPath } from '../../../src/ui/lib/list/list-row-index-path'
-import { render, waitFor } from '../../helpers/ui/render'
+import { render, waitFor } from '../../helpers/ui/vitest-render'
+
+// Scrolling measurements do not send list-rendering telemetry.
+vi.mock('../../../src/lib/helpers/non-fatal-exception', () => ({ sendNonFatalException: vi.fn() }))
 
 const LIST_HEIGHT = 360
 const LIST_WIDTH = 365

@@ -1,12 +1,12 @@
 import assert from 'node:assert'
-import { it } from 'node:test'
+import { it, onTestFinished } from 'vitest'
 import * as React from 'react'
 
 import { Branch, BranchType } from '../../../src/models/branch'
 import { Repository } from '../../../src/models/repository'
 import { Dispatcher } from '../../../src/ui/dispatcher'
 import { StashAndSwitchBranch } from '../../../src/ui/stash-changes/stash-and-switch-branch-dialog'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 const repository = new Repository('/repo', 1, null, false)
 const currentBranch = new Branch(
@@ -24,11 +24,11 @@ const branchToCheckout = new Branch(
   'refs/heads/feature'
 )
 
-it('disables the switch button after clicking it', async t => {
+it('disables the switch button after clicking it', async () => {
   const electron = await import('electron')
   const previousSend = electron.ipcRenderer.send
   electron.ipcRenderer.send = () => {}
-  t.after(() => {
+  onTestFinished(() => {
     electron.ipcRenderer.send = previousSend
   })
 
