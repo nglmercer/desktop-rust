@@ -14,7 +14,6 @@
  */
 
 import { backend, BackendError } from './client'
-import type { IRequest } from './contracts'
 
 /** Monotonic revision guard for a projection key. */
 export class RevisionTracker {

@@ -35,3 +35,5 @@ container.offsetHeight.toString()
 
 // Browser has rendered the emojis, now we can remove them.
 document.body.removeChild(container)
+
+export {}

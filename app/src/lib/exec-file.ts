@@ -17,7 +17,7 @@ import {
 export function execFile(
   file: string,
   args?: ReadonlyArray<string>,
-  options?: ExecFileOptions
+  options?: ExecFileOptions & { readonly encoding?: BufferEncoding }
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFileOrig(
