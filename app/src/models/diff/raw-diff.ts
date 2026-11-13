@@ -1,4 +1,4 @@
-import { DiffLine } from './diff-line'
+import type { DiffLine } from './diff-line'
 
 export enum DiffHunkExpansionType {
   /** The hunk header cannot be expanded at all. */

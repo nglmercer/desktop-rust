@@ -28,3 +28,7 @@ app/test/vitest-setup.ts
 app/src/web/*
 !app/src/web/fs.ts
 !app/src/web/child_process.ts
+# Diff models are checked and formatted by Biome.
+app/src/models/diff/**
+# Progress parsers and their shared types are checked and formatted by Biome.
+app/src/lib/progress/**

@@ -245,7 +245,9 @@ export class DiffSelection {
     }
 
     if (computedSelectionType === DiffSelectionType.Partial) {
-      const newDivergingLines = new Set<number>(this.divergingLines!)
+      const newDivergingLines = new Set<number>(
+        this.divergingLines ?? undefined
+      )
 
       if (typeMatchesSelection(this.defaultSelectionType, selected)) {
         for (let i = from; i < to; i++) {

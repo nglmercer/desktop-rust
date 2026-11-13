@@ -291,19 +291,19 @@ export function parse(line: string): IGitProgressInfo | null {
   }
 
   let value: number
-  let total: number | undefined = undefined
-  let percent: number | undefined = undefined
+  let total: number | undefined
+  let percent: number | undefined
 
   if (valueOnlyRe.test(progressParts[0])) {
     value = parseInt(progressParts[0], 10)
 
-    if (isNaN(value)) {
+    if (Number.isNaN(value)) {
       return null
     }
   } else {
     const percentMatch = percentRe.exec(progressParts[0])
 
-    if (!percentMatch || percentMatch.length !== 4) {
+    if (percentMatch?.length !== 4) {
       return null
     }
 
@@ -311,7 +311,7 @@ export function parse(line: string): IGitProgressInfo | null {
     value = parseInt(percentMatch[2], 10)
     total = parseInt(percentMatch[3], 10)
 
-    if (isNaN(percent) || isNaN(value) || isNaN(total)) {
+    if (Number.isNaN(percent) || Number.isNaN(value) || Number.isNaN(total)) {
       return null
     }
   }

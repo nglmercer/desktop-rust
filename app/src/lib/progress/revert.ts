@@ -1,4 +1,4 @@
-import { GitProgressParser, IProgressStep } from './git'
+import { GitProgressParser, type IProgressStep } from './git'
 
 const steps: ReadonlyArray<IProgressStep> = [{ title: '', weight: 0 }]
 

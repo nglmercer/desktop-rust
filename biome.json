@@ -51,6 +51,8 @@
       "app/test/helpers/usage-data.ts",
       "app/src/lib/stats/stats-payload.ts",
       "app/src/web/**",
+      "app/src/models/diff/**",
+      "app/src/lib/progress/**",
       "app/src/lib/git/repository-operation-context.ts",
       "app/src/lib/git/rev-list.ts",
       "app/src/lib/git/gitignore.ts",

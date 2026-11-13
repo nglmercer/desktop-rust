@@ -1,10 +1,10 @@
-import { ChildProcess } from 'child_process'
+import type { ChildProcess } from 'child_process'
 import * as Fs from 'fs'
 import * as Path from 'path'
 import byline from 'byline'
 
-import { IGitProgress, IGitOutput, IGitProgressParser } from './git'
-import { IGitExecutionOptions } from '../git/core'
+import type { IGitProgress, IGitOutput, IGitProgressParser } from './git'
+import type { IGitExecutionOptions } from '../git/core'
 import { merge } from '../merge'
 import { GitLFSProgressParser, createLFSProgressFile } from './lfs'
 import { tailByLine } from '../file-system'
@@ -17,7 +17,7 @@ import { tailByLine } from '../file-system'
  * be overwritten.
  */
 export async function executionOptionsWithProgress<
-  T extends IGitExecutionOptions
+  T extends IGitExecutionOptions,
 >(
   options: T,
   parser: IGitProgressParser,
