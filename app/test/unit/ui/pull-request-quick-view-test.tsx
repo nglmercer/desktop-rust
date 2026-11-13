@@ -7,6 +7,7 @@ import { Owner } from '../../../src/models/owner'
 import { PullRequest, PullRequestRef } from '../../../src/models/pull-request'
 import { Repository } from '../../../src/models/repository'
 import type { Dispatcher } from '../../../src/ui/dispatcher'
+import { PullRequestQuickView } from '../../../src/ui/pull-request-quick-view'
 import { render } from '../../helpers/ui/vitest-render'
 
 vi.mock('../../../src/ui/lib/sandboxed-markdown.tsx', () => ({
@@ -21,10 +22,7 @@ vi.mock('../../../src/lib/custom-integration', () => ({
   isValidCustomIntegration: vi.fn(),
 }))
 
-it('passes the local account context through the quick view badge to CI status', async () => {
-  const { PullRequestQuickView } = await import(
-    '../../../src/ui/pull-request-quick-view'
-  )
+it('passes the local account context through the quick view badge to CI status', () => {
   const github = new GitHubRepository(
     'repo',
     new Owner('owner', 'https://api.github.com', 1),
