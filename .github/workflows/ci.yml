@@ -45,8 +45,7 @@ on:
 env:
   NODE_VERSION: 24.22.1
   DESKTOP_ERROR_REPORTING_ENDPOINT: ${{ inputs.error-reporting-endpoint }}
-  DESKTOP_NON_FATAL_ERROR_REPORTING_ENDPOINT:
-    ${{ inputs.non-fatal-error-reporting-endpoint }}
+  DESKTOP_NON_FATAL_ERROR_REPORTING_ENDPOINT: ${{ inputs.non-fatal-error-reporting-endpoint }}
 
 jobs:
   lint:
@@ -116,49 +115,39 @@ jobs:
           npm run lint
           npm test
       - name: Validate notarization API-key secrets
-        if:
-          runner.os == 'macOS' && contains(fromJSON('["production", "beta",
+        if: runner.os == 'macOS' && contains(fromJSON('["production", "beta",
           "test"]'), inputs.environment)
         shell: bash
         env:
           API_KEY_ID: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_KEY_ID }}
-          API_ISSUER_ID:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
-          API_PRIVATE_KEY:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
+          API_ISSUER_ID: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
+          API_PRIVATE_KEY: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
         run: |
           if [[ -z "$API_KEY_ID" || -z "$API_ISSUER_ID" || -z "$API_PRIVATE_KEY" ]]; then
             echo "::error::Set all three GATEWATCHER_APP_STORE_CONNECT_API secrets together for macOS release notarization."
             exit 1
           fi
       - name: Set up notarization API key
-        if:
-          runner.os == 'macOS' && contains(fromJSON('["production", "beta",
+        if: runner.os == 'macOS' && contains(fromJSON('["production", "beta",
           "test"]'), inputs.environment)
         id: notarization-key
         uses: nodeselector/setup-apple-codesign@6b2173bdcb7dd4057e0396ccfa28ebfa4d90affa
         with:
           asset-type: app-store-connect-api-key
-          app-store-connect-api-key-key-id:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_KEY_ID }}
-          app-store-connect-api-key-issuer-id:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
-          app-store-connect-api-key-base64-private-key:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
+          app-store-connect-api-key-key-id: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_KEY_ID }}
+          app-store-connect-api-key-issuer-id: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
+          app-store-connect-api-key-base64-private-key: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
       - name: Build production app
         run: npm run build:prod
         env:
           DESKTOP_OAUTH_CLIENT_ID: ${{ secrets.DESKTOP_OAUTH_CLIENT_ID }}
-          DESKTOP_OAUTH_CLIENT_SECRET:
-            ${{ secrets.DESKTOP_OAUTH_CLIENT_SECRET }}
-          APPLE_API_KEY_PATH:
-            ${{
+          DESKTOP_OAUTH_CLIENT_SECRET: ${{ secrets.DESKTOP_OAUTH_CLIENT_SECRET }}
+          APPLE_API_KEY_PATH: ${{
             steps.notarization-key.outputs.app-store-connect-api-key-key-path }}
           APPLE_API_KEY_ID:
             ${{ steps.notarization-key.outputs.app-store-connect-api-key-key-id
             }}
-          APPLE_API_ISSUER:
-            ${{
+          APPLE_API_ISSUER: ${{
             steps.notarization-key.outputs.app-store-connect-api-key-issuer-id
             }}
           APPLE_APPLICATION_CERT: ${{ secrets.APPLE_APPLICATION_CERT }}
@@ -234,50 +223,40 @@ jobs:
           arch: ${{ matrix.arch }}
           install-ffmpeg: 'true'
       - name: Validate notarization API-key secrets
-        if:
-          runner.os == 'macOS' && contains(fromJSON('["production", "beta",
+        if: runner.os == 'macOS' && contains(fromJSON('["production", "beta",
           "test"]'), inputs.environment)
         shell: bash
         env:
           API_KEY_ID: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_KEY_ID }}
-          API_ISSUER_ID:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
-          API_PRIVATE_KEY:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
+          API_ISSUER_ID: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
+          API_PRIVATE_KEY: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
         run: |
           if [[ -z "$API_KEY_ID" || -z "$API_ISSUER_ID" || -z "$API_PRIVATE_KEY" ]]; then
             echo "::error::Set all three GATEWATCHER_APP_STORE_CONNECT_API secrets together for macOS release notarization."
             exit 1
           fi
       - name: Set up notarization API key
-        if:
-          runner.os == 'macOS' && contains(fromJSON('["production", "beta",
+        if: runner.os == 'macOS' && contains(fromJSON('["production", "beta",
           "test"]'), inputs.environment)
         id: notarization-key
         uses: nodeselector/setup-apple-codesign@6b2173bdcb7dd4057e0396ccfa28ebfa4d90affa
         with:
           asset-type: app-store-connect-api-key
-          app-store-connect-api-key-key-id:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_KEY_ID }}
-          app-store-connect-api-key-issuer-id:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
-          app-store-connect-api-key-base64-private-key:
-            ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
+          app-store-connect-api-key-key-id: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_KEY_ID }}
+          app-store-connect-api-key-issuer-id: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
+          app-store-connect-api-key-base64-private-key: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
       - name: Build production app
         run: npm run build:prod
         env:
           DESKTOP_E2E_UPDATES_URL: http://127.0.0.1:51789/update
           DESKTOP_OAUTH_CLIENT_ID: ${{ secrets.DESKTOP_OAUTH_CLIENT_ID }}
-          DESKTOP_OAUTH_CLIENT_SECRET:
-            ${{ secrets.DESKTOP_OAUTH_CLIENT_SECRET }}
-          APPLE_API_KEY_PATH:
-            ${{
+          DESKTOP_OAUTH_CLIENT_SECRET: ${{ secrets.DESKTOP_OAUTH_CLIENT_SECRET }}
+          APPLE_API_KEY_PATH: ${{
             steps.notarization-key.outputs.app-store-connect-api-key-key-path }}
           APPLE_API_KEY_ID:
             ${{ steps.notarization-key.outputs.app-store-connect-api-key-key-id
             }}
-          APPLE_API_ISSUER:
-            ${{
+          APPLE_API_ISSUER: ${{
             steps.notarization-key.outputs.app-store-connect-api-key-issuer-id
             }}
           APPLE_APPLICATION_CERT: ${{ secrets.APPLE_APPLICATION_CERT }}

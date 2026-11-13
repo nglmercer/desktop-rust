@@ -6,8 +6,7 @@ on:
 
 jobs:
   label-incoming:
-    if:
-      github.event.action == 'opened' || github.event.action == 'reopened' ||
+    if: github.event.action == 'opened' || github.event.action == 'reopened' ||
       github.event.action == 'unlabeled'
     uses: desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/triage-label-incoming.yml@main
     permissions:

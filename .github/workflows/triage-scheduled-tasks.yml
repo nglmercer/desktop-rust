@@ -36,8 +36,7 @@ jobs:
       issues: write
 
   pitch-surface:
-    if:
-      github.event.schedule == '0 14 1 * *' || github.event_name ==
+    if: github.event.schedule == '0 14 1 * *' || github.event_name ==
       'workflow_dispatch'
     uses: desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/pitch-surface-top-issues.yml@main
     with:

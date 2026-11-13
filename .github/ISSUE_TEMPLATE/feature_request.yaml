@@ -9,8 +9,7 @@ body:
     id: the-feature-request
     attributes:
       label: The feature request
-      description:
-        Write a clear and concise description of what the feature or problem is.
+      description: Write a clear and concise description of what the feature or problem is.
     validations:
       required: true
   - type: textarea

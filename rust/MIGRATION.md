@@ -34,6 +34,10 @@ Biome 2.6 now formats the application's SCSS, except for
 rewrites whitespace inside custom-property SVG values. The compressed desktop
 and crash CSS outputs were compared byte for byte before and after migration.
 Prettier and ESLint remain necessary for other files and rules.
+Biome also formats the checked-in workflow, action, issue-template and
+configuration YAML files. The generated pnpm and issue-triage lockfiles retain
+their previous formatting policy. Parsed YAML documents were compared before
+and after formatting to verify that their values did not change.
 
 Linux CI now exercises the active `github-desktop-rs` Wry webview: its
 isolated smoke run waits for the shared React renderer to mount and performs

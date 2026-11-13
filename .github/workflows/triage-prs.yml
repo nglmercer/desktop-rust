@@ -30,8 +30,7 @@ jobs:
       repository-projects: read
 
   pr-requirements:
-    if:
-      github.event.action == 'opened' || github.event.action == 'reopened' ||
+    if: github.event.action == 'opened' || github.event.action == 'reopened' ||
       github.event.action == 'edited' || github.event.action ==
       'ready_for_review'
     uses: desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/triage-pr-requirements.yml@main
