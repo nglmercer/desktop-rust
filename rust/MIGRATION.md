@@ -2583,8 +2583,13 @@ empty destination; post-check rejects account registration and recovery, so
 the user must inspect both locations before retrying. A same-user process can
 also replace the private broker HOME between its creation and no-follow open;
 this follows the existing same-user hook and filter trust boundary. Native
-Android, LFS and cross-platform parity remain to be verified. Wry, Electron and
-the browser clone workflow do
+Android, LFS and cross-platform parity remain to be verified. The browser clone
+dialog offers an explicit selected-account HTTPS mode without submodules; it
+requires the same account in GitHub CLI and an absent destination. Completed
+clones remain unselected and must be added explicitly. The dialog lists pending
+recoveries and resumes eligible text-path records, while byte-path records are
+displayed for manual inspection because renderer resource reservations require
+text paths. The original clone option remains the default. Wry and Electron do
 not yet use this route; recursive submodule account scopes and full clone error
 detail remain open.
 
@@ -2593,8 +2598,8 @@ It forwards only fixed phase labels and numeric percentages, discarding raw
 remote output and rewritten URLs; notifications are bounded and best effort.
 Cancellation interrupts the Git process group on Unix and leaves the caller
 responsible for inspecting any partial destination. Windows process-tree
-cancellation, Git LFS progress, recursive selected-account isolation, and
-routing the browser clone workflow through this endpoint remain open.
+cancellation, Git LFS progress, and recursive selected-account isolation remain
+open.
 
 Wry and browser WebSocket remote-HEAD refresh use a reviewed Rust operation. It binds
 the raw loose HEAD file, including dangling symbolic refs, and checks path

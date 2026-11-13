@@ -37,6 +37,14 @@ import { groupAccountsByHost } from '../../lib/group-accounts-by-host'
 import { SignInResult } from '../../lib/stores/sign-in-store'
 import { LinkButton } from '../lib/link-button'
 import { Row } from '../lib/row'
+import { backend } from '../../backend/client'
+import {
+  listNativeCloneRecoveries,
+  nativeClone,
+  nativeCloneAccountHost,
+  recoverNativeClone,
+  type INativeCloneRecovery,
+} from './native-clone'
 import {
   canonicalMutationPath,
   isRepositoryAffectedByAssistedCommit,
@@ -90,6 +98,10 @@ interface ICloneRepositoryProps {
 }
 
 interface ICloneRepositoryState {
+  readonly nativeSelectedClone: boolean
+  readonly nativeProgress: string | null
+  readonly nativeMessage: string | null
+  readonly nativeRecoveries: ReadonlyArray<INativeCloneRecovery>
   /** A copy of the path state field which is set when the component initializes.
    *
    *  This value, as opposed to the path state variable, doesn't change for the
@@ -221,6 +233,10 @@ export class CloneRepository extends React.Component<
     }
 
     this.state = {
+      nativeSelectedClone: false,
+      nativeProgress: null,
+      nativeMessage: null,
+      nativeRecoveries: [],
       initialPath: defaultDirectory,
       loading: false,
       gitHubTabState: {
@@ -267,6 +283,9 @@ export class CloneRepository extends React.Component<
 
   public componentDidMount() {
     this.mounted = true
+    if (backend().transportKind === 'ws') {
+      void this.refreshNativeRecoveries()
+    }
     const initialURL = this.props.initialURL
     if (initialURL) {
       this.updateUrl(initialURL)
@@ -312,6 +331,49 @@ export class CloneRepository extends React.Component<
         </TabBar>
 
         {error ? <DialogError>{error.message}</DialogError> : null}
+
+        {backend().transportKind === 'ws' &&
+        this.props.selectedTab === CloneRepositoryTab.GitHub ? (
+          <label>
+            <input
+              type="checkbox"
+              checked={this.state.nativeSelectedClone}
+              onChange={this.onNativeModeChanged}
+              disabled={this.state.loading}
+            />
+            Clone with the selected account (HTTPS only, without submodules;
+            requires the same account in GitHub CLI)
+          </label>
+        ) : null}
+        {this.state.nativeProgress !== null ? (
+          <p role="status">{this.state.nativeProgress}</p>
+        ) : null}
+        {this.state.nativeMessage !== null ? (
+          <p role="status">{this.state.nativeMessage}</p>
+        ) : null}
+        {backend().transportKind === 'ws' &&
+        this.state.nativeRecoveries.length > 0 ? (
+          <div>
+            <p>Interrupted clones</p>
+            {this.state.nativeRecoveries.map(recovery => (
+              <div key={recovery.id}>
+                <span>{recovery.destination}</span>{' '}
+                {recovery.recoverable ? (
+                  <button
+                    type="button"
+                    disabled={this.state.loading}
+                    data-recovery-id={recovery.id}
+                    onClick={this.onRecoverNativeClone}
+                  >
+                    Recover
+                  </button>
+                ) : (
+                  <span>Inspect manually</span>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <div role="tabpanel" aria-labelledby={this.getSelectedTabId()}>
           {this.renderActiveTab()}
@@ -376,6 +438,71 @@ export class CloneRepository extends React.Component<
 
   private onTabClicked = (tab: CloneRepositoryTab) => {
     this.props.onTabSelected(tab)
+  }
+
+  private onNativeModeChanged = (event: React.FormEvent<HTMLInputElement>) => {
+    this.setState({ nativeSelectedClone: event.currentTarget.checked })
+  }
+
+  private refreshNativeRecoveries = async () => {
+    try {
+      const nativeRecoveries = await listNativeCloneRecoveries()
+      if (this.mounted) {
+        this.setState({ nativeRecoveries })
+      }
+    } catch {
+      if (this.mounted) {
+        this.setState({
+          nativeMessage:
+            'Unable to read clone recovery history. Inspect the destination before retrying.',
+        })
+      }
+    }
+  }
+
+  private onRecoverNativeClone = (
+    event: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    const id = event.currentTarget.dataset.recoveryId
+    if (id !== undefined) {
+      void this.recoverNativeClone(id)
+    }
+  }
+
+  private recoverNativeClone = async (id: string) => {
+    const recovery = this.state.nativeRecoveries.find(item => item.id === id)
+    if (
+      recovery === undefined ||
+      !recovery.recoverable ||
+      recovery.mutationPath === null ||
+      recovery.stagePath === null
+    ) {
+      return
+    }
+    this.setState({ loading: true, nativeMessage: null })
+    try {
+      const result = await recoverNativeClone(
+        id,
+        recovery.mutationPath,
+        recovery.stagePath
+      )
+      if (this.mounted) {
+        this.setState({
+          nativeMessage: `Recovered ${result.path}. Add it as an existing repository to open it. Private staging retained at ${result.staging}.`,
+          loading: false,
+        })
+      }
+    } catch (error) {
+      if (this.mounted) {
+        this.setState({ loading: false })
+        this.setSelectedTabState({
+          error: new Error(
+            `${error.message} Inspect the destination before retrying.`
+          ),
+        })
+      }
+    }
+    await this.refreshNativeRecoveries()
   }
 
   private onPathChanged = (path: string) => {
@@ -864,6 +991,62 @@ export class CloneRepository extends React.Component<
     if (currentPathError !== null) {
       this.setState({ loading: false })
       this.setSelectedTabState({ error: currentPathError })
+      return
+    }
+    if (
+      backend().transportKind === 'ws' &&
+      request.tab === CloneRepositoryTab.GitHub &&
+      this.state.nativeSelectedClone
+    ) {
+      const account = request.account
+      if (account === null) {
+        this.setState({ loading: false })
+        this.setSelectedTabState({
+          error: new Error('Choose an account to clone.'),
+        })
+        return
+      }
+      try {
+        try {
+          await readdir(path)
+          throw new Error(
+            'This mode requires a destination that does not yet exist.'
+          )
+        } catch (error) {
+          if (error.code !== 'ENOENT') {
+            throw error
+          }
+        }
+        const host = nativeCloneAccountHost(account.endpoint)
+        const result = await nativeClone(
+          url.trim(),
+          path,
+          { host, login: account.login, id: account.id },
+          defaultBranch,
+          nativeProgress => {
+            if (this.mounted) {
+              this.setState({ nativeProgress })
+            }
+          }
+        )
+        if (this.mounted) {
+          this.setState({
+            loading: false,
+            nativeProgress: null,
+            nativeMessage: `Cloned ${result.path}. Add it as an existing repository to open it. Private staging retained at ${result.staging}.`,
+          })
+        }
+      } catch (error) {
+        if (this.mounted) {
+          this.setState({ loading: false, nativeProgress: null })
+          this.setSelectedTabState({
+            error: new Error(
+              `${error.message} Inspect the destination before retrying.`
+            ),
+          })
+        }
+      }
+      await this.refreshNativeRecoveries()
       return
     }
     this.props.dispatcher.closeFoldout(FoldoutType.Repository)

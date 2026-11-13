@@ -18,6 +18,7 @@
   "app/test/unit/stores/worktree-move-selection-test.ts",
   "app/test/unit/git-config-parameters-test.ts",
   "app/test/unit/clone-options-bridge-integration-test.ts",
+  "app/test/unit/native-clone-ui-test.ts",
   "app/test/unit/rust-comparison-diff-routing-test.ts",
   "app/test/unit/wry-commit-progress-integration-test.ts",
   "app/test/unit/stores/updates/update-remote-url-test.ts",

@@ -10,6 +10,15 @@ import { BackendClient } from '../../app/src/backend/client'
 import { BINARY, clean, object } from './fixtures/accounts'
 import { Credentials } from './fixtures/credentials'
 
+const uiRoute = vi.hoisted(() => ({ client: undefined as BackendClient | undefined }))
+vi.mock('../../app/src/backend/client', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../app/src/backend/client')>()),
+  backend: () => {
+    if (uiRoute.client === undefined) throw new Error('No clone UI backend')
+    return uiRoute.client
+  },
+}))
+
 const JSDOM = createRequire(import.meta.url)('jsdom').JSDOM
 async function bounded<T>(promise: Promise<T>, ms = 30_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -28,6 +37,8 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !
   let source: string
   let url: string
   let dom: { window: Window & typeof globalThis & { close(): void } }
+  let uiClone: typeof import('../../app/src/ui/clone-repository/native-clone')
+  let operations: typeof import('../../app/src/lib/git/repository-operation')
   beforeAll(async () => {
     suite = new Credentials()
     await suite.start()
@@ -45,12 +56,17 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !
     assert.match(line, /^Open http:\/\/127\.0\.0\.1:\d+\/#token=/)
     dom = new JSDOM('', { url: line.slice(5) })
     vi.stubGlobal('window', dom.window)
+    vi.stubGlobal('location', dom.window.location)
     vi.stubGlobal('sessionStorage', dom.window.sessionStorage)
     vi.stubGlobal('WebSocket', dom.window.WebSocket)
     client = new BackendClient(); other = new BackendClient()
+    uiRoute.client = client
+    uiClone = await import('../../app/src/ui/clone-repository/native-clone')
+    operations = await import('../../app/src/lib/git/repository-operation')
     await bounded(Promise.all([client.waitReady(), other.waitReady()]))
   }, 360_000)
   afterAll(async () => {
+    uiRoute.client = undefined
     client?.close(); other?.close(); dom?.window.close(); vi.unstubAllGlobals()
     if (server && server.exitCode === null) {
       const exited = new Promise<void>(resolve => server.once('close', () => resolve()))
@@ -91,6 +107,35 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !
     assert.ok(progress.length > 0, 'expected clone progress notifications')
     assert.ok(progress.every(line => /^(remote: )?(Enumerating objects|Counting objects|Compressing objects|Receiving objects|Resolving deltas|Checking out files|Updating files|Filtering content): (\d{1,3})% \(\3\/100\)\r$/.test(line)))
     await bounded(client.request('open_repository', { path: destination }))
+  }, 90_000)
+
+  it('runs the browser clone helper against the real bridge', async () => {
+    const destination = path.join(suite.root, 'browser-clone')
+    const progress: string[] = []
+    const result = await bounded(uiClone.nativeClone(url, destination, account(), undefined, text => progress.push(text)), 60_000)
+    assert.equal(result.path, destination)
+    assert.ok(result.staging.startsWith(path.join(suite.root, '.desktop-clone-')))
+    assert.equal(readFileSync(path.join(destination, 'file'), 'utf8'), 'base\n')
+    assert.ok(progress.length > 0)
+    assert.deepEqual(await bounded(uiClone.listNativeCloneRecoveries()), [])
+  }, 90_000)
+
+  it('holds the renderer mutation reservation during a real transfer', async () => {
+    const destination = path.join(suite.root, 'browser-reservation')
+    const protection = operations.protectAssistedCommitResources(destination)
+    try {
+      await assert.rejects(uiClone.nativeClone(url, destination, account(), undefined, () => {}))
+      assert.equal(existsSync(destination), false)
+    } finally { protection.release() }
+    blockTransfer()
+    const cloning = uiClone.nativeClone(url, destination, account(), undefined, () => {})
+    try {
+      await waitForTransfer()
+      assert.equal(operations.isRepositoryGitMutationInProgress(destination), true)
+      unblockTransfer()
+      await bounded(cloning, 60_000)
+      assert.equal(operations.isRepositoryGitMutationInProgress(destination), false)
+    } finally { unblockTransfer() }
   }, 90_000)
 
   it('returns a byte-preserving retained staging path only when requested', async () => {
@@ -165,12 +210,20 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !
       const status = withStatus.find(row => row.destination === destination)
       assert.equal(status?.recoverable, true)
       assert.equal(status?.conflicted, false)
+      const uiRecord = (await uiClone.listNativeCloneRecoveries()).find(row => row.destination === destination)
+      assert.equal(uiRecord?.recoverable, true)
       rmSync(destination, { recursive: true })
-      const recovered = object(await bounded(client.request('recover_clone', { recovery_id: record?.id, report_retained_staging: true }), 60_000))
+      assert.equal(typeof uiRecord?.id, 'string')
+      const stage = String(uiRecord?.stagePath)
+      const protection = operations.protectAssistedCommitResources(stage)
+      try {
+        await assert.rejects(uiClone.recoverNativeClone(String(uiRecord?.id), destination, stage))
+      } finally { protection.release() }
+      const recovered = await bounded(uiClone.recoverNativeClone(String(uiRecord?.id), destination, stage), 60_000)
       clean(recovered)
       assert.equal(recovered.path, destination)
-      assert.equal(recovered.retained_staging, path.dirname(String(record?.stage)))
-      assert.ok(existsSync(path.join(String(recovered.retained_staging), 'broker-home')))
+      assert.equal(recovered.staging, path.dirname(String(record?.stage)))
+      assert.ok(existsSync(path.join(recovered.staging, 'broker-home')))
       assert.equal(readFileSync(path.join(destination, 'file'), 'utf8'), 'base\n')
       const registry = object(JSON.parse(readFileSync(suite.registry, 'utf8')))
       assert.equal(registry.selected, path.join(suite.root, 'bridge-clone'))
