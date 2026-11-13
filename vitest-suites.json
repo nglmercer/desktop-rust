@@ -156,5 +156,7 @@
   "app/test/unit/promise-test.ts",
   "app/test/unit/promise-with-timeout-test.ts",
   "app/test/unit/ui/tab-bar-test.tsx",
-  "app/test/unit/ui/visual-helper-surfaces-test.tsx"
+  "app/test/unit/ui/visual-helper-surfaces-test.tsx",
+  "app/test/unit/copilot-conflict-context-test.ts",
+  "app/test/unit/copilot-conflict-resolution-test.ts"
 ]

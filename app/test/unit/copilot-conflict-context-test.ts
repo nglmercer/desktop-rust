@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 
 import {
@@ -11,6 +11,10 @@ import {
   IConflictContextCommit,
   IConflictContextPullRequest,
 } from '../../src/lib/copilot-conflict-context'
+
+// These pure hunk and prompt tests do not collect commit history from Git.
+vi.mock('../../src/lib/git/merge', () => ({ getMergeBase: vi.fn() }))
+vi.mock('../../src/lib/git/log', () => ({ getCommits: vi.fn() }))
 
 /**
  * Promote a file-level context into the unified resolution context the
