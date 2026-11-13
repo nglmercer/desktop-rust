@@ -194,10 +194,28 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let instance_socket = desktop_core::AppPaths::detect()?
         .user_data
         .join("instance.sock");
-    if args.iter().any(|arg| instance::is_forwardable(arg))
-        && instance::forward(&instance_socket, &args)
-    {
-        return Ok(());
+    if args.iter().any(|arg| instance::is_forwardable(arg)) {
+        if instance::forward(&instance_socket, &args) {
+            return Ok(());
+        }
+        // An older or unrecognized listener must not receive OAuth secrets,
+        // and a new window cannot complete another window's pending sign-in.
+        #[cfg(target_os = "linux")]
+        if !matches!(std::fs::symlink_metadata(&instance_socket), Err(ref error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            let message = format!(
+                "GitHub Desktop could not safely send this link to the open window. Close all GitHub Desktop windows, restart the application, and try the action again.\n\nIf the problem persists, check this socket after closing every window. Remove it only if it is a leftover from GitHub Desktop:\n{}",
+                instance_socket.display()
+            );
+            eprintln!("{message}");
+            rfd::MessageDialog::new()
+                .set_title("GitHub Desktop")
+                .set_level(rfd::MessageLevel::Warning)
+                .set_description(&message)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
+            return Ok(());
+        }
     }
 
     // -- tao event loop -----------------------------------------------------

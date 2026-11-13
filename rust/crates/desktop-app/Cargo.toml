@@ -30,6 +30,9 @@ include_dir = "0.7"
 uuid = { workspace = true, features = ["serde"] }
 url = "2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]
 # Same version wry links; used for the Edit menu's editing commands.
 webkit2gtk = "2.0"

@@ -74,6 +74,14 @@ storage is ephemeral. Native host CI includes compilation on all three desktop
 OSes and a Linux webview/RPC smoke run; that CI has not been executed from this
 Termux session, so native runtime validation remains a migration gate.
 
+For the React desktop shell on Linux, close older GitHub Desktop windows before
+upgrading. OAuth callbacks and other links are sent only to an instance whose
+socket has a matching private marker; an older unmarked instance cannot receive
+them. If a warning appears, close all Desktop windows, restart the application,
+and retry the action. If an old socket remains after every window has closed,
+the warning shows its path; remove it only after verifying it is a leftover from
+GitHub Desktop. Unknown sockets are never removed automatically.
+
 ## Saved repositories, creation, and clone
 
 ```sh

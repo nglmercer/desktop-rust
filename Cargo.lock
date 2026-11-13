@@ -690,6 +690,7 @@ dependencies = [
  "desktop-shell-core-legacy",
  "http",
  "include_dir",
+ "libc",
  "muda",
  "rfd",
  "serde",
