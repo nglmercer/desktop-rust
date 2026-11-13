@@ -96,13 +96,13 @@ Commit de retirada: (pendiente, revisión individual por archivo)
 ```
 
 ```text
-Ruta retirada: rust/crates/desktop-app/web/ipc-shim.js (cuando Wry ya tenga bootstrap tipado)
+Ruta retirada: rust/crates/desktop-app/web/ipc-shim.js
 Responsabilidad anterior: shim ipcRenderer sobre window.ipc.postMessage + evaluate_script
-Reemplazo conectado: app/src/backend/client.ts (tipado, <50 ms primeros bytes, `read_skill table-fit` no aplica aquí)
-Consumidores, imports dinámicos y scripts revisados: desktop-app/src/{bridge,host,main}.rs INIT_SCRIPT, build.rs (solo ipc-shim.js)
+Reemplazo conectado: web/ipc-shim.ts, compilado por Vite e inyectado por el host Wry
+Consumidores, imports dinámicos y scripts revisados: desktop-app/src/{bridge,host,main}.rs INIT_SCRIPT, build.rs, empaquetado y pruebas
 Datos o formatos que deben seguir siendo compatibles: wire format __rpc/__invoke (version 3, capabilities cancel/max_pending) si aún lo usa Wry
-Prueba o recorrido que acredita la sustitución: desktop-app smoke sin shim, transporte tipado verificado
-Commit de retirada: (pendiente — si aún lo usa Wry, reemplazar antes)
+Prueba o recorrido que acredita la sustitución: pruebas IPC, eventos, menú y HTTP sobre el artefacto compilado; smoke real de Wry
+Commit de retirada: el puente de compatibilidad continúa activo, ahora en TypeScript
 ```
 
 ```text
@@ -159,7 +159,7 @@ Commit de retirada: (pendiente — conservar React/Primer, estilos, componentes,
 | Electron/packager/installer/devtools/deps exclusivas | Sin consumidores runtime/tests/scripts/tipos/build; instalación limpia sin ellos |
 | SDK Copilot renderer + adaptadores | Cliente Rust con paridad; runtime externo en paquete |
 | Shims `app/src/web/*`, aliases, polyfills | Revisión individual; conservar utilidades web puras |
-| `ipc-shim.js` | Bootstrap tipado definitivo; si aún usa Wry, reemplazar antes |
+| `ipc-shim.js` | Retirado; Wry inyecta el bootstrap compilado desde TypeScript |
 | `dugite`/`keytar`/trampolines/módulos nativos | Operaciones/parsers/credenciales/persistencia migradas |
 | `vendor/desktop-*`, `printenvz`, `windows-argv-parser` | Verificación individual por función |
 | Lockfiles npm y scripts npm exclusivos | Consumidores migrados; conservar fixtures/tooling independientes |

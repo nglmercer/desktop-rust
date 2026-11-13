@@ -118,6 +118,7 @@ export function packageRust(
   for (const args of [
     ['build'],
     ['build', '-c', 'vite.highlighter.config.ts'],
+    ['build', '-c', 'vite.ipc-shim.config.ts'],
   ]) {
     const result = spawnSync(process.execPath, [vite, ...args], {
       cwd: repo,
@@ -183,6 +184,7 @@ export function packageRust(
     gui,
     path.join(ui, 'index.html'),
     path.join(ui, 'highlighter.js'),
+    path.join(ui, 'ipc-shim.js'),
     path.join(repo, 'gemoji/db/emoji.json'),
   ])
     requiredFile(file)

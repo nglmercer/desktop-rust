@@ -40,7 +40,7 @@ const DEV_VITE_DIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../out/v
 /// Injected before any page script runs. It defines `window.__desktop`,
 /// `window.desktop` and an `ipcRenderer`-shaped object so the web frontend (or
 /// a browser build of the legacy React renderer) needs no Electron globals.
-pub const INIT_SCRIPT: &str = include_str!("../web/ipc-shim.js");
+pub const INIT_SCRIPT: &str = include_str!("../../../../out/vite-dist/ipc-shim.js");
 
 const JSON: &str = "application/json; charset=utf-8";
 

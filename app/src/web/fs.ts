@@ -1,6 +1,6 @@
 // `fs` for the webview build. Every call is forwarded to the Rust shell's
 // `desktop.io.fs-*` commands: asynchronous ones over the IPC bridge, the
-// `*Sync` ones over a blocking request (see `invokeSync` in ipc-shim.js).
+// `*Sync` ones over a blocking request (see `invokeSync` in ipc-shim.ts).
 //
 // File handles are emulated by path. There is no real descriptor behind
 // them, so a handle does not pin an inode the way Node's does: code that

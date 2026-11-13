@@ -68,7 +68,7 @@ rust/                                 Rust crates (root Cargo workspace)
     ├── src/host.rs                   Host implementation, outbox and Flush batching
     ├── src/actions.rs, menu.rs       WindowAction on the UI thread, muda menu
     ├── build.rs                      rebuilds the renderer when its inputs change
-    └── web/ipc-shim.js               the only file of web/ still in use (injected)
+    └── web/ipc-shim.ts               typed Wry bootstrap, compiled and injected
 app/                                  the React renderer (active), built by Vite
 out/vite-dist/                        renderer bundle: embedded in release,
                                       served from disk in debug
@@ -89,7 +89,7 @@ core and bridge; the desktop shell and native host are built explicitly.
 | native menu (`Menu.buildFromTemplate`) | `muda`, ids equal to the original `MenuEvent` strings |
 | `dialog` / `clipboard` / `shell` | `rfd` / `arboard` / `platform` module, all on Rust |
 
-An initialization script (`web/ipc-shim.js`) installs an
+The initialization script (`web/ipc-shim.ts`, compiled by Vite) installs an
 `ipcRenderer`-compatible object plus `window.desktop`. A minimal
 `require('electron')` shim is provided for a browser build of the legacy
 renderer; any other Node module throws with a message pointing at the

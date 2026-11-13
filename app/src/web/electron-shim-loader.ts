@@ -1,7 +1,7 @@
 /**
- * Injected before the UI entry. Mirrors `rust/crates/desktop-app/web/ipc-
- * shim.js` but for the Vite dev / loopback-bridge path. In the production
- * Tao/Wry host, `ipc-shim.js` is already injected via the wry
+ * Injected before the UI entry. Mirrors `rust/crates/desktop-app/web/ipc-shim.ts`
+ * for the Vite dev / loopback-bridge path. In the production Tao/Wry host,
+ * the compiled IPC bootstrap is already injected via the Wry
  * initialization script and `window.__desktop` exists — this loader is a
  * no-op there. Otherwise it installs a minimal `__desktop` marker and,
  * when the page was served by the Rust bridge (`desktop-rs serve`, Termux

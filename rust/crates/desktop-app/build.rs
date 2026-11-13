@@ -1,7 +1,7 @@
 //! Makes sure the renderer bundle that `desktop-app` embeds is current.
 //!
 //! The bundle is produced by one command, `pnpm vite:build` (the app and the
-//! highlighter worker). This script runs it when the bundle is missing, when
+//! highlighter worker and Wry bootstrap). This script runs it when the bundle is missing, when
 //! any input is newer than the bundle, or when `DESKTOP_VITE_FORCE` is set.
 //! Existence of `index.html` and `highlighter.js` alone does not make a bundle
 //! current.
@@ -17,11 +17,13 @@ use std::time::SystemTime;
 const INPUTS: &[&str] = &[
     "vite.config.ts",
     "vite.highlighter.config.ts",
+    "vite.ipc-shim.config.ts",
     "package.json",
     "pnpm-lock.yaml",
     "app/index.html",
     "app/src",
     "app/styles",
+    "rust/crates/desktop-app/web/ipc-shim.ts",
 ];
 
 /// The newest modification time under `path`, skipping `node_modules`.
@@ -43,7 +45,7 @@ fn newest(path: &Path) -> Option<SystemTime> {
 }
 
 fn bundle_is_stale(repo: &Path, dist: &Path) -> bool {
-    if !dist.join("highlighter.js").is_file() {
+    if !dist.join("highlighter.js").is_file() || !dist.join("ipc-shim.js").is_file() {
         return true;
     }
     let Ok(built) = std::fs::metadata(dist.join("index.html")).and_then(|m| m.modified()) else {
@@ -83,7 +85,10 @@ fn build_bundle(repo: &Path, dist: &Path) -> Result<(), String> {
             "`pnpm vite:build` failed ({status}). The Vite error printed above is the cause. Fix it, or run `pnpm vite:build` on its own to see it again, then rebuild."
         ));
     }
-    if !dist.join("index.html").is_file() || !dist.join("highlighter.js").is_file() {
+    if !dist.join("index.html").is_file()
+        || !dist.join("highlighter.js").is_file()
+        || !dist.join("ipc-shim.js").is_file()
+    {
         return Err(format!(
             "`pnpm vite:build` finished, but {} is incomplete",
             dist.display()
@@ -105,6 +110,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         dist.join("index.html").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        dist.join("ipc-shim.js").display()
     );
     println!("cargo:rerun-if-env-changed=DESKTOP_VITE_FORCE");
     println!("cargo:rerun-if-env-changed=DESKTOP_SERVE_FROM_DISK");

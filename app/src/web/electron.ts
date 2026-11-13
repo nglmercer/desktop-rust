@@ -1,7 +1,7 @@
 /**
  * Minimal electron shim for Vite web build.
  * Provides ipcRenderer, shell, webUtils, etc. via Rust bridge.
- * Rust bridge is injected as window.__desktop (see desktop-app/web/ipc-shim.js).
+ * Rust bridge is injected as window.__desktop (see desktop-app/web/ipc-shim.ts).
  * For Termux loopback, window.desktop is bridge over WebSocket.
  */
 

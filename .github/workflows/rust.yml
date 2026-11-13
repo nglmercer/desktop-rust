@@ -39,6 +39,7 @@ on:
       - 'vitest-suites.json'
       - 'vite.config.ts'
       - 'vite.highlighter.config.ts'
+      - 'vite.ipc-shim.config.ts'
       - 'vite.cli.config.ts'
       - 'vite.crash.config.ts'
       - 'package.json'
@@ -91,6 +92,7 @@ on:
       - 'vitest-suites.json'
       - 'vite.config.ts'
       - 'vite.highlighter.config.ts'
+      - 'vite.ipc-shim.config.ts'
       - 'vite.cli.config.ts'
       - 'vite.crash.config.ts'
       - 'package.json'
@@ -131,7 +133,9 @@ jobs:
         run: |
           npm install --global pnpm@11.17.0
           pnpm install --frozen-lockfile --ignore-scripts
+          npm run check:ipc
           pnpm vite:build
+          test -f out/vite-dist/ipc-shim.js
           test -f out/vite-dist/index.html
           test -f out/vite-dist/highlighter.js
       - name: Check migrated frontend tooling and tests

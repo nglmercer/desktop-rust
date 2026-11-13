@@ -61,6 +61,7 @@ function fixture(): string {
     `rust/target/debug/github-desktop-rs${suffix}`,
     'out/vite-dist/index.html',
     'out/vite-dist/highlighter.js',
+    'out/vite-dist/ipc-shim.js',
     'gemoji/db/emoji.json',
     'LICENSE',
   ])
@@ -164,6 +165,12 @@ describe('Rust packaging', () => {
         'build',
         '-c',
         'vite.highlighter.config.ts',
+      ],
+      [
+        path.join(root, 'node_modules/vite/bin/vite.js'),
+        'build',
+        '-c',
+        'vite.ipc-shim.config.ts',
       ],
       [
         'build',

@@ -10,6 +10,7 @@
   "scripts": {
     "cli": "node --import tsx app/src/cli/main.ts",
     "check:eslint": "tsc -P eslint-rules/",
+    "check:ipc": "tsc -P rust/crates/desktop-app/web/tsconfig.json",
     "test:eslint": "node --import tsx script/test.mts eslint-rules",
     "test:script": "node --import tsx script/test.mts script",
     "test": "node --import tsx script/test.mts",
@@ -56,7 +57,7 @@
     "draft-release:pr": "node --import tsx script/draft-release/draft-pull-request.ts",
     "validate-changelog": "node --import tsx script/validate-changelog.ts",
     "vite:dev": "vite",
-    "vite:build": "vite build && vite build -c vite.highlighter.config.ts",
+    "vite:build": "vite build && vite build -c vite.highlighter.config.ts && vite build -c vite.ipc-shim.config.ts",
     "vite:preview": "vite preview",
     "pnpm:install": "pnpm install"
   },
