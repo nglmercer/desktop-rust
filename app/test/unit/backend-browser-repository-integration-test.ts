@@ -63,6 +63,23 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         'initial',
       ])
       execFileSync('git', ['-C', repository, 'branch', 'checkout-target'])
+      execFileSync('git', ['-C', repository, 'switch', '-qc', 'merge-source'])
+      await writeFile(path.join(repository, 'merge-source.txt'), 'merged\n')
+      execFileSync('git', ['-C', repository, 'add', 'merge-source.txt'])
+      execFileSync('git', [
+        '-C',
+        repository,
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.invalid',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-qm',
+        'merge source',
+      ])
+      execFileSync('git', ['-C', repository, 'switch', '-q', '-'])
       await writeFile(path.join(repository, 'changed.txt'), 'modified\n')
       const config = path.join(directory, 'gitconfig')
       await writeFile(
@@ -205,6 +222,39 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
       expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
         'modified\n'
       )
+      await page.locator('.branch-button').click()
+      await page
+        .getByRole('button', { name: /Choose a branch to merge into/i })
+        .click()
+      const mergeDialog = page.getByRole('dialog', {
+        name: /Merge into checkout-target/i,
+      })
+      await mergeDialog
+        .getByText('merge-source', { exact: true })
+        .first()
+        .click()
+      await mergeDialog
+        .getByRole('button', { name: 'Create a merge commit' })
+        .click()
+      await vi.waitFor(
+        async () => {
+          expect(
+            await readFile(path.join(repository, 'merge-source.txt'), 'utf8')
+          ).toBe('merged\n')
+        },
+        { timeout: 20_000 }
+      )
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
+        'modified\n'
+      )
+      const mergeCalls = await page.evaluate(
+        () => Reflect.get(window, '__browserAudit') as string[]
+      )
+      expect(
+        mergeCalls.some(
+          call => JSON.parse(call).method === 'renderer_merge_start'
+        )
+      ).toBe(true)
       const checkoutCalls = await page.evaluate(
         () => Reflect.get(window, '__browserAudit') as string[]
       )
