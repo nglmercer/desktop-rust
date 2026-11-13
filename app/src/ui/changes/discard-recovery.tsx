@@ -147,6 +147,33 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
     }
   }
 
+  private closeCommit = async (id: string) => {
+    if (this.operationInFlight) return
+    this.operationInFlight = true
+    this.setState({ busy: true, error: null })
+    try {
+      await this.props.dispatcher.closeUnchangedCommitCheckpoint(
+        this.props.repository,
+        id
+      )
+      if (this.mounted) {
+        this.setState({ busy: false })
+        await this.load()
+      }
+    } catch (error) {
+      if (this.mounted)
+        this.setState({
+          busy: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Could not close this commit attempt.',
+        })
+    } finally {
+      this.operationInFlight = false
+    }
+  }
+
   private restore = async (id: string) => {
     if (this.operationInFlight) return
     this.operationInFlight = true
@@ -374,6 +401,25 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
                           >
                             Recover commit
                           </Button>
+                        )}
+                        {record.state === 'publishing' && (
+                          <>
+                            <p>
+                              Close this attempt only if the branch and index
+                              are unchanged. Its backup will be kept; the commit
+                              may have been published and later reversed.
+                            </p>
+                            <Button
+                              type="button"
+                              size="small"
+                              disabled={busy || loading || confirming !== null}
+                              onClick={() => {
+                                void this.closeCommit(record.id)
+                              }}
+                            >
+                              Close unchanged attempt
+                            </Button>
+                          </>
                         )}
                       </li>
                     ))}

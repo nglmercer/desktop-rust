@@ -344,6 +344,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::PublishSelectedCommit { .. }
             | Operation::RevalidateCommitCheckpoint { .. }
             | Operation::RecoverPublishedCommitCheckpoint { .. }
+            | Operation::CloseUnchangedCommitCheckpoint { .. }
             | Operation::InterpretTrailers { .. }
             | Operation::MergeTreePreview { .. }
             | Operation::MergeBase { .. }

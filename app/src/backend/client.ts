@@ -51,9 +51,9 @@ export interface ISelectedCommitReview {
 }
 
 export type SelectedCommitSelection = Pick<ICopilotCommitOptions, 'paths' | 'remove_paths' | 'partial_selections' | 'amend_head' | 'expected_head'> & { readonly allow_empty?: boolean }
-type CommitCheckpointState = 'prepared' | 'publishing' | 'published' | 'complete'
+type CommitCheckpointState = 'prepared' | 'publishing' | 'published' | 'complete' | 'closed'
 function isCommitCheckpointState(value: unknown): value is CommitCheckpointState {
-  return value === 'prepared' || value === 'publishing' || value === 'published' || value === 'complete'
+  return value === 'prepared' || value === 'publishing' || value === 'published' || value === 'complete' || value === 'closed'
 }
 export type CommitCheckpoint = { readonly id: string; readonly state: CommitCheckpointState; readonly head: string | null; readonly branch: string | null } | { readonly id: string; readonly state: 'invalid' }
 export interface IPublishedSelectedCommit {
@@ -1971,6 +1971,14 @@ export class BackendClient {
     catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
     if (!isRecord(value) || value.id !== id || value.state !== 'complete' || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid)) throw new BackendError({ code: 'invalid_response', message: 'Recovery outcome is uncertain; inspect commit checkpoints', retryable: false })
     return value.oid
+  }
+
+  async closeUnchangedCommitCheckpoint(repositoryPath: string, id: string): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint ID', retryable: false })
+    let value: unknown
+    try { value = await this.commitCheckpointRequest(repositoryPath, { method: 'close_unchanged_commit_checkpoint', checkpoint_id: id }) }
+    catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
+    if (!isRecord(value) || value.id !== id || value.state !== 'closed') throw new BackendError({ code: 'invalid_response', message: 'Checkpoint outcome is uncertain; inspect commit checkpoints', retryable: false })
   }
 
   async revalidateCommitCheckpoint(repositoryPath: string, id: string): Promise<{ readonly basis: string; readonly matches: boolean }> {

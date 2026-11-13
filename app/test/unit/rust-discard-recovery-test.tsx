@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   forget: vi.fn(),
   commitHistory: vi.fn(),
   recoverCommit: vi.fn(),
+  closeCommit: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
@@ -39,6 +40,7 @@ const dispatcher = {
   undoRepositoryDiscard: mocks.undo,
   forgetRepositoryDiscard: mocks.forget,
   recoverPublishedCommitCheckpoint: mocks.recoverCommit,
+  closeUnchangedCommitCheckpoint: mocks.closeCommit,
 } as unknown as Dispatcher
 const id = '12345678-1234-1234-1234-123456789abc'
 const record = {
@@ -67,6 +69,32 @@ afterEach(() => {
 })
 
 describe('discard recovery history', () => {
+  it('closes an unchanged interrupted commit while keeping its backup', async () => {
+    mocks.history.mockResolvedValue([])
+    mocks.commitHistory
+      .mockResolvedValueOnce([
+        { id, state: 'publishing', head: null, branch: 'refs/heads/main' },
+      ])
+      .mockResolvedValueOnce([
+        { id, state: 'closed', head: null, branch: 'refs/heads/main' },
+      ])
+    mocks.closeCommit.mockResolvedValue(undefined)
+    render(
+      <DiscardRecovery
+        repository={repository}
+        dispatcher={dispatcher}
+        disabled={false}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Close unchanged attempt' })
+    )
+    await waitFor(() =>
+      expect(mocks.closeCommit).toHaveBeenCalledWith(repository, id)
+    )
+    await screen.findByText('No recovery records.')
+  })
   it('keeps discard recovery available when commit history fails', async () => {
     mocks.history.mockResolvedValue([record])
     mocks.commitHistory.mockRejectedValue(

@@ -243,7 +243,7 @@ fn read_checkpoint(base: &Path, id: &str, repository_id: &str) -> Result<Checkpo
             && record.repository_id == repository_id
             && matches!(
                 record.state.as_str(),
-                "prepared" | "publishing" | "published" | "complete"
+                "prepared" | "publishing" | "published" | "complete" | "closed"
             )
             && record.basis.len() == 64
             && record.basis.bytes().all(|b| b.is_ascii_hexdigit()),
@@ -266,7 +266,7 @@ fn read_checkpoint(base: &Path, id: &str, repository_id: &str) -> Result<Checkpo
     }
     anyhow::ensure!(
         match record.state.as_str() {
-            "prepared" | "publishing" =>
+            "prepared" | "publishing" | "closed" =>
                 record.published_oid.is_none() && record.published_index.is_none(),
             "published" | "complete" =>
                 record.published_oid.as_ref().is_some_and(|oid| {
@@ -1229,6 +1229,68 @@ impl Repository {
         Ok(json!({"id":id,"state":"complete","oid":published}))
     }
 
+    /// Acknowledge an interrupted attempt only while its original repository
+    /// state is still present. Backups are retained; this does not assert that
+    /// no ref update occurred and was later reversed by another actor.
+    pub(crate) async fn close_unchanged_commit_checkpoint(&self, id: &str) -> Result<Value> {
+        let base = self.checkpoint_directory().await?;
+        read_checkpoint(&base, id, &self.id())?;
+        let _use_lock = CheckpointUse::acquire(&base, id)?;
+        let mut record = read_checkpoint(&base, id, &self.id())?;
+        anyhow::ensure!(
+            record.state == "publishing",
+            "checkpoint is not an interrupted commit attempt"
+        );
+        let index_path = self.index_path().await?;
+        let _index_lock = IndexTransaction::begin(&index_path)?;
+        let _private_lock = IndexTransaction::begin(&base.join(id).join("index.commit"))?;
+        let _references = self.lock_discard_refs().await?;
+        let inspection = self.inspect_commit_checkpoint(id).await?;
+        anyhow::ensure!(
+            [
+                "head_matches",
+                "branch_matches",
+                "index_matches",
+                "operation_matches"
+            ]
+            .iter()
+            .all(|field| inspection[*field] == true),
+            "Repository state changed; checkpoint retained for inspection"
+        );
+        let direct = self
+            .run(&args(&["symbolic-ref", "--quiet", "--no-recurse", "HEAD"]))
+            .await?;
+        match record.branch.as_deref() {
+            Some(branch) => {
+                anyhow::ensure!(
+                    direct.code == 0 && std::str::from_utf8(&direct.stdout)?.trim() == branch,
+                    "HEAD is not a direct branch reference; checkpoint retained"
+                );
+                let target = self
+                    .run(&args(&["symbolic-ref", "--quiet", branch]))
+                    .await?;
+                anyhow::ensure!(
+                    target.code == 1,
+                    "branch is not a direct reference; checkpoint retained"
+                );
+            }
+            None => anyhow::ensure!(
+                direct.code == 1,
+                "detached HEAD changed; checkpoint retained"
+            ),
+        }
+        anyhow::ensure!(
+            read_shared_index(&index_path)?.as_deref().map(hash) == record.original_index
+                && serde_json::to_vec(&read_checkpoint(&base, id, &self.id())?)?
+                    == serde_json::to_vec(&record)?,
+            "Checkpoint or index changed; checkpoint retained"
+        );
+        Cancellation::current().check()?;
+        record.state = "closed".into();
+        write_checkpoint(&base, &record)?;
+        Ok(json!({"id":id,"state":"closed"}))
+    }
+
     /// Recapture the selection as an observation, not a publication authorization.
     pub(crate) async fn revalidate_commit_checkpoint(&self, id: &str) -> Result<Value> {
         let base = self.checkpoint_directory().await?;
@@ -1732,6 +1794,40 @@ mod tests {
         assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
         assert!(repo.forget_commit_checkpoint(first_id).await.is_err());
         assert!(repo.revalidate_commit_checkpoint(first_id).await.is_err());
+
+        let branch = git(&["symbolic-ref", "HEAD"]);
+        git(&["symbolic-ref", "HEAD", "refs/heads/other"]);
+        assert!(
+            repo.close_unchanged_commit_checkpoint(first_id)
+                .await
+                .is_err()
+        );
+        git(&["symbolic-ref", "HEAD", &branch]);
+        git(&["add", "file"]);
+        let changed_index = fs::read(root.join(".git/index")).unwrap();
+        assert_ne!(changed_index, original_index);
+        assert!(
+            repo.close_unchanged_commit_checkpoint(first_id)
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), changed_index);
+        fs::write(root.join(".git/index"), &original_index).unwrap();
+        let closed = repo
+            .close_unchanged_commit_checkpoint(first_id)
+            .await
+            .unwrap();
+        assert_eq!(closed["state"], "closed");
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), original_index);
+        assert_eq!(git(&["rev-parse", "HEAD"]), head);
+        assert!(repo.forget_commit_checkpoint(first_id).await.is_err());
+        assert!(
+            root.join(".git")
+                .join(DIRECTORY)
+                .join(first_id)
+                .join("index.before")
+                .exists()
+        );
 
         fs::remove_file(hook).unwrap();
         fs::write(root.join("file"), b"reviewed\n").unwrap();

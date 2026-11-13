@@ -353,6 +353,10 @@ the owner exits; legacy lock files without the new marker remain blocked for
 manual investigation. Git's own index and reference lock files can still need
 investigation after a hard interruption. The recovery history UI now exposes
 interrupted commit recovery through both Rust transports.
+An interrupted attempt can also be closed from recovery history when HEAD,
+the branch, index and repository-operation state still match its original
+checkpoint under locks. Closing retains the backups and does not claim that a
+ref update could not have occurred and later been reversed.
 Split-index backup and restore is now shared infrastructure for commit recovery
 and the existing discard journal. Restoring a missing shared index uses an
 atomic hard link and refuses to overwrite a concurrently created conflicting

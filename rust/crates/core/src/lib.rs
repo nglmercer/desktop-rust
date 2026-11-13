@@ -375,6 +375,9 @@ impl Repository {
                     .recover_published_commit_checkpoint(&checkpoint_id)
                     .await;
             }
+            Operation::CloseUnchangedCommitCheckpoint { checkpoint_id } => {
+                return self.close_unchanged_commit_checkpoint(&checkpoint_id).await;
+            }
             Operation::ForgetCommitCheckpoint { checkpoint_id } => {
                 return self.forget_commit_checkpoint(&checkpoint_id).await;
             }
@@ -1161,6 +1164,7 @@ impl Repository {
             | InspectCommitCheckpoint { .. }
             | RevalidateCommitCheckpoint { .. }
             | RecoverPublishedCommitCheckpoint { .. }
+            | CloseUnchangedCommitCheckpoint { .. }
             | ForgetCommitCheckpoint { .. }
             | InitialCommit { .. } => {
                 unreachable!("handled by execute")

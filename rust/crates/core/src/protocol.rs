@@ -591,6 +591,9 @@ pub enum Operation {
     RecoverPublishedCommitCheckpoint {
         checkpoint_id: String,
     },
+    CloseUnchangedCommitCheckpoint {
+        checkpoint_id: String,
+    },
     ForgetCommitCheckpoint {
         checkpoint_id: String,
     },
