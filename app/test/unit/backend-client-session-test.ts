@@ -7,9 +7,10 @@ describe('backend Copilot session cleanup', () => {
   })
 
   it('cancels a Rust commit without treating its outcome as retryable', async () => {
-    const invoke = vi.fn(() => new Promise<unknown>(() => {}))
+    const invoke = vi.fn((_channel: string, ..._args: unknown[]) => new Promise<unknown>(() => {}))
+    const invokeWithProgress = vi.fn((channel, _callback, ...args) => invoke(channel, ...args))
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send, on: vi.fn() } })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, invokeWithProgress, supportsCommitRequestProgress: true, send, on: vi.fn() } })
     const client = new BackendClient()
     const controller = new AbortController()
     const id = '12345678-1234-4234-8234-123456789abc'
@@ -18,6 +19,13 @@ describe('backend Copilot session cleanup', () => {
     controller.abort()
     await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect commit checkpoints') })
     expect(send).toHaveBeenCalledWith('desktop.backend.cancel', { request_id: expect.any(String) })
+  })
+
+  it('refuses a commit on an older Wry bridge before mutation', async () => {
+    const invoke = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    await expect(new BackendClient().publishSelectedCommit('/repo', '12345678-1234-4234-8234-123456789abc', 'message')).rejects.toMatchObject({ code: 'unsupported', retryable: false })
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('cancels checkpoint preparation and directs the caller to inspect history', async () => {
@@ -32,32 +40,34 @@ describe('backend Copilot session cleanup', () => {
     expect(send).toHaveBeenCalledWith('desktop.backend.cancel', { request_id: expect.any(String) })
   })
 
-  it('delivers only matching commit hook progress and removes the listener', async () => {
+  it('delivers only request-owned matching commit hook progress', async () => {
     let finish: (value: unknown) => void = () => {}
-    const invoke = vi.fn(() => new Promise<unknown>(resolve => { finish = resolve }))
+    let listener: (value: unknown) => void = () => {}
+    const invokeWithProgress = vi.fn((_channel, callback) => { listener = callback; return new Promise<unknown>(resolve => { finish = resolve }) })
+    const invoke = vi.fn()
     const on = vi.fn()
     const off = vi.fn()
-    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on, off } })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, invokeWithProgress, supportsCommitRequestProgress: true, send: vi.fn(), on, off } })
     const id = '12345678-1234-4234-8234-123456789abc'
     const progress = vi.fn()
     const output = vi.fn()
     const pending = new BackendClient().publishSelectedCommit('/repo', id, 'message', { onHookProgress: progress, onOutput: output })
-    const listener = on.mock.calls[0][1]
-    listener({}, { checkpoint_id: 'other', hook_name: 'pre-commit', status: 'started' })
-    listener({}, { checkpoint_id: id, hook_name: 'unknown', status: 'started' })
-    listener({}, { checkpoint_id: id, hook_name: 'pre-commit', status: 'started' })
+    listener({ event: 'commit_hook_progress', checkpoint_id: 'other', hook_name: 'pre-commit', status: 'started' })
+    listener({ event: 'commit_hook_progress', checkpoint_id: id, hook_name: 'unknown', status: 'started' })
+    listener({ event: 'commit_hook_progress', checkpoint_id: id, hook_name: 'pre-commit', status: 'started' })
     expect(progress).toHaveBeenCalledOnce()
     expect(progress).toHaveBeenCalledWith({ hookName: 'pre-commit', status: 'started' })
-    const outputListener = on.mock.calls[1][1]
-    outputListener({}, { checkpoint_id: 'other', stream: 'stderr', data: 'aGk=' })
-    outputListener({}, { checkpoint_id: id, stream: 'stderr', data: 'invalid!' })
-    outputListener({}, { checkpoint_id: id, stream: 'stderr', data: 'aGk=' })
+    listener({ event: 'commit_output', checkpoint_id: 'other', stream: 'stderr', data: 'aGk=' })
+    listener({ event: 'commit_output', checkpoint_id: id, stream: 'stderr', data: 'invalid!' })
+    listener({ event: 'commit_output', checkpoint_id: id, stream: 'stderr', data: 'aGk=' })
     expect(output).toHaveBeenCalledOnce()
     expect(output).toHaveBeenCalledWith({ stream: 'stderr', bytes: new Uint8Array([104, 105]) })
     finish({ id, state: 'complete', oid: 'b'.repeat(40), stdout: '', stderr: '', output_truncated: false })
     await pending
-    expect(off).toHaveBeenCalledWith('commit_hook_progress', listener)
-    expect(off).toHaveBeenCalledWith('commit_output', outputListener)
+    listener({ event: 'commit_hook_progress', checkpoint_id: id, hook_name: 'pre-commit', status: 'failed' })
+    expect(progress).toHaveBeenCalledOnce()
+    expect(on).not.toHaveBeenCalled()
+    expect(off).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -911,13 +921,15 @@ describe('backend Copilot session cleanup', () => {
   it('validates commit checkpoint preparation and history', async () => {
     const id = '12345678-1234-4234-8234-123456789abc'
     const basis = 'a'.repeat(64)
-    const invoke = vi.fn(async (): Promise<unknown> => ({ id, state: 'prepared', basis }))
-    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const invoke = vi.fn(async (_channel: string, ..._args: unknown[]): Promise<unknown> => ({ id, state: 'prepared', basis }))
+    const invokeWithProgress = vi.fn((channel, _callback, ...args) => invoke(channel, ...args))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, invokeWithProgress, supportsCommitRequestProgress: true, send: vi.fn(), on: vi.fn() } })
     const client = new BackendClient()
     await expect(client.prepareSelectedCommit('/repo', { paths: ['file'] }, basis)).resolves.toBe(id)
     expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ type: 'commit_checkpoint', operation: expect.objectContaining({ method: 'prepare_selected_commit', basis }) }) }))
     invoke.mockResolvedValueOnce({ id, state: 'complete', oid: 'b'.repeat(40), stdout: 'done', stderr: 'hook output', output_truncated: false })
     await expect(client.publishSelectedCommit('/repo', id, 'message\n', { noVerify: true, signOff: true })).resolves.toEqual({ oid: 'b'.repeat(40), stdout: 'done', stderr: 'hook output', outputTruncated: false })
+    expect(invokeWithProgress).toHaveBeenCalledWith('desktop.backend.git_info', expect.any(Function), expect.objectContaining({ operation: expect.objectContaining({ type: 'commit_checkpoint', operation: expect.objectContaining({ method: 'publish_selected_commit' }) }) }))
     expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ type: 'commit_checkpoint', operation: expect.objectContaining({ method: 'publish_selected_commit', checkpoint_id: id, no_verify: true, sign_off: true, allow_large_files: false }) }) }))
     invoke.mockResolvedValueOnce({ id, state: 'complete', oid: 'bad' })
     await expect(client.publishSelectedCommit('/repo', id, 'message')).rejects.toMatchObject({ code: 'invalid_response' })

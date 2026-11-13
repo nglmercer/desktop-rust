@@ -34,6 +34,8 @@ export interface BackendRequestOptions {
   readonly deadlineMs?: number
   readonly signal?: AbortSignal
   readonly onProgress?: (chunk: FetchProgressChunk) => void
+  /** Internal request-owned commit output and hook events. */
+  readonly onCommitEvent?: (event: unknown) => void
 }
 
 export interface FetchProgressChunk {
@@ -386,8 +388,8 @@ class WryTransport {
       })
     }
     const channel = `desktop.backend.${method}`
-    if (opts.onProgress && typeof this.bridge.invokeWithProgress !== 'function') {
-      throw new BackendError({ code: 'unsupported', message: 'Native fetch progress is unavailable', retryable: false })
+    if ((opts.onProgress || opts.onCommitEvent) && typeof this.bridge.invokeWithProgress !== 'function') {
+      throw new BackendError({ code: 'unsupported', message: 'Native operation progress is unavailable', retryable: false })
     }
     if (method === 'read' || method === 'copilot' || method === 'git_info') {
       if (opts.signal && !this.capabilities().cancel) {
@@ -575,9 +577,12 @@ class WryTransport {
               request_id: requestId,
               deadline_ms: deadline,
             }
-          const call = opts.onProgress
+          const call = opts.onProgress || opts.onCommitEvent
             ? this.bridge.invokeWithProgress!(channel, value => {
-                if (!settled) deliverFetchProgress(opts.onProgress, value)
+                if (!settled) {
+                  deliverFetchProgress(opts.onProgress, value)
+                  try { opts.onCommitEvent?.(value) } catch { /* Progress callbacks must not affect the operation. */ }
+                }
               }, args)
             : this.bridge.invoke(channel, args)
           call
@@ -677,6 +682,7 @@ class WebSocketTransport {
       reject: (e: unknown) => void
       cleanup: () => void
       onProgress?: (chunk: FetchProgressChunk) => void
+      onCommitEvent?: (event: unknown) => void
     }
   >()
   private listeners = new Map<string, Set<(...args: unknown[]) => void>>()
@@ -812,6 +818,12 @@ class WebSocketTransport {
         if (data.event === 'fetch_output') {
           if (Number.isSafeInteger(data.request_id)) {
             deliverFetchProgress(this.pending.get(data.request_id!)?.onProgress, data)
+          }
+          return
+        }
+        if (data.event === 'commit_hook_progress' || data.event === 'commit_output') {
+          if (Number.isSafeInteger(data.request_id)) {
+            try { this.pending.get(data.request_id!)?.onCommitEvent?.(data) } catch { /* Ignore callback errors. */ }
           }
           return
         }
@@ -984,7 +996,7 @@ class WebSocketTransport {
           })
         )
       }, Math.max(0, deadline - Date.now()))
-      this.pending.set(id, { resolve, reject, cleanup, onProgress: opts.onProgress })
+      this.pending.set(id, { resolve, reject, cleanup, onProgress: opts.onProgress, onCommitEvent: opts.onCommitEvent })
       if (opts.signal) {
         onAbort = () =>
           rejectAndCancel(
@@ -1996,7 +2008,7 @@ export class BackendClient {
     return value.matches
   }
 
-  private async commitCheckpointRequest(repositoryPath: string, operation: Record<string, unknown>, options: Pick<BackendRequestOptions, 'signal' | 'deadlineMs'> = {}): Promise<unknown> {
+  private async commitCheckpointRequest(repositoryPath: string, operation: Record<string, unknown>, options: Pick<BackendRequestOptions, 'signal' | 'deadlineMs' | 'onCommitEvent'> = {}): Promise<unknown> {
     return this.transport === 'wry'
       ? this.request('git_info', { operation: { type: 'commit_checkpoint', repository_path: repositoryPath, operation } }, options)
       : this.repositoryRead(repositoryPath, operation.method as string, operation, options)
@@ -2017,22 +2029,22 @@ export class BackendClient {
   /** Live output is best-effort and bounded; the result contains the final output tails. */
   async publishSelectedCommit(repositoryPath: string, id: string, message: string, options: { readonly noVerify?: boolean; readonly signOff?: boolean; readonly allowLargeFiles?: boolean; readonly signal?: AbortSignal; readonly deadlineMs?: number; readonly onHookProgress?: (progress: ICommitHookProgress) => void; readonly onOutput?: (output: { readonly stream: 'stdout' | 'stderr'; readonly bytes: Uint8Array }) => void } = {}): Promise<IPublishedSelectedCommit> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || message.trim().length === 0 || message.includes('\0')) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint or message', retryable: false })
+    if (this.transport === 'wry' && (window as any).__desktop?.supportsCommitRequestProgress !== true) throw new BackendError({ code: 'unsupported', message: 'Request-owned commit progress requires a matching desktop backend', retryable: false })
     const operation = { method: 'publish_selected_commit', checkpoint_id: id, message, no_verify: options.noVerify ?? false, sign_off: options.signOff ?? false, allow_large_files: options.allowLargeFiles ?? false }
     const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
     if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Commit message exceeds the transport limit', retryable: false })
-    const unsubscribe = options.onHookProgress === undefined ? () => {} : this.subscribe('commit_hook_progress', value => {
-      if (!isRecord(value) || value.checkpoint_id !== id || typeof value.hook_name !== 'string' || !['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit', 'post-rewrite', 'pre-auto-gc'].includes(value.hook_name) || (value.status !== 'started' && value.status !== 'finished' && value.status !== 'failed')) return
-      options.onHookProgress?.({ hookName: value.hook_name, status: value.status })
-    })
-    const unsubscribeOutput = options.onOutput === undefined ? () => {} : this.subscribe('commit_output', value => {
-      if (!isRecord(value) || value.checkpoint_id !== id || (value.stream !== 'stdout' && value.stream !== 'stderr') || typeof value.data !== 'string' || value.data.length > 10924 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.data)) return
-      const decoded = atob(value.data)
-      options.onOutput?.({ stream: value.stream, bytes: Uint8Array.from(decoded, character => character.charCodeAt(0)) })
-    })
+    const onCommitEvent = this.transport !== 'wry' && options.onHookProgress === undefined && options.onOutput === undefined ? undefined : (event: unknown) => {
+      if (!isRecord(event) || event.checkpoint_id !== id) return
+      if (event.event === 'commit_hook_progress' && typeof event.hook_name === 'string' && ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit', 'post-rewrite', 'pre-auto-gc'].includes(event.hook_name) && (event.status === 'started' || event.status === 'finished' || event.status === 'failed')) {
+        options.onHookProgress?.({ hookName: event.hook_name, status: event.status })
+      } else if (event.event === 'commit_output' && (event.stream === 'stdout' || event.stream === 'stderr') && typeof event.data === 'string' && event.data.length <= 10924 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(event.data)) {
+        const decoded = atob(event.data)
+        options.onOutput?.({ stream: event.stream, bytes: Uint8Array.from(decoded, character => character.charCodeAt(0)) })
+      }
+    }
     let value: unknown
-    try { value = await this.commitCheckpointRequest(repositoryPath, operation, { signal: options.signal, deadlineMs: options.deadlineMs }) }
+    try { value = await this.commitCheckpointRequest(repositoryPath, operation, { signal: options.signal, deadlineMs: options.deadlineMs, onCommitEvent }) }
     catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
-    finally { unsubscribe(); unsubscribeOutput() }
     if (!isRecord(value) || value.id !== id || value.state !== 'complete' || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid) || typeof value.stdout !== 'string' || value.stdout.length > 131_072 || typeof value.stderr !== 'string' || value.stderr.length > 131_072 || typeof value.output_truncated !== 'boolean') throw new BackendError({ code: 'invalid_response', message: 'Commit outcome is uncertain; inspect commit checkpoints', retryable: false })
     return { oid: value.oid, stdout: value.stdout, stderr: value.stderr, outputTruncated: value.output_truncated }
   }

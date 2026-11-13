@@ -354,9 +354,11 @@ Wry and WebSocket. It reads Git Trace2 through a private bounded pipe and emits
 only recognized hook names and statuses; it preserves an existing Trace2 event
 target by leaving progress unavailable. Notification queues and per-commit
 events are bounded, so notifications can be dropped under load. Windows hook
-progress is not yet implemented. Successful typed publication returns bounded
-stdout and stderr tails after completion, including hook output; it does not
-stream output. The typed preparation and publication calls accept
+progress is not yet implemented. Hook events and live output are delivered to
+the originating Wry or WebSocket request; Wry rejects publication through an
+older renderer that cannot receive request-owned progress. Successful typed
+publication also returns bounded stdout and stderr tails after completion.
+The typed preparation and publication calls accept
 an abort signal; cancellation is an uncertain mutation and directs callers to
 inspect checkpoint history before retrying. The reference fence and its
 prepared OID receipt are retained in the checkpoint; the receipt is only a

@@ -84,6 +84,8 @@ enum Incoming {
     Rpc {
         #[serde(rename = "__rpc")]
         id: u64,
+        #[serde(rename = "__progress", default)]
+        progress: bool,
         channel: String,
         #[serde(default)]
         args: Vec<Value>,
@@ -93,6 +95,30 @@ enum Incoming {
         #[serde(default)]
         args: Vec<Value>,
     },
+}
+
+// Commit hook output and status must never be broadcast. An older renderer
+// without request-owned progress cannot safely publish through this bridge.
+fn requires_commit_progress(channel: &str, args: &[Value]) -> bool {
+    channel == "desktop.backend.git_info"
+        && args
+            .first()
+            .and_then(|value| value.get("operation"))
+            .is_some_and(|operation| {
+                operation.get("type").and_then(Value::as_str) == Some("commit_checkpoint")
+                    && operation
+                        .get("operation")
+                        .and_then(|value| value.get("method"))
+                        .and_then(Value::as_str)
+                        == Some("publish_selected_commit")
+            })
+}
+
+fn commit_progress_required() -> desktop_core::error::AppError {
+    desktop_core::error::AppError::Coded {
+        code: "unsupported".into(),
+        message: "Request-owned commit progress is required; reload the renderer".into(),
+    }
 }
 
 /// The admission lanes. Each has a fixed number of workers and a bounded
@@ -201,17 +227,27 @@ impl Bridge {
     /// thread, so it only admits work and never waits.
     pub fn handle_ipc(&self, body: &str) {
         match serde_json::from_str::<Incoming>(body) {
-            Ok(Incoming::Rpc { id, channel, args }) => {
-                self.admit_rpc(id, channel, args, body.len())
-            }
+            Ok(Incoming::Rpc {
+                id,
+                channel,
+                args,
+                progress,
+            }) => self.admit_rpc(id, channel, args, progress, body.len()),
             Ok(Incoming::Send { channel, args }) => self.admit_send(channel, args, body.len()),
             Err(_) => tracing::warn!(bytes = body.len(), "malformed IPC frame"),
         }
     }
 
-    fn admit_rpc(&self, id: u64, channel: String, args: Vec<Value>, bytes: usize) {
+    fn admit_rpc(&self, id: u64, channel: String, args: Vec<Value>, progress: bool, bytes: usize) {
         let lane = self.executor_for(&channel);
         let proxy = self.proxy_handle();
+        if requires_commit_progress(&channel, &args) && !progress {
+            let _ = proxy.send_event(AppEvent::RpcResult {
+                id,
+                result: RpcResult::err(commit_progress_required()),
+            });
+            return;
+        }
         let app = self.app.clone();
         let backend = self.backend.clone();
         let job = if matches!(
@@ -412,6 +448,14 @@ impl Bridge {
                 }
             };
             let channel = message.channel.clone();
+            if requires_commit_progress(&channel, &message.args) {
+                responder.respond(response(
+                    200,
+                    JSON,
+                    RpcResult::err(commit_progress_required()).to_bytes(),
+                ));
+                return;
+            }
             if sync && !desktop_core::io::allowed_synchronously(&channel, &message.args) {
                 let error = desktop_core::error::AppError::Coded {
                     code: "EINVAL".into(),
@@ -512,17 +556,29 @@ fn run_channel(
         channel,
         "desktop.backend.read" | "desktop.backend.copilot" | "desktop.backend.git_info"
     ) {
-        let app = app.clone();
         let progress = std::sync::Arc::new(
-            move |event: desktop_backend::hook_progress::CommitEvent| {
-                match event {
-                    desktop_backend::hook_progress::CommitEvent::Hook(event) => app.emit_value("commit_hook_progress", json!({"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status})),
-                    desktop_backend::hook_progress::CommitEvent::Output { checkpoint_id, stream, data } => app.emit_value("commit_output", json!({"checkpoint_id":checkpoint_id,"stream":stream,"data":data})),
-                    desktop_backend::hook_progress::CommitEvent::FetchOutput { stream, data } => {
-                        if let Some((proxy, id)) = &progress_target {
-                            let _ = proxy.send_event(AppEvent::RpcProgress { id: *id, payload: json!({"stream":stream,"data":data}) });
-                        }
-                    },
+            move |event: desktop_backend::hook_progress::CommitEvent| match event {
+                desktop_backend::hook_progress::CommitEvent::Hook(event) => {
+                    if let Some((proxy, id)) = &progress_target {
+                        let _ = proxy.send_event(AppEvent::RpcProgress { id: *id, payload: json!({"event":"commit_hook_progress","checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}) });
+                    }
+                }
+                desktop_backend::hook_progress::CommitEvent::Output {
+                    checkpoint_id,
+                    stream,
+                    data,
+                } => {
+                    if let Some((proxy, id)) = &progress_target {
+                        let _ = proxy.send_event(AppEvent::RpcProgress { id: *id, payload: json!({"event":"commit_output","checkpoint_id":checkpoint_id,"stream":stream,"data":data}) });
+                    }
+                }
+                desktop_backend::hook_progress::CommitEvent::FetchOutput { stream, data } => {
+                    if let Some((proxy, id)) = &progress_target {
+                        let _ = proxy.send_event(AppEvent::RpcProgress {
+                            id: *id,
+                            payload: json!({"stream":stream,"data":data}),
+                        });
+                    }
                 }
             },
         );
@@ -804,6 +860,40 @@ pub fn js_literal(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_progress_gate_recognizes_only_publish_requests() {
+        let publish = vec![
+            json!({"operation":{"type":"commit_checkpoint","operation":{"method":"publish_selected_commit"}}}),
+        ];
+        assert!(requires_commit_progress(
+            "desktop.backend.git_info",
+            &publish
+        ));
+        assert!(!requires_commit_progress("desktop.backend.read", &publish));
+        assert!(!requires_commit_progress(
+            "desktop.backend.git_info",
+            &[
+                json!({"operation":{"type":"commit_checkpoint","operation":{"method":"prepare_selected_commit"}}})
+            ]
+        ));
+        let old: Incoming = serde_json::from_value(
+            json!({"__rpc":1,"channel":"desktop.backend.git_info","args":publish}),
+        )
+        .unwrap();
+        assert!(matches!(
+            old,
+            Incoming::Rpc {
+                progress: false,
+                ..
+            }
+        ));
+        let new: Incoming = serde_json::from_value(
+            json!({"__rpc":1,"__progress":true,"channel":"desktop.backend.git_info","args":[]}),
+        )
+        .unwrap();
+        assert!(matches!(new, Incoming::Rpc { progress: true, .. }));
+    }
 
     #[test]
     fn percent_decoding_handles_escapes_and_malformed_input() {

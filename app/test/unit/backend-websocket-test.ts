@@ -78,6 +78,30 @@ describe('WebSocket backend transport', () => {
     vi.useRealTimers()
   })
 
+  it('routes commit events only to the pending owning request', async () => {
+    const { client: value, socket } = await connected()
+    const first = vi.fn()
+    const second = vi.fn()
+    const global = vi.fn()
+    const unsubscribe = value.subscribe('commit_output', global)
+    const pendingFirst = value.request('first', {}, { onCommitEvent: first })
+    const pendingSecond = value.request('second', {}, { onCommitEvent: second })
+    const firstId = socket.sent.at(-2)!.id
+    const secondId = socket.sent.at(-1)!.id
+    socket.message({ event: 'commit_output', request_id: firstId, checkpoint_id: 'same', stream: 'stderr', data: 'aGk=' })
+    socket.message({ event: 'commit_hook_progress', request_id: secondId, checkpoint_id: 'same', hook_name: 'pre-commit', status: 'started' })
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledTimes(1)
+    expect(global).not.toHaveBeenCalled()
+    socket.message({ id: firstId, result: {} })
+    await pendingFirst
+    socket.message({ event: 'commit_output', request_id: firstId, checkpoint_id: 'same', stream: 'stderr', data: 'aGk=' })
+    expect(first).toHaveBeenCalledTimes(1)
+    socket.message({ id: secondId, result: {} })
+    await pendingSecond
+    unsubscribe()
+  })
+
   it('retains the token for a reload while removing it from the URL', () => {
     const first = client()
     expect(first.transportKind).toBe('ws')

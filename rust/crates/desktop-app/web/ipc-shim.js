@@ -137,7 +137,15 @@
       }, timeout);
       pending.set(id, { resolve: resolvePromise, reject: reject, timer: timer, progress: onProgress });
 
-      if (!post({ __rpc: id, channel: channel, args: args })) {
+      if (!post({ __rpc: id, __progress: !!onProgress, channel: channel, args: args })) {
+        // The HTTP fallback cannot deliver request-owned progress. Refuse
+        // before submitting the operation instead of silently dropping it.
+        if (onProgress) {
+          pending.delete(id);
+          clearTimeout(timer);
+          reject(Object.assign(new Error('Request-owned progress requires native IPC'), { code: 'unsupported' }));
+          return;
+        }
         // Fallback for hosts where postMessage is not registered yet.
         fetch('/__invoke', {
           method: 'POST',
@@ -222,6 +230,7 @@
     // renderer -> Rust
     invoke: invoke,
     invokeWithProgress: invokeWithProgress,
+    supportsCommitRequestProgress: true,
     invokeSync: invokeSync,
     send: send,
     supportsCancellation: function () {
