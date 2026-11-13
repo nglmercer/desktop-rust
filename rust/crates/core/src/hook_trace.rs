@@ -1,5 +1,5 @@
 //! Read Git Trace2 through a bounded pipe and expose only hook names/statuses.
-use crate::hook_progress::HookProgress;
+use crate::hook_progress::{CommitEvent, HookProgress};
 use anyhow::{Context, Result};
 use std::{
     collections::HashMap,
@@ -23,7 +23,7 @@ struct Decoder {
     overflow: bool,
     children: HashMap<u64, String>,
     checkpoint: String,
-    sender: mpsc::Sender<(u64, HookProgress)>,
+    sender: mpsc::Sender<(u64, CommitEvent)>,
     request_id: u64,
     emitted: usize,
 }
@@ -104,11 +104,11 @@ impl Decoder {
         self.emitted += 1;
         let _ = self.sender.try_send((
             self.request_id,
-            HookProgress {
+            CommitEvent::Hook(HookProgress {
                 checkpoint_id: self.checkpoint.clone(),
                 hook_name: name.to_owned(),
                 status,
-            },
+            }),
         ));
     }
 }
@@ -123,7 +123,7 @@ impl Trace {
     pub(crate) fn start(
         directory: &Path,
         checkpoint: &str,
-        sender: mpsc::Sender<(u64, HookProgress)>,
+        sender: mpsc::Sender<(u64, CommitEvent)>,
         request_id: u64,
     ) -> Result<Self> {
         let path = directory.join(format!("hook-trace-{}", uuid::Uuid::new_v4()));
@@ -244,27 +244,29 @@ mod tests {
             receiver.try_recv().unwrap(),
             (
                 7,
-                HookProgress {
+                CommitEvent::Hook(HookProgress {
                     checkpoint_id: "checkpoint".into(),
                     hook_name: "pre-commit".into(),
                     status: "started"
-                }
+                })
             )
         );
         assert_eq!(
             receiver.try_recv().unwrap(),
             (
                 7,
-                HookProgress {
+                CommitEvent::Hook(HookProgress {
                     checkpoint_id: "checkpoint".into(),
                     hook_name: "pre-commit".into(),
                     status: "failed"
-                }
+                })
             )
         );
         assert!(receiver.try_recv().is_err());
         decoder.feed(&vec![b'x'; MAX_LINE + 1]);
         decoder.feed(b"\n{\"event\":\"child_start\",\"sid\":\"root\",\"child_class\":\"hook\",\"child_id\":4,\"hook_name\":\"commit-msg\"}\n");
-        assert_eq!(receiver.try_recv().unwrap().1.hook_name, "commit-msg");
+        assert!(
+            matches!(receiver.try_recv().unwrap().1, CommitEvent::Hook(HookProgress { hook_name, .. }) if hook_name == "commit-msg")
+        );
     }
 }

@@ -886,7 +886,7 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
     let mut preferences = state.preferences.subscribe();
     let mut active: Option<Active> = None;
     let (hook_events, mut hook_events_rx) =
-        mpsc::channel::<(u64, desktop_core::hook_progress::HookProgress)>(64);
+        mpsc::channel::<(u64, desktop_core::hook_progress::CommitEvent)>(64);
     let mut queue = VecDeque::<Rpc>::new();
     loop {
         if active.is_none()
@@ -905,13 +905,13 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
             } => {
                 active.take();
                 while let Ok((request_id, event)) = hook_events_rx.try_recv() {
-                    if !send(&mut socket, json!({"event":"commit_hook_progress","request_id":request_id,"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}), &state).await { return; }
+                    if !send(&mut socket, commit_event_value(request_id, event), &state).await { return; }
                 }
                 if !send(&mut socket, result, &state).await {break;}
                 continue;
             },
             Some((request_id, event)) = hook_events_rx.recv() => {
-                if !send(&mut socket, json!({"event":"commit_hook_progress","request_id":request_id,"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}), &state).await { break; }
+                if !send(&mut socket, commit_event_value(request_id, event), &state).await { break; }
                 continue;
             },
             message = socket.recv() => match message { Some(Ok(message)) => message, _ => break },
@@ -1005,6 +1005,25 @@ fn cancelled_message(id: u64, message: &str) -> serde_json::Value {
     json!({"id":id,"error":message,"error_code":"cancelled"})
 }
 
+fn commit_event_value(
+    request_id: u64,
+    event: desktop_core::hook_progress::CommitEvent,
+) -> serde_json::Value {
+    use desktop_core::hook_progress::CommitEvent;
+    match event {
+        CommitEvent::Hook(event) => {
+            json!({"event":"commit_hook_progress","request_id":request_id,"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status})
+        }
+        CommitEvent::Output {
+            checkpoint_id,
+            stream,
+            data,
+        } => {
+            json!({"event":"commit_output","request_id":request_id,"checkpoint_id":checkpoint_id,"stream":stream,"data":data})
+        }
+    }
+}
+
 struct Active {
     id: u64,
     cancellation: Cancellation,
@@ -1014,7 +1033,7 @@ impl Active {
     fn new(
         state: Arc<Bridge>,
         rpc: Rpc,
-        events: mpsc::Sender<(u64, desktop_core::hook_progress::HookProgress)>,
+        events: mpsc::Sender<(u64, desktop_core::hook_progress::CommitEvent)>,
     ) -> Self {
         let cancellation = Cancellation::default();
         let request_cancellation = cancellation.clone();

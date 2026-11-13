@@ -81,6 +81,7 @@ pub use stash::remote_deletion::{RemoteBranchDeletion, UpstreamDeletion};
 mod state;
 pub use state::OperationState;
 mod process;
+mod stream_redaction;
 pub use github::{GitHubAction, GitHubRequest, execute_github};
 mod protocol;
 mod registry;

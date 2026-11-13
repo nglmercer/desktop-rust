@@ -280,6 +280,14 @@ impl Session {
 
     /// Remove this session's credential from both output streams before publication.
     pub(crate) fn redact_output(&self, mut output: process::RawOutput) -> process::RawOutput {
+        for secret in self.redaction_secrets() {
+            output.stdout = redact_credential(output.stdout, &secret);
+            output.stderr = redact_credential(output.stderr, &secret);
+        }
+        output
+    }
+
+    pub(crate) fn redaction_secrets(&self) -> Vec<Vec<u8>> {
         use base64::Engine as _;
         let mut secrets = vec![
             self.token.as_bytes().to_vec(),
@@ -295,11 +303,7 @@ impl Session {
                     .into_bytes(),
             );
         }
-        for secret in secrets {
-            output.stdout = redact_credential(output.stdout, &secret);
-            output.stderr = redact_credential(output.stderr, &secret);
-        }
-        output
+        secrets
     }
 
     /// Also redact alternate Base64 encodings for a verified actor, including

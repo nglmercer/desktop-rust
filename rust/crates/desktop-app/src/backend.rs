@@ -1128,7 +1128,7 @@ impl Backend {
     pub fn read_with_progress(
         &self,
         job: ReadJob,
-        progress: Option<Arc<dyn Fn(desktop_backend::hook_progress::HookProgress) + Send + Sync>>,
+        progress: Option<Arc<dyn Fn(desktop_backend::hook_progress::CommitEvent) + Send + Sync>>,
     ) -> Result<Value> {
         let progress = if matches!(
             &job.operation,
@@ -1430,7 +1430,7 @@ impl Backend {
         if let Some(progress) = progress {
             let (sender, mut receiver) = tokio::sync::mpsc::channel::<(
                 u64,
-                desktop_backend::hook_progress::HookProgress,
+                desktop_backend::hook_progress::CommitEvent,
             )>(64);
             let forward = self.runtime.spawn(async move {
                 while let Some((_, event)) = receiver.recv().await {
@@ -1476,7 +1476,7 @@ mod tests {
             let original_index = std::fs::read(root.join(".git/index")).unwrap();
             std::fs::write(root.join("file"), b"selected\n").unwrap();
             let hook = root.join(".git/hooks/pre-commit");
-            std::fs::write(&hook, "#!/bin/sh\nprintf started > .git/commit-hook-started\nsleep 60\nprintf finished > .git/commit-hook-finished\n").unwrap();
+            std::fs::write(&hook, "#!/bin/sh\nprintf started > .git/commit-hook-started\nprintf live-output >&2\nsleep 60\nprintf finished > .git/commit-hook-finished\n").unwrap();
             std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
             let backend = Backend::new(16).unwrap();
             let call = |kind: &str, operation: Value| {
@@ -1488,7 +1488,7 @@ mod tests {
             let request_id = uuid::Uuid::new_v4();
             let job = backend.admit_git_info(vec![json!({"request_id":request_id,"operation":{"type":"commit_checkpoint","repository_path":root,"operation":{"method":"publish_selected_commit","checkpoint_id":checkpoint,"message":"message\n","no_verify":false,"sign_off":false,"allow_large_files":false}}})]).unwrap();
             let (progress_tx, progress_rx) = std::sync::mpsc::channel();
-            let progress = Arc::new(move |event: desktop_backend::hook_progress::HookProgress| { let _ = progress_tx.send(event); });
+            let progress = Arc::new(move |event: desktop_backend::hook_progress::CommitEvent| { let _ = progress_tx.send(event); });
             std::thread::scope(|scope| {
                 let worker = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn_scoped(scope, || backend.read_with_progress(job, Some(progress))).unwrap();
                 let marker = root.join(".git/commit-hook-started");
@@ -1502,10 +1502,19 @@ mod tests {
                     if result.as_ref().err().is_some_and(|error| error.to_string().contains("does not support")) { return; }
                     panic!("commit hook did not start: {result:?}");
                 }
-                let progress = progress_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-                assert_eq!(progress.checkpoint_id, checkpoint);
-                assert_eq!(progress.hook_name, "pre-commit");
-                assert_eq!(progress.status, "started");
+                let mut saw_hook = false;
+                let mut saw_output = false;
+                while !saw_hook || !saw_output {
+                    match progress_rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                        desktop_backend::hook_progress::CommitEvent::Hook(progress) => {
+                            assert_eq!(progress.checkpoint_id, checkpoint);
+                            if progress.hook_name == "pre-commit" && progress.status == "started" { saw_hook = true; }
+                        }
+                        desktop_backend::hook_progress::CommitEvent::Output { checkpoint_id, stream, data } => {
+                            if checkpoint_id == checkpoint && stream == "stderr" && data == "bGl2ZS1vdXRwdXQ=" { saw_output = true; }
+                        }
+                    }
+                }
                 backend.cancel(&[json!({"request_id":request_id})]).unwrap();
                 let result = worker.join().unwrap();
                 assert!(matches!(result, Err(AppError::Coded { code, message, .. }) if code == "cancelled" && message.contains("inspect commit checkpoints")));

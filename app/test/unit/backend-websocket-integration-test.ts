@@ -1111,13 +1111,15 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(await readFile(path.join(commitRepository, '.git', 'index'))).toEqual(originalCommitIndex)
       await client.closeUnchangedCommitCheckpoint(commitRepository, failedCheckpoint)
       expect(await client.listCommitCheckpoints(commitRepository)).toContainEqual(expect.objectContaining({ id: failedCheckpoint, state: 'closed' }))
-      await writeFile(hookPath, '#!/bin/sh\nprintf started > .git/long-hook-started\nsleep 60\nprintf finished > .git/long-hook-finished\n')
+      await writeFile(hookPath, '#!/bin/sh\nprintf started > .git/long-hook-started\nprintf "live-output\\n" >&2\nsleep 60\nprintf finished > .git/long-hook-finished\n')
       const cancelledCheckpoint = await client.prepareSelectedCommit(commitRepository, selection, review.basis)
       const commitAbort = new AbortController()
       const hookProgress: Array<{ hookName: string; status: string }> = []
-      const pendingCommit = client.publishSelectedCommit(commitRepository, cancelledCheckpoint, 'reviewed commit\n', { signal: commitAbort.signal, onHookProgress: event => hookProgress.push(event) })
+      const liveOutput: string[] = []
+      const pendingCommit = client.publishSelectedCommit(commitRepository, cancelledCheckpoint, 'reviewed commit\n', { signal: commitAbort.signal, onHookProgress: event => hookProgress.push(event), onOutput: event => liveOutput.push(new TextDecoder().decode(event.bytes)) })
       await waitFor(async () => (await readFile(path.join(commitRepository, '.git', 'long-hook-started'), 'utf8').catch(() => '')) === 'started')
       await waitFor(() => hookProgress.some(event => event.hookName === 'pre-commit' && event.status === 'started'))
+      await waitFor(() => liveOutput.join('').includes('live-output'))
       commitAbort.abort()
       await expect(pendingCommit).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect commit checkpoints') })
       expect((await client.inspectCommitCheckpoint(commitRepository, cancelledCheckpoint)).state).toBe('publishing')

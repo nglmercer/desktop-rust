@@ -506,8 +506,11 @@ fn run_channel(
     ) {
         let app = app.clone();
         let progress = std::sync::Arc::new(
-            move |event: desktop_backend::hook_progress::HookProgress| {
-                app.emit_value("commit_hook_progress", json!({"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}));
+            move |event: desktop_backend::hook_progress::CommitEvent| {
+                match event {
+                    desktop_backend::hook_progress::CommitEvent::Hook(event) => app.emit_value("commit_hook_progress", json!({"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status})),
+                    desktop_backend::hook_progress::CommitEvent::Output { checkpoint_id, stream, data } => app.emit_value("commit_output", json!({"checkpoint_id":checkpoint_id,"stream":stream,"data":data})),
+                }
             },
         );
         backend.read_with_progress(

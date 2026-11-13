@@ -669,6 +669,33 @@ pub(crate) async fn redact(mut output: RawOutput) -> RawOutput {
     }
     output
 }
+
+/// A pending credential session can acquire a secret while Git is running.
+/// Do not publish live output until its redaction set is known.
+pub(crate) async fn live_output_secrets(final_chunk: bool) -> Option<Vec<Vec<u8>>> {
+    if NATIVE_CONFIGURATION
+        .try_with(|value| *value)
+        .unwrap_or(false)
+    {
+        return Some(Vec::new());
+    }
+    let Ok(lease) = CURRENT.try_with(Clone::clone) else {
+        return Some(Vec::new());
+    };
+    let session = if final_chunk {
+        lease.session.lock().await
+    } else {
+        lease.session.try_lock().ok()?
+    };
+    if session.is_none() && !final_chunk {
+        return None;
+    }
+    let mut secrets = session
+        .as_ref()
+        .map_or_else(Vec::new, |session| session.redaction_secrets());
+    secrets.push(lease.capability.as_bytes().to_vec());
+    Some(secrets)
+}
 fn redact_literal(bytes: Vec<u8>, secret: &[u8]) -> Vec<u8> {
     if secret.is_empty() {
         return bytes;

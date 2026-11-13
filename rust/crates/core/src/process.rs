@@ -1,5 +1,6 @@
 use crate::CommandOutput;
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use std::{ffi::OsString, path::Path, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -115,6 +116,7 @@ pub(crate) async fn blob_prefix(path: &Path, oid: &str, limit: u64) -> Result<Ra
         None,
         true,
         None,
+        None,
     )
     .await
 }
@@ -200,9 +202,26 @@ pub(crate) async fn run_commit_with_index(
     if let Some(trace) = &trace {
         command.env("GIT_TRACE2_EVENT", trace.path());
     }
-    #[cfg(not(unix))]
-    let _ = checkpoint;
-    let result = run_command(path, command, args, Some(input), 2 * 1024 * 1024, None).await;
+    let live =
+        crate::hook_progress::sender()
+            .zip(checkpoint)
+            .map(|((sender, request_id), checkpoint)| LiveOutput {
+                sender,
+                request_id,
+                checkpoint: checkpoint.to_owned(),
+            });
+    let result = Box::pin(run_command_inner(
+        path,
+        command,
+        args,
+        Some(input),
+        2 * 1024 * 1024,
+        None,
+        false,
+        None,
+        live,
+    ))
+    .await;
     #[cfg(unix)]
     if let Some(trace) = trace {
         trace.finish().await;
@@ -408,6 +427,7 @@ pub(crate) async fn git_from_file(
         None,
         false,
         Some(input),
+        None,
     )
     .await
 }
@@ -527,8 +547,16 @@ async fn run_command(
         output_file,
         false,
         None,
+        None,
     )
     .await
+}
+
+#[derive(Clone)]
+struct LiveOutput {
+    sender: tokio::sync::mpsc::Sender<(u64, crate::hook_progress::CommitEvent)>,
+    request_id: u64,
+    checkpoint: String,
 }
 
 async fn run_command_inner(
@@ -540,6 +568,7 @@ async fn run_command_inner(
     output_file: Option<tokio::fs::File>,
     prefix_only: bool,
     input_file: Option<std::fs::File>,
+    live: Option<LiveOutput>,
 ) -> Result<RawOutput> {
     let cancellation = crate::cancellation::Cancellation::current();
     cancellation.check()?;
@@ -588,6 +617,7 @@ async fn run_command_inner(
                 }
                 Ok::<(), std::io::Error>(())
             };
+            let stdout_live = live.clone();
             let output = async move {
                 if let Some(mut file) = output_file {
                     let mut stdout = stdout;
@@ -599,12 +629,12 @@ async fn run_command_inner(
                     stdout.take(output_limit).read_to_end(&mut bytes).await?;
                     Ok(bytes)
                 } else {
-                    read_bounded(stdout, output_limit).await
+                    read_output(stdout, output_limit, stdout_live, "stdout").await
                 }
             };
             let (stdout, stderr, status, ()) = tokio::try_join!(
                 output,
-                read_bounded(stderr, 2 * 1024 * 1024),
+                read_output(stderr, 2 * 1024 * 1024, live, "stderr"),
                 child.wait(),
                 input_task
             )?;
@@ -695,6 +725,55 @@ impl Drop for ProcessGroup {
     fn drop(&mut self) {
         self.terminate();
     }
+}
+
+async fn read_output(
+    mut reader: impl tokio::io::AsyncRead + Unpin,
+    limit: u64,
+    live: Option<LiveOutput>,
+    stream: &'static str,
+) -> std::io::Result<Vec<u8>> {
+    let Some(live) = live else {
+        return read_bounded(reader, limit).await;
+    };
+    let mut raw = Vec::new();
+    let mut redactor = crate::stream_redaction::StreamRedactor::new();
+    let mut buffer = Box::new([0; 8192]);
+    let mut tick = tokio::time::interval(Duration::from_millis(200));
+    let mut sent = 0usize;
+    let emit = |bytes: Vec<u8>, sent: &mut usize| {
+        for chunk in bytes.chunks(8192) {
+            if *sent >= 256 * 1024 {
+                break;
+            }
+            *sent += chunk.len();
+            let event = crate::hook_progress::CommitEvent::Output {
+                checkpoint_id: live.checkpoint.clone(),
+                stream,
+                data: STANDARD.encode(chunk),
+            };
+            let _ = live.sender.try_send((live.request_id, event));
+        }
+    };
+    loop {
+        tokio::select! {
+            read = reader.read(&mut buffer[..]) => {
+                let count = read?;
+                if count == 0 { break; }
+                if raw.len().saturating_add(count) > limit as usize {
+                    return Err(std::io::Error::other(format!("command output exceeds {limit} bytes; inspect state using the CLI")));
+                }
+                raw.extend_from_slice(&buffer[..count]);
+                emit(redactor.push(&buffer[..count], crate::git_credentials::live_output_secrets(false).await), &mut sent);
+            }
+            _ = tick.tick() => emit(redactor.push(&[], crate::git_credentials::live_output_secrets(false).await), &mut sent),
+        }
+    }
+    let secrets = crate::git_credentials::live_output_secrets(true)
+        .await
+        .unwrap_or_default();
+    emit(redactor.finish(secrets), &mut sent);
+    Ok(raw)
 }
 
 async fn read_bounded(

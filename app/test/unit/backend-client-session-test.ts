@@ -40,16 +40,24 @@ describe('backend Copilot session cleanup', () => {
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on, off } })
     const id = '12345678-1234-4234-8234-123456789abc'
     const progress = vi.fn()
-    const pending = new BackendClient().publishSelectedCommit('/repo', id, 'message', { onHookProgress: progress })
+    const output = vi.fn()
+    const pending = new BackendClient().publishSelectedCommit('/repo', id, 'message', { onHookProgress: progress, onOutput: output })
     const listener = on.mock.calls[0][1]
     listener({}, { checkpoint_id: 'other', hook_name: 'pre-commit', status: 'started' })
     listener({}, { checkpoint_id: id, hook_name: 'unknown', status: 'started' })
     listener({}, { checkpoint_id: id, hook_name: 'pre-commit', status: 'started' })
     expect(progress).toHaveBeenCalledOnce()
     expect(progress).toHaveBeenCalledWith({ hookName: 'pre-commit', status: 'started' })
+    const outputListener = on.mock.calls[1][1]
+    outputListener({}, { checkpoint_id: 'other', stream: 'stderr', data: 'aGk=' })
+    outputListener({}, { checkpoint_id: id, stream: 'stderr', data: 'invalid!' })
+    outputListener({}, { checkpoint_id: id, stream: 'stderr', data: 'aGk=' })
+    expect(output).toHaveBeenCalledOnce()
+    expect(output).toHaveBeenCalledWith({ stream: 'stderr', bytes: new Uint8Array([104, 105]) })
     finish({ id, state: 'complete', oid: 'b'.repeat(40), stdout: '', stderr: '', output_truncated: false })
     await pending
     expect(off).toHaveBeenCalledWith('commit_hook_progress', listener)
+    expect(off).toHaveBeenCalledWith('commit_output', outputListener)
   })
 
   it.each([
