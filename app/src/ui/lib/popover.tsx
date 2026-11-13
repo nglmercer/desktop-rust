@@ -1,6 +1,5 @@
 import * as React from 'react'
 import FocusTrap from 'focus-trap-react'
-import { Options as FocusTrapOptions } from 'focus-trap'
 import classNames from 'classnames'
 import {
   ComputePositionReturn,
@@ -18,6 +17,10 @@ import {
 } from '@floating-ui/core'
 import { assertNever } from '../../lib/fatal-error'
 import { isMacOSSequoia, isMacOSSonoma, isMacOSVentura } from '../../lib/get-os'
+
+type FocusTrapOptions = NonNullable<
+  React.ComponentProps<typeof FocusTrap>['focusTrapOptions']
+>
 
 /**
  * Position of the popover relative to its anchor element. It's composed by 2

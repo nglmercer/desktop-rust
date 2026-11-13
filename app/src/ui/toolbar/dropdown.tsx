@@ -12,10 +12,13 @@ import { ToolbarButton, ToolbarButtonStyle } from './button'
 import { rectEquals } from '../lib/rect'
 import classNames from 'classnames'
 import FocusTrap from 'focus-trap-react'
-import { Options as FocusTrapOptions } from 'focus-trap'
 import { TooltipTarget } from '../lib/tooltip'
 import { AriaHasPopupType } from '../lib/aria-types'
 import { enableResizingToolbarButtons } from '../../lib/feature-flag'
+
+type FocusTrapOptions = NonNullable<
+  React.ComponentProps<typeof FocusTrap>['focusTrapOptions']
+>
 
 export type DropdownState = 'open' | 'closed'
 
