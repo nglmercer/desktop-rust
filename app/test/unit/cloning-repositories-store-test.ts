@@ -1,7 +1,10 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import { CloningRepositoriesStore } from '../../src/lib/stores/cloning-repositories-store'
 import { CloningRepository } from '../../src/models/cloning-repository'
+
+// These collection tests never launch a clone operation.
+vi.mock('../../src/lib/git', () => ({ clone: vi.fn() }))
 
 describe('CloningRepositoriesStore', () => {
   it('starts with no repositories', () => {

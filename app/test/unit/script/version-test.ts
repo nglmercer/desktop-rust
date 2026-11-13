@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { getNextVersionNumber } from '../../../../script/draft-release/version'
 

@@ -158,5 +158,21 @@
   "app/test/unit/ui/tab-bar-test.tsx",
   "app/test/unit/ui/visual-helper-surfaces-test.tsx",
   "app/test/unit/copilot-conflict-context-test.ts",
-  "app/test/unit/copilot-conflict-resolution-test.ts"
+  "app/test/unit/copilot-conflict-resolution-test.ts",
+  "app/test/unit/fuzzy-find-test.ts",
+  "app/test/unit/format-test.ts",
+  "app/test/unit/fatal-error-test.ts",
+  "app/test/unit/copilot-error-test.ts",
+  "app/test/unit/offset-from-test.ts",
+  "app/test/unit/cloning-repository-test.ts",
+  "app/test/unit/multi-commit-operation-test.ts",
+  "app/test/unit/section-list-test.ts",
+  "app/test/unit/git/credential-test.ts",
+  "app/test/unit/get-file-hash-test.ts",
+  "app/test/unit/cloning-repositories-store-test.ts",
+  "app/test/unit/path-test.ts",
+  "app/test/unit/ci-checks-test.ts",
+  "app/test/unit/endpoint-capabilities-test.ts",
+  "app/test/unit/ipc-contract-test.ts",
+  "app/test/unit/script/version-test.ts"
 ]

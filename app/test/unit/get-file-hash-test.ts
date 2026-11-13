@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { writeFile, rm, mkdtemp } from 'fs/promises'
 import { tmpdir } from 'os'
