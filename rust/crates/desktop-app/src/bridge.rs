@@ -208,9 +208,26 @@ impl Bridge {
         }
     }
 
-    /// Stop admitting work and finish what is queued as `Shutdown`. Running
-    /// tasks are not interrupted; the process stop handles them.
+    /// Stop admissions on every lane. Follow this with `shutdown` to finish
+    /// queued work; running tasks are tracked until they actually return.
+    pub fn stop_admission(&self) {
+        for executor in [
+            &self.state,
+            &self.control,
+            &self.short,
+            &self.long,
+            &self.sync,
+        ] {
+            executor.stop_admission();
+        }
+    }
+
+    /// Stop admissions, request cancellation, and finish queued work. Running
+    /// tasks may still need time to finish; use `wait_for_idle` to observe it.
     pub fn shutdown(&self) {
+        // Close every admission gate first: a drained callback can block, and
+        // no other lane may continue admitting work while that happens.
+        self.stop_admission();
         self.backend.cancel_all();
         for executor in [
             &self.state,
@@ -221,6 +238,22 @@ impl Bridge {
         ] {
             executor.close();
         }
+    }
+
+    /// Wait for accepted work and drained callbacks to finish, using one shared
+    /// deadline. Rejected admission callbacks are not tracked; their only work
+    /// here is reporting the rejection, not mutating application storage. A
+    /// false result means callers must not assume data is idle.
+    pub fn wait_for_idle(&self, deadline: Instant) -> bool {
+        [
+            &self.state,
+            &self.control,
+            &self.short,
+            &self.long,
+            &self.sync,
+        ]
+        .into_iter()
+        .all(|executor| executor.wait_for_idle(deadline))
     }
 
     /// `window.ipc.postMessage` entry point. Runs on the webview callback

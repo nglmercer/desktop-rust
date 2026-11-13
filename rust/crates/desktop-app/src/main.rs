@@ -25,6 +25,7 @@ mod instance;
 mod menu;
 mod navigation;
 mod protocol;
+mod shutdown;
 
 use std::sync::{Arc, Mutex};
 
@@ -133,10 +134,29 @@ impl ThemeNudge {
 /// Everything that must stop when the window is going away, in order: refuse
 /// new host work, end child processes and release waiting streams, then close
 /// the admission lanes so queued requests get their `Shutdown` answer.
-fn stop_services(app: &DesktopApp, host: &TaoHost, bridge: &Bridge) {
-    host.shutdown();
-    app.shutdown_io();
-    bridge.shutdown();
+fn begin_shutdown(
+    app: Arc<DesktopApp>,
+    host: Arc<TaoHost>,
+    bridge: Arc<Bridge>,
+    proxy: tao::event_loop::EventLoopProxy<AppEvent>,
+) {
+    let error_proxy = proxy.clone();
+    if let Err(error) = shutdown::start(
+        std::time::Duration::from_secs(5),
+        move |deadline| {
+            bridge.stop_admission();
+            host.shutdown();
+            app.shutdown_io();
+            bridge.shutdown();
+            bridge.wait_for_idle(deadline)
+        },
+        move |drained| {
+            let _ = proxy.send_event(AppEvent::ShutdownComplete { drained });
+        },
+    ) {
+        tracing::error!(%error, "could not start bounded shutdown");
+        let _ = error_proxy.send_event(AppEvent::ShutdownComplete { drained: false });
+    }
 }
 
 fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -342,6 +362,9 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let bridge_loop = bridge.clone();
     let info_loop = info.clone();
     let theme_nudge_loop = theme_nudge.clone();
+    let proxy_loop = proxy.clone();
+    let mut shutting_down = false;
+    let mut smoke_outcome = None;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -349,15 +372,27 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::UserEvent(user) => match user {
                 AppEvent::SmokeResult(passed) => {
-                    stop_services(&app_loop, &host_loop, &bridge_loop);
-                    if passed {
+                    if shutting_down { return; }
+                    shutting_down = true;
+                    smoke_outcome = Some(passed);
+                    begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
+                }
+                AppEvent::ShutdownComplete { drained } => {
+                    if !shutting_down { return; }
+                    if !drained {
+                        tracing::warn!("shutdown deadline elapsed with work still active");
+                    }
+                    if let Some(passed) = smoke_outcome {
+                    if passed && drained {
                         eprintln!(
                             "PASS: native webview mounted React and completed shell and backend RPC"
                         );
                     } else {
                         eprintln!("FAIL: native webview smoke test");
                     }
-                    std::process::exit(if passed { 0 } else { 1 });
+                    std::process::exit(if passed && drained { 0 } else { 1 });
+                    }
+                    *control_flow = ControlFlow::Exit;
                 }
                 AppEvent::Flush => {
                     // Clear the scheduled flag first: anything published while
@@ -420,18 +455,24 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         tracing::warn!(%error, id, "failed to deliver renderer progress");
                     }
                 }
-                AppEvent::WindowAction { action, reply } => {
+                AppEvent::WindowAction { action, mut reply } => {
+                    if shutdown::reject_window_action(shutting_down, &mut reply) {
+                        return;
+                    }
                     let (value, effect) =
                         actions::apply(action, &window, &webview, &info_loop, &app_loop);
                     if let Some(reply) = reply {
                         let _ = reply.send(Ok(value));
                     }
                     if matches!(effect, ActionEffect::Exit) {
-                        stop_services(&app_loop, &host_loop, &bridge_loop);
-                        *control_flow = ControlFlow::Exit;
+                        if !shutting_down {
+                            shutting_down = true;
+                            begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
+                        }
                     }
                 }
                 AppEvent::NativeMenu(id) => {
+                    if shutting_down { return; }
                     use desktop_core::ipc::protocol::WindowAction;
                     use desktop_core::menu::MenuAction;
 
@@ -442,9 +483,11 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                             app_loop.emit(event::MENU_EVENT, vec![json!(name)])
                         }
                         Some(MenuAction::Quit) => {
-                            app_loop.emit("will-quit", vec![]);
-                            stop_services(&app_loop, &host_loop, &bridge_loop);
-                            *control_flow = ControlFlow::Exit;
+                            if !shutting_down {
+                                app_loop.emit("will-quit", vec![]);
+                                shutting_down = true;
+                                begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
+                            }
                         }
                         Some(MenuAction::Edit(command)) => actions::edit(&webview, command),
                         Some(MenuAction::Zoom(direction)) => {
@@ -494,13 +537,12 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 WindowEvent::CloseRequested => {
                     // Electron's AppWindow emitted `will-quit` first. Keep that
                     // contract so a renderer can veto / persist on shutdown.
-                    app_loop.emit("will-quit", vec![]);
-                    stop_services(&app_loop, &host_loop, &bridge_loop);
-                    if smoke_test {
-                        eprintln!("FAIL: native webview closed before smoke test completed");
-                        std::process::exit(1);
+                    if !shutting_down {
+                        app_loop.emit("will-quit", vec![]);
+                        if smoke_test { smoke_outcome = Some(false); }
+                        shutting_down = true;
+                        begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
                     }
-                    *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Focused(focused) => {
                     if focused {

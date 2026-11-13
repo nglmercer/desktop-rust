@@ -61,6 +61,8 @@ struct Queue {
     items: VecDeque<Task>,
     bytes: usize,
     closed: bool,
+    active: usize,
+    shutdown_callbacks: usize,
 }
 
 #[derive(Default)]
@@ -126,6 +128,8 @@ impl Executor {
                 items: VecDeque::new(),
                 bytes: 0,
                 closed: false,
+                active: 0,
+                shutdown_callbacks: 0,
             }),
             Condvar::new(),
         ));
@@ -186,6 +190,16 @@ impl Executor {
         }
     }
 
+    /// Refuse admissions immediately without running any task callbacks.
+    /// Pending tasks remain queued until `close` finishes them as shutdown.
+    pub fn stop_admission(&self) {
+        let (lock, ready) = &*self.queue;
+        let mut queue = lock.lock().unwrap_or_else(|e| e.into_inner());
+        queue.closed = true;
+        drop(queue);
+        ready.notify_all();
+    }
+
     /// Refuse new work and finish every queued task with [`Outcome::Shutdown`].
     /// Tasks already running are not interrupted.
     pub fn close(&self) {
@@ -194,14 +208,46 @@ impl Executor {
             let mut queue = lock.lock().unwrap_or_else(|e| e.into_inner());
             queue.closed = true;
             queue.bytes = 0;
-            let items = queue.items.drain(..).collect();
+            let items: Vec<_> = queue.items.drain(..).collect();
+            queue.shutdown_callbacks += items.len();
             drop(queue);
             ready.notify_all();
             items
         };
         for task in drained {
-            task.finish(Outcome::Shutdown);
+            let _ = catch_unwind(AssertUnwindSafe(|| task.finish(Outcome::Shutdown)));
+            let (lock, ready) = &*self.queue;
+            let mut queue = lock.lock().unwrap_or_else(|e| e.into_inner());
+            queue.shutdown_callbacks -= 1;
+            drop(queue);
+            ready.notify_all();
         }
+    }
+
+    /// Wait until every active task and drained shutdown callback has returned.
+    /// The executor must already be closed; the deadline is shared by callers
+    /// waiting for multiple executors. A timeout never implies quiescence.
+    pub fn wait_for_idle(&self, deadline: Instant) -> bool {
+        let (lock, ready) = &*self.queue;
+        let mut queue = lock.lock().unwrap_or_else(|e| e.into_inner());
+        if !queue.closed {
+            return false;
+        }
+        while queue.active != 0 || queue.shutdown_callbacks != 0 || !queue.items.is_empty() {
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            let (guard, timeout) = ready
+                .wait_timeout(queue, remaining)
+                .unwrap_or_else(|e| e.into_inner());
+            queue = guard;
+            if timeout.timed_out()
+                && (queue.active != 0 || queue.shutdown_callbacks != 0 || !queue.items.is_empty())
+            {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -211,12 +257,14 @@ fn worker(queue: &(Mutex<Queue>, Condvar), counters: &Counters) {
             let (lock, ready) = queue;
             let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
             loop {
-                if let Some(task) = guard.items.pop_front() {
-                    guard.bytes -= task.bytes;
-                    break Some(task);
-                }
                 if guard.closed {
                     break None;
+                }
+                if let Some(task) = guard.items.pop_front() {
+                    guard.bytes -= task.bytes;
+                    guard.active += 1;
+                    counters.active.fetch_add(1, Ordering::Relaxed);
+                    break Some(task);
                 }
                 guard = ready.wait(guard).unwrap_or_else(|e| e.into_inner());
             }
@@ -229,11 +277,15 @@ fn worker(queue: &(Mutex<Queue>, Condvar), counters: &Counters) {
         } else {
             Outcome::Run
         };
-        counters.active.fetch_add(1, Ordering::Relaxed);
         // A panicking task must not shrink the pool: the worker count is fixed.
         let _ = catch_unwind(AssertUnwindSafe(|| task.finish(outcome)));
+        let (lock, ready) = queue;
+        let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        guard.active -= 1;
         counters.active.fetch_sub(1, Ordering::Relaxed);
         counters.completed.fetch_add(1, Ordering::Relaxed);
+        drop(guard);
+        ready.notify_all();
     }
 }
 
@@ -354,5 +406,115 @@ mod tests {
         assert_eq!(rx.recv().unwrap(), Outcome::Shutdown);
         assert!(executor.submit(Task::new(0, far(), |_| {})).is_err());
         hold_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn idle_wait_never_finishes_before_a_blocked_writer() {
+        let root = std::env::temp_dir().join(format!(
+            "executor-writer-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let executor = Arc::new(Executor::new("test-writer", 1, 4, 1024).unwrap());
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let writer_root = root.clone();
+        executor
+            .submit(Task::new(0, far(), move |outcome| {
+                assert_eq!(outcome, Outcome::Run);
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                std::fs::create_dir_all(&writer_root).unwrap();
+                std::fs::write(writer_root.join("state"), "written").unwrap();
+            }))
+            .ok()
+            .unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        executor.close();
+        assert!(!executor.wait_for_idle(Instant::now() + Duration::from_millis(20)));
+        let waiter = executor.clone();
+        let cleanup_root = root.clone();
+        let (cleaned_tx, cleaned_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            assert!(waiter.wait_for_idle(Instant::now() + Duration::from_secs(5)));
+            std::fs::remove_dir_all(cleanup_root).unwrap();
+            cleaned_tx.send(()).unwrap();
+        });
+        assert!(cleaned_rx.recv_timeout(Duration::from_millis(20)).is_err());
+        release_tx.send(()).unwrap();
+        cleaned_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            !root.exists(),
+            "the writer cannot recreate data after cleanup"
+        );
+    }
+
+    #[test]
+    fn idle_wait_includes_shutdown_callbacks_even_during_concurrent_close() {
+        let executor = Arc::new(Executor::new("test-close-callback", 1, 4, 1024).unwrap());
+        let (started_tx, started_rx) = mpsc::channel();
+        let (worker_tx, worker_rx) = mpsc::channel::<()>();
+        executor
+            .submit(Task::new(0, far(), move |_| {
+                started_tx.send(()).unwrap();
+                worker_rx.recv().unwrap();
+            }))
+            .ok()
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (closing_tx, closing_rx) = mpsc::channel();
+        let (callback_tx, callback_rx) = mpsc::channel::<()>();
+        executor
+            .submit(Task::new(0, far(), move |outcome| {
+                assert_eq!(outcome, Outcome::Shutdown);
+                closing_tx.send(()).unwrap();
+                callback_rx.recv().unwrap();
+            }))
+            .ok()
+            .unwrap();
+        let closer = executor.clone();
+        let thread = std::thread::spawn(move || closer.close());
+        closing_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker_tx.send(()).unwrap();
+        assert!(!executor.wait_for_idle(Instant::now() + Duration::from_millis(20)));
+        callback_tx.send(()).unwrap();
+        thread.join().unwrap();
+        assert!(executor.wait_for_idle(Instant::now() + Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn stopping_admission_never_starts_queued_work_before_close() {
+        let executor = Executor::new("test-stop-admission", 1, 4, 1024).unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        executor
+            .submit(Task::new(0, far(), move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            }))
+            .ok()
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (outcome_tx, outcome_rx) = mpsc::channel();
+        executor
+            .submit(Task::new(0, far(), move |outcome| {
+                outcome_tx.send(outcome).unwrap();
+            }))
+            .ok()
+            .unwrap();
+        executor.stop_admission();
+        assert!(executor.submit(Task::new(0, far(), |_| {})).is_err());
+        release_tx.send(()).unwrap();
+        assert!(!executor.wait_for_idle(Instant::now() + Duration::from_millis(20)));
+        assert!(outcome_rx.try_recv().is_err());
+        executor.close();
+        assert_eq!(
+            outcome_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Outcome::Shutdown
+        );
+        assert!(executor.wait_for_idle(Instant::now() + Duration::from_secs(5)));
     }
 }

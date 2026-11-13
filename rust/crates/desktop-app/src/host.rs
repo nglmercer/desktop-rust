@@ -48,6 +48,8 @@ pub enum AppEvent {
     NativeMenu(String),
     /// Completion of the explicit webview smoke test.
     SmokeResult(bool),
+    /// Executor shutdown completed or reached its deadline.
+    ShutdownComplete { drained: bool },
 }
 
 /// Cached, thread-safe mirror of the parts of `tao::Window` that `desktop-core`
