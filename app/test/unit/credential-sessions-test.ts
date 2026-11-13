@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { Account } from '../../src/models/account'
 import {
@@ -188,14 +188,14 @@ describe('CredentialSessions token refresh lifecycle events', () => {
     assert.equal(await sessions.getFreshToken(replacement), replacement.token)
   })
 
-  it('does not count success before a renewed credential is saved', async t => {
+  it('does not count success before a renewed credential is saved', async () => {
     const { sessions, secure, refreshEvents } = setup()
     sessions.restore(account, expiring)
     let finish: () => void = () => {
       throw new Error('Save not started')
     }
     const started = new Promise<void>(resolve => {
-      t.mock.method(secure, 'setItem', () => {
+      vi.spyOn(secure, 'setItem').mockImplementation(() => {
         resolve()
         return new Promise<void>(complete => {
           finish = complete
@@ -211,10 +211,10 @@ describe('CredentialSessions token refresh lifecycle events', () => {
     assert.deepEqual(refreshEvents, ['attempt', 'abandoned'])
   })
 
-  it('counts required sign-in but no success or persistence-failure metric when secure storage fails', async t => {
+  it('counts required sign-in but no success or persistence-failure metric when secure storage fails', async () => {
     const { sessions, secure, refreshEvents } = setup()
     sessions.restore(account, expiring)
-    t.mock.method(secure, 'setItem', async () => {
+    vi.spyOn(secure, 'setItem').mockImplementation(async () => {
       throw new Error('storage unavailable')
     })
     await assert.rejects(sessions.getFreshToken(account), /Unable to save/)
@@ -224,7 +224,7 @@ describe('CredentialSessions token refresh lifecycle events', () => {
   it('does not count debug override renewals, but resumes reporting after renewal', async t => {
     const previous = process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
     process.env.GITHUB_DESKTOP_PREVIEW_FEATURES = '1'
-    t.after(() => {
+    t.onTestFinished(() => {
       if (previous === undefined) {
         delete process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
       } else {
@@ -248,7 +248,7 @@ describe('CredentialSessions token refresh lifecycle events', () => {
   it('records normal renewals after resetting an override', async t => {
     const previous = process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
     process.env.GITHUB_DESKTOP_PREVIEW_FEATURES = '1'
-    t.after(() => {
+    t.onTestFinished(() => {
       if (previous === undefined) {
         delete process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
       } else {
@@ -266,7 +266,7 @@ describe('CredentialSessions token refresh lifecycle events', () => {
   it('excludes non-transient failures and forced sign-ins during debug override testing', async t => {
     const previous = process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
     process.env.GITHUB_DESKTOP_PREVIEW_FEATURES = '1'
-    t.after(() => {
+    t.onTestFinished(() => {
       if (previous === undefined) {
         delete process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
       } else {
@@ -402,7 +402,7 @@ describe('CredentialSessions test expiration overrides', () => {
     const { sessions } = setup()
     sessions.restore(account, { ...expiring, expiresAt: renewed.expiresAt })
     const lease = await sessions.leaseToken(account, 'git')
-    t.after(lease.release)
+    t.onTestFinished(lease.release)
     sessions.setTokenExpirationForTesting(account, now + 30 * 60_000)
     const waiting = sessions.getFreshToken(account, 61 * 60_000)
     sessions.setTokenExpirationForTesting(account, now + 30_000)
