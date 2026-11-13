@@ -73,7 +73,8 @@
     "untildify": "^3.0.2",
     "which": "^5.0.0",
     "windows-argv-parser": "file:../vendor/windows-argv-parser",
-    "winston": "^3.6.0"
+    "winston": "^3.6.0",
+    "winston-transport": "^4.9.0"
   },
   "devDependencies": {
     "@testing-library/dom": "8.20.1",
