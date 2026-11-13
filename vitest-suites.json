@@ -1,4 +1,5 @@
 [
+  "rust/tests/wry-push-hook-decision.test.ts",
   "script/copilot-test.ts",
   "script/native-module-build-test.ts",
   "rust/tests/push-hook-decision.test.ts",

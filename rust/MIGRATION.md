@@ -2604,8 +2604,13 @@ repositories, including multiple destinations, cancellation, changes to a
 reference-transaction hook, and a successful hook with 1.5 MiB of output. A
 real authenticated WebSocket bridge and renderer client test covers approval,
 rejection, cancellation, a late decision, and attempts to resolve another
-session's or request's decision. The Wry webview has **not** yet been tested
-end-to-end for this flow. macOS behavior also remains to be verified.
+session's or request's decision. A Linux WebKitGTK/Wry integration test runs
+the real renderer backend client in an isolated test page and checks approval,
+rejection and cancellation against local Git remotes. It uses a debug shell,
+Xvfb and private user/mount namespaces; run it with
+`DESKTOP_WRY_WEBVIEW_TEST=1 npm test -- rust/tests/wry-push-hook-decision.test.ts`.
+The test does not exercise the full application dialog. macOS behavior also
+remains to be verified.
 
 The existing 120-second Git command deadline starts before the hook executes,
 so a slow hook leaves less time to decide. Existing command output remains
