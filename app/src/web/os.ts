@@ -12,6 +12,8 @@ interface IDesktopEnv {
 const env = (): IDesktopEnv => (globalThis as any).__desktopEnv ?? {}
 
 export const EOL = __WIN32__ ? '\r\n' : '\n'
+// Browser code cannot receive operating-system process signals.
+export const constants = { signals: {} }
 
 export function platform() {
   return (
@@ -55,6 +57,7 @@ export function userInfo() {
 
 export default {
   EOL,
+  constants,
   platform,
   arch,
   release,
