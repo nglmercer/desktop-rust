@@ -34,6 +34,19 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
     afterAll(async () => {
       if (suite) await suite.close()
     })
+    it('scopes assigned credentials to the reviewed named fetch', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('reviewed-fetch-credentials')
+      suite.assign(repo)
+      const request = { remote: 'origin', expected_url: `${suite.service.url}/fork/repo.git`, recurse_submodules: false }
+      const preview = suite.rpc(repo, 'renderer_fetch_preview', { request })
+      suite.clearTransport()
+      assert.equal(suite.rpc(repo, 'renderer_fetch', { request, basis: preview.basis }).code, 0)
+      suite.assertActor()
+      assert.ok(!existsSync(suite.nativeLog))
+      suite.assertPrivateStorage(repo)
+    }, 120_000)
+
     it('limits rewritten destinations and rejects multiple push destinations', () => {
       suite.configure({ host: suite.service.host })
       const repo = suite.seed('credential-destinations')

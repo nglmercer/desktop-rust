@@ -209,7 +209,7 @@ fn remote_names(data: &[u8]) -> Result<Option<Vec<String>>> {
 
 /// Preserve the exact URL for editable settings. Ambiguous URL forms stay on
 /// the old path rather than exposing a secret or silently changing the URL.
-fn safe_url(value: &str) -> bool {
+pub(crate) fn safe_url(value: &str) -> bool {
     if value.is_empty() || value.len() > 16384 || value.chars().any(char::is_control) {
         return false;
     }
@@ -226,6 +226,13 @@ fn safe_url(value: &str) -> bool {
     }
     if value.starts_with('/') || value.starts_with("./") || value.starts_with("../") {
         return true;
+    }
+    // On Windows Git accepts drive-absolute paths as local remotes. Do not
+    // admit drive-relative paths (such as C:repo), which are ambiguous with
+    // scp-style remote syntax.
+    #[cfg(windows)]
+    if matches!(value.as_bytes(), [drive, b':', b'/' | b'\\', ..] if drive.is_ascii_alphabetic()) {
+        return !value.contains('?');
     }
     if !value.contains([':', '@', '?', '#']) {
         return true;
@@ -339,5 +346,15 @@ mod tests {
         ] {
             assert!(!safe_url(value), "{value}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn accepts_drive_absolute_paths_but_not_drive_relative_paths() {
+        assert!(safe_url(r"C:\repositories\project.git"));
+        assert!(safe_url("d:/repositories/project.git"));
+        assert!(safe_url(r"C:\repositories\project#1.git"));
+        assert!(!safe_url("C:project"));
+        assert!(!safe_url(r"C:\project?token=secret"));
     }
 }

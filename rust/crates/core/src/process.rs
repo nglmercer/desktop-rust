@@ -318,6 +318,21 @@ pub(crate) async fn run_bound_checkout(path: &Path, args: &[OsString]) -> Result
     run_command(path, bound_git_command(), args, None, 2 * 1024 * 1024, None).await
 }
 
+/// Keep credential-manager prompts suppressed for background fetches while
+/// allowing the normal interactive flow for user-initiated operations.
+pub(crate) async fn run_bound_remote_fetch(
+    path: &Path,
+    args: &[OsString],
+    is_background_task: bool,
+) -> Result<RawOutput> {
+    let mut command = bound_git_command();
+    command.env(
+        "GCM_INTERACTIVE",
+        if is_background_task { "0" } else { "1" },
+    );
+    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+}
+
 /// Run a local tracking-branch fetch with bounded output and explicit stdin.
 pub(crate) async fn run_bound_local_fetch(
     path: &Path,
@@ -868,6 +883,19 @@ async fn read_bounded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remote_fetch_sets_credential_manager_interactivity_for_descendants() {
+        let command = crate::args(&["-c", "alias.probe=!printf %s \"$GCM_INTERACTIVE\"", "probe"]);
+        for (background, expected) in [(true, &b"0"[..]), (false, &b"1"[..])] {
+            let result = run_bound_remote_fetch(&std::env::temp_dir(), &command, background)
+                .await
+                .unwrap();
+            assert_eq!(result.code, 0);
+            assert_eq!(result.stdout, expected);
+        }
+    }
 
     #[test]
     fn bad_revision_classification_does_not_hide_other_git_failures() {

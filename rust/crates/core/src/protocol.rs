@@ -327,6 +327,13 @@ pub enum Operation {
         request: RendererFastForwardRequest,
         basis: String,
     },
+    RendererFetchPreview {
+        request: RendererFetchRequest,
+    },
+    RendererFetch {
+        request: RendererFetchRequest,
+        basis: String,
+    },
     RendererRebaseStart {
         request: RendererRebaseStartRequest,
         basis: String,
@@ -1028,6 +1035,28 @@ pub struct RendererMixedResetRequest {
 pub struct RendererFastForwardRequest {
     pub branches: Vec<RendererTrackingBranch>,
     pub recurse_submodules: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererFetchRequest {
+    pub remote: String,
+    pub expected_url: String,
+    pub recurse_submodules: bool,
+    #[serde(default)]
+    pub is_background_task: bool,
+}
+
+impl std::fmt::Debug for RendererFetchRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RendererFetchRequest")
+            .field("remote", &self.remote)
+            .field("expected_url", &"<redacted>")
+            .field("recurse_submodules", &self.recurse_submodules)
+            .field("is_background_task", &self.is_background_task)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

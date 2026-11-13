@@ -106,6 +106,28 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('fetches a reviewed local remote over WebSocket', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-fetch-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      const sessionUrl = line.startsWith('Open ') ? line.slice(5) : ''
+      expect(sessionUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#token=/)
+      dom = new JSDOM('', { url: sessionUrl })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+      const source = path.join(directory, 'source'); const repository = path.join(directory, 'repository')
+      execFileSync('git', ['init', '-q', '-b', 'main', source])
+      execFileSync('git', ['-C', source, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'base'])
+      await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
+      const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args], { encoding: 'utf8' }).trim()
+      git('remote', 'add', '--', '--test', source)
+      await expect(client.fetchRepositoryRemote(repository, '--test', '/wrong/path', false)).rejects.toThrow()
+      await client.fetchRepositoryRemote(repository, '--test', source, false)
+      expect(git('rev-parse', 'refs/remotes/--test/main')).toBe(execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim())
+      expect(await readFile(path.join(repository, '.git', 'FETCH_HEAD'), 'utf8')).toContain('branch')
+    }, 90_000)
+
     it('fast-forwards reviewed tracking branches without touching FETCH_HEAD', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-ff-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })

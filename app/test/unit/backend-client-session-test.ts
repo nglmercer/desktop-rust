@@ -606,6 +606,28 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.checkoutDetachedCommit('/repo', oid, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
   })
 
+  it('reviews remote fetches and does not replay interrupted mutations', async () => {
+    const request = { remote: '--Tópico', expected_url: 'file:///repo', recurse_submodules: false, is_background_task: false }
+    const preview = { remote: request.remote, recurse_submodules: false, basis: 'c'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 0, error_kind: null })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'fetch_remote', repository_path: '/repo', operation: { method: 'renderer_fetch', request, basis: preview.basis } } }))
+    invoke.mockResolvedValueOnce({ ...preview, remote: 'other' })
+    await expect(client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected secret'))
+    await expect(client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false)).rejects.toMatchObject({ retryable: false, message: expect.not.stringContaining('secret') })
+    expect(invoke).toHaveBeenCalledTimes(5)
+    invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 128, error_kind: 'https_authentication_failed' })
+    await expect(client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false)).resolves.toEqual({ exitCode: 128, errorKind: 'https_authentication_failed' })
+    invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 128, error_kind: 'unknown secret' })
+    await expect(client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false)).rejects.toMatchObject({ code: 'invalid_response', message: expect.not.stringContaining('secret') })
+    invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 0, error_kind: null })
+    await client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false, true)
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ operation: expect.objectContaining({ request: expect.objectContaining({ is_background_task: true }) }) }) }))
+  })
+
   it('reviews tracking branch fast-forwards and never replays an interrupted mutation', async () => {
     const branches = [{ ref: 'refs/heads/feature', sha: 'a'.repeat(40), upstreamRef: 'refs/remotes/origin/feature', upstreamSha: 'b'.repeat(40) }]
     const request = { branches: [{ ref: branches[0].ref, sha: branches[0].sha, upstream_ref: branches[0].upstreamRef, upstream_sha: branches[0].upstreamSha }], recurse_submodules: false }

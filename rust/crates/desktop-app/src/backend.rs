@@ -169,6 +169,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    FetchRemote {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -477,6 +481,9 @@ impl Backend {
         | GitInfoOperation::FastForwardBranches {
             repository_path, ..
         }
+        | GitInfoOperation::FetchRemote {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -744,6 +751,16 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported branch fast-forward operation".into(),
+            ));
+        }
+        if let GitInfoOperation::FetchRemote { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererFetchPreview { .. } | Operation::RendererFetch { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported remote fetch operation".into(),
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
@@ -1540,6 +1557,10 @@ impl Backend {
                         operation: Operation::RendererFastForward { .. },
                         ..
                     }
+                    | GitInfoOperation::FetchRemote {
+                        operation: Operation::RendererFetch { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1749,6 +1770,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::FastForwardBranches { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::FetchRemote { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2013,6 +2041,29 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn wry_fetches_reviewed_remote() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-fetch-{}", uuid::Uuid::new_v4()));
+            let source = root.join("source"); let target = root.join("target");
+            fs::create_dir_all(&source).unwrap(); fs::create_dir(&target).unwrap();
+            let git = |dir: &Path, args: &[&str]| { let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap(); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
+            git(&source, &["init", "-q", "-b", "main"]); git(&source, &["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "base"]);
+            git(&target, &["init", "-q"]); let url = source.to_str().unwrap(); git(&target, &["remote", "add", "--", "--test", url]);
+            let request = json!({"remote":"--test", "expected_url":url, "recurse_submodules":false});
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"fetch_remote", "repository_path":target, "operation":operation}})]);
+            assert!(route(json!({"method":"stage", "paths":["file"]})).is_err());
+            let preview = backend.read(route(json!({"method":"renderer_fetch_preview", "request":request})).unwrap()).unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_fetch", "request":request, "basis":"bad"})).unwrap()).is_err());
+            let result = backend.read(route(json!({"method":"renderer_fetch", "request":request, "basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(result["code"], 0);
+            assert_eq!(git(&target, &["rev-parse", "refs/remotes/--test/main"]), git(&source, &["rev-parse", "HEAD"]));
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
     }
 
     #[test]

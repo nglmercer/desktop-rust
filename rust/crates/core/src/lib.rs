@@ -34,6 +34,7 @@ mod editors;
 pub use editors::{EditorLaunch, ExternalEditor, available_editors};
 mod discard;
 mod discard_fs;
+mod fetch_error;
 mod git_credentials;
 mod github;
 mod github_api;
@@ -51,6 +52,7 @@ pub use remote_discovery::{ManagedRemoteAction, safe_fetch_remotes, safe_remote_
 mod refs;
 mod renderer_cherry_pick;
 mod renderer_fast_forward;
+mod renderer_fetch;
 mod renderer_merge;
 mod renderer_rebase;
 mod renderer_reset;
@@ -686,6 +688,12 @@ impl Repository {
             }
             Operation::RendererFastForwardPreview { request } => {
                 return self.renderer_fast_forward_preview(&request).await;
+            }
+            Operation::RendererFetchPreview { request } => {
+                return self.renderer_fetch_preview(&request).await;
+            }
+            Operation::RendererFetch { request, basis } => {
+                return self.renderer_fetch(&request, &basis).await;
             }
             Operation::RendererFastForward { request, basis } => {
                 return self.renderer_fast_forward(&request, &basis).await;
@@ -1344,6 +1352,8 @@ impl Repository {
             | RendererMergeStartPreview { .. }
             | RendererMixedResetPreview { .. }
             | RendererFastForwardPreview { .. }
+            | RendererFetchPreview { .. }
+            | RendererFetch { .. }
             | RendererFastForward { .. }
             | RendererMixedReset { .. }
             | RendererMergeStart { .. }

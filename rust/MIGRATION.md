@@ -2467,3 +2467,19 @@ configuration responses can also exceed the existing command-output bound.
 Nested submodule operations do not inherit the parent repository's assigned
 account grant. Independent writers can race review and Git's ref locks; remote
 network fetch and cross-platform parity remain open.
+
+Named remote fetch has an experimental reviewed native operation; application
+routing is disabled until platform, error-handling, and progress parity are
+resolved. The operation binds the selected
+configured remote and effective URL, refs, configuration, worktrees and
+`FETCH_HEAD`, then uses Git's normal prune and submodule recursion options.
+It rejects symlinked or multiply linked `FETCH_HEAD` on Unix. Git and independent
+writers can still race the final review. URLs rejected by the safe-remote policy
+(including credential-bearing URLs and SSH usernames other than `git`) are
+unsupported. Windows uses a handle-based hardlink and reparse-point check for
+existing `FETCH_HEAD` files; native Windows runtime verification remains open.
+Background requests pass the existing credential-manager interaction policy,
+and common failures are classified without returning Git output. Full error
+details and request-scoped Git/LFS progress remain open, as does nested-
+submodule credential parity. A `FETCH_HEAD` larger than 8 MiB cannot be
+reviewed. Arbitrary refspec fetches still use their existing path.

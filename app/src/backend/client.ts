@@ -236,6 +236,17 @@ export class BackendError extends Error implements IBackendError {
   }
 }
 
+const fetchErrorKinds = [
+  'ssh_key_unverified', 'ssh_authentication_failed', 'ssh_permission_denied',
+  'https_authentication_failed', 'remote_disconnection', 'host_down',
+  'https_repository_not_found', 'ssh_repository_not_found', 'lock_file_exists',
+] as const
+export type FetchErrorKind = typeof fetchErrorKinds[number]
+export interface FetchFailure {
+  readonly exitCode: number
+  readonly errorKind: FetchErrorKind | null
+}
+
 function toBackendError(value: unknown): BackendError {
   if (value instanceof BackendError) return value
   const anyValue = value as Partial<IBackendError> & {
@@ -2579,6 +2590,28 @@ export class BackendClient {
     }
     if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Squash abort outcome is uncertain; inspect the repository', retryable: false })
     if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the squash'}; inspect the repository`, retryable: false })
+  }
+
+  /** Fetch a named remote after reviewing its configuration and repository state. */
+  async fetchRepositoryRemote(repositoryPath: string, remote: string, expectedUrl: string, recurseSubmodules: boolean, isBackgroundTask = false): Promise<FetchFailure | undefined> {
+    const request = { remote, expected_url: expectedUrl, recurse_submodules: recurseSubmodules, is_background_task: isBackgroundTask }
+    const call = (method: 'renderer_fetch_preview' | 'renderer_fetch', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } })
+      : this.repositoryRead(repositoryPath, method, { request, ...extra })
+    const preview = await call('renderer_fetch_preview')
+    if (!isRecord(preview) || preview.remote !== remote || preview.recurse_submodules !== recurseSubmodules || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid fetch review', retryable: false })
+    let result: unknown
+    try { result = await call('renderer_fetch', { basis: preview.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: 'Fetch outcome is uncertain; inspect remote refs and FETCH_HEAD before retrying', retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || (result.error_kind !== null && !(typeof result.error_kind === 'string' && fetchErrorKinds.includes(result.error_kind as FetchErrorKind)))) throw new BackendError({ code: 'invalid_response', message: 'Fetch outcome is uncertain; inspect remote refs and FETCH_HEAD', retryable: false })
+    if (result.code === 0) {
+      if (result.error_kind !== null) throw new BackendError({ code: 'invalid_response', message: 'Invalid fetch result', retryable: false })
+      return
+    }
+    return { exitCode: result.code as number, errorKind: result.error_kind as FetchErrorKind | null }
   }
 
   /** Fast-forward reviewed local tracking branches without rewriting FETCH_HEAD. */
