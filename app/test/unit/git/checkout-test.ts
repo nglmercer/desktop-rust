@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import * as Path from 'path'
 import { readFile, writeFile } from 'fs/promises'
@@ -31,9 +31,8 @@ import { removeConflictedFile } from '../../../src/lib/git/rm'
 import { ManualConflictResolution } from '../../../src/models/manual-conflict-resolution'
 
 describe('git/checkout', () => {
-  it(
+  it.skipIf(process.platform === 'win32')(
     'checks out only the requested path when its name contains pathspec magic',
-    { skip: process.platform === 'win32' },
     async t => {
       const repository = await setupRepositoryWithPathspecMagicFile(t)
       const specialFilePath = Path.join(repository.path, PathspecMagicFileName)
@@ -52,9 +51,8 @@ describe('git/checkout', () => {
     }
   )
 
-  it(
+  it.skipIf(process.platform === 'win32')(
     'checks out only the conflicted path when its name contains pathspec magic',
-    { skip: process.platform === 'win32' },
     async t => {
       const repository = await setupConflictedRepoWithPathspecMagicFile(t, true)
       const file = (
@@ -84,9 +82,8 @@ describe('git/checkout', () => {
     }
   )
 
-  it(
+  it.skipIf(process.platform === 'win32')(
     'removes only the conflicted path when its name contains pathspec magic',
-    { skip: process.platform === 'win32' },
     async t => {
       const repository = await setupConflictedRepoWithPathspecMagicFile(t)
       const file = (

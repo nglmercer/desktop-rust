@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, type TestContext } from 'vitest'
 import assert from 'node:assert'
 
 import { push } from '../../../src/lib/git/push'
@@ -15,7 +15,7 @@ import { writeFile } from 'fs/promises'
  * Bare repos accept pushes to any branch.
  */
 async function createBareUpstream(
-  t: import('node:test').TestContext,
+  t: TestContext,
   source: Repository
 ): Promise<string> {
   const barePath = await createTempDirectory(t)

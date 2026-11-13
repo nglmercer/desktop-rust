@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import * as Path from 'path'
 import { realpath, rm } from 'fs/promises'
-import { describe, it, type TestContext } from 'node:test'
+import { describe, it, type TestContext } from 'vitest'
 import { exec } from 'dugite'
 import { setupEmptyRepository } from '../../helpers/repositories'
 import { makeCommit } from '../../helpers/repository-scaffolding'

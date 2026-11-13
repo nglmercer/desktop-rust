@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, type TestContext } from 'vitest'
 import { exec } from 'dugite'
 import { Repository } from '../../../src/models/repository'
 import { AppFileStatusKind, FileChange } from '../../../src/models/status'

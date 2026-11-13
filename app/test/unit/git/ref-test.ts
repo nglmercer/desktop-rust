@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { formatAsLocalRef, getSymbolicRef } from '../../../src/lib/git/refs'
 import { setupEmptyRepository } from '../../helpers/repositories'

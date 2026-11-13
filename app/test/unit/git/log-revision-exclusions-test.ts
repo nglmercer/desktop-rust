@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { it } from 'node:test'
+import { it } from 'vitest'
 import { exec } from 'dugite'
 import { getCommits } from '../../../src/lib/git/log'
 import { setupEmptyRepository } from '../../helpers/repositories'

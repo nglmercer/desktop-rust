@@ -1,14 +1,21 @@
 import assert from 'node:assert/strict'
-import { after, before, beforeEach, describe, it, mock } from 'node:test'
+import { beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import { Account } from '../../src/models/account'
 import { CloneOptions } from '../../src/models/clone-options'
 import type { IAccessibleRepository } from '../../src/lib/repository-matching'
 import type { CloningRepositoriesStore } from '../../src/lib/stores/cloning-repositories-store'
 import { createMockAPIRepository } from '../helpers/mock-api'
 
+const { clonedOptions } = vi.hoisted(() => ({ clonedOptions: [] as CloneOptions[] }))
+
+vi.mock('../../src/lib/git', () => ({
+  clone: async (_url: string, _path: string, options: CloneOptions) => {
+    clonedOptions.push(options)
+  },
+}))
+
 describe('CloningRepositoriesStore account selection', () => {
   let createStore: () => CloningRepositoriesStore
-  const clonedOptions: CloneOptions[] = []
   const assignment: IAccessibleRepository = {
     owner: 'owner',
     name: 'repo',
@@ -24,14 +31,7 @@ describe('CloningRepositoriesStore account selection', () => {
     apiRepository: { ...createMockAPIRepository(), parent: undefined },
   }
 
-  before(async () => {
-    mock.module('../../src/lib/git', {
-      namedExports: {
-        clone: async (_url: string, _path: string, options: CloneOptions) => {
-          clonedOptions.push(options)
-        },
-      },
-    })
+  beforeAll(async () => {
     const { CloningRepositoriesStore } = await import(
       '../../src/lib/stores/cloning-repositories-store'
     )
@@ -40,7 +40,6 @@ describe('CloningRepositoriesStore account selection', () => {
   beforeEach(() => {
     clonedOptions.length = 0
   })
-  after(() => mock.restoreAll())
 
   it('registers the clone before prompting and passes only the chosen identity', async () => {
     const store = createStore()
