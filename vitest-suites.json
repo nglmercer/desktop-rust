@@ -331,5 +331,7 @@
   "script/main-build.test.ts",
   "app/test/unit/markdown-emoji-bundle-test.ts",
   "script/vite-static-assets.test.ts",
-  "app/test/unit/menu-event-test.ts"
+  "app/test/unit/menu-event-test.ts",
+  "rust/tests/wry-emoji-webview.test.ts",
+  "app/test/unit/git/assisted-commit-push-git-semantics-test.ts"
 ]

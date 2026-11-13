@@ -62,8 +62,12 @@ architectures still require verification before switching the main build.
 The web build copies bundled resources and source maps to the configured output
 directory, materializes gitignore template links, and preserves executable
 permissions. Markdown custom emoji load from the bundled renderer origin on
-WebSocket; Chromium covered the real resource path. Wry's custom-protocol
-fetch still requires validation in an actual webview.
+WebSocket; Chromium covered the real resource path. A Linux Wry/WebKitGTK
+integration probe exercises the full `readEmoji` to `EmojiFilter` path using
+`desktop://` and real gemoji assets. Run it with
+`DESKTOP_WRY_WEBVIEW_TEST=1 node --import tsx script/test.mts rust/tests/wry-emoji-webview.test.ts`
+after building the web renderer and debug desktop-app binary; it requires Xvfb
+and Linux user/mount namespaces. macOS and Windows webviews remain unverified.
 
 The loopback WebSocket client is tested against the Rust bridge for login,
 events, cancellation and reconnect. The browser entry currently returns 503:
@@ -2699,3 +2703,11 @@ Oversized files retain their specific skipped reason; unsafe, missing and
 unreadable paths are skipped. Relative symlinks must remain inside the worktree
 and Git metadata is excluded. Applying Copilot's generated resolutions remains
 a separate legacy Node-backed workflow and has not been migrated by this read.
+
+Assisted push still refuses to proceed when its isolated URL pin cannot be
+verified as a single destination. Git 2.45 retains earlier multi-valued push
+URLs despite an empty reset; a real local-repository test confirms that it can
+update an unintended remote before reporting failure. Git 2.56 resets the
+same configuration. Compatibility with older Git requires preserving the
+original remote identity, hook arguments and credential scope without relying
+on that reset; the refusal must remain until a safe replacement is verified.
