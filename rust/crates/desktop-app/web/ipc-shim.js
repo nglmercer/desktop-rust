@@ -58,6 +58,16 @@
     }
   }
 
+  // Progress is scoped to the pending invocation rather than broadcast to
+  // channel listeners. Late events after completion are discarded.
+  function progress(id, payload) {
+    var entry = pending.get(id);
+    if (entry && entry.progress) {
+      try { entry.progress(payload); }
+      catch (error) { console.error('[desktop] progress listener failed', error); }
+    }
+  }
+
   // Normal IPC promises the renderer may keep open. Past this, a request is
   // refused at once rather than queued without bound (Rust applies the same
   // kind of limit on its side; see `resources` in __health, published by
@@ -89,6 +99,14 @@
   setTimeout(refreshPendingLimit, 0);
 
   function invoke(channel, ...args) {
+    return invokeRequest(channel, null, args);
+  }
+
+  function invokeWithProgress(channel, onProgress, ...args) {
+    return invokeRequest(channel, onProgress, args);
+  }
+
+  function invokeRequest(channel, onProgress, args) {
     // Electron drew a native popup for this request. The page draws the same
     // menu instead; see showContextMenu below.
     if (channel === 'show-contextual-menu') {
@@ -108,7 +126,7 @@
           reject(new Error('IPC timeout: ' + channel));
         }
       }, channel === 'desktop.backend.copilot' ? 360000 : 180000);
-      pending.set(id, { resolve: resolvePromise, reject: reject, timer: timer });
+      pending.set(id, { resolve: resolvePromise, reject: reject, timer: timer, progress: onProgress });
 
       if (!post({ __rpc: id, channel: channel, args: args })) {
         // Fallback for hosts where postMessage is not registered yet.
@@ -194,6 +212,7 @@
   var bridge = {
     // renderer -> Rust
     invoke: invoke,
+    invokeWithProgress: invokeWithProgress,
     invokeSync: invokeSync,
     send: send,
     supportsCancellation: function () {
@@ -216,6 +235,7 @@
     // Called by Rust through evaluate_script.
     emit: dispatch,
     resolve: resolve,
+    progress: progress,
     ready: markReady,
     // Last sanitized AppState snapshot, always kept fresh even before the UI
     // has registered its state-changed listener.

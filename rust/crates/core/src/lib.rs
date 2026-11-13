@@ -40,6 +40,7 @@ mod github;
 mod github_api;
 mod github_checkout;
 mod github_create;
+mod lfs_progress;
 pub use git_credentials::helper as git_credential_helper;
 mod lfs;
 mod lfs_attributes;

@@ -1462,6 +1462,9 @@ impl Backend {
             BackendOperation::GitInfo(GitInfoOperation::CommitCheckpoint {
                 operation: Operation::PublishSelectedCommit { .. },
                 ..
+            }) | BackendOperation::GitInfo(GitInfoOperation::FetchRemote {
+                operation: Operation::RendererFetch { .. },
+                ..
             })
         ) {
             progress
@@ -2053,14 +2056,17 @@ mod tests {
             let git = |dir: &Path, args: &[&str]| { let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap(); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
             git(&source, &["init", "-q", "-b", "main"]); git(&source, &["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "base"]);
             git(&target, &["init", "-q"]); let url = source.to_str().unwrap(); git(&target, &["remote", "add", "--", "--test", url]);
-            let request = json!({"remote":"--test", "expected_url":url, "recurse_submodules":false});
+            let request = json!({"remote":"--test", "expected_url":url, "recurse_submodules":false, "report_progress":true});
             let backend = Backend::new(16).unwrap();
             let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"fetch_remote", "repository_path":target, "operation":operation}})]);
             assert!(route(json!({"method":"stage", "paths":["file"]})).is_err());
             let preview = backend.read(route(json!({"method":"renderer_fetch_preview", "request":request})).unwrap()).unwrap();
             assert!(backend.read(route(json!({"method":"renderer_fetch", "request":request, "basis":"bad"})).unwrap()).is_err());
-            let result = backend.read(route(json!({"method":"renderer_fetch", "request":request, "basis":preview["basis"]})).unwrap()).unwrap();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let progress = Arc::new(move |event| { let _ = sender.send(event); });
+            let result = backend.read_with_progress(route(json!({"method":"renderer_fetch", "request":request, "basis":preview["basis"]})).unwrap(), Some(progress)).unwrap();
             assert_eq!(result["code"], 0);
+            assert!(receiver.try_iter().any(|event| matches!(event, desktop_backend::hook_progress::CommitEvent::FetchOutput { stream: "stderr", .. })));
             assert_eq!(git(&target, &["rev-parse", "refs/remotes/--test/main"]), git(&source, &["rev-parse", "HEAD"]));
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
@@ -2332,6 +2338,7 @@ mod tests {
                         desktop_backend::hook_progress::CommitEvent::Output { checkpoint_id, stream, data } => {
                             if checkpoint_id == checkpoint && stream == "stderr" && data == "bGl2ZS1vdXRwdXQ=" { saw_output = true; }
                         }
+                        desktop_backend::hook_progress::CommitEvent::FetchOutput { .. } => {}
                     }
                 }
                 backend.cancel(&[json!({"request_id":request_id})]).unwrap();

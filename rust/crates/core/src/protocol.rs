@@ -1045,6 +1045,10 @@ pub struct RendererFetchRequest {
     pub recurse_submodules: bool,
     #[serde(default)]
     pub is_background_task: bool,
+    #[serde(default)]
+    pub report_progress: bool,
+    #[serde(default)]
+    pub expected_saml_owner: Option<String>,
 }
 
 impl std::fmt::Debug for RendererFetchRequest {
@@ -1055,6 +1059,8 @@ impl std::fmt::Debug for RendererFetchRequest {
             .field("expected_url", &"<redacted>")
             .field("recurse_submodules", &self.recurse_submodules)
             .field("is_background_task", &self.is_background_task)
+            .field("report_progress", &self.report_progress)
+            .field("expected_saml_owner", &self.expected_saml_owner)
             .finish()
     }
 }

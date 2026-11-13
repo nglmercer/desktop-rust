@@ -1,4 +1,6 @@
 [
+  "app/test/unit/rust-fetch-progress-test.ts",
+  "app/test/unit/wry-fetch-progress-test.ts",
   "app/test/unit/rust-fetch-error-test.ts",
   "app/test/unit/alive-store-test.ts",
   "rust/tests/branch-rules-oracle/embedded-parity.test.ts",

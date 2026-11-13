@@ -1021,6 +1021,9 @@ fn commit_event_value(
         } => {
             json!({"event":"commit_output","request_id":request_id,"checkpoint_id":checkpoint_id,"stream":stream,"data":data})
         }
+        CommitEvent::FetchOutput { stream, data } => {
+            json!({"event":"fetch_output","request_id":request_id,"stream":stream,"data":data})
+        }
     }
 }
 

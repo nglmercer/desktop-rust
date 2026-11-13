@@ -22,7 +22,7 @@ rquickjs = { version = "0.14.0", default-features = false, features = ["std"] }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 rquickjs = { version = "0.14.0", default-features = false, features = ["std", "bindgen"] }

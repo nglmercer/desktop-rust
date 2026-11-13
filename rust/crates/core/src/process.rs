@@ -213,7 +213,7 @@ pub(crate) async fn run_commit_with_index(
             .map(|((sender, request_id), checkpoint)| LiveOutput {
                 sender,
                 request_id,
-                checkpoint: checkpoint.to_owned(),
+                checkpoint: Some(checkpoint.to_owned()),
             });
     let result = Box::pin(run_command_inner(
         path,
@@ -324,13 +324,88 @@ pub(crate) async fn run_bound_remote_fetch(
     path: &Path,
     args: &[OsString],
     is_background_task: bool,
+    report_progress: bool,
 ) -> Result<RawOutput> {
     let mut command = bound_git_command();
+    // Never let an inherited progress path redirect Git LFS writes.
+    command.env_remove("GIT_LFS_PROGRESS");
     command.env(
         "GCM_INTERACTIVE",
         if is_background_task { "0" } else { "1" },
     );
-    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+    let live = if report_progress {
+        crate::hook_progress::sender().map(|(sender, request_id)| LiveOutput {
+            sender,
+            request_id,
+            checkpoint: None,
+        })
+    } else {
+        None
+    };
+    let mut lfs = live
+        .as_ref()
+        .and_then(|_| crate::lfs_progress::ProgressFile::create().ok());
+    if let Some(file) = &lfs {
+        // `bound_git_command` has already applied the credential policy, so
+        // only our private file, never an inherited path, reaches Git LFS.
+        command.env("GIT_LFS_PROGRESS", file.path());
+    }
+    let work = run_command_inner(
+        path,
+        command,
+        args,
+        None,
+        2 * 1024 * 1024,
+        None,
+        None,
+        None,
+        live.clone(),
+    );
+    tokio::pin!(work);
+    let mut redactor = crate::stream_redaction::StreamRedactor::new();
+    let mut tick = tokio::time::interval(Duration::from_millis(200));
+    let emit = |bytes: Vec<u8>| {
+        if let Some(live) = &live {
+            for chunk in bytes.chunks(8192) {
+                let event = crate::hook_progress::CommitEvent::FetchOutput {
+                    stream: "lfs",
+                    data: STANDARD.encode(chunk),
+                };
+                let _ = live.sender.try_send((live.request_id, event));
+            }
+        }
+    };
+    let result = loop {
+        tokio::select! {
+            result = &mut work => break result,
+            _ = tick.tick(), if lfs.is_some() => {
+                if let Some(file) = &mut lfs {
+                    let bytes = file.read_new().unwrap_or_default();
+                    emit(redactor.push(&bytes, crate::git_credentials::live_output_secrets(false).await));
+                }
+            }
+        }
+    };
+    if let Some(file) = &mut lfs {
+        loop {
+            let bytes = file.read_new().unwrap_or_default();
+            if bytes.is_empty() {
+                break;
+            }
+            emit(redactor.push(
+                &bytes,
+                crate::git_credentials::live_output_secrets(false).await,
+            ));
+        }
+        emit(
+            redactor.finish(
+                crate::git_credentials::live_output_secrets(true)
+                    .await
+                    .unwrap_or_default(),
+            ),
+        );
+    }
+    result
 }
 
 /// Run a local tracking-branch fetch with bounded output and explicit stdin.
@@ -627,7 +702,7 @@ async fn run_command(
 struct LiveOutput {
     sender: tokio::sync::mpsc::Sender<(u64, crate::hook_progress::CommitEvent)>,
     request_id: u64,
-    checkpoint: String,
+    checkpoint: Option<String>,
 }
 
 async fn run_command_inner(
@@ -837,10 +912,16 @@ async fn read_output(
                 break;
             }
             *sent += chunk.len();
-            let event = crate::hook_progress::CommitEvent::Output {
-                checkpoint_id: live.checkpoint.clone(),
-                stream,
-                data: STANDARD.encode(chunk),
+            let event = match &live.checkpoint {
+                Some(checkpoint_id) => crate::hook_progress::CommitEvent::Output {
+                    checkpoint_id: checkpoint_id.clone(),
+                    stream,
+                    data: STANDARD.encode(chunk),
+                },
+                None => crate::hook_progress::CommitEvent::FetchOutput {
+                    stream,
+                    data: STANDARD.encode(chunk),
+                },
             };
             let _ = live.sender.try_send((live.request_id, event));
         }
@@ -889,12 +970,81 @@ mod tests {
     async fn remote_fetch_sets_credential_manager_interactivity_for_descendants() {
         let command = crate::args(&["-c", "alias.probe=!printf %s \"$GCM_INTERACTIVE\"", "probe"]);
         for (background, expected) in [(true, &b"0"[..]), (false, &b"1"[..])] {
-            let result = run_bound_remote_fetch(&std::env::temp_dir(), &command, background)
+            let result = run_bound_remote_fetch(&std::env::temp_dir(), &command, background, false)
                 .await
                 .unwrap();
             assert_eq!(result.code, 0);
             assert_eq!(result.stdout, expected);
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remote_fetch_ignores_inherited_lfs_progress_path() {
+        const PROBE: &str = "DESKTOP_TEST_LFS_PROGRESS_INHERITANCE_CHILD";
+        if std::env::var_os(PROBE).is_none() {
+            // A separate test process avoids modifying the environment of
+            // concurrently running tests.
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "process::tests::remote_fetch_ignores_inherited_lfs_progress_path",
+                ])
+                .env(PROBE, "1")
+                .env("GIT_LFS_PROGRESS", "/untrusted/progress")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}",
+                String::from_utf8_lossy(&child.stderr)
+            );
+            return;
+        }
+        let command = crate::args(&[
+            "-c",
+            "alias.probe=!printf %s \"${GIT_LFS_PROGRESS-unset}\"",
+            "probe",
+        ]);
+        let result = run_bound_remote_fetch(&std::env::temp_dir(), &command, false, false)
+            .await
+            .unwrap();
+        assert_eq!(result.code, 0);
+        assert_eq!(result.stdout, b"unset");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remote_fetch_streams_request_owned_git_and_lfs_output() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(32);
+        let command = crate::args(&[
+            "-c",
+            "alias.probe=!printf 'Receiving objects: 50%% (1/2)\\r' >&2; printf 'download 1/2 4/8 example\\n' >> \"$GIT_LFS_PROGRESS\"",
+            "probe",
+        ]);
+        let output = crate::hook_progress::scope(
+            sender,
+            42,
+            run_bound_remote_fetch(&std::env::temp_dir(), &command, false, true),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.code, 0);
+        let mut git = Vec::new();
+        let mut lfs = Vec::new();
+        while let Ok((request, event)) = receiver.try_recv() {
+            assert_eq!(request, 42);
+            if let crate::hook_progress::CommitEvent::FetchOutput { stream, data } = event {
+                let bytes = STANDARD.decode(data).unwrap();
+                match stream {
+                    "stderr" => git.extend(bytes),
+                    "lfs" => lfs.extend(bytes),
+                    _ => {}
+                }
+            }
+        }
+        assert!(String::from_utf8_lossy(&git).contains("Receiving objects"));
+        assert!(String::from_utf8_lossy(&lfs).contains("download 1/2"));
     }
 
     #[test]

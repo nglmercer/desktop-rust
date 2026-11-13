@@ -33,6 +33,23 @@ export interface BackendRequestOptions {
   readonly accountId?: string
   readonly deadlineMs?: number
   readonly signal?: AbortSignal
+  readonly onProgress?: (chunk: FetchProgressChunk) => void
+}
+
+export interface FetchProgressChunk {
+  readonly stream: 'stdout' | 'stderr' | 'lfs'
+  readonly data: string
+}
+
+function isFetchProgressChunk(value: unknown): value is FetchProgressChunk {
+  return isRecord(value) && (value.stream === 'stdout' || value.stream === 'stderr' || value.stream === 'lfs') &&
+    typeof value.data === 'string' && value.data.length <= 1_400_000 &&
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.data)
+}
+
+function deliverFetchProgress(callback: ((chunk: FetchProgressChunk) => void) | undefined, value: unknown): void {
+  if (!callback || !isFetchProgressChunk(value)) return
+  try { callback({ stream: value.stream, data: value.data }) } catch { /* User progress handlers cannot terminate a backend operation. */ }
 }
 
 export type BackendGitPath = string | { readonly bytes: ReadonlyArray<number> }
@@ -238,7 +255,7 @@ export class BackendError extends Error implements IBackendError {
 
 const fetchErrorKinds = [
   'ssh_key_unverified', 'ssh_authentication_failed', 'ssh_permission_denied',
-  'https_authentication_failed', 'remote_disconnection', 'host_down',
+  'https_authentication_failed', 'https_saml_reauth_required', 'ssh_saml_reauth_required', 'remote_disconnection', 'host_down',
   'https_repository_not_found', 'ssh_repository_not_found', 'lock_file_exists',
 ] as const
 export type FetchErrorKind = typeof fetchErrorKinds[number]
@@ -305,6 +322,7 @@ type WryBridge = {
   readonly __transport?: string
   supportsCancellation?: () => boolean
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+  invokeWithProgress?: (channel: string, callback: (value: unknown) => void, ...args: unknown[]) => Promise<unknown>
   send: (channel: string, ...args: unknown[]) => void
   on: (
     channel: string,
@@ -366,6 +384,9 @@ class WryTransport {
       })
     }
     const channel = `desktop.backend.${method}`
+    if (opts.onProgress && typeof this.bridge.invokeWithProgress !== 'function') {
+      throw new BackendError({ code: 'unsupported', message: 'Native fetch progress is unavailable', retryable: false })
+    }
     if (method === 'read' || method === 'copilot' || method === 'git_info') {
       if (opts.signal && !this.capabilities().cancel) {
         throw new BackendError({
@@ -544,12 +565,17 @@ class WryTransport {
           deadline
         )
         try {
-          this.bridge
-            .invoke(channel, {
+          const args = {
               ...(params as object),
               request_id: requestId,
               deadline_ms: deadline,
-            })
+            }
+          const call = opts.onProgress
+            ? this.bridge.invokeWithProgress!(channel, value => {
+                if (!settled) deliverFetchProgress(opts.onProgress, value)
+              }, args)
+            : this.bridge.invoke(channel, args)
+          call
             .then(
               value => finish(() => resolve(value)),
               error => finish(() => reject(nativeError(error)))
@@ -597,6 +623,9 @@ interface BridgeRpcReply {
   event?: string
   snapshot?: unknown
   preferences?: unknown
+  request_id?: number
+  stream?: unknown
+  data?: unknown
 }
 
 function disconnectedError(): BackendError {
@@ -642,6 +671,7 @@ class WebSocketTransport {
       resolve: (v: unknown) => void
       reject: (e: unknown) => void
       cleanup: () => void
+      onProgress?: (chunk: FetchProgressChunk) => void
     }
   >()
   private listeners = new Map<string, Set<(...args: unknown[]) => void>>()
@@ -771,6 +801,12 @@ class WebSocketTransport {
             } else {
               entry.resolve(data.result)
             }
+          }
+          return
+        }
+        if (data.event === 'fetch_output') {
+          if (Number.isSafeInteger(data.request_id)) {
+            deliverFetchProgress(this.pending.get(data.request_id!)?.onProgress, data)
           }
           return
         }
@@ -943,7 +979,7 @@ class WebSocketTransport {
           })
         )
       }, Math.max(0, deadline - Date.now()))
-      this.pending.set(id, { resolve, reject, cleanup })
+      this.pending.set(id, { resolve, reject, cleanup, onProgress: opts.onProgress })
       if (opts.signal) {
         onAbort = () =>
           rejectAndCancel(
@@ -2593,11 +2629,17 @@ export class BackendClient {
   }
 
   /** Fetch a named remote after reviewing its configuration and repository state. */
-  async fetchRepositoryRemote(repositoryPath: string, remote: string, expectedUrl: string, recurseSubmodules: boolean, isBackgroundTask = false): Promise<FetchFailure | undefined> {
-    const request = { remote, expected_url: expectedUrl, recurse_submodules: recurseSubmodules, is_background_task: isBackgroundTask }
-    const call = (method: 'renderer_fetch_preview' | 'renderer_fetch', extra: Record<string, unknown> = {}) => this.transport === 'wry'
-      ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } })
-      : this.repositoryRead(repositoryPath, method, { request, ...extra })
+  async fetchRepositoryRemote(repositoryPath: string, remote: string, expectedUrl: string, recurseSubmodules: boolean, isBackgroundTask = false, expectedSamlOwner?: string, onProgress?: (chunk: FetchProgressChunk) => void): Promise<FetchFailure | undefined> {
+    if (onProgress && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
+      throw new BackendError({ code: 'unsupported', message: 'Native fetch progress is unavailable', retryable: false })
+    }
+    const request = { remote, expected_url: expectedUrl, recurse_submodules: recurseSubmodules, is_background_task: isBackgroundTask, report_progress: onProgress !== undefined, ...(expectedSamlOwner === undefined ? {} : { expected_saml_owner: expectedSamlOwner }) }
+    const call = (method: 'renderer_fetch_preview' | 'renderer_fetch', extra: Record<string, unknown> = {}) => {
+      const options = method === 'renderer_fetch' ? { onProgress } : {}
+      return this.transport === 'wry'
+        ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } }, options)
+        : this.repositoryRead(repositoryPath, method, { request, ...extra }, options)
+    }
     const preview = await call('renderer_fetch_preview')
     if (!isRecord(preview) || preview.remote !== remote || preview.recurse_submodules !== recurseSubmodules || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid fetch review', retryable: false })
     let result: unknown

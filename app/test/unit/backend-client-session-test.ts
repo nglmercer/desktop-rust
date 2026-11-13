@@ -607,7 +607,7 @@ describe('backend Copilot session cleanup', () => {
   })
 
   it('reviews remote fetches and does not replay interrupted mutations', async () => {
-    const request = { remote: '--Tópico', expected_url: 'file:///repo', recurse_submodules: false, is_background_task: false }
+    const request = { remote: '--Tópico', expected_url: 'file:///repo', recurse_submodules: false, is_background_task: false, report_progress: false }
     const preview = { remote: request.remote, recurse_submodules: false, basis: 'c'.repeat(64) }
     const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 0, error_kind: null })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
@@ -626,6 +626,35 @@ describe('backend Copilot session cleanup', () => {
     invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 0, error_kind: null })
     await client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false, true)
     expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ operation: expect.objectContaining({ request: expect.objectContaining({ is_background_task: true }) }) }) }))
+  })
+
+  it('delivers only active native fetch progress and rejects unavailable streaming before preview', async () => {
+    const preview = { remote: 'origin', recurse_submodules: false, basis: 'c'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValue(preview)
+    let finish: (result: unknown) => void = () => {}
+    let deliver: (value: unknown) => void = () => {}
+    const invokeWithProgress = vi.fn((_channel: string, callback: (value: unknown) => void) => {
+      deliver = callback
+      return new Promise(resolve => { finish = resolve })
+    })
+    const progress = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, invokeWithProgress, send: vi.fn(), on: vi.fn() } })
+    const pending = new BackendClient().fetchRepositoryRemote('/repo', 'origin', 'file:///repo', false, false, undefined, progress)
+    await vi.waitFor(() => expect(invokeWithProgress).toHaveBeenCalledOnce())
+    deliver({ stream: 'stderr', data: 'aGk=' })
+    deliver({ stream: 'invalid', data: 'aGk=' })
+    deliver({ stream: 'stderr', data: 'invalid!' })
+    expect(progress).toHaveBeenCalledExactlyOnceWith({ stream: 'stderr', data: 'aGk=' })
+    finish({ code: 0, error_kind: null })
+    await pending
+    deliver({ stream: 'stderr', data: 'bGF0ZQ==' })
+    expect(progress).toHaveBeenCalledOnce()
+    expect(invokeWithProgress).toHaveBeenCalledWith('desktop.backend.git_info', expect.any(Function), expect.objectContaining({ operation: expect.objectContaining({ operation: expect.objectContaining({ request: expect.objectContaining({ report_progress: true }) }) }) }))
+
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    invoke.mockClear()
+    await expect(new BackendClient().fetchRepositoryRemote('/repo', 'origin', 'file:///repo', false, false, undefined, progress)).rejects.toMatchObject({ code: 'unsupported' })
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('reviews tracking branch fast-forwards and never replays an interrupted mutation', async () => {

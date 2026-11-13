@@ -316,6 +316,16 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         tracing::warn!(%error, id, "failed to resolve renderer invoke");
                     }
                 }
+                AppEvent::RpcProgress { id, payload } => {
+                    let script = format!(
+                        "window.__desktop && window.__desktop.progress({},{})",
+                        id,
+                        js_literal(&payload)
+                    );
+                    if let Err(error) = webview.evaluate_script(&script) {
+                        tracing::warn!(%error, id, "failed to deliver renderer progress");
+                    }
+                }
                 AppEvent::WindowAction { action, reply } => {
                     let (value, effect) =
                         actions::apply(action, &window, &webview, &info_loop, &app_loop);

@@ -124,6 +124,29 @@ describe('WebSocket backend transport', () => {
     expect(socket.sent).toHaveLength(2)
   })
 
+  it('isolates fetch output to the active matching request', async () => {
+    const { client: value, socket } = await connected()
+    const first = vi.fn()
+    const second = vi.fn()
+    const broadcast = vi.fn()
+    value.subscribe('fetch_output', broadcast)
+    const firstResult = value.request('renderer_fetch', {}, { onProgress: first })
+    const secondResult = value.request('renderer_fetch', {}, { onProgress: second })
+    socket.message({ event: 'fetch_output', request_id: 1, stream: 'stderr', data: 'aGk=' })
+    socket.message({ event: 'fetch_output', request_id: 2, stream: 'lfs', data: 'eA==' })
+    socket.message({ event: 'fetch_output', request_id: 2, stream: 'invalid', data: 'eA==' })
+    socket.message({ event: 'fetch_output', request_id: 999, stream: 'stderr', data: 'eA==' })
+    expect(first).toHaveBeenCalledExactlyOnceWith({ stream: 'stderr', data: 'aGk=' })
+    expect(second).toHaveBeenCalledExactlyOnceWith({ stream: 'lfs', data: 'eA==' })
+    expect(broadcast).not.toHaveBeenCalled()
+    socket.message({ id: 1, result: { code: 0 } })
+    await firstResult
+    socket.message({ event: 'fetch_output', request_id: 1, stream: 'stderr', data: 'bGF0ZQ==' })
+    expect(first).toHaveBeenCalledOnce()
+    socket.message({ id: 2, result: { code: 0 } })
+    await secondResult
+  })
+
   it('allows a long Copilot turn to finish before the transport deadline', async () => {
     const { client: value, socket } = await connected()
     let finished = false

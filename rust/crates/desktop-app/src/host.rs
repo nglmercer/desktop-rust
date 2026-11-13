@@ -42,6 +42,8 @@ pub enum AppEvent {
     },
     /// Resolve a pending renderer `invoke` promise.
     RpcResult { id: u64, result: RpcResult },
+    /// Deliver progress only to the callback for this pending invocation.
+    RpcProgress { id: u64, payload: Value },
     /// A native (muda) menu item was clicked.
     NativeMenu(String),
 }

@@ -234,6 +234,25 @@ pub(crate) fn safe_url(value: &str) -> bool {
     if matches!(value.as_bytes(), [drive, b':', b'/' | b'\\', ..] if drive.is_ascii_alphabetic()) {
         return !value.contains('?');
     }
+    // Git also accepts scp-style SSH remotes without an explicit username.
+    // Keep usernames restricted to the known `git@` spelling above: an
+    // arbitrary username can itself contain a credential. Reject `ext::` and
+    // other remote-helper syntax, and avoid ambiguous drive-relative paths.
+    if !value.contains("://") {
+        if let Some((host, path)) = value.split_once(':') {
+            if host.len() > 1
+                && host.as_bytes()[0].is_ascii_alphanumeric()
+                && host
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b".-".contains(&c))
+                && !path.is_empty()
+                && !path.starts_with(':')
+                && !path.contains(['?', '#'])
+            {
+                return true;
+            }
+        }
+    }
     if !value.contains([':', '@', '?', '#']) {
         return true;
     }
@@ -306,6 +325,120 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[tokio::test]
+    async fn discovers_and_manages_username_free_scp_remotes() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-scp-remote-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let repository = crate::Repository::open(&root).await.unwrap();
+        let url = "desktop-scp-test.invalid:team/repo.git";
+        assert_eq!(
+            repository
+                .execute(crate::Operation::ManageRemote {
+                    action: ManagedRemoteAction::Add {
+                        name: "origin".into(),
+                        url: url.into(),
+                    },
+                })
+                .await
+                .unwrap(),
+            serde_json::json!({"kind":"updated"})
+        );
+        assert_eq!(
+            super::safe_fetch_remotes(&root).await.unwrap(),
+            serde_json::json!([{"name":"origin", "url":url}])
+        );
+        assert_eq!(
+            super::safe_remote_url(&root, "origin").await.unwrap(),
+            serde_json::json!({"kind":"resolved", "url":url})
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reviewed_fetch_accepts_username_free_scp_remote() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("desktop-scp-fetch-{}", uuid::Uuid::new_v4()));
+        let source = root.join("source");
+        let target = root.join("target");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&source, &["init", "-q", "-b", "main"]);
+        git(
+            &source,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "initial",
+            ],
+        );
+        git(&target, &["init", "-q"]);
+        let ssh = root.join("ssh-fixture");
+        std::fs::write(&ssh, "#!/bin/sh\nshift\nexec sh -c \"$1\"\n").unwrap();
+        std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o700)).unwrap();
+        git(
+            &target,
+            &["config", "core.sshCommand", ssh.to_str().unwrap()],
+        );
+        git(&target, &["config", "ssh.variant", "simple"]);
+        let url = format!("desktop-scp-test.invalid:{}", source.display());
+        git(&target, &["remote", "add", "origin", &url]);
+        let repository = crate::Repository::open(&target).await.unwrap();
+        let request: crate::RendererFetchRequest = serde_json::from_value(serde_json::json!({
+            "remote":"origin", "expected_url":url, "recurse_submodules":false,
+        }))
+        .unwrap();
+        let preview = repository
+            .execute(crate::Operation::RendererFetchPreview {
+                request: request.clone(),
+            })
+            .await
+            .unwrap();
+        let result = repository
+            .execute(crate::Operation::RendererFetch {
+                request,
+                basis: preview["basis"].as_str().unwrap().to_owned(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(
+            git(&target, &["rev-parse", "refs/remotes/origin/main"]),
+            git(&source, &["rev-parse", "HEAD"])
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn tracks_empty_overrides_without_returning_urls() {
         assert_eq!(remote_names(b"").unwrap().unwrap(), Vec::<String>::new());
@@ -330,6 +463,8 @@ mod tests {
         for value in [
             "https://github.com/owner/repo.git",
             "git@github.com:owner/repo.git",
+            "github.com:owner/repo.git",
+            "ssh-host.example:/srv/repo.git",
             "ssh://git@github.com/owner/repo",
             "/tmp/repo",
         ] {
@@ -342,6 +477,9 @@ mod tests {
             "ssh://token@host/repo",
             "token@host:repo",
             "ext::command",
+            "-host:repo",
+            "host:repo?token=secret",
+            "C:project",
             "https://host/repo\nsecret",
         ] {
             assert!(!safe_url(value), "{value}");

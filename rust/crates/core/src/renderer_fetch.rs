@@ -221,10 +221,16 @@ impl Repository {
         } else {
             "--recurse-submodules=no"
         };
+        let mut command = args(&["fetch", "--prune", recurse]);
+        if request.report_progress {
+            command.push("--progress".into());
+        }
+        command.extend(args(&["--", &request.remote]));
         let output = process::run_bound_remote_fetch(
             &self.path,
-            &args(&["fetch", "--prune", recurse, "--", &request.remote]),
+            &command,
             request.is_background_task,
+            request.report_progress,
         )
         .await?;
         Ok(json!({
@@ -232,7 +238,7 @@ impl Repository {
             "error_kind": if output.code == 0 {
                 None
             } else {
-                crate::fetch_error::classify(&output.stderr, &output.stdout)
+                crate::fetch_error::classify(&output.stderr, &output.stdout, request.expected_saml_owner.as_deref())
             }
         }))
     }
@@ -315,6 +321,8 @@ mod tests {
                 expected_url: url.into(),
                 recurse_submodules: false,
                 is_background_task: false,
+                report_progress: false,
+                expected_saml_owner: None,
             }
         }
     }
@@ -383,6 +391,8 @@ mod tests {
             expected_url: "https://user:synthetic-secret@example.invalid/repo".into(),
             recurse_submodules: false,
             is_background_task: false,
+            report_progress: false,
+            expected_saml_owner: None,
         };
         assert!(!format!("{request:?}").contains("synthetic-secret"));
         assert!(!crate::remote_discovery::safe_url(&request.expected_url));

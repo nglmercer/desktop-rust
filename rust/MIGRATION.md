@@ -2479,7 +2479,12 @@ writers can still race the final review. URLs rejected by the safe-remote policy
 unsupported. Windows uses a handle-based hardlink and reparse-point check for
 existing `FETCH_HEAD` files; native Windows runtime verification remains open.
 Background requests pass the existing credential-manager interaction policy,
-and common failures are classified without returning Git output. Full error
-details and request-scoped Git/LFS progress remain open, as does nested-
-submodule credential parity. A `FETCH_HEAD` larger than 8 MiB cannot be
-reviewed. Arbitrary refspec fetches still use their existing path.
+and common failures, including a matching SAML owner, are classified without
+returning Git diagnostics. Request-scoped Git and LFS progress is available to
+the experimental client, with bounded best-effort delivery that can drop
+chunks. LFS progress uses a private temporary file; Windows verifies its ACL
+and omits capture if the filesystem does not enforce it. Real Git LFS transfer
+and native Windows capture have not been verified. Full error details and
+nested-submodule credential parity remain open. A `FETCH_HEAD` larger than
+8 MiB cannot be reviewed. Arbitrary refspec fetches still use their existing
+path.

@@ -39,8 +39,36 @@ fn classify_stream(output: &[u8]) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn classify(stderr: &[u8], stdout: &[u8]) -> Option<&'static str> {
-    classify_stream(stderr).or_else(|| classify_stream(stdout))
+pub(crate) fn classify(
+    stderr: &[u8],
+    stdout: &[u8],
+    expected_owner: Option<&str>,
+) -> Option<&'static str> {
+    let kind = classify_stream(stderr).or_else(|| classify_stream(stdout));
+    // Return only a fixed classification, never the remote-controlled text or
+    // organization name. The renderer uses its already-known repository owner.
+    let remote = String::from_utf8_lossy(stderr)
+        .lines()
+        .filter_map(|line| line.strip_prefix("remote: "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let saml = expected_owner.is_some_and(|owner| {
+        !owner.is_empty()
+            && owner.len() <= 39
+            && owner
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && (remote.contains(&format!("'{owner}' organization has enabled SAML SSO"))
+                || remote.contains(&format!("'{owner}' organization has enforced SAML SSO")))
+            && remote.contains("you must re-authorize")
+    });
+    match (kind, saml) {
+        (Some("https_authentication_failed"), true) => Some("https_saml_reauth_required"),
+        (Some("ssh_authentication_failed" | "ssh_permission_denied"), true) => {
+            Some("ssh_saml_reauth_required")
+        }
+        _ => kind,
+    }
 }
 
 #[cfg(test)]
@@ -81,17 +109,30 @@ mod tests {
                 "lock_file_exists",
             ),
         ] {
-            assert_eq!(classify(message.as_bytes(), b""), Some(expected));
+            assert_eq!(classify(message.as_bytes(), b"", None), Some(expected));
             assert_eq!(
-                classify(b"unclassified", message.as_bytes()),
+                classify(b"unclassified", message.as_bytes(), None),
                 Some(expected)
             );
         }
-        assert_eq!(classify(b"secret token", b""), None);
+        assert_eq!(classify(b"secret token", b"", None), None);
+        assert_eq!(
+            classify(b"remote: The 'example' organization has enabled SAML SSO.\nremote: you must re-authorize\nfatal: Authentication failed for 'https://example.com'", b"", Some("example")),
+            Some("https_saml_reauth_required")
+        );
+        assert_eq!(
+            classify(b"remote: The 'other' organization has enabled SAML SSO.\nremote: you must re-authorize\nfatal: Authentication failed for 'https://example.com'", b"", Some("example")),
+            Some("https_authentication_failed")
+        );
+        assert_eq!(
+            classify(b"The 'example' organization has enabled SAML SSO. you must re-authorize\nfatal: Authentication failed for 'https://example.com'", b"", Some("example")),
+            Some("https_authentication_failed")
+        );
         assert_eq!(
             classify(
                 b"fatal: Authentication failed",
-                b"The requested URL returned error: 403"
+                b"The requested URL returned error: 403",
+                None
             ),
             Some("ssh_authentication_failed")
         );

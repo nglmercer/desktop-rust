@@ -18,6 +18,11 @@ pub enum CommitEvent {
         stream: &'static str,
         data: String,
     },
+    /// Output for the request that owns the active remote fetch.
+    FetchOutput {
+        stream: &'static str,
+        data: String,
+    },
 }
 
 tokio::task_local! { static SENDER: (mpsc::Sender<(u64, CommitEvent)>, u64); }

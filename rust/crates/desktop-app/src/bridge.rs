@@ -243,7 +243,14 @@ impl Bridge {
             .map_or_else(|| queue_deadline(&channel), |job| job.deadline);
         let task = Task::new(bytes, deadline, move |outcome| {
             let result = match outcome {
-                Outcome::Run => run_channel(&app, &backend, &channel, args, job),
+                Outcome::Run => run_channel(
+                    &app,
+                    &backend,
+                    &channel,
+                    args,
+                    job,
+                    Some((proxy.clone(), id)),
+                ),
                 other => refused(&channel, other),
             };
             let _ = proxy.send_event(AppEvent::RpcResult { id, result });
@@ -447,7 +454,7 @@ impl Bridge {
                 .map_or_else(|| queue_deadline(&channel), |job| job.deadline);
             let task = Task::new(bytes, deadline, move |outcome| {
                 let result = match outcome {
-                    Outcome::Run => run_channel(&app, &backend, &channel, message.args, job),
+                    Outcome::Run => run_channel(&app, &backend, &channel, message.args, job, None),
                     other => refused(&outcome_channel, other),
                 };
                 responder.respond(response(200, JSON, result.to_bytes()));
@@ -499,6 +506,7 @@ fn run_channel(
     channel: &str,
     args: Vec<Value>,
     job: Option<crate::backend::ReadJob>,
+    progress_target: Option<(EventLoopProxy<AppEvent>, u64)>,
 ) -> RpcResult {
     let result = if matches!(
         channel,
@@ -510,6 +518,11 @@ fn run_channel(
                 match event {
                     desktop_backend::hook_progress::CommitEvent::Hook(event) => app.emit_value("commit_hook_progress", json!({"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status})),
                     desktop_backend::hook_progress::CommitEvent::Output { checkpoint_id, stream, data } => app.emit_value("commit_output", json!({"checkpoint_id":checkpoint_id,"stream":stream,"data":data})),
+                    desktop_backend::hook_progress::CommitEvent::FetchOutput { stream, data } => {
+                        if let Some((proxy, id)) = &progress_target {
+                            let _ = proxy.send_event(AppEvent::RpcProgress { id: *id, payload: json!({"stream":stream,"data":data}) });
+                        }
+                    },
                 }
             },
         );
