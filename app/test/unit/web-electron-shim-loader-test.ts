@@ -87,6 +87,14 @@ describe('loopback bridge event shim', () => {
     shim.removeAllListeners()
     expect(listeners.get('repository_changed')?.size).toBe(0)
   })
+  it('requests browser focus for notification clicks', async () => {
+    const focus = vi.spyOn(window, 'focus').mockImplementation(() => {})
+    await import('../../src/web/electron-shim-loader')
+    const shim = Reflect.get(window, '__desktop') as IShim
+    shim.send('focus-window')
+    expect(focus).toHaveBeenCalledOnce()
+    expect(request).not.toHaveBeenCalled()
+  })
   it('writes copy actions through the browser clipboard instead of the bridge', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {

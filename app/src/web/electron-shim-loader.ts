@@ -82,6 +82,10 @@ if (typeof window !== 'undefined' && !Reflect.get(window, '__desktop')) {
     },
     send: (channel: string, ...args: unknown[]) => {
       if (client.transportKind === 'ws') {
+        if (channel === 'focus-window') {
+          window.focus()
+          return
+        }
         if (channel === 'select-all-window-contents') {
           const active = document.activeElement
           if (
