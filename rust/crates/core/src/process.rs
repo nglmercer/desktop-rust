@@ -72,8 +72,13 @@ pub(crate) async fn run_clone_with_inherited_fd(
 ) -> Result<RawOutput> {
     use std::os::fd::AsRawFd;
     let mut descriptors = vec![handle.as_raw_fd()];
-    if let Some(home) = home { descriptors.push(home.as_raw_fd()); }
-    anyhow::ensure!(descriptors.iter().all(|fd| *fd >= 3), "Clone directory descriptor overlaps a standard stream");
+    if let Some(home) = home {
+        descriptors.push(home.as_raw_fd());
+    }
+    anyhow::ensure!(
+        descriptors.iter().all(|fd| *fd >= 3),
+        "Clone directory descriptor overlaps a standard stream"
+    );
     run_clone_inner(path, args, report_progress, &descriptors).await
 }
 
@@ -94,15 +99,22 @@ async fn run_clone_inner(
                 return Err(std::io::Error::last_os_error().into());
             }
             let metadata = unsafe { metadata.assume_init() };
-            command.env("DESKTOP_TEST_CLONE_CHILD_FD", fd.to_string())
-                .env("DESKTOP_TEST_CLONE_CHILD_IDENTITY", format!("{}:{}", metadata.st_dev, metadata.st_ino));
+            command
+                .env("DESKTOP_TEST_CLONE_CHILD_FD", fd.to_string())
+                .env(
+                    "DESKTOP_TEST_CLONE_CHILD_IDENTITY",
+                    format!("{}:{}", metadata.st_dev, metadata.st_ino),
+                );
             if let Some(home_fd) = inherited_fds.get(1) {
                 let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
                 if unsafe { libc::fstat(*home_fd, metadata.as_mut_ptr()) } != 0 {
                     return Err(std::io::Error::last_os_error().into());
                 }
                 let metadata = unsafe { metadata.assume_init() };
-                command.env("DESKTOP_TEST_CLONE_HOME_IDENTITY", format!("{}:{}", metadata.st_dev, metadata.st_ino));
+                command.env(
+                    "DESKTOP_TEST_CLONE_HOME_IDENTITY",
+                    format!("{}:{}", metadata.st_dev, metadata.st_ino),
+                );
             }
         }
         // This runs after fork, so clearing CLOEXEC changes only the child's
@@ -140,9 +152,7 @@ async fn run_clone_inner(
             .join(":");
         command.env("GIT_ALLOW_PROTOCOL", filtered);
     }
-    let sender = report_progress
-        .then(crate::hook_progress::sender)
-        .flatten();
+    let sender = report_progress.then(crate::hook_progress::sender).flatten();
     let emit_clone_progress = sender.is_some();
     let (sender, request_id) = sender.unwrap_or_else(|| {
         let (sender, _receiver) = tokio::sync::mpsc::channel(1);
@@ -532,7 +542,10 @@ async fn run_bound_remote_operation(
         None
     };
     #[cfg(not(unix))]
-    anyhow::ensure!(!observe_hooks, "Pre-push hook progress is unavailable on this platform");
+    anyhow::ensure!(
+        !observe_hooks,
+        "Pre-push hook progress is unavailable on this platform"
+    );
     // Never let an inherited progress path redirect Git LFS writes.
     command.env_remove("GIT_LFS_PROGRESS");
     command.env(
@@ -614,7 +627,11 @@ async fn run_bound_remote_operation(
         );
     }
     #[cfg(unix)]
-    let hook_failed = if let Some(trace) = trace { trace.finish().await } else { false };
+    let hook_failed = if let Some(trace) = trace {
+        trace.finish().await
+    } else {
+        false
+    };
     #[cfg(not(unix))]
     let hook_failed = false;
     result.map(|output| (output, hook_failed))
@@ -1361,17 +1378,44 @@ mod tests {
         let source = root.join("source.git");
         let destination = root.join("destination");
         std::fs::create_dir_all(&destination).unwrap();
-        let init = std::process::Command::new("git").args(["init", "--bare", "--quiet"]).arg(&source).status().unwrap();
+        let init = std::process::Command::new("git")
+            .args(["init", "--bare", "--quiet"])
+            .arg(&source)
+            .status()
+            .unwrap();
         assert!(init.success());
         let handle = std::fs::File::open(&destination).unwrap();
         let fd = handle.as_raw_fd();
-        assert_ne!(unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC, 0);
-        let args = vec!["clone".into(), "--no-checkout".into(), "--".into(), source.as_os_str().to_owned(), format!("/proc/self/fd/{fd}").into()];
-        let result = run_clone_with_inherited_fd(&root, &args, false, &handle, None).await.unwrap();
-        assert_eq!(result.code, 0, "{}", String::from_utf8_lossy(&result.stderr));
+        assert_ne!(
+            unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC,
+            0
+        );
+        let args = vec![
+            "clone".into(),
+            "--no-checkout".into(),
+            "--".into(),
+            source.as_os_str().to_owned(),
+            format!("/proc/self/fd/{fd}").into(),
+        ];
+        let result = run_clone_with_inherited_fd(&root, &args, false, &handle, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.code,
+            0,
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
         assert!(destination.join(".git").is_dir());
-        assert!(!std::fs::read_to_string(destination.join(".git/config")).unwrap().contains("/proc/self/fd"));
-        assert_ne!(unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC, 0);
+        assert!(
+            !std::fs::read_to_string(destination.join(".git/config"))
+                .unwrap()
+                .contains("/proc/self/fd")
+        );
+        assert_ne!(
+            unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC,
+            0
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1382,15 +1426,24 @@ mod tests {
         const CHILD: &str = "DESKTOP_TEST_CLONE_CLOSED_STDIN";
         if std::env::var_os(CHILD).is_none() {
             let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "process::tests::clone_rejects_directory_fd_overlapping_standard_stream", "--nocapture"])
-                .env(CHILD, "1").status().unwrap();
+                .args([
+                    "--exact",
+                    "process::tests::clone_rejects_directory_fd_overlapping_standard_stream",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
             assert!(status.success());
             return;
         }
         let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
         assert_eq!(unsafe { libc::dup2(directory.as_raw_fd(), 0) }, 0);
         let handle = unsafe { std::fs::File::from_raw_fd(0) };
-        let error = run_clone_with_inherited_fd(Path::new("/"), &[], false, &handle, None).await.err().unwrap();
+        let error = run_clone_with_inherited_fd(Path::new("/"), &[], false, &handle, None)
+            .await
+            .err()
+            .unwrap();
         assert!(error.to_string().contains("standard stream"));
     }
 

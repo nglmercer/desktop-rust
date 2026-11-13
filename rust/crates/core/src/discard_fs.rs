@@ -150,7 +150,10 @@ impl WorkingFile {
         }
         let file = self.parent.open_with(&self.name, &options)?.into_std();
         let metadata = file.metadata()?;
-        anyhow::ensure!(metadata.is_file(), "Working file is not a supported regular file");
+        anyhow::ensure!(
+            metadata.is_file(),
+            "Working file is not a supported regular file"
+        );
         if metadata.len() > limit {
             return Err(WorkingFileTooLarge.into());
         }

@@ -250,7 +250,8 @@ fn endpoint_view(index: usize, e: &Endpoint) -> Value {
         None
     };
     let display_safe = destination.is_some();
-    let destination = destination.unwrap_or_else(|| format!("Push destination {} (URL hidden)", index + 1));
+    let destination =
+        destination.unwrap_or_else(|| format!("Push destination {} (URL hidden)", index + 1));
     json!({"index":index,"destination":destination,"display_safe":display_safe,"expected":e.expected,"available_locally":e.available_locally,"phase":e.phase,"error":e.error,"restored_as":e.restored_as})
 }
 fn clean_error(error: &str, endpoints: &[Endpoint]) -> String {
@@ -1091,11 +1092,21 @@ mod tests {
             "https://example.test/second.git",
             "https://user:secret@example.test/third.git",
             "https://example.test/fourth.git?token=anothersecret",
-        ].iter().enumerate().map(|(index, url)| endpoint_view(index, &endpoint(url))).collect();
+        ]
+        .iter()
+        .enumerate()
+        .map(|(index, url)| endpoint_view(index, &endpoint(url)))
+        .collect();
         assert_eq!(views[0]["destination"], "https://example.test/first.git");
         assert_eq!(views[1]["destination"], "https://example.test/second.git");
-        assert_eq!(views[2]["destination"], "https://example.test/third.git (credentials and query hidden)");
-        assert_eq!(views[3]["destination"], "https://example.test/fourth.git (credentials and query hidden)");
+        assert_eq!(
+            views[2]["destination"],
+            "https://example.test/third.git (credentials and query hidden)"
+        );
+        assert_eq!(
+            views[3]["destination"],
+            "https://example.test/fourth.git (credentials and query hidden)"
+        );
         assert_eq!(views[2]["display_safe"], true);
         assert_eq!(views[3]["display_safe"], true);
         let rendered = serde_json::to_string(&views).unwrap();

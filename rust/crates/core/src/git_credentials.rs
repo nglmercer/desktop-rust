@@ -383,7 +383,10 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::Recover { .. }
             | Operation::Checkout { .. }
             | Operation::RendererCheckoutDirect { .. }
-            | Operation::RendererWorktreeApply { action: crate::renderer_worktree::WorktreeAction::Add { .. }, .. }
+            | Operation::RendererWorktreeApply {
+                action: crate::renderer_worktree::WorktreeAction::Add { .. },
+                ..
+            }
             | Operation::RendererDetach { .. }
             | Operation::Detach { .. }
             | Operation::CreateBranch { .. }

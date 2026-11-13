@@ -148,8 +148,18 @@ async fn empty_url_clears_previous(path: &Path) -> Result<Option<bool>> {
     let result = process::run(
         path,
         &args(&[
-            "-c", &initial, "-c", &empty, "-c", &previous_rewrite, "-c", &cleared_rewrite,
-            "ls-remote", "--get-url", "--", &name,
+            "-c",
+            &initial,
+            "-c",
+            &empty,
+            "-c",
+            &previous_rewrite,
+            "-c",
+            &cleared_rewrite,
+            "ls-remote",
+            "--get-url",
+            "--",
+            &name,
         ]),
     )
     .await?;
@@ -544,15 +554,21 @@ mod tests {
         assert!(empty.active.is_empty());
         assert!(empty.cleared.is_empty());
         let cleared = remote_names(b"remote.origin.url\nvalue\0remote.origin.url\n\0")
-            .unwrap().unwrap();
+            .unwrap()
+            .unwrap();
         assert!(cleared.active.is_empty());
         assert_eq!(cleared.cleared, vec!["origin"]);
-        let multiple = remote_names(b"remote.one.url\nvalue\0remote.two.url\nvalue\0remote.one.url\n\0")
-            .unwrap().unwrap();
+        let multiple =
+            remote_names(b"remote.one.url\nvalue\0remote.two.url\nvalue\0remote.one.url\n\0")
+                .unwrap()
+                .unwrap();
         assert_eq!(multiple.active, vec!["two"]);
         assert_eq!(multiple.cleared, vec!["one"]);
-        let reset = remote_names(b"remote.origin.url\nvalue\0remote.origin.url\n\0remote.origin.url\nnew\0")
-            .unwrap().unwrap();
+        let reset = remote_names(
+            b"remote.origin.url\nvalue\0remote.origin.url\n\0remote.origin.url\nnew\0",
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(reset.active, vec!["origin"]);
         assert!(reset.cleared.is_empty());
         let empty_only = remote_names(b"remote.origin.url\n\0").unwrap().unwrap();
@@ -564,47 +580,95 @@ mod tests {
 
     #[tokio::test]
     async fn lists_trailing_empty_urls_as_the_installed_git_does() {
-        let root = std::env::temp_dir().join(format!("desktop-remote-empty-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-remote-empty-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
         let git = |args: &[&str]| {
-            let output = std::process::Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             String::from_utf8(output.stdout).unwrap()
         };
         git(&["init", "-q"]);
-        git(&["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "initial"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "initial",
+        ]);
         let source = root.join("source.git");
         let source = source.to_str().unwrap();
         git(&["init", "--bare", "-q", source]);
         git(&["push", "-q", source, "HEAD:refs/heads/main"]);
-        git(&["--git-dir", source, "symbolic-ref", "HEAD", "refs/heads/main"]);
+        git(&[
+            "--git-dir",
+            source,
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+        ]);
         git(&["config", "--add", "remote.cleared.url", source]);
         git(&["config", "--add", "remote.cleared.url", ""]);
         git(&["config", "remote.active.url", "/active"]);
         // A broad rewrite must not make the synthetic capability probe ambiguous.
         git(&["config", "url./rewritten/.insteadOf", "desktop-"]);
         let output = git(&["remote", "-v"]);
-        let expects_cleared = output.lines().any(|line| line == format!("cleared\t{source} (fetch)"));
+        let expects_cleared = output
+            .lines()
+            .any(|line| line == format!("cleared\t{source} (fetch)"));
         let fetch = std::process::Command::new("git")
-            .arg("-C").arg(&root).args(["fetch", "-q", "--", "cleared"])
-            .output().unwrap();
+            .arg("-C")
+            .arg(&root)
+            .args(["fetch", "-q", "--", "cleared"])
+            .output()
+            .unwrap();
         assert_eq!(fetch.status.success(), expects_cleared);
         let mut expected = vec![serde_json::json!({"name":"active", "url":"/active"})];
         if expects_cleared {
             expected.push(serde_json::json!({"name":"cleared", "url":source}));
         }
-        assert_eq!(super::safe_fetch_remotes(&root).await.unwrap(), serde_json::json!(expected));
+        assert_eq!(
+            super::safe_fetch_remotes(&root).await.unwrap(),
+            serde_json::json!(expected)
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn resolves_effective_url_after_empty_reset_and_rewrite() {
-        let root = std::env::temp_dir().join(format!("desktop-remote-reset-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-remote-reset-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
         let git = |args: &[&str]| {
-            let output = std::process::Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-            String::from_utf8(output.stdout).unwrap().trim_end_matches('\n').to_owned()
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .trim_end_matches('\n')
+                .to_owned()
         };
         git(&["init", "-q"]);
         git(&["config", "--add", "remote.desktop-test.url", "/original"]);
@@ -613,14 +677,28 @@ mod tests {
         git(&["config", "url./rewritten.insteadOf", "/replacement"]);
         let expected = git(&["ls-remote", "--get-url", "--", "desktop-test"]);
         let version = git(&["--version"]);
-        let version = version.strip_prefix("git version ").unwrap().split('.').take(2).filter_map(|part| part.parse::<u32>().ok()).collect::<Vec<_>>();
+        let version = version
+            .strip_prefix("git version ")
+            .unwrap()
+            .split('.')
+            .take(2)
+            .filter_map(|part| part.parse::<u32>().ok())
+            .collect::<Vec<_>>();
         if version.len() == 2 && (version[0] > 2 || (version[0] == 2 && version[1] >= 56)) {
             assert_eq!(expected, "/rewritten");
         }
         let remotes = super::safe_fetch_remotes(&root).await.unwrap();
-        let actual = remotes.as_array().unwrap().iter().find(|entry| entry["name"] == "desktop-test").unwrap();
+        let actual = remotes
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == "desktop-test")
+            .unwrap();
         assert_eq!(actual["url"], expected);
-        assert_eq!(super::safe_remote_url(&root, "desktop-test").await.unwrap()["url"], expected);
+        assert_eq!(
+            super::safe_remote_url(&root, "desktop-test").await.unwrap()["url"],
+            expected
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

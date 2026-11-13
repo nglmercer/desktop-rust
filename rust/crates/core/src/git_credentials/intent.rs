@@ -64,7 +64,9 @@ async fn collect_operation(
             requests.push((request.remote.clone(), Direction::Fetch))
         }
         Operation::Push { remote, .. } => requests.push((remote.clone(), Direction::Push)),
-        Operation::RendererPush { request, .. } => requests.push((request.remote.clone(), Direction::Push)),
+        Operation::RendererPush { request, .. } => {
+            requests.push((request.remote.clone(), Direction::Push))
+        }
         Operation::RemoteBranchDeletePreview { request }
         | Operation::DeleteRemoteBranch { request, .. } => {
             requests.push((request.remote.clone(), Direction::Deletion));

@@ -161,22 +161,43 @@ pub struct EditorLaunch {
 pub async fn open_global_git_config_editor(name: String) -> Result<Value> {
     ExternalEditor::Named { name: name.clone() }.validate()?;
     let editor = cancellation::blocking(move || {
-        let editor = discover().into_iter().find(|editor| editor.name == name)
+        let editor = discover()
+            .into_iter()
+            .find(|editor| editor.name == name)
             .context("Selected editor was not found")?;
-        anyhow::ensure!(!editor.terminal, "This editor needs an interactive terminal");
+        anyhow::ensure!(
+            !editor.terminal,
+            "This editor needs an interactive terminal"
+        );
         Ok(editor)
-    }).await?;
+    })
+    .await?;
     let path = crate::git_global_config_path().await?;
     let plan = cancellation::blocking(move || {
-        let target = PathBuf::from(path).canonicalize().context("global Git configuration does not exist")?;
+        let target = PathBuf::from(path)
+            .canonicalize()
+            .context("global Git configuration does not exist")?;
         anyhow::ensure!(target.is_file(), "global Git configuration must be a file");
         let mut args = Vec::new();
         #[cfg(target_os = "macos")]
-        if editor.name == "TextEdit" { args.extend([OsString::from("-a"), OsString::from("TextEdit")]); }
-        if editor.name != "Notepad" && editor.name != "Notepad++" && editor.name != "TextEdit" { args.push(OsString::from("--")); }
+        if editor.name == "TextEdit" {
+            args.extend([OsString::from("-a"), OsString::from("TextEdit")]);
+        }
+        if editor.name != "Notepad" && editor.name != "Notepad++" && editor.name != "TextEdit" {
+            args.push(OsString::from("--"));
+        }
         args.push(target.as_os_str().to_owned());
-        Ok(EditorLaunch { program: editor.program, args, directory: target.parent().context("global Git configuration has no parent")?.to_owned(), terminal: editor.terminal })
-    }).await?;
+        Ok(EditorLaunch {
+            program: editor.program,
+            args,
+            directory: target
+                .parent()
+                .context("global Git configuration has no parent")?
+                .to_owned(),
+            terminal: editor.terminal,
+        })
+    })
+    .await?;
     launch_editor(plan).await
 }
 fn substitute(template: &str, target: &Path, repository: &Path) -> OsString {
@@ -257,45 +278,45 @@ impl Repository {
 }
 
 async fn launch_editor(plan: EditorLaunch) -> Result<Value> {
-        if plan.terminal {
-            bail!(
-                "This editor needs an interactive terminal. Run desktop-rs -C <repository> editor <file> in Termux or a terminal, then refresh and stage the edited resolution."
+    if plan.terminal {
+        bail!(
+            "This editor needs an interactive terminal. Run desktop-rs -C <repository> editor <file> in Termux or a terminal, then refresh and stage the edited resolution."
+        );
+    }
+    let mut command = tokio::process::Command::new(plan.program);
+    command
+        .args(plan.args)
+        .current_dir(plan.directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    command.process_group(0);
+    cancellation::Cancellation::current().check()?;
+    let mut child = command.spawn().context("launch configured editor")?;
+    match tokio::time::timeout(std::time::Duration::from_millis(200), child.wait()).await {
+        Ok(Ok(status)) if !status.success() => bail!(
+            "Editor exited unsuccessfully ({}). Check its executable and argument settings.",
+            status
+                .code()
+                .map_or_else(|| "signal".to_owned(), |code| code.to_string())
+        ),
+        Ok(Err(error)) => return Err(error).context("wait for editor launch"),
+        Ok(Ok(_)) => {
+            return Ok(
+                json!({"code":0,"stdout":"Editor launch completed. Save your changes, then refresh the conflict preview.","stderr":""}),
             );
         }
-        let mut command = tokio::process::Command::new(plan.program);
-        command
-            .args(plan.args)
-            .current_dir(plan.directory)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        #[cfg(unix)]
-        command.process_group(0);
-        cancellation::Cancellation::current().check()?;
-        let mut child = command.spawn().context("launch configured editor")?;
-        match tokio::time::timeout(std::time::Duration::from_millis(200), child.wait()).await {
-            Ok(Ok(status)) if !status.success() => bail!(
-                "Editor exited unsuccessfully ({}). Check its executable and argument settings.",
-                status
-                    .code()
-                    .map_or_else(|| "signal".to_owned(), |code| code.to_string())
-            ),
-            Ok(Err(error)) => return Err(error).context("wait for editor launch"),
-            Ok(Ok(_)) => {
-                return Ok(
-                    json!({"code":0,"stdout":"Editor launch completed. Save your changes, then refresh the conflict preview.","stderr":""}),
-                );
-            }
-            Err(_) => {}
-        }
-        // Reap editors while the service runs. Closing the service leaves the
-        // independent editor running, as ordinary desktop launches do.
-        tokio::spawn(async move {
-            let _ = child.wait().await;
-        });
-        Ok(
-            json!({"code":0,"stdout":"Editor launched. Save your changes, then refresh the conflict preview.","stderr":""}),
-        )
+        Err(_) => {}
+    }
+    // Reap editors while the service runs. Closing the service leaves the
+    // independent editor running, as ordinary desktop launches do.
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
+    Ok(
+        json!({"code":0,"stdout":"Editor launched. Save your changes, then refresh the conflict preview.","stderr":""}),
+    )
 }
 
 #[cfg(test)]
@@ -305,13 +326,36 @@ mod tests {
     #[tokio::test]
     async fn named_editor_requires_a_known_editor_and_confined_file() {
         let root = std::env::temp_dir().join(format!("desktop-editor-{}", uuid::Uuid::new_v4()));
-        assert!(std::process::Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
         let repo = Repository::open(&root).await.unwrap();
         std::fs::write(root.join("file.txt"), "test").unwrap();
-        let named = ExternalEditor::Named { name: "not-an-allowlisted-editor".into() };
-        assert!(repo.editor_launch(Some(GitPath::Text("file.txt".into())), named.clone()).await.is_err());
-        assert!(repo.editor_launch(Some(GitPath::Text("../outside".into())), named).await.is_err());
-        assert!(ExternalEditor::Named { name: "invalid\nname".into() }.validate().is_err());
+        let named = ExternalEditor::Named {
+            name: "not-an-allowlisted-editor".into(),
+        };
+        assert!(
+            repo.editor_launch(Some(GitPath::Text("file.txt".into())), named.clone())
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.editor_launch(Some(GitPath::Text("../outside".into())), named)
+                .await
+                .is_err()
+        );
+        assert!(
+            ExternalEditor::Named {
+                name: "invalid\nname".into()
+            }
+            .validate()
+            .is_err()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

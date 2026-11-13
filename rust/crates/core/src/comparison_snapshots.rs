@@ -195,146 +195,6 @@ fn insert_with_ttl(
     Ok(json!({"kind":"snapshot", "id":id.to_string(), "size":size}))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn uploads_are_ordered_private_and_released_on_close() {
-        let owner = Owner::new();
-        let other = Owner::new();
-        let id = scope(owner.clone(), async {
-            let permit = reserve().await.unwrap();
-            let upload = insert_upload("repo", permit).unwrap();
-            let id = Uuid::parse_str(upload["id"].as_str().unwrap()).unwrap();
-            assert!(append_upload("repo", id, 1, "YQ==").is_err());
-            assert!(chunk("repo", id, 0, 1).is_err());
-            assert_eq!(append_upload("repo", id, 0, "YQ==").unwrap()["size"], 1);
-            assert!(take_upload("repo", id, 2).is_err());
-            id
-        })
-        .await;
-        scope(other.clone(), async {
-            assert!(append_upload("repo", id, 1, "Yg==").is_err());
-            assert!(take_upload("repo", id, 1).is_err());
-            assert!(release_owned(&id.to_string()).is_err());
-        })
-        .await;
-        owner.close();
-        scope(owner.clone(), async {
-            assert!(take_upload("repo", id, 1).is_err());
-        })
-        .await;
-        other.close();
-    }
-
-    #[tokio::test]
-    async fn snapshots_are_session_owned_and_actively_reclaimed() {
-        let owner = Owner::new();
-        let other = Owner::new();
-        let third = Owner::new();
-        let id = scope(owner.clone(), async {
-            let permit = reserve().await.unwrap();
-            let result = insert_with_ttl(
-                "repo",
-                b"abc\0def".to_vec(),
-                permit,
-                Duration::from_millis(400),
-                false,
-            )
-            .unwrap();
-            let id = Uuid::parse_str(result["id"].as_str().unwrap()).unwrap();
-            assert_eq!(
-                chunk("repo", id, 1, 3).unwrap()["data"],
-                STANDARD.encode(b"bc\0")
-            );
-            assert!(chunk("other", id, 0, 3).is_err());
-            id
-        })
-        .await;
-        scope(other.clone(), async {
-            assert!(chunk("repo", id, 0, 3).is_err());
-            assert!(release("repo", id).is_err());
-            assert!(release_owned(&id.to_string()).is_err());
-            let second = reserve().await.unwrap();
-            let second = insert("repo", vec![2], second).unwrap();
-            let second = Uuid::parse_str(second["id"].as_str().unwrap()).unwrap();
-            assert!(reserve().await.is_err());
-            assert!(
-                scope(
-                    third.clone(),
-                    tokio::time::timeout(Duration::from_millis(10), reserve())
-                )
-                .await
-                .is_err()
-            );
-            let cancellation = crate::cancellation::Cancellation::default();
-            cancellation.cancel();
-            assert!(
-                scope(third.clone(), cancellation.clone().scope(reserve()))
-                    .await
-                    .is_err()
-            );
-            let waiting_owner = Owner::new();
-            let waiter = tokio::spawn(scope(waiting_owner.clone(), async {
-                reserve().await.is_err()
-            }));
-            tokio::task::yield_now().await;
-            waiting_owner.close();
-            assert!(
-                tokio::time::timeout(Duration::from_millis(100), waiter)
-                    .await
-                    .unwrap()
-                    .unwrap()
-            );
-            release("repo", second).unwrap();
-        })
-        .await;
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        scope(owner.clone(), async {
-            assert!(chunk("repo", id, 0, 1).is_ok());
-        })
-        .await;
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        scope(owner.clone(), async {
-            assert!(chunk("repo", id, 0, 1).is_ok());
-        })
-        .await;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        scope(other.clone(), async {
-            assert!(chunk("repo", id, 0, 3).is_err());
-            drop(reserve().await.unwrap());
-            let permit = reserve().await.unwrap();
-            let result = insert("repo", vec![1], permit).unwrap();
-            let id = Uuid::parse_str(result["id"].as_str().unwrap()).unwrap();
-            let task = entries()
-                .lock()
-                .unwrap()
-                .get(&id)
-                .unwrap()
-                .expiry_task
-                .clone()
-                .unwrap();
-            release_owned(&id.to_string()).unwrap();
-            tokio::task::yield_now().await;
-            assert!(task.is_finished());
-        })
-        .await;
-        scope(owner.clone(), async {
-            let permit = reserve().await.unwrap();
-            owner.close();
-            assert!(insert("repo", vec![1], permit).is_err());
-        })
-        .await;
-        scope(other.clone(), async {
-            drop(reserve().await.unwrap());
-        })
-        .await;
-        other.close();
-        third.close();
-    }
-}
-
 pub(crate) fn chunk(repository: &str, id: Uuid, offset: u64, length: u32) -> Result<Value> {
     let owner = OWNER
         .try_with(|value| value.id)
@@ -476,4 +336,144 @@ pub fn release_owned(id: &str) -> Result<Value> {
     }
     map.remove(&id);
     Ok(json!({"released":true}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn uploads_are_ordered_private_and_released_on_close() {
+        let owner = Owner::new();
+        let other = Owner::new();
+        let id = scope(owner.clone(), async {
+            let permit = reserve().await.unwrap();
+            let upload = insert_upload("repo", permit).unwrap();
+            let id = Uuid::parse_str(upload["id"].as_str().unwrap()).unwrap();
+            assert!(append_upload("repo", id, 1, "YQ==").is_err());
+            assert!(chunk("repo", id, 0, 1).is_err());
+            assert_eq!(append_upload("repo", id, 0, "YQ==").unwrap()["size"], 1);
+            assert!(take_upload("repo", id, 2).is_err());
+            id
+        })
+        .await;
+        scope(other.clone(), async {
+            assert!(append_upload("repo", id, 1, "Yg==").is_err());
+            assert!(take_upload("repo", id, 1).is_err());
+            assert!(release_owned(&id.to_string()).is_err());
+        })
+        .await;
+        owner.close();
+        scope(owner.clone(), async {
+            assert!(take_upload("repo", id, 1).is_err());
+        })
+        .await;
+        other.close();
+    }
+
+    #[tokio::test]
+    async fn snapshots_are_session_owned_and_actively_reclaimed() {
+        let owner = Owner::new();
+        let other = Owner::new();
+        let third = Owner::new();
+        let id = scope(owner.clone(), async {
+            let permit = reserve().await.unwrap();
+            let result = insert_with_ttl(
+                "repo",
+                b"abc\0def".to_vec(),
+                permit,
+                Duration::from_millis(400),
+                false,
+            )
+            .unwrap();
+            let id = Uuid::parse_str(result["id"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                chunk("repo", id, 1, 3).unwrap()["data"],
+                STANDARD.encode(b"bc\0")
+            );
+            assert!(chunk("other", id, 0, 3).is_err());
+            id
+        })
+        .await;
+        scope(other.clone(), async {
+            assert!(chunk("repo", id, 0, 3).is_err());
+            assert!(release("repo", id).is_err());
+            assert!(release_owned(&id.to_string()).is_err());
+            let second = reserve().await.unwrap();
+            let second = insert("repo", vec![2], second).unwrap();
+            let second = Uuid::parse_str(second["id"].as_str().unwrap()).unwrap();
+            assert!(reserve().await.is_err());
+            assert!(
+                scope(
+                    third.clone(),
+                    tokio::time::timeout(Duration::from_millis(10), reserve())
+                )
+                .await
+                .is_err()
+            );
+            let cancellation = crate::cancellation::Cancellation::default();
+            cancellation.cancel();
+            assert!(
+                scope(third.clone(), cancellation.clone().scope(reserve()))
+                    .await
+                    .is_err()
+            );
+            let waiting_owner = Owner::new();
+            let waiter = tokio::spawn(scope(waiting_owner.clone(), async {
+                reserve().await.is_err()
+            }));
+            tokio::task::yield_now().await;
+            waiting_owner.close();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), waiter)
+                    .await
+                    .unwrap()
+                    .unwrap()
+            );
+            release("repo", second).unwrap();
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        scope(owner.clone(), async {
+            assert!(chunk("repo", id, 0, 1).is_ok());
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        scope(owner.clone(), async {
+            assert!(chunk("repo", id, 0, 1).is_ok());
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        scope(other.clone(), async {
+            assert!(chunk("repo", id, 0, 3).is_err());
+            drop(reserve().await.unwrap());
+            let permit = reserve().await.unwrap();
+            let result = insert("repo", vec![1], permit).unwrap();
+            let id = Uuid::parse_str(result["id"].as_str().unwrap()).unwrap();
+            let task = entries()
+                .lock()
+                .unwrap()
+                .get(&id)
+                .unwrap()
+                .expiry_task
+                .clone()
+                .unwrap();
+            release_owned(&id.to_string()).unwrap();
+            tokio::task::yield_now().await;
+            assert!(task.is_finished());
+        })
+        .await;
+        scope(owner.clone(), async {
+            let permit = reserve().await.unwrap();
+            owner.close();
+            assert!(insert("repo", vec![1], permit).is_err());
+        })
+        .await;
+        scope(other.clone(), async {
+            drop(reserve().await.unwrap());
+        })
+        .await;
+        other.close();
+        third.close();
+    }
 }

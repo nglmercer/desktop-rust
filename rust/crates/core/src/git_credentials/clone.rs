@@ -40,18 +40,33 @@ struct Guard {
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn create_broker_home_before_create(parent: &std::fs::File, expected: &Path, before_create: impl FnOnce() -> Result<()>) -> Result<std::fs::File> {
+fn create_broker_home_before_create(
+    parent: &std::fs::File,
+    expected: &Path,
+    before_create: impl FnOnce() -> Result<()>,
+) -> Result<std::fs::File> {
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     let pinned_parent = crate::registry::pinned_clone_directory(parent, Path::new("/proc"))?;
     before_create()?;
-    ensure!(std::fs::canonicalize(&pinned_parent)? == expected, "Clone staging container changed before broker initialization");
+    ensure!(
+        std::fs::canonicalize(&pinned_parent)? == expected,
+        "Clone staging container changed before broker initialization"
+    );
     let anchored = pinned_parent.join("broker-home");
-    std::fs::DirBuilder::new().mode(0o700).create(&anchored).context("Cannot create private clone directory")?;
-    let home = std::fs::OpenOptions::new().read(true)
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&anchored)
+        .context("Cannot create private clone directory")?;
+    let home = std::fs::OpenOptions::new()
+        .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&anchored).context("Cannot pin private clone HOME")?;
+        .open(&anchored)
+        .context("Cannot pin private clone HOME")?;
     let pinned_home = crate::registry::pinned_clone_directory(&home, Path::new("/proc"))?;
-    ensure!(std::fs::canonicalize(pinned_home)? == expected.join("broker-home"), "Clone temporary HOME changed during creation");
+    ensure!(
+        std::fs::canonicalize(pinned_home)? == expected.join("broker-home"),
+        "Clone temporary HOME changed during creation"
+    );
     Ok(home)
 }
 
@@ -273,9 +288,11 @@ pub(crate) async fn clone_no_checkout(
         None => std::env::current_exe()?,
     };
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    let temporary_handle = create_broker_home_before_create(container_handle, container, || Ok(()))?;
+    let temporary_handle =
+        create_broker_home_before_create(container_handle, container, || Ok(()))?;
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    let command_directory = crate::registry::pinned_clone_directory(&temporary_handle, Path::new("/proc"))?;
+    let command_directory =
+        crate::registry::pinned_clone_directory(&temporary_handle, Path::new("/proc"))?;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let child_home = {
         use std::os::fd::AsRawFd;
@@ -285,7 +302,10 @@ pub(crate) async fn clone_no_checkout(
     let command_directory = {
         let _ = container_handle;
         let temporary = container.join("broker-home");
-        std::fs::DirBuilder::new().mode(0o700).create(&temporary).context("Cannot create private clone directory")?;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&temporary)
+            .context("Cannot create private clone directory")?;
         temporary
     };
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -348,15 +368,24 @@ pub(crate) async fn clone_no_checkout(
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     args.push(destination.as_os_str().to_owned());
     let output = CURRENT
-        .scope(
-            lease.clone(),
-            async {
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                { crate::process::run_clone_with_inherited_fd(&command_directory, &args, progress, destination_handle, Some(&temporary_handle)).await }
-                #[cfg(not(any(target_os = "linux", target_os = "android")))]
-                { let _ = destination_handle; crate::process::run_clone(&command_directory, &args, progress).await }
-            },
-        )
+        .scope(lease.clone(), async {
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            {
+                crate::process::run_clone_with_inherited_fd(
+                    &command_directory,
+                    &args,
+                    progress,
+                    destination_handle,
+                    Some(&temporary_handle),
+                )
+                .await
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            {
+                let _ = destination_handle;
+                crate::process::run_clone(&command_directory, &args, progress).await
+            }
+        })
         .await;
     lease.cancellation.cancel();
     drop(guard);
@@ -525,14 +554,32 @@ mod tests {
         if let Some(path) = std::env::var_os("DESKTOP_TEST_CLONE_PID_FILE") {
             std::fs::write(path, std::process::id().to_string()).unwrap();
         }
-        let stage = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_STAGE").expect("fixture stage"));
+        let stage =
+            PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_STAGE").expect("fixture stage"));
         let url = std::env::var("DESKTOP_TEST_CLONE_URL").expect("fixture URL");
         let host = std::env::var("DESKTOP_TEST_CLONE_HOST").expect("fixture host");
         let handle = std::fs::File::open(&stage).unwrap();
-        let account = ChosenAccount { host: &host, login: "AliceCase", id: Some(101) };
+        let account = ChosenAccount {
+            host: &host,
+            login: "AliceCase",
+            id: Some(101),
+        };
         let container = stage.parent().unwrap();
         let container_handle = std::fs::File::open(container).unwrap();
-        clone_no_checkout(container, &url, &stage, &handle, &container_handle, container, None, Some("main"), account, false).await.unwrap();
+        clone_no_checkout(
+            container,
+            &url,
+            &stage,
+            &handle,
+            &container_handle,
+            container,
+            None,
+            Some("main"),
+            account,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(stage.join(".git").is_dir());
     }
 }

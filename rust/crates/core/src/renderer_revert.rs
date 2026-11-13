@@ -16,168 +16,6 @@ struct Review {
     parents: usize,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{fs, path::PathBuf, process::Command};
-
-    struct Fixture(PathBuf);
-    impl Fixture {
-        fn new() -> Self {
-            let root =
-                std::env::temp_dir().join(format!("desktop-revert-{}", uuid::Uuid::new_v4()));
-            fs::create_dir(&root).unwrap();
-            let f = Self(root);
-            f.git(&["init", "-q", "-b", "main"]);
-            f.git(&["config", "user.name", "Revert Test"]);
-            f.git(&["config", "user.email", "revert@example.invalid"]);
-            f.git(&["config", "commit.gpgsign", "false"]);
-            f.write("file", "base\n");
-            f.git(&["add", "--all"]);
-            f.git(&["commit", "-qm", "base"]);
-            f
-        }
-        fn git(&self, args: &[&str]) -> String {
-            let out = Command::new("git")
-                .arg("-C")
-                .arg(&self.0)
-                .args(args)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
-                .env_remove("GIT_CONFIG_COUNT")
-                .env_remove("GIT_CONFIG_PARAMETERS")
-                .output()
-                .unwrap();
-            assert!(
-                out.status.success(),
-                "git {args:?}: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-            String::from_utf8(out.stdout).unwrap().trim().to_owned()
-        }
-        fn write(&self, name: &str, contents: &str) {
-            fs::write(self.0.join(name), contents).unwrap();
-        }
-        fn commit(&self, message: &str) -> String {
-            self.git(&["add", "--all"]);
-            self.git(&["commit", "-qm", message]);
-            self.git(&["rev-parse", "HEAD"])
-        }
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn reverts_selected_commit_and_runs_native_post_commit_hook() {
-        use std::os::unix::fs::PermissionsExt;
-        let f = Fixture::new();
-        f.write("file", "changed\n");
-        let commit = f.commit("change");
-        let hook = f.0.join(".git/hooks/post-commit");
-        fs::write(&hook, "#!/bin/sh\nprintf hook >hook-observed\n").unwrap();
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
-        let repo = Repository::open(&f.0).await.unwrap();
-        let review = repo.renderer_revert_preview(&commit).await.unwrap();
-        assert_eq!(review["head"], commit);
-        assert_eq!(review["mainline"], Value::Null);
-        let result = repo
-            .renderer_revert(&commit, review["basis"].as_str().unwrap())
-            .await
-            .unwrap();
-        assert_eq!(result["outcome"], "complete");
-        assert_ne!(result["head_before"], result["head_after"]);
-        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "base\n");
-        assert_eq!(
-            fs::read_to_string(f.0.join("hook-observed")).unwrap(),
-            "hook"
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_stale_review_without_touching_index_or_head() {
-        let f = Fixture::new();
-        f.write("file", "changed\n");
-        let commit = f.commit("change");
-        let repo = Repository::open(&f.0).await.unwrap();
-        let review = repo.renderer_revert_preview(&commit).await.unwrap();
-        f.write("untracked", "new\n");
-        f.git(&["add", "untracked"]);
-        let index = fs::read(f.0.join(".git/index")).unwrap();
-        assert!(
-            repo.renderer_revert(&commit, review["basis"].as_str().unwrap())
-                .await
-                .is_err()
-        );
-        assert_eq!(f.git(&["rev-parse", "HEAD"]), commit);
-        assert_eq!(fs::read(f.0.join(".git/index")).unwrap(), index);
-        f.write("file", "local-one\n");
-        let review = repo.renderer_revert_preview(&commit).await.unwrap();
-        let status = f.git(&["status", "--porcelain=v1"]);
-        f.write("file", "local-two\n");
-        assert_eq!(f.git(&["status", "--porcelain=v1"]), status);
-        assert!(
-            repo.renderer_revert(&commit, review["basis"].as_str().unwrap())
-                .await
-                .is_err()
-        );
-        assert_eq!(f.git(&["rev-parse", "HEAD"]), commit);
-        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "local-two\n");
-        for invalid in ["HEAD", "--help", "", &"0".repeat(40), &"g".repeat(40)] {
-            assert!(repo.renderer_revert_preview(invalid).await.is_err());
-        }
-    }
-
-    #[tokio::test]
-    async fn reports_conflict_and_retains_native_abort_state() {
-        let f = Fixture::new();
-        f.write("file", "selected\n");
-        let target = f.commit("selected");
-        f.write("file", "newer\n");
-        let head = f.commit("newer");
-        let repo = Repository::open(&f.0).await.unwrap();
-        let review = repo.renderer_revert_preview(&target).await.unwrap();
-        let result = repo
-            .renderer_revert(&target, review["basis"].as_str().unwrap())
-            .await
-            .unwrap();
-        assert_eq!(result["outcome"], "conflict");
-        assert_eq!(result["head_after"], head);
-        assert_eq!(f.git(&["rev-parse", "REVERT_HEAD"]), target);
-        assert!(!f.git(&["ls-files", "--unmerged"]).is_empty());
-        f.git(&["revert", "--abort"]);
-        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "newer\n");
-        assert_eq!(f.git(&["rev-parse", "HEAD"]), head);
-    }
-
-    #[tokio::test]
-    async fn merge_revert_selects_first_parent() {
-        let f = Fixture::new();
-        f.git(&["switch", "-qc", "side"]);
-        f.write("side", "side\n");
-        f.commit("side");
-        f.git(&["switch", "-q", "main"]);
-        f.write("main", "main\n");
-        f.commit("main");
-        f.git(&["merge", "--no-ff", "-qm", "merge", "side"]);
-        let merge = f.git(&["rev-parse", "HEAD"]);
-        let repo = Repository::open(&f.0).await.unwrap();
-        let review = repo.renderer_revert_preview(&merge).await.unwrap();
-        assert_eq!(review["mainline"], 1);
-        let result = repo
-            .renderer_revert(&merge, review["basis"].as_str().unwrap())
-            .await
-            .unwrap();
-        assert_eq!(result["outcome"], "complete");
-        assert!(!f.0.join("side").exists());
-        assert_eq!(fs::read_to_string(f.0.join("main")).unwrap(), "main\n");
-    }
-}
-
 impl Repository {
     async fn renderer_revert_review(&self, commit: &str) -> Result<Review> {
         // The review uses shared repository readers which inherit the process
@@ -424,5 +262,167 @@ impl Repository {
         Ok(
             json!({"outcome":result,"code":output.code,"stdout":String::from_utf8_lossy(&output.stdout),"stderr":String::from_utf8_lossy(&output.stderr),"head_before":review.head,"head_after":new_head,"commit":review.commit}),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, path::PathBuf, process::Command};
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let root =
+                std::env::temp_dir().join(format!("desktop-revert-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let f = Self(root);
+            f.git(&["init", "-q", "-b", "main"]);
+            f.git(&["config", "user.name", "Revert Test"]);
+            f.git(&["config", "user.email", "revert@example.invalid"]);
+            f.git(&["config", "commit.gpgsign", "false"]);
+            f.write("file", "base\n");
+            f.git(&["add", "--all"]);
+            f.git(&["commit", "-qm", "base"]);
+            f
+        }
+        fn git(&self, args: &[&str]) -> String {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(&self.0)
+                .args(args)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env_remove("GIT_CONFIG_COUNT")
+                .env_remove("GIT_CONFIG_PARAMETERS")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        }
+        fn write(&self, name: &str, contents: &str) {
+            fs::write(self.0.join(name), contents).unwrap();
+        }
+        fn commit(&self, message: &str) -> String {
+            self.git(&["add", "--all"]);
+            self.git(&["commit", "-qm", message]);
+            self.git(&["rev-parse", "HEAD"])
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reverts_selected_commit_and_runs_native_post_commit_hook() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = Fixture::new();
+        f.write("file", "changed\n");
+        let commit = f.commit("change");
+        let hook = f.0.join(".git/hooks/post-commit");
+        fs::write(&hook, "#!/bin/sh\nprintf hook >hook-observed\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        let repo = Repository::open(&f.0).await.unwrap();
+        let review = repo.renderer_revert_preview(&commit).await.unwrap();
+        assert_eq!(review["head"], commit);
+        assert_eq!(review["mainline"], Value::Null);
+        let result = repo
+            .renderer_revert(&commit, review["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result["outcome"], "complete");
+        assert_ne!(result["head_before"], result["head_after"]);
+        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "base\n");
+        assert_eq!(
+            fs::read_to_string(f.0.join("hook-observed")).unwrap(),
+            "hook"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_stale_review_without_touching_index_or_head() {
+        let f = Fixture::new();
+        f.write("file", "changed\n");
+        let commit = f.commit("change");
+        let repo = Repository::open(&f.0).await.unwrap();
+        let review = repo.renderer_revert_preview(&commit).await.unwrap();
+        f.write("untracked", "new\n");
+        f.git(&["add", "untracked"]);
+        let index = fs::read(f.0.join(".git/index")).unwrap();
+        assert!(
+            repo.renderer_revert(&commit, review["basis"].as_str().unwrap())
+                .await
+                .is_err()
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), commit);
+        assert_eq!(fs::read(f.0.join(".git/index")).unwrap(), index);
+        f.write("file", "local-one\n");
+        let review = repo.renderer_revert_preview(&commit).await.unwrap();
+        let status = f.git(&["status", "--porcelain=v1"]);
+        f.write("file", "local-two\n");
+        assert_eq!(f.git(&["status", "--porcelain=v1"]), status);
+        assert!(
+            repo.renderer_revert(&commit, review["basis"].as_str().unwrap())
+                .await
+                .is_err()
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), commit);
+        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "local-two\n");
+        for invalid in ["HEAD", "--help", "", &"0".repeat(40), &"g".repeat(40)] {
+            assert!(repo.renderer_revert_preview(invalid).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn reports_conflict_and_retains_native_abort_state() {
+        let f = Fixture::new();
+        f.write("file", "selected\n");
+        let target = f.commit("selected");
+        f.write("file", "newer\n");
+        let head = f.commit("newer");
+        let repo = Repository::open(&f.0).await.unwrap();
+        let review = repo.renderer_revert_preview(&target).await.unwrap();
+        let result = repo
+            .renderer_revert(&target, review["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result["outcome"], "conflict");
+        assert_eq!(result["head_after"], head);
+        assert_eq!(f.git(&["rev-parse", "REVERT_HEAD"]), target);
+        assert!(!f.git(&["ls-files", "--unmerged"]).is_empty());
+        f.git(&["revert", "--abort"]);
+        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "newer\n");
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), head);
+    }
+
+    #[tokio::test]
+    async fn merge_revert_selects_first_parent() {
+        let f = Fixture::new();
+        f.git(&["switch", "-qc", "side"]);
+        f.write("side", "side\n");
+        f.commit("side");
+        f.git(&["switch", "-q", "main"]);
+        f.write("main", "main\n");
+        f.commit("main");
+        f.git(&["merge", "--no-ff", "-qm", "merge", "side"]);
+        let merge = f.git(&["rev-parse", "HEAD"]);
+        let repo = Repository::open(&f.0).await.unwrap();
+        let review = repo.renderer_revert_preview(&merge).await.unwrap();
+        assert_eq!(review["mainline"], 1);
+        let result = repo
+            .renderer_revert(&merge, review["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result["outcome"], "complete");
+        assert!(!f.0.join("side").exists());
+        assert_eq!(fs::read_to_string(f.0.join("main")).unwrap(), "main\n");
     }
 }

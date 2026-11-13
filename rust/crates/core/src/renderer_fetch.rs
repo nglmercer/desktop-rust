@@ -527,7 +527,10 @@ mod tests {
         request.expected_url = "https://user:secret@example.invalid/owner/repo".into();
         request.refspec = Some("refs/heads/main".into());
         let repo = Repository::open(&target).await.unwrap();
-        assert_eq!(repo.renderer_fetch_preview(&request).await.unwrap()["kind"], "unsupported");
+        assert_eq!(
+            repo.renderer_fetch_preview(&request).await.unwrap()["kind"],
+            "unsupported"
+        );
         assert!(!target.join(".git/FETCH_HEAD").exists());
     }
 

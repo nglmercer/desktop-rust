@@ -290,18 +290,46 @@ mod tests {
     async fn rejects_an_oversized_conflict_blob_before_preview() {
         use std::io::Write as _;
         use std::process::Stdio;
-        let root = std::env::temp_dir().join(format!("desktop-resolution-large-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-resolution-large-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
-        assert!(Command::new("git").current_dir(&root).args(["init", "-q"]).status().unwrap().success());
-        fs::write(root.join("large"), vec![b'x'; crate::comparison_snapshots::MAX_BYTES + 1]).unwrap();
-        let output = Command::new("git").current_dir(&root).args(["hash-object", "-w", "large"]).output().unwrap();
+        assert!(
+            Command::new("git")
+                .current_dir(&root)
+                .args(["init", "-q"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(
+            root.join("large"),
+            vec![b'x'; crate::comparison_snapshots::MAX_BYTES + 1],
+        )
+        .unwrap();
+        let output = Command::new("git")
+            .current_dir(&root)
+            .args(["hash-object", "-w", "large"])
+            .output()
+            .unwrap();
         assert!(output.status.success());
         let oid = String::from_utf8(output.stdout).unwrap().trim().to_owned();
-        let mut update = Command::new("git").current_dir(&root).args(["update-index", "--index-info"]).stdin(Stdio::piped()).spawn().unwrap();
-        write!(update.stdin.take().unwrap(), "100644 {oid} 2\tlarge\n").unwrap();
+        let mut update = Command::new("git")
+            .current_dir(&root)
+            .args(["update-index", "--index-info"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        writeln!(update.stdin.take().unwrap(), "100644 {oid} 2\tlarge").unwrap();
         assert!(update.wait().unwrap().success());
         let repository = Repository::open(&root).await.unwrap();
-        assert!(repository.resolution_stage(std::ffi::OsStr::new("large"), 2).await.unwrap_err().to_string().contains("exceeds"));
+        assert!(
+            repository
+                .resolution_stage(std::ffi::OsStr::new("large"), 2)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds")
+        );
         fs::remove_dir_all(root).unwrap();
     }
     #[tokio::test]

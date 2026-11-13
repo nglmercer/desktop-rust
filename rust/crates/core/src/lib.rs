@@ -55,13 +55,13 @@ mod refs;
 mod renderer_cherry_pick;
 mod renderer_fast_forward;
 mod renderer_fetch;
-mod renderer_push;
 mod renderer_merge;
+mod renderer_push;
 mod renderer_rebase;
 mod renderer_reset;
 mod renderer_revert;
-pub mod renderer_worktree;
 mod renderer_working_file;
+pub mod renderer_worktree;
 mod resolution_diff;
 pub use refs::symbolic_ref;
 mod repository_discovery;
@@ -106,8 +106,9 @@ use anyhow::{Context, Result, bail};
 pub use creation::CreationFile;
 pub use protocol::*;
 pub use registry::{
-    CloneAccount, CloneOptions, Registry, SavedRepositories, SavedRepositoryRecord, clone_repository,
-    clone_repository_selected, clone_repository_with_options, initialize, initialize_desktop_repository, recover_selected_clone, recover_selected_clone_with_staging,
+    CloneAccount, CloneOptions, Registry, SavedRepositories, SavedRepositoryRecord,
+    clone_repository, clone_repository_selected, clone_repository_with_options, initialize,
+    initialize_desktop_repository, recover_selected_clone, recover_selected_clone_with_staging,
 };
 use serde_json::Value;
 use std::{
@@ -595,18 +596,41 @@ impl Repository {
                     )
                     .await;
             }
-            Operation::RendererCompareChanges { before, after, merge_base } => {
-                return self.renderer_compare_changes(&before, &after, merge_base).await;
+            Operation::RendererCompareChanges {
+                before,
+                after,
+                merge_base,
+            } => {
+                return self
+                    .renderer_compare_changes(&before, &after, merge_base)
+                    .await;
             }
             Operation::RendererResolutionBegin => {
                 let permit = comparison_snapshots::reserve().await?;
                 return comparison_snapshots::insert_upload(&self.id(), permit);
             }
-            Operation::RendererResolutionAppend { snapshot_id, offset, data } => {
-                return comparison_snapshots::append_upload(&self.id(), uuid::Uuid::parse_str(&snapshot_id)?, offset, &data);
+            Operation::RendererResolutionAppend {
+                snapshot_id,
+                offset,
+                data,
+            } => {
+                return comparison_snapshots::append_upload(
+                    &self.id(),
+                    uuid::Uuid::parse_str(&snapshot_id)?,
+                    offset,
+                    &data,
+                );
             }
-            Operation::RendererResolutionDiff { snapshot_id, size, path, stage, hide_whitespace } => {
-                return self.renderer_resolution_diff(path, stage, hide_whitespace, &snapshot_id, size).await;
+            Operation::RendererResolutionDiff {
+                snapshot_id,
+                size,
+                path,
+                stage,
+                hide_whitespace,
+            } => {
+                return self
+                    .renderer_resolution_diff(path, stage, hide_whitespace, &snapshot_id, size)
+                    .await;
             }
             Operation::RendererCompareDiffChunk {
                 snapshot_id,
@@ -629,7 +653,9 @@ impl Repository {
             Operation::RendererStagedDiff { amend_head } => {
                 return self.renderer_staged_diff(amend_head.as_deref()).await;
             }
-            Operation::RendererWorkingFile { path, max_bytes } => return self.renderer_working_file(path, max_bytes).await,
+            Operation::RendererWorkingFile { path, max_bytes } => {
+                return self.renderer_working_file(path, max_bytes).await;
+            }
             Operation::RendererWorkingDiff {
                 path,
                 base,
@@ -694,8 +720,12 @@ impl Repository {
                 new_branch,
                 start,
             } => return self.worktree_add(path, branch, new_branch, start).await,
-            Operation::RendererWorktreePreview { action } => return self.renderer_worktree_preview(&action).await,
-            Operation::RendererWorktreeApply { action, basis } => return self.renderer_worktree_apply(action, &basis).await,
+            Operation::RendererWorktreePreview { action } => {
+                return self.renderer_worktree_preview(&action).await;
+            }
+            Operation::RendererWorktreeApply { action, basis } => {
+                return self.renderer_worktree_apply(action, &basis).await;
+            }
             Operation::WorktreeRemove { path, force } => {
                 return self.worktree_remove(path, force).await;
             }

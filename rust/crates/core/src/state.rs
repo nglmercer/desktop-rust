@@ -172,9 +172,7 @@ impl Repository {
                 Err(error) => return Err(error.into()),
             };
             let is_rebase = read_operation_file(&apply, "applying", 128)?.is_none();
-            let progress = if is_rebase
-                && read_operation_file(&apply, "rebasing", 128)?.is_some()
-            {
+            let progress = if is_rebase && read_operation_file(&apply, "rebasing", 128)?.is_some() {
                 Some(json!({
                     "original": read_operation_file(&apply, "orig-head", 8192)?,
                     "branch": read_operation_file(&apply, "head-name", 8192)?,
@@ -188,7 +186,10 @@ impl Repository {
             Ok((true, is_rebase, progress))
         };
         let apply = apply_state()?;
-        anyhow::ensure!(merge_progress.is_none() || !apply.0, "Ambiguous rebase state");
+        anyhow::ensure!(
+            merge_progress.is_none() || !apply.0,
+            "Ambiguous rebase state"
+        );
         if merge_progress.is_none() && !apply.1 {
             return Ok(Value::Null);
         }
@@ -201,7 +202,11 @@ impl Repository {
         {
             return Ok(Value::Null);
         }
-        let backend = if merge_progress.is_some() { "merge" } else { "apply" };
+        let backend = if merge_progress.is_some() {
+            "merge"
+        } else {
+            "apply"
+        };
         Ok(json!({"head":head,"backend":backend,"progress":merge_progress.or(apply.2)}))
     }
 
@@ -466,41 +471,91 @@ mod cherry_pick_state_tests {
 
     #[tokio::test]
     async fn reads_last_fetch_for_each_linked_worktree() {
-        let root = std::env::temp_dir().join(format!("desktop-last-fetch-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-last-fetch-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let git = |args: &[&str]| {
-            let output = Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         };
         git(&["init", "-q", "-b", "main"]);
-        git(&["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "initial"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "initial",
+        ]);
         let linked = root.join("linked");
-        git(&["worktree", "add", "-qb", "linked-branch", linked.to_str().unwrap()]);
+        git(&[
+            "worktree",
+            "add",
+            "-qb",
+            "linked-branch",
+            linked.to_str().unwrap(),
+        ]);
         let main = Repository::open(&root).await.unwrap();
         let child = Repository::open(&linked).await.unwrap();
-        assert_eq!(main.renderer_last_fetch().await.unwrap()["kind"], "unavailable");
+        assert_eq!(
+            main.renderer_last_fetch().await.unwrap()["kind"],
+            "unavailable"
+        );
         fs::write(root.join(".git/FETCH_HEAD"), "").unwrap();
         assert_eq!(main.renderer_last_fetch().await.unwrap()["kind"], "empty");
         fs::write(root.join(".git/FETCH_HEAD"), "data\n").unwrap();
         let main_value = main.renderer_last_fetch().await.unwrap();
         assert_eq!(main_value["kind"], "fetched");
         assert!(main_value["time"].as_i64().unwrap() > 0);
-        assert_eq!(child.renderer_last_fetch().await.unwrap()["kind"], "unavailable");
-        fs::write(child.git_directory().await.unwrap().join("FETCH_HEAD"), "other\n").unwrap();
-        assert_eq!(child.renderer_last_fetch().await.unwrap()["kind"], "fetched");
+        assert_eq!(
+            child.renderer_last_fetch().await.unwrap()["kind"],
+            "unavailable"
+        );
+        fs::write(
+            child.git_directory().await.unwrap().join("FETCH_HEAD"),
+            "other\n",
+        )
+        .unwrap();
+        assert_eq!(
+            child.renderer_last_fetch().await.unwrap()["kind"],
+            "fetched"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
     async fn reads_apply_backend_rebase_from_real_conflict() {
-        let root = std::env::temp_dir().join(format!("desktop-apply-rebase-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-apply-rebase-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let git = |args: &[&str]| {
-            Command::new("git").arg("-C").arg(&root).args(args).output().unwrap()
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap()
         };
         let run = |args: &[&str]| {
             let output = git(args);
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             String::from_utf8(output.stdout).unwrap().trim().to_owned()
         };
         run(&["init", "-q", "-b", "main"]);
@@ -524,20 +579,36 @@ mod cherry_pick_state_tests {
         let repository = Repository::open(&root).await.unwrap();
         let state = repository.renderer_rebase_state().await.unwrap();
         assert_eq!(state["head"], original);
-        assert_eq!(state["progress"]["original"].as_str().unwrap().trim(), original);
-        assert_eq!(state["progress"]["branch"].as_str().unwrap().trim(), "refs/heads/topic");
+        assert_eq!(
+            state["progress"]["original"].as_str().unwrap().trim(),
+            original
+        );
+        assert_eq!(
+            state["progress"]["branch"].as_str().unwrap().trim(),
+            "refs/heads/topic"
+        );
         assert_eq!(state["progress"]["onto"].as_str().unwrap().trim(), onto);
         assert_eq!(state["progress"]["current"].as_str().unwrap().trim(), "1");
         assert_eq!(state["progress"]["total"].as_str().unwrap().trim(), "1");
-        assert_eq!(repository.status_context().await.unwrap()["rebaseInternalState"], json!({
-            "originalBranchTip":original,"targetBranch":"topic","baseBranchTip":onto
-        }));
+        assert_eq!(
+            repository.status_context().await.unwrap()["rebaseInternalState"],
+            json!({
+                "originalBranchTip":original,"targetBranch":"topic","baseBranchTip":onto
+            })
+        );
         // Displaying apply-backend progress must not authorize continuation:
         // the existing mutation certificate only covers the merge backend.
         fs::write(root.join("file"), "resolved\n").unwrap();
         run(&["add", "--", "file"]);
-        let error = repository.renderer_rebase_continue_preview(&original).await.unwrap_err();
-        assert!(error.to_string().contains("Only merge-backend rebase continuation"));
+        let error = repository
+            .renderer_rebase_continue_preview(&original)
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Only merge-backend rebase continuation")
+        );
 
         let apply = root.join(".git/rebase-apply");
         fs::write(apply.join("last"), vec![b'x'; 8193]).unwrap();

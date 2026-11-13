@@ -322,7 +322,9 @@ impl Repository {
         ensure(&output)?;
         if let Some(permit) = permit {
             if output.stdout.len() > crate::comparison_snapshots::MAX_BYTES {
-                return Ok(json!({"kind":"unrenderable", "prefix":STANDARD.encode(&output.stdout[..output.stdout.len().min(64 * 1024)])}));
+                return Ok(
+                    json!({"kind":"unrenderable", "prefix":STANDARD.encode(&output.stdout[..output.stdout.len().min(64 * 1024)])}),
+                );
             }
             let cancellation = crate::cancellation::Cancellation::current();
             cancellation.check()?;
@@ -500,17 +502,26 @@ impl Repository {
 
     /// Resolve once, then capture a byte-exact bounded blob for session-owned
     /// chunk reads. Larger blobs retain the legacy streaming path.
-    pub(crate) async fn renderer_blob_snapshot(&self, revision: &str, path: GitPath) -> Result<Value> {
-        let Some((oid, size, _)) = self.read_renderer_blob(revision, path, 0, 0, None).await? else {
+    pub(crate) async fn renderer_blob_snapshot(
+        &self,
+        revision: &str,
+        path: GitPath,
+    ) -> Result<Value> {
+        let Some((oid, size, _)) = self.read_renderer_blob(revision, path, 0, 0, None).await?
+        else {
             return Ok(Value::Null);
         };
         if size > crate::comparison_snapshots::MAX_BYTES as u64 {
             return Ok(json!({"kind":"too_large"}));
         }
         let permit = crate::comparison_snapshots::reserve().await?;
-        let output = process::run_resolution_blob(&self.path, &args(&["cat-file", "blob", &oid])).await?;
+        let output =
+            process::run_resolution_blob(&self.path, &args(&["cat-file", "blob", &oid])).await?;
         ensure(&output)?;
-        anyhow::ensure!(output.stdout.len() as u64 == size, "blob size changed during read");
+        anyhow::ensure!(
+            output.stdout.len() as u64 == size,
+            "blob size changed during read"
+        );
         let cancellation = crate::cancellation::Cancellation::current();
         cancellation.check()?;
         let result = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;

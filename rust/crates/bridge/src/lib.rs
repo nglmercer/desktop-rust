@@ -307,7 +307,9 @@ enum ControlOperation {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum ManagementOperation {
     AvailableEditors,
-    OpenGlobalGitConfigEditor { editor_name: String },
+    OpenGlobalGitConfigEditor {
+        editor_name: String,
+    },
     GitVersion,
     GitGlobalConfigPath,
     OpenEditor {
@@ -472,31 +474,11 @@ enum CreationStatusAction {
 fn retained_staging_path_value(path: &std::path::Path) -> serde_json::Value {
     let value = match path.to_str() {
         Some(text) => desktop_core::GitPath::Text(text.to_owned()),
-        None => desktop_core::GitPath::Bytes { bytes: path.as_os_str().as_encoded_bytes().to_vec() },
+        None => desktop_core::GitPath::Bytes {
+            bytes: path.as_os_str().as_encoded_bytes().to_vec(),
+        },
     };
     json!(value)
-}
-
-#[cfg(test)]
-mod retained_staging_tests {
-    use super::*;
-
-    #[test]
-    fn text_path_keeps_the_existing_git_path_shape() {
-        assert_eq!(retained_staging_path_value(std::path::Path::new("/tmp/stage")), json!("/tmp/stage"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn non_utf8_path_round_trips_without_losing_bytes() {
-        use std::os::unix::ffi::OsStringExt;
-        let bytes = b"/tmp/clone-\xff".to_vec();
-        let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(bytes.clone()));
-        let value = retained_staging_path_value(&path);
-        assert_eq!(value, json!({"bytes": bytes}));
-        let decoded: desktop_core::GitPath = serde_json::from_value(value).unwrap();
-        assert_eq!(desktop_core::directory_path(decoded).unwrap(), path);
-    }
 }
 
 async fn execute(
@@ -631,11 +613,11 @@ async fn execute(
             let editor = if let Some(name) = editor_name {
                 desktop_core::ExternalEditor::Named { name }
             } else {
-                cancellation::blocking(move || registry.preferences().read()).await?.external_editor
+                cancellation::blocking(move || registry.preferences().read())
+                    .await?
+                    .external_editor
             };
-            repository
-                .open_editor(path, editor)
-                .await
+            repository.open_editor(path, editor).await
         }
         ApplicationOperation::Management(GetPreferences) => {
             let store = registry.preferences();
@@ -654,11 +636,20 @@ async fn execute(
                 .await?
                 .public_view()
         }
-        ApplicationOperation::Management(ListCloneRecoveries { report_recovery_status }) => {
-            anyhow::ensure!(expected_repository.is_none(), "Clone recovery cannot use a selected-repository binding");
-            let mut records = cancellation::blocking(move || registry.clone_recovery_records()).await?;
+        ApplicationOperation::Management(ListCloneRecoveries {
+            report_recovery_status,
+        }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "Clone recovery cannot use a selected-repository binding"
+            );
+            let mut records =
+                cancellation::blocking(move || registry.clone_recovery_records()).await?;
             if !report_recovery_status {
-                for record in records.as_array_mut().ok_or_else(|| anyhow::anyhow!("Clone recovery response is invalid"))? {
+                for record in records
+                    .as_array_mut()
+                    .ok_or_else(|| anyhow::anyhow!("Clone recovery response is invalid"))?
+                {
                     if let Some(record) = record.as_object_mut() {
                         record.remove("recoverable");
                         record.remove("conflicted");
@@ -667,19 +658,39 @@ async fn execute(
             }
             Ok(records)
         }
-        ApplicationOperation::Management(RecoverClone { recovery_id, report_retained_staging }) => {
-            anyhow::ensure!(expected_repository.is_none(), "Clone recovery cannot use a selected-repository binding");
-            anyhow::ensure!(uuid::Uuid::parse_str(&recovery_id).is_ok_and(|value| value.to_string() == recovery_id), "Invalid clone recovery ID");
-            let (record, retained) = desktop_core::recover_selected_clone_with_staging(registry, &recovery_id).await?;
+        ApplicationOperation::Management(RecoverClone {
+            recovery_id,
+            report_retained_staging,
+        }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "Clone recovery cannot use a selected-repository binding"
+            );
+            anyhow::ensure!(
+                uuid::Uuid::parse_str(&recovery_id)
+                    .is_ok_and(|value| value.to_string() == recovery_id),
+                "Invalid clone recovery ID"
+            );
+            let (record, retained) =
+                desktop_core::recover_selected_clone_with_staging(registry, &recovery_id).await?;
             let response: anyhow::Result<serde_json::Value> = (|| {
                 let mut response = serde_json::to_value(record)?;
                 if report_retained_staging {
-                    response.as_object_mut().ok_or_else(|| anyhow::anyhow!("Recovered clone response is invalid"))?
-                        .insert("retained_staging".into(), retained_staging_path_value(&retained));
+                    response
+                        .as_object_mut()
+                        .ok_or_else(|| anyhow::anyhow!("Recovered clone response is invalid"))?
+                        .insert(
+                            "retained_staging".into(),
+                            retained_staging_path_value(&retained),
+                        );
                 }
                 Ok(response)
             })();
-            response.map_err(|_| anyhow::anyhow!("Clone was recovered and saved; inspect the destination before retrying"))
+            response.map_err(|_| {
+                anyhow::anyhow!(
+                    "Clone was recovered and saved; inspect the destination before retrying"
+                )
+            })
         }
         ApplicationOperation::Management(RepositorySafeFetchRemotes { path }) => {
             anyhow::ensure!(
@@ -898,14 +909,39 @@ async fn execute(
             state.changes.send_replace(snapshot.clone());
             Ok(snapshot)
         }
-        ApplicationOperation::Management(CloneRepository { url, path, branch, default_branch, recursive, report_progress, report_retained_staging, account: Some(account) }) => {
-            anyhow::ensure!(expected_repository.is_none(), "Clone cannot use a selected-repository binding");
+        ApplicationOperation::Management(CloneRepository {
+            url,
+            path,
+            branch,
+            default_branch,
+            recursive,
+            report_progress,
+            report_retained_staging,
+            account: Some(account),
+        }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "Clone cannot use a selected-repository binding"
+            );
             let destination = desktop_core::directory_path(path)?;
-            let assigned = desktop_core::AccountAssignment::Assigned { host: account.host.to_ascii_lowercase(), login: account.login.clone(), id: account.id };
+            let assigned = desktop_core::AccountAssignment::Assigned {
+                host: account.host.to_ascii_lowercase(),
+                login: account.login.clone(),
+                id: account.id,
+            };
             let repository = desktop_core::clone_repository_selected(
-                registry.clone(), &url, &destination,
-                desktop_core::CloneOptions { branch, default_branch, recursive, report_progress }, account,
-            ).await?;
+                registry.clone(),
+                &url,
+                &destination,
+                desktop_core::CloneOptions {
+                    branch,
+                    default_branch,
+                    recursive,
+                    report_progress,
+                },
+                account,
+            )
+            .await?;
             let finished: anyhow::Result<serde_json::Value> = async {
                 let account_view = repository.execute(Operation::RepositoryAccount).await?;
                 let bound_record = account_view["scope_id"].as_str().ok_or_else(|| anyhow::anyhow!("Clone account binding is unavailable"))?.to_owned();
@@ -925,7 +961,11 @@ async fn execute(
                 }
                 Ok(response)
             }.await;
-            finished.map_err(|_| anyhow::anyhow!("Clone completed and was saved; inspect the destination before retrying"))
+            finished.map_err(|_| {
+                anyhow::anyhow!(
+                    "Clone completed and was saved; inspect the destination before retrying"
+                )
+            })
         }
         ApplicationOperation::Management(operation) => {
             let selecting = matches!(operation, SelectRepository { .. });
@@ -946,18 +986,22 @@ async fn execute(
                     report_retained_staging,
                     account,
                 } => {
-                    anyhow::ensure!(!report_retained_staging, "Retained staging is available only for selected-account clones");
+                    anyhow::ensure!(
+                        !report_retained_staging,
+                        "Retained staging is available only for selected-account clones"
+                    );
                     let destination = desktop_core::directory_path(path)?;
                     let options = desktop_core::CloneOptions {
-                            branch,
-                            default_branch,
-                            recursive,
-                            report_progress,
-                        };
+                        branch,
+                        default_branch,
+                        recursive,
+                        report_progress,
+                    };
                     if account.is_some() {
                         anyhow::bail!("Selected-account clone is not available yet")
                     } else {
-                        desktop_core::clone_repository_with_options(&url, &destination, options).await?
+                        desktop_core::clone_repository_with_options(&url, &destination, options)
+                            .await?
                     }
                 }
                 _ => unreachable!("handled above"),
@@ -1230,5 +1274,30 @@ impl Active {
 impl Drop for Active {
     fn drop(&mut self) {
         self.cancellation.cancel();
+    }
+}
+
+#[cfg(test)]
+mod retained_staging_tests {
+    use super::*;
+
+    #[test]
+    fn text_path_keeps_the_existing_git_path_shape() {
+        assert_eq!(
+            retained_staging_path_value(std::path::Path::new("/tmp/stage")),
+            json!("/tmp/stage")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_path_round_trips_without_losing_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+        let bytes = b"/tmp/clone-\xff".to_vec();
+        let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(bytes.clone()));
+        let value = retained_staging_path_value(&path);
+        assert_eq!(value, json!({"bytes": bytes}));
+        let decoded: desktop_core::GitPath = serde_json::from_value(value).unwrap();
+        assert_eq!(desktop_core::directory_path(decoded).unwrap(), path);
     }
 }
