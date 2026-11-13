@@ -1,11 +1,17 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import {
   getCommitMode,
   storeCommitMode,
 } from '../../src/lib/stores/helpers/commit-mode-storage'
 import { Repository } from '../../src/models/repository'
 import { createTestRepositoryStateCache } from '../helpers/app-store-test-harness'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 function createRepository(id: number) {
   return new Repository(`/repositories/${id}`, id, null, false)

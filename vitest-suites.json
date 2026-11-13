@@ -200,5 +200,9 @@
   "app/test/unit/is-application-bundle-test.ts",
   "app/test/unit/find-forked-remotes-to-prune-test.ts",
   "app/test/unit/stores/updates/update-conflict-state-test.ts",
-  "app/test/unit/stores/updates/update-changed-files-test.ts"
+  "app/test/unit/stores/updates/update-changed-files-test.ts",
+  "app/test/unit/copilot-byok-test.ts",
+  "app/test/unit/local-storage-test.ts",
+  "app/test/unit/commit-mode-storage-test.ts",
+  "app/test/unit/assisted-commit-push-storage-test.ts"
 ]

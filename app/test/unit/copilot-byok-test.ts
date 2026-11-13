@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, describe, it } from 'node:test'
+import { afterEach, describe, it, vi } from 'vitest'
 import {
   encodeModelKey,
   isLocalBaseUrl,
@@ -10,6 +10,8 @@ import {
   saveBYOKProviders,
   type IBYOKProvider,
 } from '../../src/lib/copilot/byok'
+
+vi.mock('keytar', () => ({ default: {} }))
 
 const StorageKey = 'copilot-byok-providers'
 
