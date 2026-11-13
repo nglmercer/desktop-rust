@@ -1,10 +1,13 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import { Repository } from '../../src/models/repository'
 import { GitStoreCache } from '../../src/lib/stores/git-store-cache'
 import { shell } from '../helpers/test-app-shell'
 import { TestStatsStore } from '../helpers/test-stats-store'
 import noop from 'lodash/noop'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('GitStoreCache', () => {
   it('returns same instance of GitStore', () => {

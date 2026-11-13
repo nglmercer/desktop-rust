@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import {
   createTestStores,
@@ -8,6 +8,9 @@ import {
 } from '../helpers/app-store-test-harness'
 import { Account } from '../../src/models/account'
 import { getDotComAPIEndpoint } from '../../src/lib/api'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('app-store-test-harness', () => {
   describe('createTestStores', () => {
