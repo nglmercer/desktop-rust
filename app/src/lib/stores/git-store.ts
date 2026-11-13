@@ -1657,13 +1657,14 @@ export class GitStore extends BaseStore {
     branch: Branch,
     options?: MergeOptions
   ): Promise<MergeResult | undefined> {
-    if (this.tip.kind !== TipState.Valid) {
+    const tip = this.tip
+    if (tip.kind !== TipState.Valid) {
       throw new Error(
         `unable to merge as tip state is '${this.tip.kind}' and the application expects the repository to be on a branch currently`
       )
     }
 
-    const currentBranch = this.tip.branch.name
+    const currentBranch = tip.branch.name
     let aborted = false
     const onHookFailure = options?.onHookFailure
 
@@ -1679,6 +1680,11 @@ export class GitStore extends BaseStore {
                     aborted = result === 'abort'
                     return result
                   }),
+        }, {
+          sourceRef: branch.ref,
+          sourceHead: branch.tip.sha,
+          currentRef: tip.branch.ref,
+          currentHead: tip.branch.tip.sha,
         }).catch(e => (aborted ? MergeResult.Failed : Promise.reject(e))),
       {
         gitContext: {

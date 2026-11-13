@@ -2581,6 +2581,30 @@ export class BackendClient {
     if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the squash'}; inspect the repository`, retryable: false })
   }
 
+  /** Start a reviewed merge without replaying an uncertain result. */
+  async startRepositoryMerge(repositoryPath: string, request: { readonly source_ref: string; readonly source_head: string; readonly current_ref: string; readonly current_head: string; readonly squash: boolean; readonly no_verify: boolean }): Promise<'complete' | 'conflict' | 'up_to_date'> {
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
+    if (!oid.test(request.current_head) || !oid.test(request.source_head) || request.source_head.length !== request.current_head.length || !(request.source_ref.startsWith('refs/heads/') || request.source_ref.startsWith('refs/remotes/')) || !request.current_ref.startsWith('refs/heads/')) throw new BackendError({ code: 'invalid_request', message: 'Reviewed source and current branches are required', retryable: false })
+    const call = (method: 'renderer_merge_start_preview' | 'renderer_merge_start', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'start_merge', repository_path: repositoryPath, operation: { method, request, ...extra } } })
+      : this.repositoryRead(repositoryPath, method, { request, ...extra })
+    const preview = await call('renderer_merge_start_preview')
+    if (!isRecord(preview) || !isRecord(preview.request) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid merge review', retryable: false })
+    const reviewed = preview.request
+    if (Object.entries(request).some(([key, value]) => reviewed[key] !== value)) throw new BackendError({ code: 'invalid_response', message: 'Invalid merge review', retryable: false })
+    let result: unknown
+    try { result = await call('renderer_merge_start', { basis: preview.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect merge state, branch and history before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Merge outcome is uncertain; inspect the repository', retryable: false })
+    if (result.code === 0 && result.outcome === 'complete') return 'complete'
+    if (result.code === 0 && result.outcome === 'up_to_date') return 'up_to_date'
+    if (result.code !== 0 && result.outcome === 'conflict') return 'conflict'
+    throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to complete merge'}; inspect merge state, branch and history before retrying`, retryable: false })
+  }
+
   /** Start a reviewed rebase without replaying an uncertain result. */
   async startRepositoryRebase(repositoryPath: string, request: { readonly base_ref: string; readonly base_head: string; readonly target_ref: string; readonly target_head: string; readonly current_head: string; readonly current_branch: string | null }): Promise<'complete' | 'conflict' | 'up_to_date'> {
     const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/

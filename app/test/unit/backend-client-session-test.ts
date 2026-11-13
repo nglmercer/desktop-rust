@@ -606,6 +606,21 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.checkoutDetachedCommit('/repo', oid, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
   })
 
+  it('reviews merge start and never replays an interrupted mutation', async () => {
+    const request = { source_ref: 'refs/remotes/origin/main', source_head: 'a'.repeat(40), current_ref: 'refs/heads/main', current_head: 'b'.repeat(40), squash: true, no_verify: false }
+    const preview = { request, basis: 'c'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ outcome: 'complete', code: 0, stdout: '', stderr: '' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.startRepositoryMerge('/repo', request)).resolves.toBe('complete')
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'start_merge', repository_path: '/repo', operation: { method: 'renderer_merge_start', request, basis: preview.basis } } }))
+    invoke.mockResolvedValueOnce({ ...preview, request: { ...request, squash: false } })
+    await expect(client.startRepositoryMerge('/repo', request)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.startRepositoryMerge('/repo', request)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('inspect merge state') })
+    expect(invoke).toHaveBeenCalledTimes(5)
+  })
+
   it('reviews rebase start and never replays an interrupted mutation', async () => {
     const head = 'a'.repeat(40)
     const request = { base_ref: 'refs/remotes/origin/main', base_head: 'b'.repeat(40), target_ref: 'refs/heads/-topic', target_head: 'c'.repeat(40), current_head: head, current_branch: null }

@@ -2373,6 +2373,18 @@ hooks and performs the existing message cleanup; cancellation is reported as
 an uncertain commit outcome. Other commit, rebase and cherry-pick execution
 and hook-interaction gates remain open.
 
+## Reviewed merge start
+
+Wry and WebSocket start ordinary and squash merges through Rust. The review
+binds source and current branch refs and commit IDs, working files, index and
+Git operation state. The short source name is checked for ambiguity before Git
+uses it, preserving Git's normal merge message; unresolved index entries are
+refused before starting. Squash merges also refuse preexisting staged changes
+before creating the squash commit. Conflicts leave Git's merge or squash state
+intact, and interrupted outcomes require inspection. Independent Git writers
+can race between review and Git locks; interactive hook handling, streamed
+output, Electron fallback and cross-platform parity remain open.
+
 ## Squash merge abort
 
 The native squash abort verifies the selected branch, tip, squash marker, and

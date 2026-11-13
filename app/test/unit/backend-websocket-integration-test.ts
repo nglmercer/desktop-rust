@@ -1134,22 +1134,9 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         '-m',
         'main',
       ])
-      expect(() =>
-        execFileSync(
-          'git',
-          [
-            '-C',
-            firstRepository,
-            '-c',
-            'user.name=Test',
-            '-c',
-            'user.email=test@example.com',
-            'merge',
-            'conflicting',
-          ],
-          { stdio: 'pipe' }
-        )
-      ).toThrow()
+      const mergeRequest = { source_ref: 'refs/heads/conflicting', source_head: execFileSync('git', ['-C', firstRepository, 'rev-parse', 'refs/heads/conflicting'], { encoding: 'utf8' }).trim(), current_ref: execFileSync('git', ['-C', firstRepository, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim(), current_head: execFileSync('git', ['-C', firstRepository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), squash: false, no_verify: false }
+      await expect(client.startRepositoryMerge(firstRepository, { ...mergeRequest, source_head: '0'.repeat(40) })).rejects.toThrow()
+      await expect(client.startRepositoryMerge(firstRepository, mergeRequest)).resolves.toBe('conflict')
       const conflict = await client.repositoryConflictDetails(
         firstRepository,
         'merge'

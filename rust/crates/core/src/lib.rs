@@ -50,6 +50,7 @@ mod remote_discovery;
 pub use remote_discovery::{ManagedRemoteAction, safe_fetch_remotes, safe_remote_url};
 mod refs;
 mod renderer_cherry_pick;
+mod renderer_merge;
 mod renderer_rebase;
 mod renderer_revert;
 pub use refs::symbolic_ref;
@@ -674,6 +675,12 @@ impl Repository {
             }
             Operation::RendererRebaseStartPreview { request } => {
                 return self.renderer_rebase_start_preview(&request).await;
+            }
+            Operation::RendererMergeStartPreview { request } => {
+                return self.renderer_merge_start_preview(&request).await;
+            }
+            Operation::RendererMergeStart { request, basis } => {
+                return self.renderer_merge_start(&request, &basis).await;
             }
             Operation::RendererRebaseStart { request, basis } => {
                 return self.renderer_rebase_start(&request, &basis).await;
@@ -1320,6 +1327,8 @@ impl Repository {
             | RendererCherryPickContinue { .. }
             | RendererRebaseContinuePreview { .. }
             | RendererRebaseStartPreview { .. }
+            | RendererMergeStartPreview { .. }
+            | RendererMergeStart { .. }
             | RendererRebaseStart { .. }
             | RendererRebaseContinue { .. }
             | CheckoutHistory

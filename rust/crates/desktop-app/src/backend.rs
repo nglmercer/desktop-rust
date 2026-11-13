@@ -157,6 +157,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    StartMerge {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -456,6 +460,9 @@ impl Backend {
         | GitInfoOperation::StartRebase {
             repository_path, ..
         }
+        | GitInfoOperation::StartMerge {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -692,6 +699,16 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported rebase start operation".into(),
+            ));
+        }
+        if let GitInfoOperation::StartMerge { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererMergeStartPreview { .. } | Operation::RendererMergeStart { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported merge start operation".into(),
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
@@ -1476,6 +1493,10 @@ impl Backend {
                         operation: Operation::RendererRebaseStart { .. },
                         ..
                     }
+                    | GitInfoOperation::StartMerge {
+                        operation: Operation::RendererMergeStart { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1664,6 +1685,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::StartRebase { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::StartMerge { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2026,11 +2054,20 @@ mod tests {
             git(&["checkout", "-qb", "side"]);
             fs::write(root.join("file"), "side\n").unwrap();
             git(&["commit", "-qam", "side"]);
+            let source_head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
             git(&["checkout", "-q", "-"]);
             fs::write(root.join("file"), "main\n").unwrap();
             git(&["commit", "-qam", "main"]);
-            assert!(!Command::new("git").arg("-C").arg(&root).args(["merge", "side"]).output().unwrap().status.success());
             let backend = Backend::new(16).unwrap();
+            let current_head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
+            let current_ref = String::from_utf8(git(&["symbolic-ref", "HEAD"])).unwrap().trim().to_owned();
+            let request = json!({"source_ref":"refs/heads/side","source_head":source_head,"current_ref":current_ref,"current_head":current_head,"squash":false,"no_verify":false});
+            let start = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"start_merge","repository_path":root,"operation":operation}})]);
+            assert!(start(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(start(json!({"method":"renderer_merge_start_preview","request":request})).unwrap()).unwrap();
+            assert!(backend.read(start(json!({"method":"renderer_merge_start","request":request,"basis":"bad"})).unwrap()).is_err());
+            let result = backend.read(start(json!({"method":"renderer_merge_start","request":request,"basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(result["outcome"], "conflict");
             let call = |operation: Value| backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":operation}})]).unwrap());
             let detail = call(json!({"method":"conflict_detail","path":"file"})).unwrap();
             let basis = detail["basis"].as_str().unwrap();

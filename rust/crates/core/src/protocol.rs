@@ -306,6 +306,13 @@ pub enum Operation {
     RendererRebaseStartPreview {
         request: RendererRebaseStartRequest,
     },
+    RendererMergeStartPreview {
+        request: RendererMergeStartRequest,
+    },
+    RendererMergeStart {
+        request: RendererMergeStartRequest,
+        basis: String,
+    },
     RendererRebaseStart {
         request: RendererRebaseStartRequest,
         basis: String,
@@ -980,6 +987,17 @@ pub struct RendererRebaseStartRequest {
     pub target_head: String,
     pub current_head: String,
     pub current_branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererMergeStartRequest {
+    pub source_ref: String,
+    pub source_head: String,
+    pub current_ref: String,
+    pub current_head: String,
+    pub squash: bool,
+    pub no_verify: bool,
 }
 
 fn history_limit() -> u16 {

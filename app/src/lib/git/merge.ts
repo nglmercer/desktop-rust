@@ -32,8 +32,15 @@ export type MergeOptions = {
 export async function merge(
   repository: Repository,
   branch: string,
-  options?: MergeOptions
+  options?: MergeOptions,
+  expected?: { readonly sourceRef: string; readonly sourceHead: string; readonly currentRef: string; readonly currentHead: string }
 ): Promise<MergeResult> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    if (expected === undefined) throw new Error('Refresh the current and source branches before merging')
+    const request = { source_ref: expected.sourceRef, source_head: expected.sourceHead, current_ref: expected.currentRef, current_head: expected.currentHead, squash: options?.squash === true, no_verify: options?.noVerify === true }
+    const result = await withRepositoryGitOperation(repository.path, 'mutation', () => backend().startRepositoryMerge(repository.path, request), true)
+    return result === 'conflict' ? MergeResult.Failed : result === 'up_to_date' ? MergeResult.AlreadyUpToDate : MergeResult.Success
+  }
   const onTerminalOutputAvailable = options?.onTerminalOutputAvailable
     ? createMultiOperationTerminalOutputCallback(
         options?.onTerminalOutputAvailable
