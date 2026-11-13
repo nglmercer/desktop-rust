@@ -149,7 +149,7 @@ impl Repository {
         let fields: Vec<_> = output.stdout.split(|byte| *byte == 0).collect();
         anyhow::ensure!(fields.len().is_multiple_of(2), "Invalid author output");
         let mut authors = Vec::with_capacity(fields.len() / 2);
-        for pair in fields.chunks_exact(2) {
+        for pair in fields.chunks(2) {
             let oid = std::str::from_utf8(pair[0])?;
             anyhow::ensure!(
                 matches!(oid.len(), 40 | 64)
@@ -207,6 +207,10 @@ impl Repository {
         .await
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Comparison options correspond to distinct protocol fields"
+    )]
     async fn renderer_compare_diff_inner(
         &self,
         before: &str,

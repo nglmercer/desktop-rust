@@ -51,7 +51,7 @@ fn open_private_sidecar(path: &Path) -> Result<Option<fs::File>> {
     }
     match options.open(path) {
         Ok(file) => Ok(Some(file)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => bail!("Cannot safely inspect private registry metadata"),
     }
 }
@@ -1173,6 +1173,7 @@ fn publish_clone_intent_before_rename(registry: &Registry, intent: &CloneIntent,
     use cap_std::fs::Dir;
     use std::os::unix::fs::MetadataExt;
     use std::{ffi::{CString, OsStr}, os::{fd::AsRawFd, unix::ffi::OsStrExt}};
+    #[allow(clippy::unnecessary_cast)] // libc field widths differ on 32-bit targets.
     fn identity(directory: &Dir, name: &OsStr) -> Result<Option<(u64, u64)>> {
         let name = CString::new(name.as_bytes()).context("Invalid clone path")?;
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
@@ -1201,33 +1202,30 @@ fn publish_clone_intent_before_rename(registry: &Registry, intent: &CloneIntent,
     let source_dir = Dir::from_std_file(source_handle);
     let target_dir = Dir::from_std_file(target_handle);
     let expected = (intent.device, intent.inode);
-    match identity(&source_dir, source_name)? {
-        Some(actual) => {
-            anyhow::ensure!(actual == expected, "Clone staging directory changed; inspect it before recovery");
-            let pinned_source = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), source_dir.as_raw_fd())).join(source_name);
-            verify_clone_certificate(&pinned_source, intent)?;
-            anyhow::ensure!(identity(&source_dir, source_name)? == Some(expected), "Clone staging directory changed during review");
-            before_lock()?;
-            // Legacy writers use this same lock. Keep it through the short
-            // identity check and rename, never through the tree scan above.
-            let lock = crate::storage::lock(&registry.path)?;
-            let state = registry.read()?;
-            anyhow::ensure!(state.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
-            let saved = state.clone_intents.iter().find(|saved| saved.id == intent.id).context("Clone recovery record changed")?;
-            anyhow::ensure!(saved.phase == "ready" && saved.certificate == intent.certificate && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && saved.parent_identity == intent.parent_identity && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)?, "Clone recovery record changed");
-            anyhow::ensure!(identity(&source_dir, source_name)? == Some(expected), "Clone staging directory changed during review");
-            after_recheck()?;
-            crate::cancellation::Cancellation::current().check()?;
-            let source = CString::new(source_name.as_bytes()).context("Invalid clone staging name")?;
-            let target = CString::new(target_name.as_bytes()).context("Invalid clone destination name")?;
-            // Both names are single path components and both parent FDs remain live.
-            let result = unsafe { libc::renameat2(source_dir.as_raw_fd(), source.as_ptr(), target_dir.as_raw_fd(), target.as_ptr(), libc::RENAME_NOREPLACE as _) };
-            if result != 0 { return Err(std::io::Error::last_os_error()).context("Clone destination cannot be published without replacing existing data"); }
-            drop(lock);
-            source_dir.open(".")?.into_std().sync_all()?;
-            target_dir.open(".")?.into_std().sync_all()?;
-        }
-        None => {}
+    if let Some(actual) = identity(&source_dir, source_name)? {
+        anyhow::ensure!(actual == expected, "Clone staging directory changed; inspect it before recovery");
+        let pinned_source = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), source_dir.as_raw_fd())).join(source_name);
+        verify_clone_certificate(&pinned_source, intent)?;
+        anyhow::ensure!(identity(&source_dir, source_name)? == Some(expected), "Clone staging directory changed during review");
+        before_lock()?;
+        // Legacy writers use this same lock. Keep it through the short
+        // identity check and rename, never through the tree scan above.
+        let lock = crate::storage::lock(&registry.path)?;
+        let state = registry.read()?;
+        anyhow::ensure!(state.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
+        let saved = state.clone_intents.iter().find(|saved| saved.id == intent.id).context("Clone recovery record changed")?;
+        anyhow::ensure!(saved.phase == "ready" && saved.certificate == intent.certificate && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && saved.parent_identity == intent.parent_identity && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)?, "Clone recovery record changed");
+        anyhow::ensure!(identity(&source_dir, source_name)? == Some(expected), "Clone staging directory changed during review");
+        after_recheck()?;
+        crate::cancellation::Cancellation::current().check()?;
+        let source = CString::new(source_name.as_bytes()).context("Invalid clone staging name")?;
+        let target = CString::new(target_name.as_bytes()).context("Invalid clone destination name")?;
+        // Both names are single path components and both parent FDs remain live.
+        let result = unsafe { libc::renameat2(source_dir.as_raw_fd(), source.as_ptr(), target_dir.as_raw_fd(), target.as_ptr(), libc::RENAME_NOREPLACE as _) };
+        if result != 0 { return Err(std::io::Error::last_os_error()).context("Clone destination cannot be published without replacing existing data"); }
+        drop(lock);
+        source_dir.open(".")?.into_std().sync_all()?;
+        target_dir.open(".")?.into_std().sync_all()?;
     }
     anyhow::ensure!(identity(&target_dir, target_name)? == Some(expected), "Published clone differs from the reviewed staging directory");
     verify_clone_identity(&intent.destination, intent.device, intent.inode)?;

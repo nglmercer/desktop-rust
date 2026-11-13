@@ -454,6 +454,10 @@ impl Repository {
         Ok((snapshot, result))
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Selection and review options are independently verified"
+    )]
     async fn capture_selected_worktree(
         &self,
         paths: Vec<GitPath>,

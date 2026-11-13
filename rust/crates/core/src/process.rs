@@ -141,7 +141,7 @@ async fn run_clone_inner(
         command.env("GIT_ALLOW_PROTOCOL", filtered);
     }
     let sender = report_progress
-        .then(|| crate::hook_progress::sender())
+        .then(crate::hook_progress::sender)
         .flatten();
     let emit_clone_progress = sender.is_some();
     let (sender, request_id) = sender.unwrap_or_else(|| {
@@ -887,6 +887,10 @@ enum OutputSlice {
     BoundedBlob,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Process I/O channels and limits have separate semantics"
+)]
 async fn run_command_inner(
     path: &Path,
     mut command: Command,
@@ -1215,26 +1219,25 @@ async fn read_clone_output(
         }
         for &byte in &buffer[..count] {
             if byte == b'\r' || byte == b'\n' {
-                if !discarded {
-                    if let Some((phase, percent)) = clone_progress_line(&line)
-                        && !seen[phase][(percent / 20) as usize]
-                    {
-                        seen[phase][(percent / 20) as usize] = true;
-                        let prefix = if CLONE_PROGRESS_PHASES[phase] == "Compressing objects" {
-                            "remote: "
-                        } else {
-                            ""
-                        };
-                        let progress = format!(
-                            "{prefix}{}: {percent}% ({percent}/100)\r",
-                            CLONE_PROGRESS_PHASES[phase]
-                        );
-                        let event = crate::hook_progress::CommitEvent::FetchOutput {
-                            stream: "stderr",
-                            data: STANDARD.encode(progress),
-                        };
-                        let _ = live.sender.try_send((live.request_id, event));
-                    }
+                if !discarded
+                    && let Some((phase, percent)) = clone_progress_line(&line)
+                    && !seen[phase][(percent / 20) as usize]
+                {
+                    seen[phase][(percent / 20) as usize] = true;
+                    let prefix = if CLONE_PROGRESS_PHASES[phase] == "Compressing objects" {
+                        "remote: "
+                    } else {
+                        ""
+                    };
+                    let progress = format!(
+                        "{prefix}{}: {percent}% ({percent}/100)\r",
+                        CLONE_PROGRESS_PHASES[phase]
+                    );
+                    let event = crate::hook_progress::CommitEvent::FetchOutput {
+                        stream: "stderr",
+                        data: STANDARD.encode(progress),
+                    };
+                    let _ = live.sender.try_send((live.request_id, event));
                 }
                 line.clear();
                 discarded = false;

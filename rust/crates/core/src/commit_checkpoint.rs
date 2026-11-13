@@ -498,6 +498,7 @@ fn verify_checkpoint_files(base: &Path, record: &Checkpoint, hash_length: usize)
             u64::MAX,
             Some(&object.oid),
         )?;
+        #[expect(clippy::collapsible_if, reason = "Let chains require Rust 1.88")]
         if let Some(pointer) = crate::lfs::pointer(&small).filter(|pointer| pointer.size != 0) {
             if let Some(size) = pointers.insert(pointer.oid, pointer.size) {
                 anyhow::ensure!(size == pointer.size, "inconsistent saved LFS pointer");
@@ -673,6 +674,10 @@ impl Repository {
 
     /// Retain the exact reviewed index and all original staged data. This is
     /// preparation only: it does not publish an index or create a commit.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Commit review fields mirror the scoped protocol request"
+    )]
     pub(crate) async fn prepare_selected_commit(
         &self,
         paths: Vec<GitPath>,

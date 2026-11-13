@@ -746,6 +746,10 @@ impl Repository {
         ))
         .await
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Checkout decisions and recovery identifiers remain explicit"
+    )]
     async fn checkout_execute_id(
         &self,
         plan: Plan,

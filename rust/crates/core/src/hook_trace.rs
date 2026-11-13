@@ -161,7 +161,7 @@ impl Trace {
                             // A detached hook may keep writing after Git exits;
                             // do not wait indefinitely for an empty pipe.
                             for _ in 0..256 {
-                                match (&*fd.get_ref()).read(&mut buffer) {
+                                match fd.get_ref().read(&mut buffer) {
                                     Ok(0) => break,
                                     Ok(count) => decoder.feed(&buffer[..count]),
                                     Err(error) if error.kind() == ErrorKind::WouldBlock => break,
@@ -172,7 +172,7 @@ impl Trace {
                         }
                         ready = fd.readable() => {
                             let Ok(mut ready) = ready else { break; };
-                            match ready.try_io(|fd| (&*fd.get_ref()).read(&mut buffer)) {
+                            match ready.try_io(|fd| fd.get_ref().read(&mut buffer)) {
                                 Ok(Ok(0)) => break,
                                 Ok(Ok(count)) => decoder.feed(&buffer[..count]),
                                 Ok(Err(_)) => break,

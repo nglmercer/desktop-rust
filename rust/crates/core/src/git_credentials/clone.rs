@@ -108,6 +108,10 @@ impl Drop for Guard {
 /// Run only the network portion of a clone. No clone result is selected or
 /// persisted here. The caller owns binding the account, checkout and recovery.
 #[cfg(unix)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Pinned paths, handles, account, and options are checked separately"
+)]
 pub(crate) async fn clone_no_checkout(
     path: &Path,
     url: &str,
@@ -499,9 +503,11 @@ pub(super) fn secrets() -> Option<Vec<Vec<u8>>> {
             values.push(lease.capability.as_bytes().to_vec());
             values.extend(lease.secrets.iter().cloned());
             values.extend(
-                lease.config.iter().filter_map(|(_, value)| {
-                    (!value.is_empty()).then(|| value.as_bytes().to_vec())
-                }),
+                lease
+                    .config
+                    .iter()
+                    .filter(|(_, value)| !value.is_empty())
+                    .map(|(_, value)| value.as_bytes().to_vec()),
             );
             values
         })

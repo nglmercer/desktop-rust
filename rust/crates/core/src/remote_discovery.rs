@@ -327,9 +327,9 @@ pub(crate) fn safe_url(value: &str) -> bool {
     // Keep usernames restricted to the known `git@` spelling above: an
     // arbitrary username can itself contain a credential. Reject `ext::` and
     // other remote-helper syntax, and avoid ambiguous drive-relative paths.
-    if !value.contains("://") {
-        if let Some((host, path)) = value.split_once(':') {
-            if host.len() > 1
+    if !value.contains("://")
+        && value.split_once(':').is_some_and(|(host, path)| {
+            host.len() > 1
                 && host.as_bytes()[0].is_ascii_alphanumeric()
                 && host
                     .bytes()
@@ -337,10 +337,9 @@ pub(crate) fn safe_url(value: &str) -> bool {
                 && !path.is_empty()
                 && !path.starts_with(':')
                 && !path.contains(['?', '#'])
-            {
-                return true;
-            }
-        }
+        })
+    {
+        return true;
     }
     let Ok(parsed) = url::Url::parse(value) else {
         return false;
