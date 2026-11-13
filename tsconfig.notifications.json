@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "desktop-notifications": ["./vendor/desktop-notifications/lib/index.ts"],
+      "desktop-notifications/dist/*": ["./vendor/desktop-notifications/lib/*"]
+    }
+  }
+}

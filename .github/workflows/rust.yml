@@ -27,6 +27,7 @@ on:
       - 'app/test/vitest-setup.ts'
       - 'app/test/backend-transport-tsconfig.json'
       - 'script/test.mts'
+      - 'script/**'
       - 'script/test-discovery.mts'
       - 'script/generate-example-usage-data.mts'
       - 'script/highlighter-build.test.ts'
@@ -34,6 +35,9 @@ on:
       - 'script/crash-build.test.ts'
       - 'eslint-rules/**'
       - 'vendor/desktop-trampoline/**'
+      - 'vendor/desktop-notifications/lib/**'
+      - 'tsconfig.json'
+      - 'tsconfig.notifications.json'
       - 'biome.json'
       - 'vitest.config.ts'
       - 'vitest-suites.json'
@@ -80,6 +84,7 @@ on:
       - 'app/test/vitest-setup.ts'
       - 'app/test/backend-transport-tsconfig.json'
       - 'script/test.mts'
+      - 'script/**'
       - 'script/test-discovery.mts'
       - 'script/generate-example-usage-data.mts'
       - 'script/highlighter-build.test.ts'
@@ -87,6 +92,9 @@ on:
       - 'script/crash-build.test.ts'
       - 'eslint-rules/**'
       - 'vendor/desktop-trampoline/**'
+      - 'vendor/desktop-notifications/lib/**'
+      - 'tsconfig.json'
+      - 'tsconfig.notifications.json'
       - 'biome.json'
       - 'vitest.config.ts'
       - 'vitest-suites.json'
@@ -142,6 +150,8 @@ jobs:
         run: |
           npm run lint:biome
           npm run check:eslint
+          npm run check:types
+          npm run compile:script
           npm ci --prefix vendor/desktop-trampoline --no-audit --no-fund
           npm run lint --prefix vendor/desktop-trampoline
           npm test --prefix vendor/desktop-trampoline

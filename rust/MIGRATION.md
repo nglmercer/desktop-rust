@@ -24,9 +24,10 @@ headless Termux builds remain a separate path.
 Build and release scripts now use `tsx` rather than a direct `ts-node`
 dependency. Both remaining Webpack configurations were exercised with the
 new loader, but the complete Electron build is still blocked locally by
-missing native modules. `tsx` transpiles without type-checking; the existing
-`compile:script` configuration currently fails on unrelated project-wide
-JSX/global type errors and does not yet replace that implicit check.
+missing native modules. `tsx` transpiles without type-checking, so CI now runs
+both `check:types` and `compile:script` independently. The compiler resolves
+the legacy notification package's types from its checked-in TypeScript source;
+no Electron addon or generated `dist` directory is needed for those checks.
 
 Biome 2.6 now formats the application's SCSS, except for
 `app/styles/ui/_dialog.scss`, which remains under Prettier because Biome

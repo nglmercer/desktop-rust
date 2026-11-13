@@ -11,6 +11,7 @@
     "cli": "node --import tsx app/src/cli/main.ts",
     "check:eslint": "tsc -P eslint-rules/",
     "check:ipc": "tsc -P rust/crates/desktop-app/web/tsconfig.json",
+    "check:types": "tsc --noEmit -p tsconfig.json",
     "test:eslint": "node --import tsx script/test.mts eslint-rules",
     "test:script": "node --import tsx script/test.mts script",
     "test": "node --import tsx script/test.mts",

@@ -1,4 +1,5 @@
 {
+  "extends": "./tsconfig.notifications.json",
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "bundler",

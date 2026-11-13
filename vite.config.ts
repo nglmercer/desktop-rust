@@ -280,7 +280,6 @@ export default defineConfig({
     moveSourceMaps(),
     nodePolyfills({
       include: ['util','buffer','crypto','assert','events','querystring','timers','string_decoder'],
-      exclude: ['fs/promises','stream/promises','stream/consumers','fs','stream'],
       globals: { Buffer: true, global: true, process: true },
       protocolImports: true,
       // `crypto` is replaced for both import and require paths (the Copilot
@@ -373,7 +372,7 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
-        includePaths: [
+        loadPaths: [
           path.resolve(__dirname, 'app/styles'),
           path.resolve(__dirname, 'node_modules/.pnpm/primer-support@4.7.2/node_modules/primer-support'),
           path.resolve(__dirname, 'node_modules'),
