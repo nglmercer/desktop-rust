@@ -257,9 +257,7 @@ beforeEach(() => {
       0: rect,
       length: 1,
       item: index => (index === 0 ? rect : null),
-      *[Symbol.iterator]() {
-        yield rect
-      },
+      [Symbol.iterator]: () => [rect][Symbol.iterator](),
     }
   }
 
