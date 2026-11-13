@@ -104,8 +104,8 @@ use anyhow::{Context, Result, bail};
 pub use creation::CreationFile;
 pub use protocol::*;
 pub use registry::{
-    CloneOptions, Registry, SavedRepositories, SavedRepositoryRecord, clone_repository,
-    clone_repository_with_options, initialize, initialize_desktop_repository,
+    CloneAccount, CloneOptions, Registry, SavedRepositories, SavedRepositoryRecord, clone_repository,
+    clone_repository_selected, clone_repository_with_options, initialize, initialize_desktop_repository, recover_selected_clone,
 };
 use serde_json::Value;
 use std::{

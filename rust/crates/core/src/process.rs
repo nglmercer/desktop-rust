@@ -63,7 +63,9 @@ pub(crate) async fn run_clone(
     // Fixed diagnostics allow safe classification without forwarding Git's
     // potentially credential-bearing error output to the caller.
     command.env("LC_ALL", "C");
-    if let Some(value) = std::env::var_os("GIT_ALLOW_PROTOCOL") {
+    if crate::git_credentials::clone::active() {
+        command.env("GIT_ALLOW_PROTOCOL", "https");
+    } else if let Some(value) = std::env::var_os("GIT_ALLOW_PROTOCOL") {
         let value = value
             .into_string()
             .map_err(|_| anyhow::anyhow!("Invalid Git protocol allowlist"))?;

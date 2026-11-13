@@ -2528,22 +2528,37 @@ instead of raw Git output, which can contain credentials introduced by URL
 rewrites. Its WebSocket request accepts optional branch, initial default-branch
 and recursive-submodule settings while retaining the earlier nonrecursive
 defaults for old clients. These options are covered by real Git and WebSocket
-tests, including a rewritten external helper in a submodule. The endpoint
-still uses native Git credential configuration; it does not provide selected
-account isolation or recovery, and is not yet used by the browser
-clone workflow. Full clone error detail and a destination-scoped credential
-lease remain open.
+tests, including a rewritten external helper in a submodule. Requests without
+an account retain native Git credential configuration.
 
-A provisional clone lease cannot inherit the existing repository-bound broker:
-the destination has no saved account record, and helper-reported Git paths do
-not authenticate a descendant process. A Git credential probe also confirmed
-that clearing the global helper does not disable a URL-specific helper. A
-selected-account clone therefore needs an isolated, reviewed Git configuration
-that accounts for URL rewrites, HTTPS redirects, TLS and proxies, followed by
-account revocation, cancellation and recovery checks. Checkout filters, hooks,
-LFS and recursive submodules must not inherit the provisional credential scope
-without their own destination policy. No selected-account clone path has been
-enabled by this investigation.
+An opt-in WebSocket request may instead name a stored account and numeric actor
+for an HTTPS clone. It verifies the account and repository, rejects URL rewrites
+and redirects, and uses an isolated Git configuration and private credential
+broker for a no-checkout network phase. Git uses a private HOME for this phase;
+the supported TLS and proxy settings are copied explicitly. Templates are
+installed only after the provisional broker ends, and checkout uses the saved
+account broker. The clone is staged privately and published with a no-replace
+rename after a no-follow contents and metadata review. The saved result is not
+selected automatically; callers must explicitly open it.
+
+The private clone journal is separate from the version-1 registry. It records
+download, checkout and ready phases before publication. `list_clone_recoveries`
+shows pending records; `recover_clone` can resume only a ready publication
+after rechecking its actor, origin, directory identity and reviewed contents.
+Interrupted downloads and checkouts require inspection and are not replayed.
+A saved record is committed before the journal is cleared, allowing recovery if
+the process stops between those writes. Recovery leaves private staging
+metadata for inspection because the original directory handle is no longer
+available.
+
+This route is limited to Linux and Android with accessible `/proc` descriptor
+paths, an absent destination, nonrecursive HTTPS and a GitHub CLI account that
+can be verified. The review currently supports at most 100,000 entries, 2 GiB
+of regular-file data including `.git`, and depth 128. Same-user filesystem
+writers can still race the final review. Native Android, LFS and cross-platform
+parity remain to be verified. Wry, Electron and the browser clone workflow do
+not yet use this route; recursive submodule account scopes and full clone error
+detail remain open.
 
 The WebSocket clone endpoint can optionally report request-owned Git progress.
 It forwards only fixed phase labels and numeric percentages, discarding raw

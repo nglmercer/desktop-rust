@@ -2,6 +2,7 @@
 //! Secrets cross only a private helper pipe and an ephemeral authenticated loopback
 //! connection. Neither this channel nor its capability is exposed to the web UI.
 mod auth_sources;
+pub(crate) mod clone;
 mod endpoint;
 mod intent;
 mod lfs_storage;
@@ -75,6 +76,7 @@ where
 
 struct Lease {
     repository: Repository,
+    pinned_clone_root: bool,
     basis: String,
     assignment: AccountAssignment,
     operation: Operation,
@@ -261,6 +263,7 @@ async fn scope_selected<T>(
     let helper = std::env::current_exe().context("Locate Git credential helper")?;
     let lease = Arc::new(Lease {
         repository: repository.clone(),
+        pinned_clone_root: clone::pinned_checkout_active(),
         basis,
         assignment,
         operation,
@@ -555,8 +558,13 @@ impl Lease {
         }
         let directory = PathBuf::from(crate::os_from_bytes(&STANDARD.decode(request.directory)?)?);
         let root = Repository::open(&directory).await?;
+        let selected_root = if self.pinned_clone_root {
+            self.repository.path().canonicalize()?
+        } else {
+            self.repository.path().to_owned()
+        };
         ensure!(
-            root.path() == self.repository.path(),
+            root.path() == selected_root,
             "Nested repository requires its own account selection"
         );
         // Git can execute a submodule credential helper from the parent
@@ -676,6 +684,9 @@ fn validate_helper_path(
 /// Applied centrally so checkout/commit hooks, LFS and gh checkout descendants
 /// inherit policy. Values added to Git config contain no token or capability.
 pub(crate) fn apply(command: &mut Command) {
+    if clone::apply(command) {
+        return;
+    }
     if NATIVE_CONFIGURATION
         .try_with(|value| *value)
         .unwrap_or(false)
@@ -740,6 +751,12 @@ pub(crate) async fn redact(mut output: RawOutput) -> RawOutput {
     {
         return output;
     }
+    if let Some(secrets) = clone::secrets() {
+        for secret in secrets {
+            output.stdout = redact_literal(output.stdout, &secret);
+            output.stderr = redact_literal(output.stderr, &secret);
+        }
+    }
     if let Ok(lease) = CURRENT.try_with(Clone::clone) {
         if let Some(session) = lease.session.lock().await.as_ref() {
             output = session.redact_output(output);
@@ -758,6 +775,9 @@ pub(crate) async fn live_output_secrets(final_chunk: bool) -> Option<Vec<Vec<u8>
         .unwrap_or(false)
     {
         return Some(Vec::new());
+    }
+    if let Some(secrets) = clone::secrets() {
+        return Some(secrets);
     }
     let Ok(lease) = CURRENT.try_with(Clone::clone) else {
         return Some(Vec::new());
@@ -797,6 +817,9 @@ fn redact_literal(bytes: Vec<u8>, secret: &[u8]) -> Vec<u8> {
 /// Restore caller configuration plus this operation's tokenless policy after a
 /// native branch guard removes its own hook overrides.
 pub(crate) fn inherited_parameters() -> Option<std::ffi::OsString> {
+    if let Some(parameters) = clone::parameters() {
+        return Some(parameters);
+    }
     let original = std::env::var_os("GIT_CONFIG_PARAMETERS");
     if NATIVE_CONFIGURATION
         .try_with(|value| *value)
