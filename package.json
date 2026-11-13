@@ -30,6 +30,8 @@
     "start": "cross-env NODE_ENV=development node --import tsx script/start.ts",
     "start:prod": "cross-env NODE_ENV=production node --import tsx script/start.ts",
     "compile:main:vite": "vite build -c vite.main.config.ts",
+    "compile:renderer:vite": "vite build -c vite.renderer.experimental.config.ts",
+    "test:renderer:vite": "node --import tsx script/renderer-vite-probe.ts",
     "compile:dev": "cross-env NODE_ENV=development vite build -c vite.main.config.ts && cross-env NODE_ENV=development node --import tsx node_modules/webpack-cli/bin/cli.js --disable-interpret --config app/webpack.development.ts && cross-env NODE_ENV=development vite build -c vite.cli.config.ts && cross-env NODE_ENV=development vite build -c vite.crash.config.ts && vite build -c vite.highlighter.config.ts --outDir ../out --sourcemap",
     "compile:prod": "cross-env NODE_ENV=production vite build -c vite.main.config.ts && cross-env NODE_ENV=production NODE_OPTIONS='--max_old_space_size=4096' node --import tsx node_modules/webpack-cli/bin/cli.js --disable-interpret --config app/webpack.production.ts && cross-env NODE_ENV=production vite build -c vite.cli.config.ts && cross-env NODE_ENV=production vite build -c vite.crash.config.ts && vite build -c vite.highlighter.config.ts --outDir ../out --sourcemap",
     "build:dev": "npm run compile:dev && cross-env NODE_ENV=development node --import tsx script/build.ts",
