@@ -127,4 +127,38 @@ describe('Update remote url', () => {
     assert(gitStore.currentRemote !== null)
     assert.equal(gitStore.currentRemote.url, originalUrl)
   })
+
+  it('preserves credentials when the API clone URL changes', async t => {
+    const originalUrl = 'https://user:secret@github.com/my-user/my-repo'
+    const { gitHubRepository, gitStore } = await createRepository(
+      t,
+      apiRepository,
+      originalUrl
+    )
+    const updatedApiRepository = {
+      ...apiRepository,
+      clone_url: 'https://github.com/my-user/my-updated-repo',
+    }
+
+    await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
+    assert.equal(gitStore.currentRemote?.url, originalUrl)
+  })
+
+  for (const suffix of ['?access=secret', '#custom']) {
+    it(`preserves a remote URL with ${suffix.startsWith('?') ? 'query' : 'fragment'} data`, async t => {
+      const originalUrl = `https://github.com/my-user/my-repo${suffix}`
+      const { gitHubRepository, gitStore } = await createRepository(
+        t,
+        apiRepository,
+        originalUrl
+      )
+      const updatedApiRepository = {
+        ...apiRepository,
+        clone_url: 'https://github.com/my-user/my-updated-repo',
+      }
+
+      await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
+      assert.equal(gitStore.currentRemote?.url, originalUrl)
+    })
+  }
 })

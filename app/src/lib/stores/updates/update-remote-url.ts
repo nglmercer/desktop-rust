@@ -1,7 +1,6 @@
 import { IAPIRepository } from '../../api'
 import { GitStore } from '../git-store'
 import { urlMatchesRemote } from '../../repository-matching'
-import * as URL from 'url'
 import { GitHubRepository } from '../../../models/github-repository'
 
 export async function updateRemoteUrl(
@@ -19,18 +18,30 @@ export async function updateRemoteUrl(
   const updatedRemoteUrl = apiRepo.clone_url
   const urlsMatch = urlMatchesRemote(updatedRemoteUrl, gitStore.defaultRemote)
 
-  // Verify that protocol hasn't changed. If it has we don't want
-  // to alter the protocol in case they are relying on a specific one.
-  // If protocol is null that implies the url is a ssh url
-  // of the format git@github.com:octocat/Hello-World.git, which
-  // can't be parsed by URL.parse. In this case we assume the user
-  // manually configured their remote to use this format and we don't
-  // want to change what they've done just to be safe
-  const parsedRemoteUrl = URL.parse(remoteUrl)
-  const parsedUpdatedRemoteUrl = URL.parse(updatedRemoteUrl)
+  // SCP-style and malformed URLs are user-configured and cannot be safely
+  // compared using the standard URL parser.
+  let parsedRemoteUrl: URL
+  let parsedUpdatedRemoteUrl: URL
+  try {
+    parsedRemoteUrl = new URL(remoteUrl)
+    parsedUpdatedRemoteUrl = new URL(updatedRemoteUrl)
+  } catch {
+    return
+  }
+  // An API clone URL does not contain locally configured credentials or URL
+  // parameters. Preserve even empty userinfo, query, and fragment delimiters.
+  // Backslashes have ambiguous URL/path interpretation, so do not rewrite them.
+  if (
+    remoteUrl.includes('\\') ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*@/.test(remoteUrl) ||
+    parsedRemoteUrl.username !== '' ||
+    parsedRemoteUrl.password !== '' ||
+    parsedRemoteUrl.href.includes('?') ||
+    parsedRemoteUrl.href.includes('#')
+  ) {
+    return
+  }
   const protocolsMatch =
-    parsedRemoteUrl.protocol !== null &&
-    parsedUpdatedRemoteUrl.protocol !== null &&
     parsedRemoteUrl.protocol === parsedUpdatedRemoteUrl.protocol
 
   // Check if the default remote url has been manually changed from the

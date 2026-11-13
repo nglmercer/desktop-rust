@@ -7,7 +7,7 @@ import {
   ErrorWithMetadata,
 } from '../../lib/error-with-metadata'
 import { GitError, isAuthFailureError } from '../../lib/git/core'
-import { NativeFetchError } from '../../lib/git/fetch-error'
+import { isNativeFetchSamlReauthError } from '../../lib/git/fetch-error'
 import { ShellError } from '../../lib/shells'
 import { UpstreamAlreadyExistsError } from '../../lib/stores/upstream-already-exists-error'
 
@@ -462,7 +462,7 @@ export async function samlReauthRequired(error: Error, dispatcher: Dispatcher) {
   const match = samlReauthErrorMessageRe.exec(remoteMessage)
 
   const organizationName = match?.[1] ??
-    (gitError instanceof NativeFetchError && gitError.samlReauthRequired
+    (isNativeFetchSamlReauthError(gitError)
       ? repository.gitHubRepository.owner.login
       : undefined)
   if (!organizationName) {

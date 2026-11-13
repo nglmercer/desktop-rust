@@ -1,4 +1,6 @@
 [
+  "app/test/unit/git-core-import-cycle-test.ts",
+  "app/test/unit/stores/updates/update-remote-url-safety-test.ts",
   "app/test/unit/pull-hook-callbacks-test.ts",
   "rust/tests/real-lfs-progress.test.ts",
   "app/test/unit/rust-fetch-routing-test.ts",

@@ -35,28 +35,13 @@ const fetchDescriptions: Partial<Record<FetchErrorKind, string>> = {
   host_resolution_failed: 'The remote host could not be resolved. Check your connection and remote URL.',
 }
 
-export class NativeFetchError extends GitError {
-  public constructor(
-    failure: FetchFailure,
-    repositoryPath: string,
-    remote: string,
-    public readonly samlReauthRequired: boolean
-  ) {
-    const gitError = failure.errorKind === null ? null : errorKinds[failure.errorKind]
-    super(
-      {
-        exitCode: failure.exitCode,
-        stdout: '',
-        stderr: '',
-        path: repositoryPath,
-        gitError,
-        gitErrorDescription: failure.errorKind === null ? null :
-          fetchDescriptions[failure.errorKind] ?? (gitError === null ? null : getDescriptionForError(gitError, '')),
-      },
-      ['fetch', '--', remote],
-      ''
-    )
-  }
+// Keep the marker separate from the error's public diagnostics. Creating a
+// subclass at module load time would also read GitError during the existing
+// core/trampoline import cycle, before that class has been initialized.
+const samlReauthErrors = new WeakSet<GitError>()
+
+export function isNativeFetchSamlReauthError(error: GitError): boolean {
+  return samlReauthErrors.has(error)
 }
 
 /** Convert a completed native fetch failure into the existing Git error contract. */
@@ -65,10 +50,22 @@ export function fetchFailureToGitError(
   repositoryPath: string,
   remote: string
 ): GitError {
-  return new NativeFetchError(
-    failure,
-    repositoryPath,
-    remote,
-    failure.errorKind === 'https_saml_reauth_required' || failure.errorKind === 'ssh_saml_reauth_required'
+  const gitError = failure.errorKind === null ? null : errorKinds[failure.errorKind]
+  const error = new GitError(
+    {
+      exitCode: failure.exitCode,
+      stdout: '',
+      stderr: '',
+      path: repositoryPath,
+      gitError,
+      gitErrorDescription: failure.errorKind === null ? null :
+        fetchDescriptions[failure.errorKind] ?? (gitError === null ? null : getDescriptionForError(gitError, '')),
+    },
+    ['fetch', '--', remote],
+    ''
   )
+  if (failure.errorKind === 'https_saml_reauth_required' || failure.errorKind === 'ssh_saml_reauth_required') {
+    samlReauthErrors.add(error)
+  }
+  return error
 }
