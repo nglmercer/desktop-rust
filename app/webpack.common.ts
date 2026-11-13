@@ -49,6 +49,7 @@ const commonConfig: webpack.Configuration = {
     // React 16.14 provides this entry without an exports map. ESM packages
     // such as react-confetti otherwise require an explicit file extension.
     alias: {
+      '@desktop-assets': path.resolve(__dirname, 'static/common'),
       'react/jsx-runtime$': require.resolve('react/jsx-runtime', {
         paths: [path.resolve(__dirname, 'node_modules')],
       }),

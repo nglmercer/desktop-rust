@@ -324,6 +324,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      { find: /^@desktop-assets\//, replacement: path.resolve(__dirname, 'app/static/common') + '/' },
       { find: /^electron$/, replacement: path.resolve(__dirname, 'app/src/web/electron.ts') },
       // The SDK speaks JSON-RPC over the Node stream classes. Vite would pick
       // the package's browser build (no stream classes) through its `browser`
