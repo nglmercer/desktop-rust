@@ -2413,8 +2413,14 @@ migration before the legacy module can be removed.
 The native renderer now reads the rebase head and merge progress through a
 repository-scoped Rust operation. Fixed, bounded state files are read without
 following symlinks and rechecked for changes. The renderer uses this state for
-progress, internal-state display, and the continuation guard; execution, hook
-handling, apply-backend parity, and the remaining legacy callers are still open.
+progress, internal-state display, and the continuation guard. Apply-backend
+rebases now expose their fixed original branch, base, current and total files
+through the same read, with no-follow and bounded, repeated checks. This does
+not authorize continuation: the renderer refuses apply-backend continuation
+before staging, and the review certificate remains merge-backend only. An
+external Git process can still change rebase state between that preflight and
+the renderer's separate staging requests; those requests are not one transaction.
+Execution, hook handling and remaining legacy callers are still open.
 
 ## Git operation aborts
 

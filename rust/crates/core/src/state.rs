@@ -159,29 +159,40 @@ impl Repository {
                 && head.bytes().all(|byte| byte.is_ascii_hexdigit()),
             "invalid rebase head"
         );
-        let progress = read_progress(&root)?;
+        let merge_progress = read_progress(&root)?;
         // Git may leave REBASE_HEAD behind after finishing. Require a live
         // rebase directory rather than treating that stale pseudoref as an
         // active operation. `rebase-apply/applying` denotes git am instead.
-        let apply_state = || -> Result<(bool, bool)> {
+        let apply_state = || -> Result<(bool, bool, Option<Value>)> {
             let apply = match root.open_dir_nofollow("rebase-apply") {
                 Ok(dir) => dir,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok((false, false));
+                    return Ok((false, false, None));
                 }
                 Err(error) => return Err(error.into()),
             };
-            Ok((
-                true,
-                read_operation_file(&apply, "applying", 128)?.is_none(),
-            ))
+            let is_rebase = read_operation_file(&apply, "applying", 128)?.is_none();
+            let progress = if is_rebase
+                && read_operation_file(&apply, "rebasing", 128)?.is_some()
+            {
+                Some(json!({
+                    "original": read_operation_file(&apply, "orig-head", 8192)?,
+                    "branch": read_operation_file(&apply, "head-name", 8192)?,
+                    "onto": read_operation_file(&apply, "onto", 8192)?,
+                    "current": read_operation_file(&apply, "next", 8192)?,
+                    "total": read_operation_file(&apply, "last", 8192)?,
+                }))
+            } else {
+                None
+            };
+            Ok((true, is_rebase, progress))
         };
         let apply = apply_state()?;
-        anyhow::ensure!(progress.is_none() || !apply.0, "Ambiguous rebase state");
-        if progress.is_none() && !apply.1 {
+        anyhow::ensure!(merge_progress.is_none() || !apply.0, "Ambiguous rebase state");
+        if merge_progress.is_none() && !apply.1 {
             return Ok(Value::Null);
         }
-        if read_progress(&root)? != progress
+        if read_progress(&root)? != merge_progress
             || apply_state()? != apply
             || read_operation_file(&root, "REBASE_HEAD", 128)?
                 .as_deref()
@@ -190,7 +201,8 @@ impl Repository {
         {
             return Ok(Value::Null);
         }
-        Ok(json!({"head":head,"progress":progress}))
+        let backend = if merge_progress.is_some() { "merge" } else { "apply" };
+        Ok(json!({"head":head,"backend":backend,"progress":merge_progress.or(apply.2)}))
     }
 
     pub(crate) async fn ahead_behind(&self, range: &str) -> Result<Value> {
@@ -480,6 +492,66 @@ mod cherry_pick_state_tests {
     }
 
     #[tokio::test]
+    async fn reads_apply_backend_rebase_from_real_conflict() {
+        let root = std::env::temp_dir().join(format!("desktop-apply-rebase-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            Command::new("git").arg("-C").arg(&root).args(args).output().unwrap()
+        };
+        let run = |args: &[&str]| {
+            let output = git(args);
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.name", "Test"]);
+        run(&["config", "user.email", "test@example.invalid"]);
+        fs::write(root.join("file"), "base\n").unwrap();
+        run(&["add", "--", "file"]);
+        run(&["-c", "commit.gpgsign=false", "commit", "-qm", "base"]);
+        run(&["switch", "-qc", "topic"]);
+        fs::write(root.join("file"), "topic\n").unwrap();
+        run(&["-c", "commit.gpgsign=false", "commit", "-qam", "topic"]);
+        let original = run(&["rev-parse", "HEAD"]);
+        run(&["switch", "-q", "main"]);
+        fs::write(root.join("file"), "main\n").unwrap();
+        run(&["-c", "commit.gpgsign=false", "commit", "-qam", "main"]);
+        let onto = run(&["rev-parse", "HEAD"]);
+        run(&["switch", "-q", "topic"]);
+        let rebase = git(&["rebase", "--apply", "main"]);
+        assert!(!rebase.status.success(), "fixture must stop in conflict");
+
+        let repository = Repository::open(&root).await.unwrap();
+        let state = repository.renderer_rebase_state().await.unwrap();
+        assert_eq!(state["head"], original);
+        assert_eq!(state["progress"]["original"].as_str().unwrap().trim(), original);
+        assert_eq!(state["progress"]["branch"].as_str().unwrap().trim(), "refs/heads/topic");
+        assert_eq!(state["progress"]["onto"].as_str().unwrap().trim(), onto);
+        assert_eq!(state["progress"]["current"].as_str().unwrap().trim(), "1");
+        assert_eq!(state["progress"]["total"].as_str().unwrap().trim(), "1");
+        assert_eq!(repository.status_context().await.unwrap()["rebaseInternalState"], json!({
+            "originalBranchTip":original,"targetBranch":"topic","baseBranchTip":onto
+        }));
+        // Displaying apply-backend progress must not authorize continuation:
+        // the existing mutation certificate only covers the merge backend.
+        fs::write(root.join("file"), "resolved\n").unwrap();
+        run(&["add", "--", "file"]);
+        let error = repository.renderer_rebase_continue_preview(&original).await.unwrap_err();
+        assert!(error.to_string().contains("Only merge-backend rebase continuation"));
+
+        let apply = root.join(".git/rebase-apply");
+        fs::write(apply.join("last"), vec![b'x'; 8193]).unwrap();
+        assert!(repository.renderer_rebase_state().await.is_err());
+        fs::remove_file(apply.join("last")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join(".git/config"), apply.join("last")).unwrap();
+            assert!(repository.renderer_rebase_state().await.is_err());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn reads_rebase_state_and_rejects_unsafe_progress() {
         let root =
             std::env::temp_dir().join(format!("desktop-rebase-state-{}", uuid::Uuid::new_v4()));
@@ -503,7 +575,7 @@ mod cherry_pick_state_tests {
         fs::create_dir(git_dir.join("rebase-apply")).unwrap();
         assert_eq!(
             repo.renderer_rebase_state().await.unwrap(),
-            json!({"head":head,"progress":null})
+            json!({"head":head,"backend":"apply","progress":null})
         );
         fs::write(git_dir.join("rebase-apply/applying"), "1\n").unwrap();
         assert_eq!(repo.renderer_rebase_state().await.unwrap(), Value::Null);

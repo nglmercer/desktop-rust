@@ -240,7 +240,7 @@ impl Repository {
         // The merge backend's complete progress state is captured below; do not
         // claim review support for apply-backend state yet.
         anyhow::ensure!(
-            state["progress"].is_object(),
+            state["backend"] == "merge" && state["progress"].is_object(),
             "Only merge-backend rebase continuation is supported"
         );
         anyhow::ensure!(

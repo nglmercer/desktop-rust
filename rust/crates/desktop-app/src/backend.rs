@@ -2461,6 +2461,28 @@ mod tests {
     }
 
     #[test]
+    fn wry_reads_apply_rebase_progress() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-apply-rebase-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            assert!(Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
+            let apply = root.join(".git/rebase-apply");
+            fs::create_dir(&apply).unwrap();
+            fs::write(root.join(".git/REBASE_HEAD"), format!("{}\n", "a".repeat(40))).unwrap();
+            for (name, content) in [("rebasing", ""), ("orig-head", "original\n"), ("head-name", "refs/heads/topic\n"), ("onto", "base\n"), ("next", "2\n"), ("last", "3\n")] {
+                fs::write(apply.join(name), content).unwrap();
+            }
+            let backend = Backend::new(4).unwrap();
+            let state = backend.read_args(vec![json!({"repository_path":root,"method":"renderer_rebase_state"})]).unwrap();
+            assert_eq!(state["backend"], "apply");
+            assert_eq!(state["progress"]["branch"], "refs/heads/topic\n");
+            assert_eq!(state["progress"]["current"], "2\n");
+            assert_eq!(state["progress"]["total"], "3\n");
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
     fn wry_resets_a_reviewed_commit() {
         std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
             let root = std::env::temp_dir().join(format!("desktop-wry-reset-{}", uuid::Uuid::new_v4()));

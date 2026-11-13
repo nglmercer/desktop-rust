@@ -477,7 +477,13 @@ export async function continueRebase(
   if (native && opts?.gitEditor !== undefined && opts.gitEditor !== ':') {
     throw new Error('Custom rebase editors are not supported by the native backend')
   }
-  const expectedHead = native ? await readRebaseHead(repository) : undefined
+  const nativeState = native
+    ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+    : undefined
+  if (nativeState !== undefined && nativeState !== null && nativeState.backend !== 'merge') {
+    throw new Error('Continuing an apply-backend rebase is not supported; use Git to continue or abort it')
+  }
+  const expectedHead = native ? nativeState?.head ?? null : undefined
   if (native && expectedHead === null) return RebaseResult.Aborted
   const trackedFiles = files.filter(f => {
     return f.status.kind !== AppFileStatusKind.Untracked

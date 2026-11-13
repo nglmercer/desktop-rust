@@ -141,6 +141,38 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       if (fetched.kind === 'fetched') expect(Math.abs(Date.now() - fetched.time)).toBeLessThan(30_000)
     }, 90_000)
 
+    it('reads progress for a real apply-backend rebase conflict', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-apply-rebase-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
+      const repository = path.join(directory, 'repository')
+      await client.initializeDesktopRepository(repository, 'main')
+      const git = (args: string[]) => execFileSync('git', ['-C', repository, ...args], { encoding: 'utf8', env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory!, 'empty-global-config') }, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+      git(['config', 'user.name', 'Test']); git(['config', 'user.email', 'test@example.invalid']); git(['config', 'commit.gpgsign', 'false'])
+      await writeFile(path.join(repository, 'file'), 'base\n'); git(['add', '--', 'file']); git(['commit', '-qm', 'base'])
+      git(['switch', '-qc', 'topic']); await writeFile(path.join(repository, 'file'), 'topic\n'); git(['commit', '-qam', 'topic'])
+      const original = git(['rev-parse', 'HEAD'])
+      git(['switch', '-q', 'main']); await writeFile(path.join(repository, 'file'), 'main\n'); git(['commit', '-qam', 'main'])
+      const onto = git(['rev-parse', 'HEAD'])
+      git(['switch', '-q', 'topic'])
+      expect(() => git(['rebase', '--apply', 'main'])).toThrow()
+      await client.selectBrowserRepository(repository)
+      await expect(client.repositoryRebaseState(repository)).resolves.toEqual({
+        head: original,
+        backend: 'apply',
+        progress: { original: `${original}\n`, branch: 'refs/heads/topic\n', onto: `${onto}\n`, current: '1\n', total: '1\n' },
+      })
+      await expect(client.repositoryStatusContext(repository)).resolves.toMatchObject({
+        rebaseInternalState: { originalBranchTip: original, targetBranch: 'topic', baseBranchTip: onto },
+      })
+      await writeFile(path.join(repository, 'file'), 'resolved\n'); git(['add', '--', 'file'])
+      await expect(client.continueRepositoryRebase(repository, original, false, false)).rejects.toThrow()
+    }, 90_000)
+
     it('reviews and recovers remote and combined branch deletions', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-delete-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
@@ -572,7 +604,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await writeFile(path.join(firstRepository, '.git', 'REBASE_HEAD'), 'b'.repeat(40) + '\n')
       await expect(client.repositoryRebaseState(firstRepository)).resolves.toBeNull()
       await mkdir(path.join(firstRepository, '.git', 'rebase-apply'))
-      await expect(client.repositoryRebaseState(firstRepository)).resolves.toEqual({ head: 'b'.repeat(40), progress: null })
+      await expect(client.repositoryRebaseState(firstRepository)).resolves.toEqual({ head: 'b'.repeat(40), backend: 'apply', progress: null })
       await rm(path.join(firstRepository, '.git', 'rebase-apply'), { recursive: true })
       await unlink(path.join(firstRepository, '.git', 'REBASE_HEAD'))
       await expect(client.repositoryCherryPickState(firstRepository)).resolves.toBeNull()
