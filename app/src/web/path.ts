@@ -21,7 +21,7 @@ function rootLength(p: string): number {
   if (isSep(p[0])) {
     if (p.length > 1 && isSep(p[1])) {
       // UNC: \\server\share\
-      const parts = /^[\\/]{2}([^\\/]+)[\\/]+([^\\/]+)([\\/]*)/.exec(p)
+      const parts = /^[\\/]{2}([^\\/]+)[\\/]+([^\\/]+)[\\/]?/.exec(p)
       if (parts !== null) {
         return parts[0].length
       }
@@ -116,28 +116,53 @@ function resolve(...parts: string[]): string {
 }
 
 function dirname(p: string): string {
-  const { rawRoot: root, rest } = splitRoot(p)
-  const trimmed = rest.replace(/[\\/]+$/, '')
-  const index = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'))
-  if (index === -1) {
-    return root.length > 0 ? root : '.'
-  }
-  return root + trimmed.slice(0, index).replace(/[\\/]+$/, '')
+  return parse(p).dir || '.'
 }
 
 function basename(p: string, suffix?: string): string {
-  const rest = splitRoot(p).rest.replace(/[\\/]+$/, '')
+  const driveLength = /^[a-zA-Z]:/.test(p) ? 2 : 0
+  if (suffix !== undefined && suffix.length > 0 && suffix.length <= p.length) {
+    if (suffix === p) return ''
+    let start = driveLength
+    let end = -1
+    let componentEnd = -1
+    let remaining = suffix.length - 1
+    for (let i = p.length - 1; i >= driveLength; i--) {
+      if (isSep(p[i])) {
+        if (componentEnd !== -1) {
+          start = i + 1
+          break
+        }
+      } else {
+        if (componentEnd === -1) componentEnd = i + 1
+        if (remaining >= 0) {
+          if (p[i] === suffix[remaining]) {
+            remaining--
+            if (remaining === -1) end = i
+          } else {
+            remaining = -1
+            end = componentEnd
+          }
+        }
+      }
+    }
+    if (start === end) end = componentEnd
+    else if (end === -1) end = p.length
+    return p.slice(start, end)
+  }
+  // UNC roots are also valid basenames (the share), unlike drive roots.
+  const rest = p.slice(driveLength).replace(/[\\/]+$/, '')
   const index = Math.max(rest.lastIndexOf('\\'), rest.lastIndexOf('/'))
-  const base = rest.slice(index + 1)
-  return suffix !== undefined && base !== suffix && base.endsWith(suffix)
-    ? base.slice(0, -suffix.length)
-    : base
+  return rest.slice(index + 1)
+}
+
+function extensionOfBase(base: string): string {
+  const index = base.lastIndexOf('.')
+  return index <= 0 || base === '..' ? '' : base.slice(index)
 }
 
 function extname(p: string): string {
-  const base = basename(p)
-  const index = base.lastIndexOf('.')
-  return index <= 0 ? '' : base.slice(index)
+  return extensionOfBase(basename(p))
 }
 
 function relative(from: string, to: string): string {
@@ -169,12 +194,20 @@ function relative(from: string, to: string): string {
 
 function parse(p: string): IParsedPath {
   const { rawRoot: root } = splitRoot(p)
-  const base = basename(p)
-  const ext = extname(p)
-  const dir = dirname(p)
+  let end = p.length
+  while (end > root.length && isSep(p[end - 1])) {
+    end--
+  }
+  let start = end
+  while (start > root.length && !isSep(p[start - 1])) {
+    start--
+  }
+  const base = p.slice(start, end)
+  const ext = extensionOfBase(base)
+  const dir = start > root.length ? p.slice(0, start - 1) : root
   return {
     root,
-    dir: dir === '.' && root.length === 0 ? '' : dir,
+    dir,
     base,
     ext,
     name: ext.length > 0 ? base.slice(0, -ext.length) : base,
