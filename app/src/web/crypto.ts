@@ -3,6 +3,7 @@
 // Copilot SDK imports it (`import { randomUUID } from "node:crypto"`).
 
 import { randomUUID } from './random-uuid'
+import './install-random-uuid'
 // @ts-expect-error -- aliased by desktop-crypto-impl in vite.config.ts
 import cryptoBrowserify from 'desktop-crypto-impl'
 
@@ -53,16 +54,3 @@ export const {
   randomFillSync,
   rng,
 } = cryptoBrowserify
-
-// The webview's global `crypto` may lack randomUUID (WebKit gives custom schemes
-// no secure context). The app calls crypto.randomUUID() directly, so supply it
-// once, as early as this module loads: the UI entry imports it first.
-if (
-  typeof globalThis.crypto !== 'undefined' &&
-  typeof globalThis.crypto.randomUUID !== 'function'
-) {
-  Object.defineProperty(globalThis.crypto, 'randomUUID', {
-    value: randomUUID,
-    configurable: true,
-  })
-}

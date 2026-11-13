@@ -100,10 +100,12 @@ export function bundleDevtools(): Plugin {
     enforce: 'pre',
     resolveId(id) {
       if (id === virtualId) return loader
+      return null
     },
     load(id) {
       if (moduleId(id) === loader)
         return `module.exports = () => require(${JSON.stringify(installer)})`
+      return null
     },
     transform(code, id) {
       if (moduleId(id) !== entry) return null

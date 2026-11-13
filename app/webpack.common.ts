@@ -46,24 +46,19 @@ const commonConfig: webpack.Configuration = {
   },
   resolve: {
     extensions: ['.js', '.ts', '.tsx'],
+    // React 16.14 provides this entry without an exports map. ESM packages
+    // such as react-confetti otherwise require an explicit file extension.
+    alias: {
+      'react/jsx-runtime$': require.resolve('react/jsx-runtime', {
+        paths: [path.resolve(__dirname, 'node_modules')],
+      }),
+    },
   },
   node: {
     __dirname: false,
     __filename: false,
   },
 }
-
-export const main = merge({}, commonConfig, {
-  entry: { main: path.resolve(__dirname, 'src/main-process/main') },
-  target: 'electron-main',
-  plugins: [
-    new webpack.DefinePlugin(
-      Object.assign({}, replacements, {
-        __PROCESS_KIND__: JSON.stringify('main'),
-      })
-    ),
-  ],
-})
 
 export const renderer = merge(
   {},

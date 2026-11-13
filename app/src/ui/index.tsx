@@ -1,4 +1,4 @@
-import '../web/crypto'
+import '../web/install-random-uuid'
 import '../lib/logging/renderer/install'
 
 import * as React from 'react'

@@ -10,8 +10,6 @@ const config: webpack.Configuration = {
   devtool: 'source-map',
 }
 
-const mainConfig = merge({}, common.main, config)
-
 const rendererConfig = merge({}, common.renderer, config, {
   module: {
     rules: [
@@ -41,4 +39,4 @@ const rendererConfig = merge({}, common.renderer, config, {
 })
 
 // eslint-disable-next-line no-restricted-syntax
-export default [mainConfig, rendererConfig]
+export default [rendererConfig]

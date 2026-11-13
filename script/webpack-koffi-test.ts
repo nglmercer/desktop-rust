@@ -16,6 +16,23 @@ const targets = (['darwin', 'win32', 'linux'] as const).flatMap(platform =>
 )
 
 describe('Koffi webpack output', () => {
+  it('resolves a native addon nested below the SDK and Koffi', async t => {
+    const root = await createTempDirectory(t)
+    const nodeModules = join(root, 'node_modules')
+    const sdk = join(nodeModules, '@github', 'copilot-sdk')
+    const koffi = join(sdk, 'node_modules', 'koffi')
+    const target = join(koffi, 'node_modules', '@koromix', 'koffi-linux-x64')
+    const otherTarget = join(nodeModules, '@koromix', 'koffi-linux-x64')
+    for (const directory of [sdk, koffi, target, otherTarget]) {
+      await mkdir(directory, { recursive: true })
+      await writeFile(join(directory, 'index.js'), 'module.exports = {}')
+    }
+    const config = getKoffiWebpackConfig(nodeModules, 'linux', 'x64')
+    assert.deepEqual(config.resolve?.alias, {
+      '@koromix/koffi-linux-x64$': join(target, 'index.js'),
+    })
+  })
+
   for (const { platform, arch, name: target } of targets) {
     it(`bundles only ${target} when other native packages are installed`, async t => {
       const root = await createTempDirectory(t)
@@ -44,6 +61,10 @@ describe('Koffi webpack output', () => {
 
       const entry = join(root, 'index.js')
       await writeFile(entry, "import koffi from 'koffi'; export default koffi")
+      const sdkEntry = require.resolve('@github/copilot-sdk', {
+        paths: [resolve(__dirname, '../app/node_modules')],
+      })
+      const koffiEntry = require.resolve('koffi', { paths: [sdkEntry] })
       const config: webpack.Configuration = {
         mode: 'production',
         optimization: { minimize: false },
@@ -56,6 +77,7 @@ describe('Koffi webpack output', () => {
         },
         resolve: {
           modules: [nodeModules, resolve(__dirname, '../app/node_modules')],
+          alias: { koffi$: koffiEntry },
         },
         module: {
           rules: [

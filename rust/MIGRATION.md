@@ -43,22 +43,23 @@ implementations indefinitely is not the final architecture.
 No gate is satisfied by CLI passthrough alone, source counts, or the existence
 of a replacement file. Legacy removal requires runtime evidence of replacement.
 
-The Electron highlighter now uses the same Vite worker build as the Rust UI;
-its standalone CLI and crash-window entries also build with Vite as CommonJS.
-The Electron main and renderer entries still use Webpack. The crash window was
-exercised under Linux Electron/Xvfb; packaged macOS and Windows remain
-unverified. CLI build tests cover output
-preservation, argument handling and simulated macOS/Windows launcher paths;
-packaged execution on those platforms remains unverified. A Vitest check executes the
-generated worker and verifies that its output does not remove adjacent bundles.
-The local full Electron development compile exhausted the Node heap in the
-remaining Webpack stage, so the complete Electron build remains unverified.
-An opt-in `npm run compile:main:vite` builds the Electron main entry with Vite.
-It preserves native addon load sites and bundles the development extension
-installer lazily. Build tests exercise channel combinations and relocated,
-simulated addons; Electron development and production bundles opened a window
-under Linux/Xvfb after relocation. Real macOS/Windows addons, packaging and
-architectures still require verification before switching the main build.
+The Electron main process, standalone CLI, crash window and highlighter now
+build with Vite; the renderer still uses Webpack. The development server keeps
+the renderer's hot-reload event stream. The main build preserves native addon
+load sites and bundles the development extension installer lazily. Tests
+exercise channels and the complete macOS/Windows dependency graphs using
+simulated addons; development and production main bundles opened a window
+under Linux/Xvfb after relocation. The crash window was also exercised under
+Linux Electron/Xvfb. Real macOS/Windows addons, packaging and architectures
+remain unverified.
+
+The local `npm run compile:dev` successfully built the Vite main bundle, but
+the Webpack renderer could not resolve the `desktop-notifications.node` and
+`fs_admin.node` addons after dependencies were installed without native scripts.
+The full Electron build remains unverified; this test environment has not
+supplied those native addons. The renderer's ts-loader continues to type-check
+the full project, including main-process sources and tests; existing project
+type errors also need to be addressed before a complete build can pass.
 The web build copies bundled resources and source maps to the configured output
 directory, materializes gitignore template links, and preserves executable
 permissions. Markdown custom emoji load from the bundled renderer origin on
