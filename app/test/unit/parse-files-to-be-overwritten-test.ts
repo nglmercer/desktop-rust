@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { setupEmptyRepository } from '../helpers/repositories'
 import { writeFile } from 'fs/promises'

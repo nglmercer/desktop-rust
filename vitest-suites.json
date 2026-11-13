@@ -313,5 +313,11 @@
   "app/test/unit/git/multi-operation-terminal-output-test.ts",
   "app/test/unit/git/remote-operations-test.ts",
   "app/test/unit/git/remote-discovery-test.ts",
-  "app/test/unit/text-diff-expansion-test.ts"
+  "app/test/unit/text-diff-expansion-test.ts",
+  "app/test/unit/format-commit-message-test.ts",
+  "app/test/unit/parse-files-to-be-overwritten-test.ts",
+  "app/test/unit/patch-formatter-test.ts",
+  "app/test/unit/write-default-readme-test.ts",
+  "app/test/unit/git-info-test.ts",
+  "app/test/unit/git/file-version-fence-test.ts"
 ]

@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import { mkdir, writeFile } from 'fs/promises'
 import * as path from 'path'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 
 import { getSHA } from '../../git-info'
 import { createTempDirectory } from '../helpers/temp'
