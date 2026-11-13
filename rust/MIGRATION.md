@@ -53,6 +53,13 @@ packaged execution on those platforms remains unverified. A Vitest check execute
 generated worker and verifies that its output does not remove adjacent bundles.
 The local full Electron development compile exhausted the Node heap in the
 remaining Webpack stage, so the complete Electron build remains unverified.
+An experimental Vite main build needs to preserve the conditional native
+loads for desktop-notifications and Windows registry-js and copy their addons
+beside the bundle. A relocated fixture with simulated addons exercised those
+loads, but the full development bundle still left electron-devtools-installer
+external even though it is not copied into the package. Node-oriented package
+resolution, actual Electron startup, and real macOS/Windows addons and package
+architectures still require verification before switching the main build.
 
 The loopback WebSocket client is tested against the Rust bridge for login,
 events, cancellation and reconnect. The browser entry currently returns 503:
