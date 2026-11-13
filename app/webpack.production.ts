@@ -40,23 +40,5 @@ const rendererConfig = merge({}, common.renderer, config, {
   ],
 })
 
-const crashConfig = merge({}, common.crash, config, {
-  module: {
-    rules: [
-      // This will cause the compiled CSS to be output to a
-      // styles.css and a <link rel="stylesheet"> tag to be
-      // appended to the index.html HEAD at compile time
-      {
-        test: /\.(scss|css)$/,
-        use: [MiniCssExtractPlugin.loader, 'css-loader', 'sass-loader'],
-      },
-    ],
-  },
-  plugins: [
-    // Necessary to be able to use MiniCssExtractPlugin as a loader.
-    new MiniCssExtractPlugin({ filename: 'crash.css' }),
-  ],
-})
-
 // eslint-disable-next-line no-restricted-syntax
-export default [mainConfig, rendererConfig, crashConfig]
+export default [mainConfig, rendererConfig]

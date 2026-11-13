@@ -94,6 +94,7 @@
   "script/draft-release/format-json.test.ts",
   "script/highlighter-build.test.ts",
   "script/cli-build.test.ts",
+  "script/crash-build.test.ts",
   "app/test/unit/git/push-terminal-chunk-test.ts",
   "app/test/unit/git/create-tail-stream-test.ts",
   "app/test/unit/git/create-terminal-stream-test.ts",

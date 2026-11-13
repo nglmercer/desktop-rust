@@ -38,4 +38,6 @@ app/src/lib/markdown-filters/**
 app/src/lib/actions-log-parser/**
 vite.cli.config.ts
 script/cli-build.test.ts
+vite.crash.config.ts
+script/crash-build.test.ts
 script/test-discovery.mts

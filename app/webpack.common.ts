@@ -117,20 +117,3 @@ export const renderer = merge(
     },
   }
 )
-
-export const crash = merge({}, commonConfig, {
-  entry: { crash: path.resolve(__dirname, 'src/crash/index') },
-  target: 'electron-renderer',
-  plugins: [
-    new HtmlWebpackPlugin({
-      title: 'GitHub Desktop',
-      filename: 'crash.html',
-      chunks: ['crash'],
-    }),
-    new webpack.DefinePlugin(
-      Object.assign({}, replacements, {
-        __PROCESS_KIND__: JSON.stringify('crash'),
-      })
-    ),
-  ],
-})

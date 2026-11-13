@@ -66,23 +66,5 @@ const rendererConfig = merge({}, common.renderer, config, {
   plugins: [new webpack.HotModuleReplacementPlugin()],
 })
 
-const crashConfig = merge({}, common.crash, config, {
-  module: {
-    rules: [
-      // This will cause the compiled CSS (and sourceMap) to be
-      // embedded within the compiled javascript bundle and added
-      // as a blob:// uri at runtime.
-      {
-        test: /\.(scss|css)$/,
-        use: [
-          'style-loader',
-          { loader: 'css-loader', options: { sourceMap: true } },
-          { loader: 'sass-loader', options: { sourceMap: true } },
-        ],
-      },
-    ],
-  },
-})
-
 // eslint-disable-next-line no-restricted-syntax
-export default [mainConfig, rendererConfig, crashConfig]
+export default [mainConfig, rendererConfig]
