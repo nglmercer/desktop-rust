@@ -6,8 +6,15 @@ use std::{
     ffi::CString,
     fs,
     io::{ErrorKind, Read},
-    os::unix::{ffi::OsStrExt, fs::OpenOptionsExt},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{DirBuilderExt, OpenOptionsExt},
+    },
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::{
     io::unix::AsyncFd,
@@ -26,6 +33,7 @@ struct Decoder {
     sender: mpsc::Sender<(u64, CommitEvent)>,
     request_id: u64,
     emitted: usize,
+    pre_push_failed: Arc<AtomicBool>,
 }
 
 impl Decoder {
@@ -71,7 +79,8 @@ impl Decoder {
                 };
                 if !matches!(
                     name,
-                    "pre-commit"
+                    "pre-push"
+                        | "pre-commit"
                         | "prepare-commit-msg"
                         | "commit-msg"
                         | "post-commit"
@@ -98,6 +107,9 @@ impl Decoder {
     }
 
     fn emit(&mut self, name: &str, status: &'static str) {
+        if name == "pre-push" && status == "failed" {
+            self.pre_push_failed.store(true, Ordering::Release);
+        }
         if self.emitted >= 256 {
             return;
         }
@@ -115,11 +127,34 @@ impl Decoder {
 
 pub(crate) struct Trace {
     path: PathBuf,
+    temporary_directory: Option<PathBuf>,
     stop: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
+    pre_push_failed: Arc<AtomicBool>,
 }
 
 impl Trace {
+    /// Create a private per-operation directory for a trace without a commit checkpoint.
+    pub(crate) fn start_temporary(
+        label: &str,
+        sender: mpsc::Sender<(u64, CommitEvent)>,
+        request_id: u64,
+    ) -> Result<Self> {
+        let directory = std::env::temp_dir().join(format!("desktop-hook-{}", uuid::Uuid::new_v4()));
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700).create(&directory)?;
+        match Self::start(&directory, label, sender, request_id) {
+            Ok(mut trace) => {
+                trace.temporary_directory = Some(directory);
+                Ok(trace)
+            }
+            Err(error) => {
+                let _ = fs::remove_dir(&directory);
+                Err(error)
+            }
+        }
+    }
+
     pub(crate) fn start(
         directory: &Path,
         checkpoint: &str,
@@ -143,6 +178,7 @@ impl Trace {
             let fd =
                 unsafe { AsyncFd::register_with_interest(file, tokio::io::Interest::READABLE) }?;
             let (stop, mut stopped) = oneshot::channel();
+            let pre_push_failed = Arc::new(AtomicBool::new(false));
             let mut decoder = Decoder {
                 root: None,
                 partial: Vec::new(),
@@ -152,6 +188,7 @@ impl Trace {
                 sender,
                 request_id,
                 emitted: 0,
+                pre_push_failed: pre_push_failed.clone(),
             };
             let task = tokio::spawn(async move {
                 let mut buffer = [0u8; 8192];
@@ -184,8 +221,10 @@ impl Trace {
             });
             Ok(Self {
                 path: path.clone(),
+                temporary_directory: None,
                 stop: Some(stop),
                 task: Some(task),
+                pre_push_failed,
             })
         })();
         if result.is_err() {
@@ -196,13 +235,14 @@ impl Trace {
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
-    pub(crate) async fn finish(mut self) {
+    pub(crate) async fn finish(mut self) -> bool {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
         if let Some(task) = self.task.take() {
             let _ = task.await;
         }
+        self.pre_push_failed.load(Ordering::Acquire)
     }
 }
 impl Drop for Trace {
@@ -211,6 +251,9 @@ impl Drop for Trace {
             task.abort();
         }
         let _ = fs::remove_file(&self.path);
+        if let Some(directory) = self.temporary_directory.take() {
+            let _ = fs::remove_dir(directory);
+        }
     }
 }
 
@@ -230,6 +273,7 @@ mod tests {
             sender,
             request_id: 7,
             emitted: 0,
+            pre_push_failed: Arc::new(AtomicBool::new(false)),
         };
         let trace = br#"{"event":"version","sid":"root","argv":["private secret"]}
 {"event":"child_start","sid":"root/child","child_class":"hook","child_id":1,"hook_name":"pre-commit"}

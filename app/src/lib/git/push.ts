@@ -172,6 +172,8 @@ export async function push(
       'ALL_PROXY',
     ].some(key => key in process.env)
     if (!wry || ((!needsStreaming || hasProgress) && !inheritedProxy)) {
+      const controller = new AbortController()
+      let failedHook = false
       const listeners = new Set<(chunk: TerminalOutput) => void>()
       const terminalChunks: string[] = []
       const notifyTerminal = (text: string) => {
@@ -280,7 +282,28 @@ export async function push(
                       /* Observer setup must not trigger fallback or terminate a push. */
                     }
                   }
-                : undefined
+                : undefined,
+              event => {
+                if (event.status === 'failed') failedHook = true
+                try {
+                  withoutRepositoryGitAccess(() =>
+                    options?.onHookProgress?.(
+                      event.status === 'started'
+                        ? {
+                            hookName: event.hookName,
+                            status: 'started',
+                            abort: () => controller.abort(),
+                          }
+                        : { hookName: event.hookName, status: event.status }
+                    )
+                  )
+                } catch {
+                  /* Hook observers cannot affect an active Git operation. */
+                }
+              },
+              options?.onHookProgress === undefined
+                ? undefined
+                : controller.signal
             ),
           true
         )
@@ -315,6 +338,10 @@ export async function push(
               remote.name
             )
             error.message = `${notice} ${error.message}`
+          }
+          if (failedHook || failure.hookFailed) {
+            error.message +=
+              ' The pre-push hook failed. Ignoring an individual failed hook is not supported by the native backend.'
           }
           uncertainPushes.add(error)
           throw error

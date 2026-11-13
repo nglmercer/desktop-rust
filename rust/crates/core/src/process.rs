@@ -497,7 +497,42 @@ pub(crate) async fn run_bound_remote_fetch(
     is_background_task: bool,
     report_progress: bool,
 ) -> Result<RawOutput> {
+    run_bound_remote_operation(path, args, is_background_task, report_progress, false)
+        .await
+        .map(|(output, _)| output)
+}
+
+/// Push uses the same bounded output and credential policy as fetch, but may
+/// additionally expose request-owned pre-push hook lifecycle events.
+pub(crate) async fn run_bound_remote_push(
+    path: &Path,
+    args: &[OsString],
+    report_progress: bool,
+    observe_hooks: bool,
+) -> Result<(RawOutput, bool)> {
+    run_bound_remote_operation(path, args, false, report_progress, observe_hooks).await
+}
+
+async fn run_bound_remote_operation(
+    path: &Path,
+    args: &[OsString],
+    is_background_task: bool,
+    report_progress: bool,
+    observe_hooks: bool,
+) -> Result<(RawOutput, bool)> {
     let mut command = bound_git_command();
+    #[cfg(unix)]
+    let trace = if observe_hooks {
+        let (sender, request_id) = crate::hook_progress::sender()
+            .ok_or_else(|| anyhow::anyhow!("Pre-push hook progress requires an active request"))?;
+        let trace = crate::hook_trace::Trace::start_temporary("push", sender, request_id)?;
+        command.env("GIT_TRACE2_EVENT", trace.path());
+        Some(trace)
+    } else {
+        None
+    };
+    #[cfg(not(unix))]
+    anyhow::ensure!(!observe_hooks, "Pre-push hook progress is unavailable on this platform");
     // Never let an inherited progress path redirect Git LFS writes.
     command.env_remove("GIT_LFS_PROGRESS");
     command.env(
@@ -578,7 +613,11 @@ pub(crate) async fn run_bound_remote_fetch(
             ),
         );
     }
-    result
+    #[cfg(unix)]
+    let hook_failed = if let Some(trace) = trace { trace.finish().await } else { false };
+    #[cfg(not(unix))]
+    let hook_failed = false;
+    result.map(|output| (output, hook_failed))
 }
 
 /// Run a local tracking-branch fetch with bounded output and explicit stdin.

@@ -87,7 +87,9 @@ enum GitInfoOperation {
     Version {},
     GlobalConfigPath {},
     AvailableEditors {},
-    OpenGlobalGitConfigEditor { name: String },
+    OpenGlobalGitConfigEditor {
+        name: String,
+    },
     OpenNamedEditor {
         repository_path: String,
         path: Option<desktop_backend::GitPath>,
@@ -438,17 +440,31 @@ impl Backend {
         default_branch: Option<String>,
         account: desktop_backend::CloneAccount,
     ) -> Result<Value> {
-        let registry = self.registry.clone().ok_or_else(|| AppError::msg("Clone registry is unavailable"))?;
-        let destination = desktop_backend::directory_path(path).map_err(|error| AppError::msg(error.to_string()))?;
+        let registry = self
+            .registry
+            .clone()
+            .ok_or_else(|| AppError::msg("Clone registry is unavailable"))?;
+        let destination = desktop_backend::directory_path(path)
+            .map_err(|error| AppError::msg(error.to_string()))?;
         let assigned = desktop_backend::AccountAssignment::Assigned {
             host: account.host.to_ascii_lowercase(),
             login: account.login.clone(),
             id: account.id,
         };
         let repo = desktop_backend::clone_repository_selected(
-            registry.clone(), &url, &destination,
-            desktop_backend::CloneOptions { branch: None, default_branch, recursive: false, report_progress: true }, account,
-        ).await.map_err(|error| AppError::msg(error.to_string()))?;
+            registry.clone(),
+            &url,
+            &destination,
+            desktop_backend::CloneOptions {
+                branch: None,
+                default_branch,
+                recursive: false,
+                report_progress: true,
+            },
+            account,
+        )
+        .await
+        .map_err(|error| AppError::msg(error.to_string()))?;
         let finish: Result<Value> = async {
             let account_view = repo.execute(Operation::RepositoryAccount).await.map_err(|error| AppError::msg(error.to_string()))?;
             let bound = account_view["scope_id"].as_str().ok_or_else(|| AppError::msg("Clone account binding is unavailable"))?;
@@ -461,7 +477,9 @@ impl Backend {
             let staging = repo.retained_clone_staging().ok_or_else(|| AppError::msg("Clone staging path is unavailable"))?;
             Ok(serde_json::json!({"kind":"clone_completed_unselected", "record":record, "retained_staging":retained_clone_path(staging)}))
         }.await;
-        finish.map_err(|_| AppError::msg("Clone completed and was saved; inspect the destination before retrying"))
+        finish.map_err(|_| {
+            AppError::msg("Clone completed and was saved; inspect the destination before retrying")
+        })
     }
 
     #[cfg(test)]
@@ -567,11 +585,15 @@ impl Backend {
         | GitInfoOperation::FastForwardBranches {
             repository_path, ..
         }
-        | GitInfoOperation::OpenNamedEditor { repository_path, .. }
+        | GitInfoOperation::OpenNamedEditor {
+            repository_path, ..
+        }
         | GitInfoOperation::FetchRemote {
             repository_path, ..
         }
-        | GitInfoOperation::WorktreeMutation { repository_path, .. }
+        | GitInfoOperation::WorktreeMutation {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -732,13 +754,17 @@ impl Backend {
             ));
         }
         if let GitInfoOperation::RemoteBranchDeletion { operation, .. } = &request.operation
-            && !matches!(operation,
+            && !matches!(
+                operation,
                 Operation::RemoteBranchDeletePreview { .. }
-                | Operation::DeleteRemoteBranch { basis: Some(_), .. }
-                | Operation::RemoteDeletionHistory
-                | Operation::RestoreRemoteTip { .. })
+                    | Operation::DeleteRemoteBranch { basis: Some(_), .. }
+                    | Operation::RemoteDeletionHistory
+                    | Operation::RestoreRemoteTip { .. }
+            )
         {
-            return Err(AppError::BadArgs("unsupported remote branch deletion operation".into()));
+            return Err(AppError::BadArgs(
+                "unsupported remote branch deletion operation".into(),
+            ));
         }
         if let GitInfoOperation::BranchRename { operation, .. } = &request.operation
             && !matches!(
@@ -885,8 +911,13 @@ impl Backend {
             ));
         }
         if let GitInfoOperation::WorktreeMutation { operation, .. } = &request.operation
-            && !matches!(operation, Operation::RendererWorktreePreview { .. } | Operation::RendererWorktreeApply { .. })
-        { return Err(AppError::BadArgs("unsupported worktree operation".into())); }
+            && !matches!(
+                operation,
+                Operation::RendererWorktreePreview { .. } | Operation::RendererWorktreeApply { .. }
+            )
+        {
+            return Err(AppError::BadArgs("unsupported worktree operation".into()));
+        }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
             && !matches!(
                 operation,
@@ -997,20 +1028,31 @@ impl Backend {
         {
             return Err(AppError::BadArgs("unsupported tag operation".into()));
         }
-        if matches!(request.operation, GitInfoOperation::CloneSelected { .. } | GitInfoOperation::ListCloneRecoveries {} | GitInfoOperation::RecoverClone { .. }) && self.registry.is_none() {
+        if matches!(
+            request.operation,
+            GitInfoOperation::CloneSelected { .. }
+                | GitInfoOperation::ListCloneRecoveries {}
+                | GitInfoOperation::RecoverClone { .. }
+        ) && self.registry.is_none()
+        {
             return Err(AppError::BadArgs("Clone registry is unavailable".into()));
         }
         if let GitInfoOperation::RecoverClone { recovery_id } = &request.operation {
-            if !uuid::Uuid::parse_str(recovery_id).is_ok_and(|value| value.to_string() == *recovery_id) {
+            if !uuid::Uuid::parse_str(recovery_id)
+                .is_ok_and(|value| value.to_string() == *recovery_id)
+            {
                 return Err(AppError::BadArgs("Invalid clone recovery ID".into()));
             }
         }
         let is_fetch = matches!(
             &request.operation,
             GitInfoOperation::FetchRemote {
-                operation: Operation::RendererFetch { .. } | Operation::RendererPush { .. } | Operation::RendererRemoteHead { .. },
+                operation: Operation::RendererFetch { .. }
+                    | Operation::RendererPush { .. }
+                    | Operation::RendererRemoteHead { .. },
                 ..
-            } | GitInfoOperation::CloneSelected { .. } | GitInfoOperation::RecoverClone { .. }
+            } | GitInfoOperation::CloneSelected { .. }
+                | GitInfoOperation::RecoverClone { .. }
         );
         let maximum = if is_fetch { 3_600_000 } else { 60_000 };
         let duration = request.deadline_ms.unwrap_or(maximum);
@@ -1726,10 +1768,15 @@ impl Backend {
                         ..
                     }
                     | GitInfoOperation::FetchRemote {
-                        operation: Operation::RendererFetch { .. } | Operation::RendererPush { .. } | Operation::RendererRemoteHead { .. },
+                        operation: Operation::RendererFetch { .. }
+                            | Operation::RendererPush { .. }
+                            | Operation::RendererRemoteHead { .. },
                         ..
                     }
-                    | GitInfoOperation::WorktreeMutation { operation: Operation::RendererWorktreeApply { .. }, .. }
+                    | GitInfoOperation::WorktreeMutation {
+                        operation: Operation::RendererWorktreeApply { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1739,7 +1786,8 @@ impl Backend {
                         ..
                     }
                     | GitInfoOperation::RemoteBranchDeletion {
-                        operation: Operation::DeleteRemoteBranch { .. } | Operation::RestoreRemoteTip { .. },
+                        operation: Operation::DeleteRemoteBranch { .. }
+                            | Operation::RestoreRemoteTip { .. },
                         ..
                     }
                     | GitInfoOperation::BranchRename {
@@ -1781,7 +1829,9 @@ impl Backend {
         );
         let clone_write = matches!(
             job.operation,
-            BackendOperation::GitInfo(GitInfoOperation::CloneSelected { .. } | GitInfoOperation::RecoverClone { .. })
+            BackendOperation::GitInfo(
+                GitInfoOperation::CloneSelected { .. } | GitInfoOperation::RecoverClone { .. }
+            )
         );
         let lfs_write = matches!(
             job.operation,
@@ -2223,20 +2273,43 @@ mod tests {
             }).unwrap().join().unwrap();
             return;
         }
-        let root = std::env::temp_dir().join(format!("desktop-wry-editor-launch-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!(
+            "desktop-wry-editor-launch-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(root.join("bin")).unwrap();
-        assert!(std::process::Command::new("git").args(["init", "-q"]).arg(root.join("repo")).status().unwrap().success());
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .arg(root.join("repo"))
+                .status()
+                .unwrap()
+                .success()
+        );
         std::fs::write(root.join("repo/file with spaces"), "test").unwrap();
         let editor = root.join("bin/code");
-        std::fs::write(&editor, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DESKTOP_WRY_EDITOR_TEST_ROOT/capture\"\n").unwrap();
+        std::fs::write(
+            &editor,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DESKTOP_WRY_EDITOR_TEST_ROOT/capture\"\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let paths = std::iter::once(root.join("bin")).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())).collect::<Vec<_>>();
+        let paths = std::iter::once(root.join("bin"))
+            .chain(std::env::split_paths(
+                &std::env::var_os("PATH").unwrap_or_default(),
+            ))
+            .collect::<Vec<_>>();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "backend::tests::wry_editor_launches_detected_editor_in_real_repository", "--nocapture"])
+            .args([
+                "--exact",
+                "backend::tests::wry_editor_launches_detected_editor_in_real_repository",
+                "--nocapture",
+            ])
             .env(ROOT_ENV, &root)
             .env("GIT_CONFIG_GLOBAL", root.join("git config"))
             .env("PATH", std::env::join_paths(paths).unwrap())
-            .status().unwrap();
+            .status()
+            .unwrap();
         let launched = root.join("capture").is_file();
         std::fs::remove_dir_all(root).unwrap();
         assert!(status.success() && launched);
@@ -2598,9 +2671,20 @@ mod tests {
             assert!(receiver.try_iter().any(|event| matches!(event, desktop_backend::hook_progress::CommitEvent::FetchOutput { stream: "stderr", .. })));
             assert_eq!(git(&target, &["rev-parse", "refs/heads/main"]), git(&source, &["rev-parse", "HEAD"]));
             assert_eq!(git(&target, &["rev-parse", "refs/tags/v1"]), git(&source, &["rev-parse", "HEAD"]));
-            fs::write(source.join(".git/hooks/pre-push"), "#!/bin/sh\nexit 1\n").unwrap();
-            let blocked = backend.read(route(json!({"method":"renderer_push_preview", "request":request})).unwrap()).unwrap();
-            assert_eq!(blocked["kind"], "unsupported_hooks");
+            let previous = git(&target, &["rev-parse", "refs/heads/main"]);
+            git(&source, &["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "next"]);
+            let hook = source.join(".git/hooks/pre-push");
+            fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+            let preview = backend.read(route(json!({"method":"renderer_push_preview", "request":request})).unwrap()).unwrap();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let progress = Arc::new(move |event| { let _ = sender.send(event); });
+            let blocked = backend.read_with_progress(route(json!({"method":"renderer_push", "request":request, "basis":preview["basis"]})).unwrap(), Some(progress)).unwrap();
+            assert_ne!(blocked["code"], 0);
+            let statuses: Vec<_> = receiver.try_iter().filter_map(|event| match event { desktop_backend::hook_progress::CommitEvent::Hook(event) if event.hook_name == "pre-push" => Some(event.status), _ => None }).collect();
+            assert_eq!(statuses, ["started", "failed"]);
+            assert_eq!(git(&target, &["rev-parse", "refs/heads/main"]), previous);
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }
@@ -2631,41 +2715,88 @@ mod tests {
 
     #[test]
     fn wry_reads_last_fetch_for_selected_repository() {
-        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
-        let root = std::env::temp_dir().join(format!("desktop-wry-last-fetch-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&root).unwrap();
-        assert!(Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
-        let backend = Backend::new(4).unwrap();
-        let read = || backend.read_args(vec![json!({"repository_path":root,"method":"renderer_last_fetch"})]).unwrap();
-        assert_eq!(read()["kind"], "unavailable");
-        fs::write(root.join(".git/FETCH_HEAD"), "").unwrap();
-        assert_eq!(read()["kind"], "empty");
-        fs::write(root.join(".git/FETCH_HEAD"), "fetch\n").unwrap();
-        assert_eq!(read()["kind"], "fetched");
-        fs::remove_dir_all(root).unwrap();
-        }).unwrap().join().unwrap();
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::temp_dir()
+                    .join(format!("desktop-wry-last-fetch-{}", uuid::Uuid::new_v4()));
+                fs::create_dir(&root).unwrap();
+                assert!(
+                    Command::new("git")
+                        .args(["init", "-q"])
+                        .arg(&root)
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+                let backend = Backend::new(4).unwrap();
+                let read = || {
+                    backend
+                        .read_args(vec![
+                            json!({"repository_path":root,"method":"renderer_last_fetch"}),
+                        ])
+                        .unwrap()
+                };
+                assert_eq!(read()["kind"], "unavailable");
+                fs::write(root.join(".git/FETCH_HEAD"), "").unwrap();
+                assert_eq!(read()["kind"], "empty");
+                fs::write(root.join(".git/FETCH_HEAD"), "fetch\n").unwrap();
+                assert_eq!(read()["kind"], "fetched");
+                fs::remove_dir_all(root).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
     fn wry_reads_apply_rebase_progress() {
-        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
-            let root = std::env::temp_dir().join(format!("desktop-wry-apply-rebase-{}", uuid::Uuid::new_v4()));
-            fs::create_dir(&root).unwrap();
-            assert!(Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
-            let apply = root.join(".git/rebase-apply");
-            fs::create_dir(&apply).unwrap();
-            fs::write(root.join(".git/REBASE_HEAD"), format!("{}\n", "a".repeat(40))).unwrap();
-            for (name, content) in [("rebasing", ""), ("orig-head", "original\n"), ("head-name", "refs/heads/topic\n"), ("onto", "base\n"), ("next", "2\n"), ("last", "3\n")] {
-                fs::write(apply.join(name), content).unwrap();
-            }
-            let backend = Backend::new(4).unwrap();
-            let state = backend.read_args(vec![json!({"repository_path":root,"method":"renderer_rebase_state"})]).unwrap();
-            assert_eq!(state["backend"], "apply");
-            assert_eq!(state["progress"]["branch"], "refs/heads/topic\n");
-            assert_eq!(state["progress"]["current"], "2\n");
-            assert_eq!(state["progress"]["total"], "3\n");
-            fs::remove_dir_all(root).unwrap();
-        }).unwrap().join().unwrap();
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::temp_dir()
+                    .join(format!("desktop-wry-apply-rebase-{}", uuid::Uuid::new_v4()));
+                fs::create_dir(&root).unwrap();
+                assert!(
+                    Command::new("git")
+                        .args(["init", "-q"])
+                        .arg(&root)
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+                let apply = root.join(".git/rebase-apply");
+                fs::create_dir(&apply).unwrap();
+                fs::write(
+                    root.join(".git/REBASE_HEAD"),
+                    format!("{}\n", "a".repeat(40)),
+                )
+                .unwrap();
+                for (name, content) in [
+                    ("rebasing", ""),
+                    ("orig-head", "original\n"),
+                    ("head-name", "refs/heads/topic\n"),
+                    ("onto", "base\n"),
+                    ("next", "2\n"),
+                    ("last", "3\n"),
+                ] {
+                    fs::write(apply.join(name), content).unwrap();
+                }
+                let backend = Backend::new(4).unwrap();
+                let state = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"renderer_rebase_state"}),
+                    ])
+                    .unwrap();
+                assert_eq!(state["backend"], "apply");
+                assert_eq!(state["progress"]["branch"], "refs/heads/topic\n");
+                assert_eq!(state["progress"]["current"], "2\n");
+                assert_eq!(state["progress"]["total"], "3\n");
+                fs::remove_dir_all(root).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

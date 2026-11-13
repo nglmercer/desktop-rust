@@ -841,18 +841,27 @@ describe('backend Copilot session cleanup', () => {
   it('reviews Wry pushes, admits their long deadline, and never retries uncertain results', async () => {
     const request = { remote: 'origin', expected_url: 'file:///repo', local_branch: 'main', remote_branch: null, tags: ['v1'], force_with_lease: false, no_verify: false, report_progress: false, require_hook_callbacks: true }
     const preview = { request, destinations: ['file:///repo'], basis: 'c'.repeat(64) }
-    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 0, error_kind: null })
-    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const invoke = vi.fn().mockResolvedValue(preview)
+    const invokeWithProgress = vi.fn().mockImplementationOnce(async (_channel, progress) => {
+      progress({ event: 'commit_hook_progress', checkpoint_id: 'push', hook_name: 'pre-push', status: 'started' })
+      progress({ event: 'commit_hook_progress', checkpoint_id: 'push', hook_name: 'pre-push', status: 'finished' })
+      return { code: 0, error_kind: null }
+    })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, invokeWithProgress, send: vi.fn(), on: vi.fn() } })
     const client = new BackendClient()
-    await client.pushRepositoryRemote('/repo', request)
+    const hookProgress = vi.fn()
+    await client.pushRepositoryRemote('/repo', request, undefined, undefined, hookProgress)
     expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.objectContaining({ deadline_ms: 60_000 }))
-    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ deadline_ms: 3_600_000, operation: { type: 'fetch_remote', repository_path: '/repo', operation: { method: 'renderer_push', request, basis: preview.basis } } }))
-    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected secret'))
+    expect(invokeWithProgress).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.any(Function), expect.objectContaining({ deadline_ms: 3_600_000, operation: { type: 'fetch_remote', repository_path: '/repo', operation: { method: 'renderer_push', request, basis: preview.basis } } }))
+    expect(hookProgress.mock.calls).toEqual([[{ hookName: 'pre-push', status: 'started' }], [{ hookName: 'pre-push', status: 'finished' }]])
+    invokeWithProgress.mockResolvedValueOnce({ code: 1, error_kind: null, hook_failed: true })
+    await expect(client.pushRepositoryRemote('/repo', request)).resolves.toMatchObject({ exitCode: 1, hookFailed: true })
+    invokeWithProgress.mockRejectedValueOnce(new Error('disconnected secret'))
     await expect(client.pushRepositoryRemote('/repo', request)).rejects.toMatchObject({ code: 'push_outcome_uncertain', retryable: false, message: expect.not.stringContaining('secret') })
-    expect(invoke).toHaveBeenCalledTimes(4)
+    expect(invokeWithProgress).toHaveBeenCalledTimes(3)
     invoke.mockResolvedValueOnce({ kind: 'unsupported_hooks' })
     await expect(client.pushRepositoryRemote('/repo', request)).rejects.toThrow('pre-push hook interaction')
-    expect(invoke).toHaveBeenCalledTimes(5)
+    expect(invoke).toHaveBeenCalledTimes(4)
   })
 
   it('rejects an explicit refspec review for a different refspec', async () => {

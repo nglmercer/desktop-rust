@@ -290,6 +290,7 @@ export type PushErrorKind = typeof pushErrorKinds[number]
 export interface PushFailure {
   readonly exitCode: number
   readonly errorKind: FetchErrorKind | PushErrorKind | null
+  readonly hookFailed?: boolean
 }
 
 function toBackendError(value: unknown): BackendError {
@@ -3068,12 +3069,21 @@ export class BackendClient {
     readonly no_verify: boolean
     readonly report_progress: boolean
     readonly require_hook_callbacks: boolean
-  }, onProgress?: (chunk: FetchProgressChunk) => void, checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>): Promise<PushFailure | undefined> {
-    if (onProgress && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
+  }, onProgress?: (chunk: FetchProgressChunk) => void, checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>, onHookProgress?: (event: ICommitHookProgress) => void, signal?: AbortSignal): Promise<PushFailure | undefined> {
+    if ((onProgress || request.require_hook_callbacks) && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
       throw new BackendError({ code: 'unsupported', message: 'Native push progress is unavailable', retryable: false })
     }
     const call = (method: 'renderer_push_preview' | 'renderer_push', extra: Record<string, unknown> = {}) => {
-      const options = method === 'renderer_push' ? { onProgress, deadlineMs: 3_600_000 } : {}
+      const options = method === 'renderer_push' ? {
+        onProgress,
+        signal,
+        deadlineMs: 3_600_000,
+        onCommitEvent: request.require_hook_callbacks ? (event: unknown) => {
+          if (isRecord(event) && event.event === 'commit_hook_progress' && event.checkpoint_id === 'push' && event.hook_name === 'pre-push' && (event.status === 'started' || event.status === 'finished' || event.status === 'failed')) {
+            onHookProgress?.({ hookName: event.hook_name, status: event.status })
+          }
+        } : undefined,
+      } : {}
       return this.transport === 'wry'
         ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } }, options)
         : this.repositoryRead(repositoryPath, method, { request, ...extra }, options)
@@ -3094,12 +3104,12 @@ export class BackendClient {
     catch {
       throw new BackendError({ code: 'push_outcome_uncertain', message: 'Push outcome is uncertain; inspect the remote before retrying', retryable: false })
     }
-    if (!isRecord(result) || !Number.isSafeInteger(result.code) || (result.error_kind !== null && !(typeof result.error_kind === 'string' && (fetchErrorKinds.includes(result.error_kind as FetchErrorKind) || pushErrorKinds.includes(result.error_kind as PushErrorKind))))) throw new BackendError({ code: 'push_outcome_uncertain', message: 'Push outcome is uncertain; inspect the remote', retryable: false })
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || (result.hook_failed !== undefined && typeof result.hook_failed !== 'boolean') || (result.error_kind !== null && !(typeof result.error_kind === 'string' && (fetchErrorKinds.includes(result.error_kind as FetchErrorKind) || pushErrorKinds.includes(result.error_kind as PushErrorKind))))) throw new BackendError({ code: 'push_outcome_uncertain', message: 'Push outcome is uncertain; inspect the remote', retryable: false })
     if (result.code === 0) {
-      if (result.error_kind !== null) throw new BackendError({ code: 'push_outcome_uncertain', message: 'Invalid push result; inspect the remote', retryable: false })
+      if (result.error_kind !== null || result.hook_failed === true) throw new BackendError({ code: 'push_outcome_uncertain', message: 'Invalid push result; inspect the remote', retryable: false })
       return
     }
-    return { exitCode: result.code as number, errorKind: result.error_kind as FetchErrorKind | PushErrorKind | null }
+    return { exitCode: result.code as number, errorKind: result.error_kind as FetchErrorKind | PushErrorKind | null, hookFailed: result.hook_failed === true }
   }
 
   /** Fast-forward reviewed local tracking branches without rewriting FETCH_HEAD. */

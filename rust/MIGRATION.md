@@ -2576,10 +2576,18 @@ route where available. Unsupported push destination URLs fail closed. A failed
 or interrupted push may have updated some destinations or
 tags: the UI keeps the inspection warning visible and suppresses blind retry.
 
-Interactive pre-push hooks and full Git LFS push parity remain open. If the
-UI requests hook callbacks and a pre-push hook or configured hook is present,
-the native path refuses before mutation; it also checks again immediately
-before starting Git. `--no-verify` is used only when explicitly requested.
+On Unix, reviewed pushes now execute the user's actual pre-push hook and send
+request-owned started/finished/failed events through the native transports.
+The hook path, executable identity, permissions and bounded contents are
+included in the review; cancellation terminates the Git process group. A
+real Git LFS 3.6.1 pre-push hook uploaded an LFS object to a local remote over
+the authenticated WebSocket bridge. Hook failures do not trigger a blind
+retry; the interactive option to ignore one failed hook remains unsupported.
+Configured `hook.*` commands are rejected before mutation until their external
+executables and ordering can be reviewed. When a user-configured Trace2
+destination prevents isolated hook observation, or on non-Unix platforms,
+callback-requiring pushes with hooks still fail before mutation. `--no-verify`
+is used only when explicitly requested.
 Independent writers can still change hooks or configuration between the final
 check and Git starting. Secret-scanning failures currently provide a fixed
 warning rather than the legacy detailed bypass flow. Assisted publication,

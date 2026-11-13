@@ -149,7 +149,9 @@ describe('Rust push routing', () => {
           require_hook_callbacks: false,
         },
         expect.any(Function),
-        transport === 'wry' ? expect.any(Function) : undefined
+        transport === 'wry' ? expect.any(Function) : undefined,
+        expect.any(Function),
+        undefined
       )
       expect(progress).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -308,4 +310,45 @@ describe('Rust push routing', () => {
     })
     expect(mocks.git).not.toHaveBeenCalled()
   })
+  it.each(['ws', 'wry'])(
+    'forwards request-owned pre-push progress and abort for %s',
+    async transport => {
+      mocks.transport = transport
+      Object.defineProperty(window, '__desktop', {
+        configurable: true,
+        value: { invokeWithProgress: vi.fn() },
+      })
+      const progress = vi.fn(
+        (event: { status: string; abort?: () => void }) => {
+          expect(mocks.detached).toBe(true)
+          if (event.status === 'started') event.abort?.()
+        }
+      )
+      mocks.push.mockImplementation(
+        async (
+          _path,
+          _request,
+          _output,
+          _check,
+          onHook,
+          signal: AbortSignal
+        ) => {
+          onHook({ hookName: 'pre-push', status: 'started' })
+          expect(signal.aborted).toBe(true)
+          onHook({ hookName: 'pre-push', status: 'failed' })
+          return { exitCode: 1, errorKind: null }
+        }
+      )
+      await expect(
+        push(repository, remote, 'main', 'main', [], {
+          onHookProgress: progress,
+        })
+      ).rejects.toThrow('Ignoring an individual failed hook is not supported')
+      expect(progress.mock.calls.map(call => call[0].status)).toEqual([
+        'started',
+        'failed',
+      ])
+      expect(mocks.git).not.toHaveBeenCalled()
+    }
+  )
 })

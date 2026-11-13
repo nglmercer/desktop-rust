@@ -7,23 +7,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 impl Repository {
-    // The existing UI expects hook lifecycle and an interactive decision on
-    // failure. The reviewed native transport cannot supply that decision yet.
-    // Refuse before mutation whenever Git may execute a pre-push hook.
-    async fn push_requires_legacy_hooks(&self, request: &RendererPushRequest) -> Result<bool> {
-        if !request.require_hook_callbacks || request.no_verify {
-            return Ok(false);
-        }
-        let configured = self
-            .run(&args(&["config", "--null", "--get-regexp", "^hook\\."]))
-            .await?;
-        ensure!(
-            matches!(configured.code, 0 | 1),
-            "Cannot inspect configured Git hooks"
-        );
-        if configured.code == 0 {
-            return Ok(true);
-        }
+    async fn pre_push_hook_path(&self) -> Result<std::path::PathBuf> {
         let path = self
             .run(&args(&["rev-parse", "--git-path", "hooks/pre-push"]))
             .await?;
@@ -43,11 +27,120 @@ impl Repository {
         };
         #[cfg(not(unix))]
         let path = std::path::PathBuf::from(std::str::from_utf8(raw)?);
-        let path = if path.is_absolute() {
+        Ok(if path.is_absolute() {
             path
         } else {
             self.path.join(path)
+        })
+    }
+
+    /// Bind a reviewed push to the pre-push file Git would run. Linked hooks
+    /// are supported, but replacing or modifying the resolved file is refused.
+    #[cfg(unix)]
+    async fn pre_push_hook_fingerprint(&self) -> Result<Vec<u8>> {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let path = self.pre_push_hook_path().await?;
+        let link = match std::fs::symlink_metadata(&path) {
+            Ok(value) => value,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                return Ok(b"missing".to_vec());
+            }
+            Err(_) => anyhow::bail!("Cannot review pre-push hook"),
         };
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(&path)
+            .map_err(|_| anyhow::anyhow!("Cannot review pre-push hook"))?;
+        let before = file.metadata()?;
+        ensure!(
+            before.is_file() && before.len() <= 1024 * 1024,
+            "Pre-push hook cannot be safely reviewed"
+        );
+        let mut contents = Vec::new();
+        (&file).take(1024 * 1024 + 1).read_to_end(&mut contents)?;
+        ensure!(
+            contents.len() <= 1024 * 1024,
+            "Pre-push hook cannot be safely reviewed"
+        );
+        let after = file.metadata()?;
+        let current = std::fs::metadata(&path)?;
+        let same = |a: &std::fs::Metadata, b: &std::fs::Metadata| {
+            a.dev() == b.dev()
+                && a.ino() == b.ino()
+                && a.mode() == b.mode()
+                && a.len() == b.len()
+                && a.mtime() == b.mtime()
+                && a.mtime_nsec() == b.mtime_nsec()
+                && a.ctime() == b.ctime()
+                && a.ctime_nsec() == b.ctime_nsec()
+        };
+        ensure!(
+            same(&before, &after) && same(&after, &current),
+            "Pre-push hook changed during review"
+        );
+        let mut hash = Sha256::new();
+        hash.update(link.mode().to_le_bytes());
+        hash.update(before.dev().to_le_bytes());
+        hash.update(before.ino().to_le_bytes());
+        hash.update(before.mode().to_le_bytes());
+        hash.update(contents);
+        Ok(hash.finalize().to_vec())
+    }
+
+    // Preserve a user-supplied Trace2 destination. Our private Trace2 pipe is
+    // used only when neither environment nor Git config already selects one.
+    async fn push_hook_trace_available(&self, request: &RendererPushRequest) -> Result<bool> {
+        if !request.require_hook_callbacks || request.no_verify {
+            return Ok(false);
+        }
+        #[cfg(not(unix))]
+        return Ok(false);
+        #[cfg(unix)]
+        {
+            if std::env::var_os("GIT_TRACE2_EVENT").is_some() {
+                return Ok(false);
+            }
+            let configured = self
+                .run(&args(&["config", "--get", "trace2.eventTarget"]))
+                .await?;
+            ensure!(
+                matches!(configured.code, 0 | 1),
+                "Cannot inspect Git trace configuration"
+            );
+            Ok(configured.code == 1)
+        }
+    }
+
+    // When native hook progress cannot be delivered, retain the old fail-closed
+    // behavior before starting a push that could invoke a hook.
+    async fn push_requires_legacy_hooks(&self, request: &RendererPushRequest) -> Result<bool> {
+        if !request.require_hook_callbacks || request.no_verify {
+            return Ok(false);
+        }
+        // Configured hooks may refer to external commands and multiple hook
+        // invocations that cannot yet be bound to this review. Keep them
+        // blocked even when the traditional hook can be traced safely.
+        let configured = self
+            .run(&args(&["config", "--null", "--get-regexp", "^hook\\."]))
+            .await?;
+        ensure!(
+            matches!(configured.code, 0 | 1),
+            "Cannot inspect configured Git hooks"
+        );
+        if configured.code == 0 {
+            return Ok(true);
+        }
+        if self.push_hook_trace_available(request).await? {
+            return Ok(false);
+        }
+        let path = self.pre_push_hook_path().await?;
         match std::fs::symlink_metadata(path) {
             Ok(_) => Ok(true),
             Err(error)
@@ -183,6 +276,14 @@ impl Repository {
             .await?;
         ensure!(refs.code == 0, "Cannot inspect repository refs");
         let config = self.checkout_configuration().await?;
+        #[cfg(unix)]
+        let hook = if request.require_hook_callbacks && !request.no_verify {
+            self.pre_push_hook_fingerprint().await?
+        } else {
+            Vec::new()
+        };
+        #[cfg(not(unix))]
+        let hook = Vec::<u8>::new();
         let mut hash = Sha256::new();
         for part in [
             self.id().as_bytes(),
@@ -190,6 +291,7 @@ impl Repository {
             &serde_json::to_vec(&destinations)?,
             &refs.stdout,
             &config,
+            &hook,
         ] {
             hash.update((part.len() as u64).to_le_bytes());
             hash.update(part);
@@ -263,11 +365,16 @@ impl Repository {
             !self.push_requires_legacy_hooks(request).await?,
             "Pre-push hook changed; refresh before continuing"
         );
-        let output =
-            process::run_bound_remote_fetch(&self.path, &command, false, request.report_progress)
-                .await?;
+        let trace_hooks = self.push_hook_trace_available(request).await?;
+        let (output, hook_failed) = process::run_bound_remote_push(
+            &self.path,
+            &command,
+            request.report_progress,
+            trace_hooks,
+        )
+        .await?;
         Ok(
-            json!({"code":output.code, "error_kind":if output.code == 0 { None } else { crate::push_error::classify(&output.stderr, &output.stdout) }}),
+            json!({"code":output.code, "hook_failed":hook_failed, "error_kind":if output.code == 0 { None } else { crate::push_error::classify(&output.stderr, &output.stdout) }}),
         )
     }
 }
@@ -470,17 +577,25 @@ mod tests {
         fs::set_permissions(hook, fs::Permissions::from_mode(0o755)).unwrap();
         let repo = Repository::open(&src).await.unwrap();
         request.require_hook_callbacks = true;
-        assert_eq!(
-            repo.renderer_push_preview(&request).await.unwrap()["kind"],
-            "unsupported_hooks"
-        );
-        request.require_hook_callbacks = false;
         let preview = repo.renderer_push_preview(&request).await.unwrap();
-        let result = repo
-            .renderer_push(&request, preview["basis"].as_str().unwrap())
-            .await
-            .unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let result = crate::hook_progress::scope(
+            sender,
+            17,
+            repo.renderer_push(&request, preview["basis"].as_str().unwrap()),
+        )
+        .await
+        .unwrap();
         assert_ne!(result["code"], 0);
+        let mut statuses = Vec::new();
+        while let Ok((id, event)) = receiver.try_recv() {
+            if let crate::hook_progress::CommitEvent::Hook(hook) = event {
+                assert_eq!(id, 17);
+                assert_eq!(hook.hook_name, "pre-push");
+                statuses.push(hook.status);
+            }
+        }
+        assert_eq!(statuses, ["started", "failed"]);
         request.no_verify = true;
         let preview = repo.renderer_push_preview(&request).await.unwrap();
         let result = repo
@@ -488,6 +603,143 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["code"], 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn successful_pre_push_hook_is_executed_and_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let hook = src.join(".git/hooks/pre-push");
+        fs::write(
+            &hook,
+            "#!/bin/sh\ncat > hook-input\nprintf '%s\\n' \"$1\" > hook-remote\n",
+        )
+        .unwrap();
+        fs::set_permissions(hook, fs::Permissions::from_mode(0o755)).unwrap();
+        request.require_hook_callbacks = true;
+        let repo = Repository::open(&src).await.unwrap();
+        let preview = repo.renderer_push_preview(&request).await.unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let result = crate::hook_progress::scope(
+            sender,
+            7,
+            repo.renderer_push(&request, preview["basis"].as_str().unwrap()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(
+            fs::read_to_string(src.join("hook-remote")).unwrap(),
+            "origin\n"
+        );
+        assert!(
+            fs::read_to_string(src.join("hook-input"))
+                .unwrap()
+                .contains("refs/heads/main")
+        );
+        let mut statuses = Vec::new();
+        while let Ok((_, event)) = receiver.try_recv() {
+            if let crate::hook_progress::CommitEvent::Hook(hook) = event {
+                statuses.push(hook.status);
+            }
+        }
+        assert_eq!(statuses, ["started", "finished"]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn preserves_a_user_configured_trace_destination() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let hook = src.join(".git/hooks/pre-push");
+        fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        let trace = fixture.0.join("user-trace.json");
+        git(
+            &src,
+            &["config", "trace2.eventTarget", trace.to_str().unwrap()],
+        );
+        request.require_hook_callbacks = true;
+        let repo = Repository::open(&src).await.unwrap();
+        assert_eq!(
+            repo.renderer_push_preview(&request).await.unwrap()["kind"],
+            "unsupported_hooks"
+        );
+        assert_eq!(
+            git(&src, &["config", "--get", "trace2.eventTarget"]),
+            trace.to_str().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_configured_hooks_that_cannot_be_bound_to_review() {
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        git(&src, &["config", "hook.first.command", "/tmp/first-hook"]);
+        git(&src, &["config", "hook.first.event", "pre-push"]);
+        git(&src, &["config", "hook.second.command", "/tmp/second-hook"]);
+        git(&src, &["config", "hook.second.event", "pre-push"]);
+        request.require_hook_callbacks = true;
+        let repo = Repository::open(&src).await.unwrap();
+        assert_eq!(
+            repo.renderer_push_preview(&request).await.unwrap()["kind"],
+            "unsupported_hooks"
+        );
+        let remote = fixture.0.join("remote.git");
+        assert!(
+            !Command::new("git")
+                .current_dir(remote)
+                .args(["show-ref", "--verify", "refs/heads/main"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_during_pre_push_stops_the_hook_before_publication() {
+        use std::os::unix::fs::PermissionsExt;
+        let (fixture, mut request) = Fixture::new();
+        let src = fixture.0.join("source");
+        let hook = src.join(".git/hooks/pre-push");
+        fs::write(&hook, "#!/bin/sh\nsleep 30\n").unwrap();
+        fs::set_permissions(hook, fs::Permissions::from_mode(0o755)).unwrap();
+        request.require_hook_callbacks = true;
+        let repo = Repository::open(&src).await.unwrap();
+        let basis = repo.renderer_push_preview(&request).await.unwrap()["basis"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let cancellation = crate::cancellation::Cancellation::default();
+        let task = tokio::spawn(cancellation.clone().scope(crate::hook_progress::scope(
+            sender,
+            8,
+            async move { repo.renderer_push(&request, &basis).await },
+        )));
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            while let Some((_, event)) = receiver.recv().await {
+                if matches!(event, crate::hook_progress::CommitEvent::Hook(ref hook) if hook.hook_name == "pre-push" && hook.status == "started") { return; }
+            }
+            panic!("hook never started");
+        }).await.unwrap();
+        cancellation.cancel();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.is_err());
+        let status = Command::new("git")
+            .current_dir(fixture.0.join("remote.git"))
+            .args(["show-ref", "--verify", "refs/heads/main"])
+            .status()
+            .unwrap();
+        assert!(!status.success());
     }
 
     #[tokio::test]
@@ -503,9 +755,6 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert_eq!(
-            repo.renderer_push_preview(&request).await.unwrap()["kind"],
-            "unsupported_hooks"
-        );
+        assert!(repo.renderer_push_preview(&request).await.unwrap()["basis"].is_string());
     }
 }

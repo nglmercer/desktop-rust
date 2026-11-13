@@ -195,6 +195,11 @@ jobs:
           cargo build -p desktop-cli --features embedded-ui --locked
           pnpm exec playwright install --with-deps --only-shell chromium
           DESKTOP_TEST_BROWSER_ENTRY=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts app/test/unit/backend-browser-entry-integration-test.ts
+      - name: Exercise the Git LFS pre-push hook
+        run: |
+          lfs_binary="$(command -v git-lfs)"
+          test -n "$lfs_binary"
+          DESKTOP_TEST_GIT_LFS="$lfs_binary" node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/push-lfs.test.ts
 
   native:
     strategy:
