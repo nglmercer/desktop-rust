@@ -388,6 +388,9 @@ pub enum Operation {
     RendererCommit {
         revision: String,
     },
+    RendererAuthors {
+        revisions: Vec<String>,
+    },
     RendererHistory {
         revision: Option<String>,
         limit: Option<u64>,

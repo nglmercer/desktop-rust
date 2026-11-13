@@ -279,6 +279,10 @@ first-parent traversal and exclusion of remote refs. The existing commit parser
 continues to interpret identities, trailers and decorations. The Rust read has
 a 2 MiB command-output bound; larger history results and other history/diff
 operations still require parity work.
+Branch-list author identities use a bounded typed Rust read on both transports.
+The browser path accepts full commit object IDs only and rejects abbreviated
+IDs, symbolic revisions and annotated tag objects; Electron retains the legacy
+Git path. Returned commit IDs and ordering are validated before attribution.
 The Rust-hosted renderer now displays contextual menus in the webview instead
 of invoking Electron's menu IPC. Menu actions, submenus, keyboard navigation,
 and dismissal are handled in the renderer. Native spellcheck menu entries and

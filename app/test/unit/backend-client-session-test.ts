@@ -6,6 +6,21 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('validates resolved author identities and their input order', async () => {
+    const first = 'a'.repeat(40)
+    const second = 'b'.repeat(64)
+    const invoke = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const entry = (oid: string) => ({ oid, identity: 'Test <test@example.invalid> 100 +0000' })
+    invoke.mockResolvedValueOnce({ resolved: [first, second, first], authors: [entry(first), entry(second)] })
+    await expect(client.repositoryAuthors('/repo', [first.toUpperCase(), second, first])).resolves.toEqual([entry(first), entry(second)])
+    invoke.mockResolvedValueOnce({ resolved: [second, first], authors: [entry(second), entry(first)] })
+    await expect(client.repositoryAuthors('/repo', [first, second])).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({ resolved: [first, second], authors: [entry(second), entry(first)] })
+    await expect(client.repositoryAuthors('/repo', [first, second])).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('falls back to the bounded inline comparison on an older host', async () => {
     const invoke = vi.fn().mockRejectedValueOnce(new Error('invalid Git identity request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('hello\0world') })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

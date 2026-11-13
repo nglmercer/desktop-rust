@@ -393,6 +393,40 @@ export async function getAuthors(repository: Repository, shas: string[]) {
     return []
   }
 
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const authors: CommitIdentity[] = []
+    const seen = new Set<string>()
+    const encoder = new TextEncoder()
+    let batch: string[] = []
+    let size = 0
+    const flush = async () => {
+      if (batch.length === 0) return
+      const revisions = batch
+      batch = []
+      size = 0
+      const read = () => backend().repositoryAuthors(repository.path, revisions)
+      const entries = backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+      for (const entry of entries) {
+        if (!seen.has(entry.oid)) {
+          seen.add(entry.oid)
+          authors.push(CommitIdentity.parseIdentity(entry.identity))
+        }
+      }
+    }
+    for (const sha of shas) {
+      const bytes = encoder.encode(JSON.stringify(sha)).length + 1
+      if (bytes > 32768) throw new Error('Invalid author revision')
+      if (batch.length >= 500 || size + bytes > 32768) await flush()
+      batch.push(sha)
+      size += bytes
+    }
+    await flush()
+    assert.equal(authors.length, shas.length, 'Commit to author mismatch')
+    return authors
+  }
+
   const { stdout } = await git(
     [
       'log',

@@ -501,6 +501,9 @@ impl Repository {
             Operation::GitDescription => return self.git_description().await,
             Operation::IndexChanges => return self.index_changes().await,
             Operation::RendererCommit { revision } => return self.renderer_commit(&revision).await,
+            Operation::RendererAuthors { revisions } => {
+                return self.renderer_authors(&revisions).await;
+            }
             Operation::RendererHistory {
                 revision,
                 limit,
@@ -572,7 +575,11 @@ impl Repository {
                     )
                     .await;
             }
-            Operation::RendererCompareDiffChunk { snapshot_id, offset, length } => {
+            Operation::RendererCompareDiffChunk {
+                snapshot_id,
+                offset,
+                length,
+            } => {
                 return comparison_snapshots::chunk(
                     &self.id(),
                     uuid::Uuid::parse_str(&snapshot_id)?,
@@ -581,7 +588,10 @@ impl Repository {
                 );
             }
             Operation::RendererCompareDiffRelease { snapshot_id } => {
-                return comparison_snapshots::release(&self.id(), uuid::Uuid::parse_str(&snapshot_id)?);
+                return comparison_snapshots::release(
+                    &self.id(),
+                    uuid::Uuid::parse_str(&snapshot_id)?,
+                );
             }
             Operation::RendererWorkingDiff {
                 path,
@@ -1234,6 +1244,7 @@ impl Repository {
             | GitDescription
             | IndexChanges
             | RendererCommit { .. }
+            | RendererAuthors { .. }
             | RendererHistory { .. }
             | RendererRecentBranches
             | RendererBranchCheckouts { .. }

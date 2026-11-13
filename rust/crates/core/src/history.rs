@@ -29,6 +29,90 @@ pub(crate) struct Commit {
 }
 
 impl Repository {
+    /// Preserve Git's author format and no-walk ordering for a bounded batch.
+    /// Each returned object ID lets the renderer detect duplicates across batches.
+    pub(crate) async fn renderer_authors(&self, revisions: &[String]) -> Result<Value> {
+        anyhow::ensure!(
+            !revisions.is_empty() && revisions.len() <= 500,
+            "Invalid author revision count"
+        );
+        let size: usize = revisions.iter().map(|revision| revision.len() + 1).sum();
+        anyhow::ensure!(
+            size <= 32768
+                && revisions
+                    .iter()
+                    .all(|revision| matches!(revision.len(), 40 | 64)
+                        && revision.bytes().all(|byte| byte.is_ascii_hexdigit())),
+            "Invalid author revision"
+        );
+        // Only full commit IDs are accepted. Arbitrary revision expressions can
+        // walk unbounded history, while tag objects have a different identity.
+        let input = revisions
+            .iter()
+            .map(|revision| format!("{revision}\n"))
+            .collect::<String>();
+        let resolved = process::run_git(
+            &self.path,
+            &args(&["cat-file", "--batch-check=%(objectname) %(objecttype)"]),
+            Some(input.into_bytes()),
+            None,
+        )
+        .await?;
+        ensure(&resolved)?;
+        let lines = std::str::from_utf8(&resolved.stdout)?
+            .lines()
+            .collect::<Vec<_>>();
+        anyhow::ensure!(
+            lines.len() == revisions.len(),
+            "Invalid author revision response"
+        );
+        let mut commits = Vec::with_capacity(lines.len());
+        for line in lines {
+            let Some(oid) = line.strip_suffix(" commit") else {
+                anyhow::bail!("An author revision does not resolve to a commit");
+            };
+            anyhow::ensure!(
+                matches!(oid.len(), 40 | 64)
+                    && oid
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                "Invalid author object ID"
+            );
+            commits.push(oid.to_owned());
+        }
+        let input = commits.join("\n").into_bytes();
+        let output = process::run_git(
+            &self.path,
+            &args(&[
+                "log",
+                "--format=format:%H%x00%an <%ae> %ad",
+                "--no-walk=unsorted",
+                "--date=raw",
+                "-z",
+                "--stdin",
+            ]),
+            Some(input),
+            None,
+        )
+        .await?;
+        ensure(&output)?;
+        let fields: Vec<_> = output.stdout.split(|byte| *byte == 0).collect();
+        anyhow::ensure!(fields.len().is_multiple_of(2), "Invalid author output");
+        let mut authors = Vec::with_capacity(fields.len() / 2);
+        for pair in fields.chunks_exact(2) {
+            let oid = std::str::from_utf8(pair[0])?;
+            anyhow::ensure!(
+                matches!(oid.len(), 40 | 64)
+                    && oid
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                "Invalid author object ID"
+            );
+            authors.push(json!({"oid":oid, "identity":String::from_utf8_lossy(pair[1])}));
+        }
+        Ok(json!({"resolved":commits,"authors":authors}))
+    }
+
     /// Render the same raw patch format used by the comparison and history UI.
     /// Only fixed Git options are accepted, and paths are always literal.
     pub(crate) async fn renderer_compare_diff(
@@ -122,7 +206,9 @@ impl Repository {
         if snapshot && output.stdout.len() > crate::comparison_snapshots::MAX_BYTES {
             // Submodule rendering reads commit lines near the start of the
             // patch even when the text diff itself is too large to render.
-            return Ok(json!({"kind":"unrenderable", "prefix":STANDARD.encode(&output.stdout[..output.stdout.len().min(64 * 1024)])}));
+            return Ok(
+                json!({"kind":"unrenderable", "prefix":STANDARD.encode(&output.stdout[..output.stdout.len().min(64 * 1024)])}),
+            );
         }
         if let Some(permit) = permit {
             let cancellation = crate::cancellation::Cancellation::current();
@@ -818,30 +904,190 @@ fn parse_identity(value: &str) -> Result<Identity> {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn renderer_authors_follow_git_order_and_deduplicate_objects() {
+        use std::{fs, process::Command};
+        for object_format in ["sha1", "sha256"] {
+            let root =
+                std::env::temp_dir().join(format!("desktop-authors-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let init = Command::new("git")
+                .current_dir(&root)
+                .args([
+                    "init",
+                    "-q",
+                    "-b",
+                    "main",
+                    &format!("--object-format={object_format}"),
+                ])
+                .output()
+                .unwrap();
+            if !init.status.success() && object_format == "sha256" {
+                fs::remove_dir_all(root).unwrap();
+                continue;
+            }
+            assert!(init.status.success());
+            let git = |arguments: &[&str]| {
+                let output = Command::new("git")
+                    .current_dir(&root)
+                    .args(arguments)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                String::from_utf8(output.stdout).unwrap().trim().to_owned()
+            };
+            git(&[
+                "-c",
+                "user.name=First",
+                "-c",
+                "user.email=first@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "first",
+            ]);
+            let first = git(&["rev-parse", "HEAD"]);
+            git(&[
+                "-c",
+                "user.name=Second",
+                "-c",
+                "user.email=second@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "second",
+            ]);
+            let second = git(&["rev-parse", "HEAD"]);
+            git(&[
+                "-c",
+                "user.name=Tagger",
+                "-c",
+                "user.email=tagger@example.invalid",
+                "tag",
+                "-a",
+                "alias",
+                "-m",
+                "alias",
+                &first,
+            ]);
+            let tag = git(&["rev-parse", "refs/tags/alias"]);
+            let repo = Repository::open(&root).await.unwrap();
+            let result = repo
+                .renderer_authors(&[
+                    second.to_uppercase(),
+                    first.clone(),
+                    first.clone(),
+                    second.clone(),
+                ])
+                .await
+                .unwrap();
+            assert_eq!(
+                result["resolved"],
+                json!([&second, &first, &first, &second])
+            );
+            let entries = result["authors"].as_array().unwrap();
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0]["oid"], second);
+            assert_eq!(entries[1]["oid"], first);
+            assert!(
+                entries[0]["identity"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Second <second@example.invalid> ")
+            );
+            assert!(
+                entries[1]["identity"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("First <first@example.invalid> ")
+            );
+            assert!(
+                repo.renderer_authors(&["missing-commit".into()])
+                    .await
+                    .is_err()
+            );
+            assert!(repo.renderer_authors(&["--all".into()]).await.is_err());
+            assert!(
+                repo.renderer_authors(&["HEAD\n--all".into()])
+                    .await
+                    .is_err()
+            );
+            assert!(
+                repo.renderer_authors(&["HEAD~1..HEAD".into()])
+                    .await
+                    .is_err()
+            );
+            assert!(
+                repo.renderer_authors(&[first[..12].to_owned()])
+                    .await
+                    .is_err()
+            );
+            assert!(
+                repo.renderer_authors(&["HEAD~1000000".into()])
+                    .await
+                    .is_err()
+            );
+            assert!(repo.renderer_authors(&[tag]).await.is_err());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+    #[tokio::test]
     #[ignore = "writes and compares a 70 MB Git fixture"]
     async fn oversized_real_git_comparison_is_unrenderable() {
         use std::{fs, process::Command};
-        let root = std::env::temp_dir().join(format!("desktop-oversized-diff-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-oversized-diff-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let git = |args: &[&str]| {
-            let output = Command::new("git").current_dir(&root).args(args).output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let output = Command::new("git")
+                .current_dir(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             String::from_utf8(output.stdout).unwrap().trim().to_owned()
         };
         git(&["init", "-q", "-b", "main"]);
         git(&["config", "user.name", "Test"]);
         git(&["config", "user.email", "test@example.invalid"]);
         fs::write(root.join("file"), "before\n").unwrap();
-        git(&["add", "file"]); git(&["commit", "-qm", "before"]);
+        git(&["add", "file"]);
+        git(&["commit", "-qm", "before"]);
         let before = git(&["rev-parse", "HEAD"]);
-        fs::write(root.join("file"), format!("{}\n", "x".repeat(100)).repeat(700_000)).unwrap();
-        git(&["add", "file"]); git(&["commit", "-qm", "after"]);
+        fs::write(
+            root.join("file"),
+            format!("{}\n", "x".repeat(100)).repeat(700_000),
+        )
+        .unwrap();
+        git(&["add", "file"]);
+        git(&["commit", "-qm", "after"]);
         let after = git(&["rev-parse", "HEAD"]);
         let repo = Repository::open(&root).await.unwrap();
         let owner = crate::comparison_snapshots::Owner::new();
-        let result = crate::comparison_snapshots::scope(owner.clone(), repo.renderer_compare_diff_snapshot(
-            &before, &after, false, GitPath::Text("file".into()), None, false,
-        )).await.unwrap();
+        let result = crate::comparison_snapshots::scope(
+            owner.clone(),
+            repo.renderer_compare_diff_snapshot(
+                &before,
+                &after,
+                false,
+                GitPath::Text("file".into()),
+                None,
+                false,
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(result["kind"], "unrenderable");
         owner.close();
         fs::remove_dir_all(root).unwrap();

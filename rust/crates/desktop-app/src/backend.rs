@@ -28,6 +28,8 @@ struct ReadRequest {
     #[serde(default)]
     commitish: Option<String>,
     #[serde(default)]
+    revisions: Option<Vec<String>>,
+    #[serde(default)]
     after_date: Option<String>,
     #[serde(default)]
     limit: Option<u64>,
@@ -305,6 +307,7 @@ enum ReadMethod {
     StatusDetailed,
     IndexChanges,
     RendererCommit,
+    RendererAuthors,
     RendererHistory,
     RendererRecentBranches,
     RendererBranchCheckouts,
@@ -981,6 +984,11 @@ impl Backend {
             .try_into()
             .map_err(|_| AppError::BadArgs("backend read requires exactly one request".into()))?;
         let request: ReadRequest = serde_json::from_value(value)?;
+        if !matches!(&request.method, ReadMethod::RendererAuthors) && request.revisions.is_some() {
+            return Err(AppError::BadArgs(
+                "revisions only apply to author reads".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::RendererBranchCheckouts)
             && request.after_date.is_some()
         {
@@ -1288,6 +1296,18 @@ impl Backend {
                         revision: request
                             .commitish
                             .ok_or_else(|| AppError::BadArgs("commitish is required".into()))?,
+                    }
+                }
+                ReadMethod::RendererAuthors
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::RendererAuthors {
+                        revisions: request
+                            .revisions
+                            .ok_or_else(|| AppError::BadArgs("revisions are required".into()))?,
                     }
                 }
                 ReadMethod::RendererHistory
@@ -3989,6 +4009,52 @@ esac
         }
         fs::write(first.join("first-only"), "test").unwrap();
         let backend = Backend::new(16).unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&second)
+                .args([
+                    "-c",
+                    "user.name=Author",
+                    "-c",
+                    "user.email=author@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "author"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&second)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let oid = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        let authors = backend
+            .read_args(vec![
+                json!({"repository_path":second,"method":"renderer_authors","revisions":[oid]}),
+            ])
+            .unwrap();
+        assert_eq!(authors["authors"][0]["oid"], oid);
+        assert!(
+            authors["authors"][0]["identity"]
+                .as_str()
+                .unwrap()
+                .starts_with("Author <author@example.invalid> ")
+        );
+        assert!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":second,"method":"index_changes","revisions":[oid]})
+                ])
+                .is_err()
+        );
         assert!(
             Command::new("git")
                 .arg("-C")

@@ -1876,6 +1876,25 @@ export class BackendClient {
     })
   }
 
+  async repositoryAuthors(repositoryPath: string, revisions: ReadonlyArray<string>): Promise<ReadonlyArray<{ readonly oid: string; readonly identity: string }>> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_authors', { revisions })
+    const invalid = () => new BackendError({ code: 'invalid_response', message: 'Invalid author response', retryable: false })
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
+    if (!isRecord(value) || !Array.isArray(value.resolved) || value.resolved.length !== revisions.length || !Array.isArray(value.authors) || value.authors.length > 500) throw invalid()
+    const resolved: string[] = []
+    for (const [index, id] of value.resolved.entries()) {
+      if (typeof id !== 'string' || !oid.test(id)) throw invalid()
+      if (/^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(revisions[index]) && revisions[index].toLowerCase() !== id) throw invalid()
+      resolved.push(id)
+    }
+    const expected = Array.from(new Set(resolved))
+    if (value.authors.length !== expected.length) throw invalid()
+    return value.authors.map((entry, index) => {
+      if (!isRecord(entry) || typeof entry.oid !== 'string' || entry.oid !== expected[index] || typeof entry.identity !== 'string' || entry.identity.length > 131072) throw invalid()
+      return { oid: entry.oid, identity: entry.identity }
+    })
+  }
+
   async repositoryRendererCommit(repositoryPath: string, revision: string): Promise<string | null> {
     const value = await this.repositoryRead(repositoryPath, 'renderer_commit', this.transport === 'wry' ? { commitish: revision } : { revision })
     if (value !== null && (typeof value !== 'string' || value.length > 3_000_000 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))) {
