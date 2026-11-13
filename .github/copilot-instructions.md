@@ -12,7 +12,7 @@ PR-preparation skill.
 - **Language**: TypeScript (strict mode enabled)
 - **UI Framework**: React 16.x
 - **Runtime**: Electron > 38.x (see `app/.npmrc` for specific version)
-- **Build Tools**: Vite for the web renderer and migrated Electron bundles; Webpack remains for the Electron main process and renderer; Cargo builds the Rust workspace
+- **Build Tools**: Vite for the web renderer and migrated Electron bundles, including the main process; Webpack remains for the Electron renderer; Cargo builds the Rust workspace
 - **Package Manager**: pnpm (see `packageManager` in `package.json`); existing scripts also use npm
 - **Node Version**: >= 22.12.0 (see `.nvmrc` for the recommended version)
 - **Testing**: Vitest for migrated TypeScript suites, the Node.js test runner for remaining legacy suites, and Cargo for Rust tests. `npm test -- <file>` routes registered Vitest suites via `vitest-suites.json`.
@@ -87,11 +87,13 @@ GitHub Desktop has been developed for many years through many iterations of tech
 ### ESLint Rules
 
 The codebase uses comprehensive ESLint rules. Key custom rules:
-- `insecure-random`: Prevents use of insecure random number generation
 - `react-no-unbound-dispatcher-props`: Enforces proper dispatcher prop handling
 - `react-readonly-props-and-state`: Prevents mutation of React props and state
 - `react-proper-lifecycle-methods`: Enforces correct React lifecycle usage
 - `no-loosely-typed-webcontents-ipc`: Ensures type-safe IPC communication
+
+The `insecure-random` rule runs as a Biome TypeScript plugin through
+`npm run lint:security`.
 
 ## Building & Testing
 
