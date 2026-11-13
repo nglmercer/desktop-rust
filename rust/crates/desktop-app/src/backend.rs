@@ -84,6 +84,9 @@ enum GitInfoOperation {
     Read {},
     Version {},
     GlobalConfigPath {},
+    ReleaseComparisonSnapshot {
+        snapshot_id: String,
+    },
     LfsStatus {},
     LfsInstall {
         force: bool,
@@ -341,6 +344,13 @@ pub struct Backend {
     capacity: usize,
     registry: Option<desktop_backend::Registry>,
     copilot_runtime_root: Option<PathBuf>,
+    comparison_owner: Arc<desktop_backend::comparison_snapshots::Owner>,
+}
+
+impl Drop for Backend {
+    fn drop(&mut self) {
+        self.comparison_owner.close();
+    }
 }
 
 pub struct ReadJob {
@@ -396,6 +406,7 @@ impl Backend {
             capacity,
             registry: None,
             copilot_runtime_root: None,
+            comparison_owner: desktop_backend::comparison_snapshots::Owner::new(),
         })
     }
 
@@ -547,6 +558,8 @@ impl Backend {
                     | Operation::RendererBlobChunk { .. }
                     | Operation::RendererCommitDiff { .. }
                     | Operation::RendererCompareDiff { .. }
+                    | Operation::RendererCompareDiffChunk { .. }
+                    | Operation::RendererCompareDiffRelease { .. }
                     | Operation::DiscardPreview {
                         scope: desktop_backend::DiscardScope::WorkingTree,
                         selection: Some(_),
@@ -1674,6 +1687,9 @@ impl Backend {
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
                                 repo.execute(Operation::GitIgnore { action }).await
                             }
+                            GitInfoOperation::ReleaseComparisonSnapshot { snapshot_id } => {
+                                desktop_backend::comparison_snapshots::release_owned(&snapshot_id)
+                            }
                             GitInfoOperation::ReviewedDiscard { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
@@ -1950,6 +1966,8 @@ impl Backend {
                 }
             }
         });
+        let work =
+            desktop_backend::comparison_snapshots::scope(self.comparison_owner.clone(), work);
         if let Some(progress) = progress {
             let (sender, mut receiver) = tokio::sync::mpsc::channel::<(
                 u64,
@@ -1991,14 +2009,27 @@ mod tests {
             git(&["config", "user.name", "Test"]); git(&["config", "user.email", "test@example.invalid"]); git(&["config", "commit.gpgsign", "false"]);
             fs::write(root.join("[a].txt"), "first\n").unwrap(); git(&["add", "--", "."]); git(&["commit", "-qm", "first"]);
             let first = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
-            fs::write(root.join("[a].txt"), format!("{}\n", "a".repeat(120)).repeat(1200)).unwrap(); git(&["add", "--", "."]); git(&["commit", "-qm", "second"]);
+            fs::write(root.join("[a].txt"), format!("{}\n", "a".repeat(120)).repeat(20_000)).unwrap(); git(&["add", "--", "."]); git(&["commit", "-qm", "second"]);
             let head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
             let backend = Backend::new(16).unwrap();
-            let request = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_diff","before":first,"after":head,"merge_base":true,"path":"[a].txt","old_path":null,"hide_whitespace":false}}})]).unwrap();
+            let request = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_diff","before":first,"after":head,"merge_base":true,"path":"[a].txt","old_path":null,"hide_whitespace":false,"snapshot":true}}})]).unwrap();
             let response = backend.read(request).unwrap();
-            assert_eq!(response["kind"], "diff");
-            assert!(response["data"].as_str().unwrap().len() > 65_536);
-            fs::remove_dir_all(root).unwrap();
+            assert_eq!(response["kind"], "snapshot");
+            let size = response["size"].as_u64().unwrap();
+            assert!(size > 2 * 1024 * 1024);
+            let id = response["id"].as_str().unwrap();
+            let mut offset = 0;
+            while offset < size {
+                let request = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_diff_chunk","snapshot_id":id,"offset":offset,"length":524288}}})]).unwrap();
+                let chunk = backend.read(request).unwrap();
+                assert_eq!(chunk["offset"], offset);
+                assert_eq!(chunk["size"], size);
+                assert!(!chunk["data"].as_str().unwrap().is_empty());
+                offset = (offset + 524288).min(size);
+            }
+            fs::remove_dir_all(&root).unwrap();
+            let request = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
+            assert_eq!(backend.read(request).unwrap()["released"], true);
         }).unwrap().join().unwrap();
     }
 

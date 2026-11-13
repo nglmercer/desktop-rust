@@ -441,6 +441,16 @@ pub enum Operation {
         old_path: Option<GitPath>,
         #[serde(default)]
         hide_whitespace: bool,
+        #[serde(default)]
+        snapshot: bool,
+    },
+    RendererCompareDiffChunk {
+        snapshot_id: String,
+        offset: u64,
+        length: u32,
+    },
+    RendererCompareDiffRelease {
+        snapshot_id: String,
     },
     RendererWorkingDiff {
         path: GitPath,

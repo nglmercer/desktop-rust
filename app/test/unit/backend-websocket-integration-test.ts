@@ -131,7 +131,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
       const repository = path.join(directory, 'repository')
       await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
-      const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args])
+      const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args], { maxBuffer: 8 * 1024 * 1024 })
       git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false')
       await writeFile(path.join(repository, '[a].txt'), 'first\n'); await writeFile(path.join(repository, 'a.txt'), 'unrelated\n')
       git('add', '--', '.'); git('commit', '-qm', 'first')
@@ -143,7 +143,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(raw).not.toBeNull()
       const expected = git('diff', '--merge-base', '--patch-with-raw', '-z', '--no-color', '--end-of-options', first, last, '--', ':(literal)[a].txt')
       expect(expected.length).toBeGreaterThan(65_536)
-      expect(Buffer.from(raw!, 'base64')).toEqual(expected)
+      expect(Buffer.from(raw as Uint8Array)).toEqual(expected)
       const { getCommitRangeDiff } = await import('../../src/lib/git/diff')
       const diff = await getCommitRangeDiff({ path: repository, gitHubRepository: null } as Repository, new FileChange('[a].txt', { kind: AppFileStatusKind.Modified }), [first])
       expect(diff.kind).toBe(DiffType.Text)
@@ -152,7 +152,14 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await writeFile(path.join(repository, '[a].txt'), `${'x'.repeat(120)}\n`.repeat(20_000))
       git('add', '--', '.'); git('commit', '-qm', 'large diff')
       const large = git('rev-parse', 'HEAD').toString().trim()
-      await expect(client.repositoryRendererCompareDiff(repository, last, large, false, '[a].txt', undefined, false)).rejects.toThrow()
+      const largeRaw = await client.repositoryRendererCompareDiff(repository, last, large, false, '[a].txt', undefined, false)
+      const largeExpected = git('diff', '--patch-with-raw', '-z', '--no-color', '--format=', '--end-of-options', last, large, '--', ':(literal)[a].txt')
+      expect(largeExpected.length).toBeGreaterThan(2 * 1024 * 1024)
+      expect(Buffer.from(largeRaw as Uint8Array)).toEqual(largeExpected)
+      const binding = await client.request<{ root_id: string }>('repository_binding', { path: repository })
+      const snapshot = await client.request<{ id: string }>('renderer_compare_diff', { before: last, after: large, merge_base: false, path: '[a].txt', old_path: null, hide_whitespace: false, snapshot: true }, { repositoryId: binding.root_id })
+      await client.selectBrowserRepository(null)
+      await expect(client.request('release_comparison_snapshot', { snapshot_id: snapshot.id })).resolves.toEqual({ released: true })
     }, 90_000)
 
     it('fetches a reviewed local remote over WebSocket', async () => {

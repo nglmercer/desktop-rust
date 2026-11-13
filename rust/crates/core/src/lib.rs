@@ -21,6 +21,7 @@ mod repo_rules;
 pub use repo_rules::{NameRuleFailure, NameRulesActor, NameRulesPolicy};
 mod branch_policy;
 pub mod cancellation;
+pub mod comparison_snapshots;
 pub mod hook_progress;
 #[cfg(unix)]
 mod hook_trace;
@@ -100,8 +101,8 @@ use anyhow::{Context, Result, bail};
 pub use creation::CreationFile;
 pub use protocol::*;
 pub use registry::{
-    Registry, SavedRepositories, SavedRepositoryRecord, clone_repository, initialize,
-    initialize_desktop_repository,
+    CloneOptions, Registry, SavedRepositories, SavedRepositoryRecord, clone_repository,
+    clone_repository_with_options, initialize, initialize_desktop_repository,
 };
 use serde_json::Value;
 use std::{
@@ -546,7 +547,20 @@ impl Repository {
                 path,
                 old_path,
                 hide_whitespace,
+                snapshot,
             } => {
+                if snapshot {
+                    return self
+                        .renderer_compare_diff_snapshot(
+                            &before,
+                            &after,
+                            merge_base,
+                            path,
+                            old_path,
+                            hide_whitespace,
+                        )
+                        .await;
+                }
                 return self
                     .renderer_compare_diff(
                         &before,
@@ -557,6 +571,17 @@ impl Repository {
                         hide_whitespace,
                     )
                     .await;
+            }
+            Operation::RendererCompareDiffChunk { snapshot_id, offset, length } => {
+                return comparison_snapshots::chunk(
+                    &self.id(),
+                    uuid::Uuid::parse_str(&snapshot_id)?,
+                    offset,
+                    length,
+                );
+            }
+            Operation::RendererCompareDiffRelease { snapshot_id } => {
+                return comparison_snapshots::release(&self.id(), uuid::Uuid::parse_str(&snapshot_id)?);
             }
             Operation::RendererWorkingDiff {
                 path,
@@ -1221,6 +1246,8 @@ impl Repository {
             | InterpretTrailers { .. }
             | RendererCommitDiff { .. }
             | RendererCompareDiff { .. }
+            | RendererCompareDiffChunk { .. }
+            | RendererCompareDiffRelease { .. }
             | RendererWorkingDiff { .. }
             | RendererBlobPrefix { .. }
             | RendererBlobChunk { .. }

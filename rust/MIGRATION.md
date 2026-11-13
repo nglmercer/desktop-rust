@@ -2509,8 +2509,14 @@ Wry and Electron retain their existing refspec path.
 
 The existing native clone endpoint now returns fixed diagnostic categories
 instead of raw Git output, which can contain credentials introduced by URL
-rewrites. Full clone error detail and the destination-scoped credential lease
-remain open.
+rewrites. Its WebSocket request accepts optional branch, initial default-branch
+and recursive-submodule settings while retaining the earlier nonrecursive
+defaults for old clients. These options are covered by real Git and WebSocket
+tests, including a rewritten external helper in a submodule. The endpoint
+still uses native Git credential configuration; it does not provide selected
+account isolation, progress or recovery, and is not yet used by the browser
+clone workflow. Full clone error detail and a destination-scoped credential
+lease remain open.
 
 Browser WebSocket remote-HEAD refresh uses a reviewed Rust operation. It binds
 the raw loose HEAD file, including dangling symbolic refs, and checks path
@@ -2521,6 +2527,14 @@ race the final review. Wry and Electron retain their existing refresh path.
 Commit-range and branch merge-base diffs use a typed Rust read on Wry and
 WebSocket, retaining the renderer's raw patch parser, literal path handling,
 rename inputs, whitespace option and initial-commit empty-tree retry. Git output
-is bounded to 2 MiB per stream; larger diffs fail instead of being fully shown.
-Electron retains the existing Git path, and native WebView response-size and
-cross-platform parity remain to be verified.
+is produced once per comparison and retained in an immutable, transport-owned
+snapshot. Two snapshots may be live at once; further requests wait with
+cancellation, and a transport may hold or wait for only one snapshot. Chunks
+are at most 512 KiB and inactive snapshots expire after
+five minutes, with cleanup on transport close. Git output over 70,000,000 bytes
+is drained without retaining the excess and shown as unrenderable. Retained
+Git output is bounded to about 140 MB across two snapshots; allocator growth
+may temporarily duplicate a buffer during reallocation, and chunk encoding
+and the renderer's copy add further bounded overhead. Electron retains the
+existing Git path; native WebView and cross-platform parity remain to be
+verified.

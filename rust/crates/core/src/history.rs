@@ -40,6 +40,49 @@ impl Repository {
         old_path: Option<GitPath>,
         hide_whitespace: bool,
     ) -> Result<Value> {
+        self.renderer_compare_diff_inner(
+            before,
+            after,
+            merge_base,
+            path,
+            old_path,
+            hide_whitespace,
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn renderer_compare_diff_snapshot(
+        &self,
+        before: &str,
+        after: &str,
+        merge_base: bool,
+        path: GitPath,
+        old_path: Option<GitPath>,
+        hide_whitespace: bool,
+    ) -> Result<Value> {
+        self.renderer_compare_diff_inner(
+            before,
+            after,
+            merge_base,
+            path,
+            old_path,
+            hide_whitespace,
+            true,
+        )
+        .await
+    }
+
+    async fn renderer_compare_diff_inner(
+        &self,
+        before: &str,
+        after: &str,
+        merge_base: bool,
+        path: GitPath,
+        old_path: Option<GitPath>,
+        hide_whitespace: bool,
+        snapshot: bool,
+    ) -> Result<Value> {
         for revision in [before, after] {
             anyhow::ensure!(
                 !revision.is_empty() && revision.len() <= 4096 && !revision.contains('\0'),
@@ -62,11 +105,37 @@ impl Repository {
         if let Some(old_path) = old_path {
             command.push(crate::validate_path(old_path)?);
         }
-        let output = self.run(&command).await?;
+        let permit = if snapshot {
+            Some(crate::comparison_snapshots::reserve().await?)
+        } else {
+            None
+        };
+        let output = if snapshot {
+            process::run_comparison_snapshot(&self.path, &command).await?
+        } else {
+            self.run(&command).await?
+        };
         if !merge_base && output.bad_revision() {
             return Ok(json!({"kind":"bad_revision"}));
         }
         ensure(&output)?;
+        if snapshot && output.stdout.len() > crate::comparison_snapshots::MAX_BYTES {
+            // Submodule rendering reads commit lines near the start of the
+            // patch even when the text diff itself is too large to render.
+            return Ok(json!({"kind":"unrenderable", "prefix":STANDARD.encode(&output.stdout[..output.stdout.len().min(64 * 1024)])}));
+        }
+        if let Some(permit) = permit {
+            let cancellation = crate::cancellation::Cancellation::current();
+            cancellation.check()?;
+            let snapshot = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;
+            if let Err(error) = cancellation.check() {
+                if let Some(id) = snapshot["id"].as_str() {
+                    let _ = crate::comparison_snapshots::release_owned(id);
+                }
+                return Err(error);
+            }
+            return Ok(snapshot);
+        }
         Ok(json!({"kind":"diff", "data":STANDARD.encode(output.stdout)}))
     }
 
@@ -748,6 +817,36 @@ fn parse_identity(value: &str) -> Result<Identity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    #[ignore = "writes and compares a 70 MB Git fixture"]
+    async fn oversized_real_git_comparison_is_unrenderable() {
+        use std::{fs, process::Command};
+        let root = std::env::temp_dir().join(format!("desktop-oversized-diff-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git").current_dir(&root).args(args).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        fs::write(root.join("file"), "before\n").unwrap();
+        git(&["add", "file"]); git(&["commit", "-qm", "before"]);
+        let before = git(&["rev-parse", "HEAD"]);
+        fs::write(root.join("file"), format!("{}\n", "x".repeat(100)).repeat(700_000)).unwrap();
+        git(&["add", "file"]); git(&["commit", "-qm", "after"]);
+        let after = git(&["rev-parse", "HEAD"]);
+        let repo = Repository::open(&root).await.unwrap();
+        let owner = crate::comparison_snapshots::Owner::new();
+        let result = crate::comparison_snapshots::scope(owner.clone(), repo.renderer_compare_diff_snapshot(
+            &before, &after, false, GitPath::Text("file".into()), None, false,
+        )).await.unwrap();
+        assert_eq!(result["kind"], "unrenderable");
+        owner.close();
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn renderer_comparison_diffs_match_git_and_keep_paths_literal() {
         use std::{fs, path::Path, process::Command};

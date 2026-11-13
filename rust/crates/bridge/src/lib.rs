@@ -320,6 +320,9 @@ enum ManagementOperation {
     RepositoryBinding {
         path: desktop_core::GitPath,
     },
+    ReleaseComparisonSnapshot {
+        snapshot_id: String,
+    },
     LfsRepository {
         path: desktop_core::GitPath,
         action: LfsRepositoryAction,
@@ -419,6 +422,12 @@ enum ManagementOperation {
     CloneRepository {
         url: String,
         path: desktop_core::GitPath,
+        #[serde(default)]
+        branch: Option<String>,
+        #[serde(default)]
+        default_branch: Option<String>,
+        #[serde(default)]
+        recursive: bool,
     },
 }
 
@@ -515,6 +524,9 @@ async fn execute(
                 }
                 None => anyhow::bail!("open, initialize, or clone a repository first"),
             }
+        }
+        ApplicationOperation::Management(ReleaseComparisonSnapshot { snapshot_id }) => {
+            desktop_core::comparison_snapshots::release_owned(&snapshot_id)
         }
         ApplicationOperation::Management(AvailableEditors) => {
             let preferences = cancellation::blocking(move || registry.preferences().read()).await?;
@@ -813,9 +825,23 @@ async fn execute(
                 InitRepository { path } => {
                     desktop_core::initialize(&desktop_core::directory_path(path)?).await?
                 }
-                CloneRepository { url, path } => {
-                    desktop_core::clone_repository(&url, &desktop_core::directory_path(path)?)
-                        .await?
+                CloneRepository {
+                    url,
+                    path,
+                    branch,
+                    default_branch,
+                    recursive,
+                } => {
+                    desktop_core::clone_repository_with_options(
+                        &url,
+                        &desktop_core::directory_path(path)?,
+                        desktop_core::CloneOptions {
+                            branch,
+                            default_branch,
+                            recursive,
+                        },
+                    )
+                    .await?
                 }
                 _ => unreachable!("handled above"),
             };
@@ -885,6 +911,14 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
     let mut changes = state.changes.subscribe();
     let mut preferences = state.preferences.subscribe();
     let mut active: Option<Active> = None;
+    // RAII also covers early returns while writing replies or closing sockets.
+    struct ComparisonSession(Arc<desktop_core::comparison_snapshots::Owner>);
+    impl Drop for ComparisonSession {
+        fn drop(&mut self) {
+            self.0.close();
+        }
+    }
+    let comparison_owner = ComparisonSession(desktop_core::comparison_snapshots::Owner::new());
     let (hook_events, mut hook_events_rx) =
         mpsc::channel::<(u64, desktop_core::hook_progress::CommitEvent)>(64);
     let mut queue = VecDeque::<Rpc>::new();
@@ -892,7 +926,12 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
         if active.is_none()
             && let Some(rpc) = queue.pop_front()
         {
-            active = Some(Active::new(state.clone(), rpc, hook_events.clone()));
+            active = Some(Active::new(
+                state.clone(),
+                rpc,
+                hook_events.clone(),
+                comparison_owner.0.clone(),
+            ));
         }
         let message = tokio::select! {
             biased;
@@ -1037,11 +1076,13 @@ impl Active {
         state: Arc<Bridge>,
         rpc: Rpc,
         events: mpsc::Sender<(u64, desktop_core::hook_progress::CommitEvent)>,
+        comparison_owner: Arc<desktop_core::comparison_snapshots::Owner>,
     ) -> Self {
         let cancellation = Cancellation::default();
         let request_cancellation = cancellation.clone();
         let request_id = rpc.id;
-        let future = Box::pin(
+        let future = Box::pin(desktop_core::comparison_snapshots::scope(
+            comparison_owner,
             cancellation
                 .clone()
                 .scope(desktop_core::hook_progress::scope(
@@ -1061,7 +1102,7 @@ impl Active {
                         }
                     },
                 )),
-        );
+        ));
         Self {
             id: rpc.id,
             cancellation,

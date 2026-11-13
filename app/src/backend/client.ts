@@ -1119,6 +1119,7 @@ export class BackendClient {
   private wry: WryTransport | null = null
   private ws: WebSocketTransport | null = null
   private transport: 'wry' | 'ws' | 'none' = 'none'
+  private comparisonTurn: Promise<void> = Promise.resolve()
 
   constructor() {
     const w = (window as any).__desktop as WryBridge | undefined
@@ -1933,7 +1934,7 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_compare_diff_chunk' | 'renderer_compare_diff_release' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
@@ -1969,11 +1970,64 @@ export class BackendClient {
     return value
   }
 
-  async repositoryRendererCompareDiff(repositoryPath: string, before: string, after: string, mergeBase: boolean, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<string | null> {
-    const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff', { before, after, merge_base: mergeBase, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace })
+  async repositoryRendererCompareDiff(repositoryPath: string, before: string, after: string, mergeBase: boolean, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<Uint8Array | { kind: 'unrenderable'; prefix: Uint8Array } | null> {
+    // A transport handles one request at a time. Keep each snapshot and its
+    // chunk reads together so another comparison cannot block their release.
+    const previous = this.comparisonTurn
+    let releaseTurn!: () => void
+    this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
+    await previous
+    try {
+      return await this.readComparisonSnapshot(repositoryPath, before, after, mergeBase, path, oldPath, hideWhitespace)
+    } finally {
+      releaseTurn()
+    }
+  }
+
+  private async readComparisonSnapshot(repositoryPath: string, before: string, after: string, mergeBase: boolean, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<Uint8Array | { kind: 'unrenderable'; prefix: Uint8Array } | null> {
+    const params = { before, after, merge_base: mergeBase, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace }
+    let value: unknown
+    try {
+      value = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff', { ...params, snapshot: true })
+    } catch (error) {
+      // Older hosts reject unknown request fields before executing Git. The
+      // read-only legacy request still has its original 2 MiB output bound.
+      const message = error instanceof Error ? error.message : ''
+      if (!/invalid typed repository request|invalid Git identity request|unknown field [`'“]?snapshot/i.test(message)) throw error
+      value = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff', params)
+    }
     if (isRecord(value) && !mergeBase && value.kind === 'bad_revision') return null
-    if (!isRecord(value) || value.kind !== 'diff' || typeof value.data !== 'string' || value.data.length > 3_000_000 || value.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value.data)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison diff response', retryable: false })
-    return value.data
+    if (isRecord(value) && value.kind === 'diff' && typeof value.data === 'string' && value.data.length <= 2_796_204 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.data)) {
+      const decoded = atob(value.data)
+      if (decoded.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid legacy comparison size', retryable: false })
+      return Uint8Array.from(decoded, character => character.charCodeAt(0))
+    }
+    if (isRecord(value) && value.kind === 'unrenderable' && typeof value.prefix === 'string' && value.prefix.length <= 87384 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.prefix)) {
+      const decoded = atob(value.prefix)
+      return { kind: 'unrenderable', prefix: Uint8Array.from(decoded, character => character.charCodeAt(0)) }
+    }
+    if (!isRecord(value) || value.kind !== 'snapshot' || typeof value.id !== 'string' || !/^[0-9a-f-]{36}$/.test(value.id)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison snapshot', retryable: false })
+    const id = value.id
+    try {
+      if (!Number.isSafeInteger(value.size) || (value.size as number) < 0 || (value.size as number) > 70_000_000) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison size', retryable: false })
+      const size = value.size as number
+      const bytes = new Uint8Array(size)
+      for (let offset = 0; offset < size;) {
+        const length = Math.min(512 * 1024, size - offset)
+        const chunk = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff_chunk', { snapshot_id: id, offset, length })
+        if (!isRecord(chunk) || chunk.offset !== offset || chunk.size !== size || typeof chunk.data !== 'string' || chunk.data.length > Math.ceil(length / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk.data)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison chunk', retryable: false })
+        const decoded = atob(chunk.data)
+        if (decoded.length !== length) throw new BackendError({ code: 'invalid_response', message: 'Incomplete comparison chunk', retryable: false })
+        for (let index = 0; index < decoded.length; index++) bytes[offset + index] = decoded.charCodeAt(index)
+        offset += length
+      }
+      return bytes
+    } finally {
+      // A disconnected session or failed release is reclaimed by the host's TTL.
+      await (this.transport === 'ws'
+        ? this.request('release_comparison_snapshot', { snapshot_id: id })
+        : this.request('git_info', { operation: { type: 'release_comparison_snapshot', snapshot_id: id } })).catch(() => {})
+    }
   }
 
   /** Capture a review basis without publishing the selected index or committing. */

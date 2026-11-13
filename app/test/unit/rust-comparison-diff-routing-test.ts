@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   transport: 'ws', compare: vi.fn(), git: vi.fn(),
   scope: vi.fn(async (_path: string, _kind: string, work: () => Promise<unknown>) => work()),
 }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCompareDiff: mocks.compare }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCompareDiff: mocks.compare, repositorySubmoduleDisplayUrl: async () => null }) }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: mocks.scope }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
@@ -20,7 +20,7 @@ vi.mock('keytar', () => ({ default: {} }))
 import { getBranchMergeBaseDiff, getCommitRangeDiff } from '../../src/lib/git/diff'
 
 let root: string
-let raw: string
+let raw: Buffer
 let first: string
 let last: string
 const repository = { path: '/repo', gitHubRepository: null } as Repository
@@ -34,7 +34,7 @@ beforeAll(() => {
   first = git('rev-parse', 'HEAD').toString().trim()
   writeFileSync(path.join(root, '[a].txt'), 'second\n'); git('add', '--', '.'); git('commit', '-qm', 'second')
   last = git('rev-parse', 'HEAD').toString().trim()
-  raw = git('diff', '--merge-base', '--patch-with-raw', '-z', '--no-color', '--end-of-options', first, last, '--', ':(literal)[a].txt').toString('base64')
+  raw = git('diff', '--merge-base', '--patch-with-raw', '-z', '--no-color', '--end-of-options', first, last, '--', ':(literal)[a].txt')
 })
 afterAll(() => { if (root) rmSync(root, { recursive: true, force: true }) })
 
@@ -62,5 +62,19 @@ describe.each(['wry', 'ws'])('Rust comparison diff via %s', transport => {
     await expect(getCommitRangeDiff(repository, file, [first])).rejects.toThrow('transport failed')
     expect(mocks.compare).toHaveBeenCalledTimes(1)
     expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('keeps oversized text unrenderable and still renders submodule commit IDs', async () => {
+    const prefix = Buffer.from('-Subproject commit oldsha\n+Subproject commit newsha\n')
+    mocks.compare.mockResolvedValue({ kind: 'unrenderable', prefix })
+    expect((await getBranchMergeBaseDiff(repository, file, first, last, false, last)).kind).toBe(DiffType.Unrenderable)
+    expect((await getCommitRangeDiff(repository, file, [first])).kind).toBe(DiffType.Unrenderable)
+    const submodule = new FileChange('sub', { kind: AppFileStatusKind.Modified, submoduleStatus: { commitChanged: true, modifiedChanges: false, untrackedChanges: false } })
+    const result = await getBranchMergeBaseDiff(repository, submodule, first, last, false, last)
+    expect(result.kind).toBe(DiffType.Submodule)
+    if (result.kind === DiffType.Submodule) {
+      expect(result.oldSHA).toBe('oldsha')
+      expect(result.newSHA).toBe('newsha')
+    }
   })
 })

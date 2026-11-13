@@ -6,6 +6,30 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('falls back to the bounded inline comparison on an older host', async () => {
+    const invoke = vi.fn().mockRejectedValueOnce(new Error('invalid Git identity request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('hello\0world') })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const result = await client.repositoryRendererCompareDiff('/repo', 'a', 'b', true, 'file', undefined, false)
+    expect(Array.from(result as Uint8Array)).toEqual(Array.from(new TextEncoder().encode('hello\0world')))
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(invoke.mock.calls[0][1].operation.operation.snapshot).toBe(true)
+    expect(invoke.mock.calls[1][1].operation.operation.snapshot).toBeUndefined()
+  })
+
+  it('uses the inline comparison when an older WS host rejects the typed request', async () => {
+    const client = new BackendClient()
+    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('legacy') })
+    const result = await client.repositoryRendererCompareDiff('/repo', 'a', 'b', false, 'file', undefined, false)
+    expect(Array.from(result as Uint8Array)).toEqual(Array.from(new TextEncoder().encode('legacy')))
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls[0][2].snapshot).toBe(true)
+    expect(request.mock.calls[1][2].snapshot).toBeUndefined()
+    request.mockReset().mockRejectedValueOnce(new Error('git exited with an error'))
+    await expect(client.repositoryRendererCompareDiff('/repo', 'a', 'b', false, 'file', undefined, false)).rejects.toThrow('git exited')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
   it('cancels a Rust commit without treating its outcome as retryable', async () => {
     const invoke = vi.fn((_channel: string, ..._args: unknown[]) => new Promise<unknown>(() => {}))
     const invokeWithProgress = vi.fn((channel, _callback, ...args) => invoke(channel, ...args))

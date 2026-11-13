@@ -192,7 +192,11 @@ export async function getBranchMergeBaseDiff(
     const read = () => backend().repositoryRendererCompareDiff(repository.path, baseBranchName, comparisonBranchName, true, file.path, oldPath, hideWhitespaceInDiff)
     const encoded = backend().transportKind === 'wry' ? await withRepositoryGitOperation(repository.path, 'read', read, true) : await read()
     if (encoded === null) throw new Error('Invalid comparison diff response')
-    return buildDiff(Buffer.from(encoded, 'base64'), repository, file, latestCommit, latestCommit)
+    if ('kind' in encoded) {
+      if (file.status.submoduleStatus === undefined) return { kind: DiffType.Unrenderable }
+      return buildDiff(Buffer.from(encoded.prefix), repository, file, latestCommit, latestCommit)
+    }
+    return buildDiff(Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength), repository, file, latestCommit, latestCommit)
   }
   const args = [
     'diff',
@@ -248,7 +252,11 @@ export async function getCommitRangeDiff(
       if (!useNullTreeSHA) return getCommitRangeDiff(repository, file, commits, hideWhitespaceInDiff, true)
       throw new Error('Unable to compare the selected commits')
     }
-    return buildDiff(Buffer.from(encoded, 'base64'), repository, file, latestCommit, oldestCommit)
+    if ('kind' in encoded) {
+      if (file.status.submoduleStatus === undefined) return { kind: DiffType.Unrenderable }
+      return buildDiff(Buffer.from(encoded.prefix), repository, file, latestCommit, oldestCommit)
+    }
+    return buildDiff(Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength), repository, file, latestCommit, oldestCommit)
   }
   const args = [
     'diff',

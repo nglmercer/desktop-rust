@@ -827,6 +827,23 @@ pub async fn initialize_desktop_repository(path: &Path, branch: &str) -> Result<
 
 /// Clone using system Git and its credential configuration. No secrets enter the registry.
 pub async fn clone_repository(url: &str, path: &Path) -> Result<Repository> {
+    clone_repository_with_options(url, path, CloneOptions::default()).await
+}
+
+/// Clone options accepted by the native clone endpoint. Defaults preserve the
+/// original endpoint's behavior for existing callers.
+#[derive(Default)]
+pub struct CloneOptions {
+    pub branch: Option<String>,
+    pub default_branch: Option<String>,
+    pub recursive: bool,
+}
+
+pub async fn clone_repository_with_options(
+    url: &str,
+    path: &Path,
+    options: CloneOptions,
+) -> Result<Repository> {
     if url.is_empty()
         || url.starts_with('-')
         || url.contains(['\0', '\n', '\r'])
@@ -834,6 +851,18 @@ pub async fn clone_repository(url: &str, path: &Path) -> Result<Repository> {
         || url.starts_with("ext.exe::")
     {
         bail!("invalid clone URL");
+    }
+    for value in [&options.branch, &options.default_branch]
+        .into_iter()
+        .flatten()
+    {
+        anyhow::ensure!(
+            !value.is_empty()
+                && value.len() <= 4096
+                && !value.starts_with('-')
+                && !value.chars().any(char::is_control),
+            "invalid clone branch"
+        );
     }
     let destination = prepare_destination(path)?;
     let parent = destination
@@ -844,10 +873,21 @@ pub async fn clone_repository(url: &str, path: &Path) -> Result<Repository> {
         "protocol.ext.allow=never",
         "-c",
         "protocol.ext.exe.allow=never",
-        "clone",
-        "--",
-        url,
     ]);
+    if let Some(default_branch) = &options.default_branch {
+        command.extend(args(&[
+            "-c",
+            &format!("init.defaultBranch={default_branch}"),
+        ]));
+    }
+    command.push("clone".into());
+    if options.recursive {
+        command.push("--recursive".into());
+    }
+    if let Some(branch) = &options.branch {
+        command.push(format!("--branch={branch}").into());
+    }
+    command.extend(args(&["--", url]));
     command.push(destination.as_os_str().to_owned());
     let output = process::run_clone(parent, &command).await?;
     if output.code != 0 {
@@ -949,6 +989,272 @@ fn config_directory(mut env: impl FnMut(&str) -> Option<std::ffi::OsString>) -> 
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clone_options_preserve_branch_recursive_and_default_behavior() {
+        use std::process::Command;
+        const CHILD: &str = "DESKTOP_TEST_CLONE_OPTIONS_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let fixture = RegistryFixture::new();
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "registry::tests::clone_options_preserve_branch_recursive_and_default_behavior",
+                    "--nocapture",
+                ])
+                .env(CHILD, &fixture.directory)
+                .env("HOME", &fixture.directory)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env(
+                    "GIT_CONFIG_GLOBAL",
+                    fixture.directory.join("missing-config"),
+                )
+                .env("GIT_ALLOW_PROTOCOL", "file")
+                .env_remove("GIT_CONFIG_COUNT")
+                .env_remove("GIT_CONFIG_PARAMETERS")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let root = PathBuf::from(std::env::var_os(CHILD).unwrap());
+        let git = |dir: &Path, arguments: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        let source = root.join("source");
+        let sub = root.join("sub");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&sub).unwrap();
+        for dir in [&source, &sub] {
+            git(dir, &["init", "-q", "-b", "main"]);
+            git(dir, &["config", "user.name", "Test"]);
+            git(dir, &["config", "user.email", "test@example.invalid"]);
+            git(dir, &["config", "commit.gpgsign", "false"]);
+            fs::write(dir.join("file"), "initial\n").unwrap();
+            git(dir, &["add", "file"]);
+            git(dir, &["commit", "-qm", "initial"]);
+        }
+        git(
+            &source,
+            &["submodule", "add", "-q", sub.to_str().unwrap(), "nested"],
+        );
+        git(&source, &["commit", "-qm", "submodule"]);
+        git(&source, &["checkout", "-qb", "feature"]);
+        fs::write(source.join("feature"), "selected\n").unwrap();
+        git(&source, &["add", "feature"]);
+        git(&source, &["commit", "-qm", "feature"]);
+        git(&source, &["checkout", "-q", "main"]);
+
+        let recursive = root.join("recursive");
+        clone_repository_with_options(
+            source.to_str().unwrap(),
+            &recursive,
+            CloneOptions {
+                branch: Some("feature".into()),
+                default_branch: Some("fallback".into()),
+                recursive: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            git(&recursive, &["symbolic-ref", "--short", "HEAD"]),
+            "feature"
+        );
+        assert_eq!(
+            fs::read_to_string(recursive.join("nested/file")).unwrap(),
+            "initial\n"
+        );
+        let ordinary = root.join("ordinary");
+        clone_repository(source.to_str().unwrap(), &ordinary)
+            .await
+            .unwrap();
+        assert!(
+            !ordinary.join("nested/file").exists(),
+            "legacy endpoint remains non-recursive"
+        );
+
+        let empty = root.join("empty.git");
+        git(&root, &["init", "--bare", "-q", empty.to_str().unwrap()]);
+        let legacy_empty = root.join("empty-legacy");
+        git(
+            &root,
+            &[
+                "-c",
+                "init.defaultBranch=fallback",
+                "clone",
+                "--",
+                empty.to_str().unwrap(),
+                legacy_empty.to_str().unwrap(),
+            ],
+        );
+        let empty_clone = root.join("empty-clone");
+        clone_repository_with_options(
+            empty.to_str().unwrap(),
+            &empty_clone,
+            CloneOptions {
+                default_branch: Some("fallback".into()),
+                ..CloneOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            git(&empty_clone, &["symbolic-ref", "--short", "HEAD"]),
+            git(&legacy_empty, &["symbolic-ref", "--short", "HEAD"])
+        );
+        let invalid = root.join("missing-parent").join("invalid");
+        assert!(
+            clone_repository_with_options(
+                source.to_str().unwrap(),
+                &invalid,
+                CloneOptions {
+                    branch: Some("--upload-pack=bad".into()),
+                    ..CloneOptions::default()
+                }
+            )
+            .await
+            .is_err()
+        );
+        assert!(!invalid.parent().unwrap().exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn recursive_clone_blocks_rewritten_external_submodule_helper() {
+        use std::{os::unix::fs::PermissionsExt, process::Command};
+        const CHILD: &str = "DESKTOP_TEST_CLONE_SUBMODULE_PROTOCOL_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let fixture = RegistryFixture::new();
+            let root = fixture.directory.clone();
+            let helper = root.join("external-helper");
+            fs::write(
+                &helper,
+                "#!/bin/sh\n: > \"$DESKTOP_CLONE_TEST_MARKER\"\nexit 1\n",
+            )
+            .unwrap();
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+            let config = root.join("gitconfig");
+            assert!(
+                Command::new("git")
+                    .args(["config", "--file"])
+                    .arg(&config)
+                    .arg(format!("url.ext::{}.insteadOf", helper.display()))
+                    .arg("https://unsafe.invalid/repo")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "registry::tests::recursive_clone_blocks_rewritten_external_submodule_helper",
+                    "--nocapture",
+                ])
+                .env(CHILD, &root)
+                .env("HOME", &root)
+                .env("GIT_CONFIG_GLOBAL", &config)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_ALLOW_PROTOCOL", "file:ext")
+                .env("DESKTOP_CLONE_TEST_MARKER", root.join("executed"))
+                .env_remove("GIT_CONFIG_COUNT")
+                .env_remove("GIT_CONFIG_PARAMETERS")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(!root.join("executed").exists());
+            return;
+        }
+        let root = PathBuf::from(std::env::var_os(CHILD).unwrap());
+        let git = |dir: &Path, arguments: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        let source = root.join("source");
+        let sub = root.join("sub");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&sub).unwrap();
+        for dir in [&source, &sub] {
+            git(dir, &["init", "-q", "-b", "main"]);
+            git(dir, &["config", "user.name", "Test"]);
+            git(dir, &["config", "user.email", "test@example.invalid"]);
+            git(dir, &["config", "commit.gpgsign", "false"]);
+            git(dir, &["commit", "--allow-empty", "-qm", "initial"]);
+        }
+        git(
+            &source,
+            &["submodule", "add", "-q", sub.to_str().unwrap(), "nested"],
+        );
+        git(
+            &source,
+            &[
+                "config",
+                "-f",
+                ".gitmodules",
+                "submodule.nested.url",
+                "https://unsafe.invalid/repo",
+            ],
+        );
+        git(&source, &["add", ".gitmodules", "nested"]);
+        git(&source, &["commit", "-qm", "submodule"]);
+        let control = Command::new("git")
+            .args(["clone", "--recursive", "--"])
+            .arg(&source)
+            .arg(root.join("control"))
+            .output()
+            .unwrap();
+        assert!(!control.status.success());
+        assert!(
+            root.join("executed").exists(),
+            "control must run the fixture helper"
+        );
+        fs::remove_file(root.join("executed")).unwrap();
+        assert!(
+            clone_repository_with_options(
+                source.to_str().unwrap(),
+                &root.join("guarded"),
+                CloneOptions {
+                    recursive: true,
+                    ..CloneOptions::default()
+                }
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            !root.join("executed").exists(),
+            "guarded recursive clone must not run external helper"
+        );
+    }
 
     #[cfg(unix)]
     #[tokio::test]

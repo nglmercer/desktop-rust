@@ -86,6 +86,25 @@ pub(crate) async fn run_status(path: &Path, args: &[OsString]) -> Result<RawOutp
     run_command(path, git_command(None), args, None, 16 * 1024 * 1024, None).await
 }
 
+/// Capture a bounded comparison snapshot. The snapshot reservation limits
+/// concurrent callers before this allocation starts.
+pub(crate) async fn run_comparison_snapshot(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    // Retain at most the render limit plus one byte, but drain the pipe so
+    // Git can finish and report its real exit status.
+    run_command_inner(
+        path,
+        git_command(None),
+        args,
+        None,
+        crate::comparison_snapshots::MAX_BYTES as u64 + 1,
+        None,
+        Some(OutputSlice::PrefixAndDrain),
+        None,
+        None,
+    )
+    .await
+}
+
 /// Inspect an index using an isolated, temporary Git directory. Never inherit
 /// repository or configuration overrides that could redirect the probe or run
 /// a configured fsmonitor command.
@@ -142,7 +161,7 @@ pub(crate) async fn blob_range(
         None,
         limit,
         None,
-        Some(offset),
+        Some(OutputSlice::Range(offset)),
         None,
         None,
     )
@@ -728,6 +747,12 @@ struct LiveOutput {
     checkpoint: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+enum OutputSlice {
+    Range(u64),
+    PrefixAndDrain,
+}
+
 async fn run_command_inner(
     path: &Path,
     mut command: Command,
@@ -735,7 +760,7 @@ async fn run_command_inner(
     input: Option<Vec<u8>>,
     output_limit: u64,
     output_file: Option<tokio::fs::File>,
-    prefix_offset: Option<u64>,
+    prefix_offset: Option<OutputSlice>,
     input_file: Option<std::fs::File>,
     live: Option<LiveOutput>,
 ) -> Result<RawOutput> {
@@ -793,19 +818,44 @@ async fn run_command_inner(
                     tokio::io::copy(&mut stdout, &mut file).await?;
                     file.sync_all().await?;
                     Ok(Vec::new())
-                } else if let Some(offset) = prefix_offset {
+                } else if let Some(slice) = prefix_offset {
                     let mut stdout = stdout;
-                    let skipped =
-                        tokio::io::copy(&mut (&mut stdout).take(offset), &mut tokio::io::sink())
-                            .await?;
-                    if skipped != offset {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
-                            "blob ended before requested offset",
-                        ));
+                    if let OutputSlice::Range(offset) = slice {
+                        let skipped = tokio::io::copy(
+                            &mut (&mut stdout).take(offset),
+                            &mut tokio::io::sink(),
+                        )
+                        .await?;
+                        if skipped != offset {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::UnexpectedEof,
+                                "blob ended before requested offset",
+                            ));
+                        }
                     }
                     let mut bytes = Vec::new();
-                    stdout.take(output_limit).read_to_end(&mut bytes).await?;
+                    if matches!(slice, OutputSlice::PrefixAndDrain) {
+                        let limit = output_limit as usize;
+                        let mut buffer = vec![0_u8; 64 * 1024];
+                        loop {
+                            let count = stdout.read(&mut buffer).await?;
+                            if count == 0 { break; }
+                            let kept = count.min(limit - bytes.len());
+                            if kept > 0 {
+                                let needed = bytes.len() + kept;
+                                if needed > bytes.capacity() {
+                                    let step = if needed <= 1024 * 1024 { 64 * 1024 } else { 1024 * 1024 };
+                                    let target = needed.next_multiple_of(step).min(limit);
+                                    bytes.try_reserve_exact(target - bytes.len()).map_err(|_| {
+                                        std::io::Error::other("cannot allocate comparison snapshot")
+                                    })?;
+                                }
+                                bytes.extend_from_slice(&buffer[..kept]);
+                            }
+                        }
+                    } else {
+                        (&mut stdout).take(output_limit).read_to_end(&mut bytes).await?;
+                    }
                     Ok(bytes)
                 } else {
                     Box::pin(read_output(stdout, output_limit, stdout_live, "stdout")).await
@@ -1081,6 +1131,30 @@ mod tests {
         assert!(!output(0, b"fatal: bad revision 'missing'\n").bad_revision());
         assert!(!output(128, b"fatal: not a git repository\n").bad_revision());
         assert!(!output(128, b"fatal: bad revision 'unterminated\n").bad_revision());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "streams 70 MB from a Git alias"]
+    async fn oversized_comparison_capture_preserves_git_failure() {
+        let command = crate::args(&[
+            "-c",
+            "alias.probe=!head -c 70000002 /dev/zero; echo failed >&2; exit 9",
+            "probe",
+        ]);
+        let output = run_comparison_snapshot(&std::env::temp_dir(), &command).await.unwrap();
+        assert_eq!(output.stdout.len(), crate::comparison_snapshots::MAX_BYTES + 1);
+        assert_eq!(output.code, 9);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("failed"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn small_comparison_capture_does_not_reserve_the_full_limit() {
+        let command = crate::args(&["-c", "alias.probe=!printf small", "probe"]);
+        let output = run_comparison_snapshot(&std::env::temp_dir(), &command).await.unwrap();
+        assert_eq!(output.stdout, b"small");
+        assert!(output.stdout.capacity() <= 64 * 1024);
     }
     #[test]
     fn private_api_commands_pin_credentials_without_logging_or_repository_defaults() {
