@@ -1,6 +1,6 @@
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 import { getHTMLURL } from '../api'
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 
 /**
  * The Mention Markdown filter looks for user logins and replaces them with
@@ -69,12 +69,11 @@ export class MentionFilter implements INodeFilter {
    */
   public createFilterTreeWalker(doc: Document): TreeWalker {
     return doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-      acceptNode: function (node) {
-        return node.parentNode !== null &&
-          ['CODE', 'PRE', 'A'].includes(node.parentNode.nodeName)
+      acceptNode: node =>
+        node.parentNode !== null &&
+        ['CODE', 'PRE', 'A'].includes(node.parentNode.nodeName)
           ? NodeFilter.FILTER_SKIP
-          : NodeFilter.FILTER_ACCEPT
-      },
+          : NodeFilter.FILTER_ACCEPT,
     })
   }
 

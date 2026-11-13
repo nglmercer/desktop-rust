@@ -1,4 +1,4 @@
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 
 /**
  * The ownerOrOwnerRepo may be of the from owner or owner/repo.

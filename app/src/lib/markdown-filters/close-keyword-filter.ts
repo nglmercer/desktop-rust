@@ -1,8 +1,8 @@
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 import { isElement } from './is-element'
 import { issueUrl } from './issue-link-filter'
 import { IssueReference } from './issue-mention-filter'
-import { INodeFilter, MarkdownContext } from './node-filter'
+import type { INodeFilter, MarkdownContext } from './node-filter'
 
 /** Markdown locations that can have closing keywords */
 const IssueClosingContext: ReadonlyArray<MarkdownContext> = [

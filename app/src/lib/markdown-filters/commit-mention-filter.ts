@@ -1,6 +1,6 @@
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 import { getHTMLURL } from '../api'
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 import { resolveOwnerRepo } from './resolve-owner-repo'
 
 /**
@@ -30,7 +30,7 @@ import { resolveOwnerRepo } from './resolve-owner-repo'
  */
 export class CommitMentionFilter implements INodeFilter {
   /** A commit reference can start at beginning of a string or be prefaced by a whitespace character, (, {, or [ */
-  private readonly sharedLeader = /^|[\s({\[]/
+  private readonly sharedLeader = /^|[\s({[]/
 
   /** Some references also can be prefaced with an @ */
   private readonly sharedLeaderWithAt = new RegExp(

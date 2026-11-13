@@ -1,5 +1,5 @@
 import { isElement } from './is-element'
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 import { githubAssetVideoRegex } from './video-url-regex'
 
 /**
@@ -16,11 +16,10 @@ export class VideoTagFilter implements INodeFilter {
    */
   public createFilterTreeWalker(doc: Document): TreeWalker {
     return doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT, {
-      acceptNode: function (el: Element) {
-        return !isElement(el, 'video') || githubAssetVideoRegex.test(el.src)
+      acceptNode: (el: Element) =>
+        !isElement(el, 'video') || githubAssetVideoRegex.test(el.src)
           ? NodeFilter.FILTER_SKIP
-          : NodeFilter.FILTER_ACCEPT
-      },
+          : NodeFilter.FILTER_ACCEPT,
     })
   }
 

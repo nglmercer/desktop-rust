@@ -1,5 +1,5 @@
 import { isElement } from './is-element'
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 import { githubAssetVideoRegex } from './video-url-regex'
 
 /**

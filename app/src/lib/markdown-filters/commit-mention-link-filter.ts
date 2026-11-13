@@ -1,7 +1,7 @@
 import escapeRegExp from 'lodash/escapeRegExp'
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 import { getHTMLURL } from '../api'
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 import { isElement } from './is-element'
 
 /**
@@ -38,7 +38,7 @@ import { isElement } from './is-element'
 export class CommitMentionLinkFilter implements INodeFilter {
   /** A regexp that searches for the owner/name pattern in issue href */
   private readonly nameWithOwner =
-    /(?<owner>-?[a-z0-9][a-z0-9\-\_]*)\/(?<name>(?:\w|\.|\-)+)/
+    /(?<owner>-?[a-z0-9][a-z0-9\-_]*)\/(?<name>(?:\w|\.|-)+)/
 
   /**
    * A regexp that searches for a url path pattern for a commit
@@ -137,7 +137,8 @@ export class CommitMentionLinkFilter implements INodeFilter {
     const slashes = 3
     const path = url.pathname.substring(owner.length + name.length + slashes)
 
-    let ref, filepathToAppend
+    let ref: string | null | undefined
+    let filepathToAppend: string | undefined
 
     const commitComparePathMatch =
       this.getRefFromCommitPath(path) ?? this.getRefFromComparePath(path)

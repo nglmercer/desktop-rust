@@ -1,7 +1,7 @@
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 import { getHTMLURL } from '../api'
 import { caseInsensitiveEquals } from '../compare'
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 
 /**
  * The Mention Markdown filter looks for team mention in an organization's repo

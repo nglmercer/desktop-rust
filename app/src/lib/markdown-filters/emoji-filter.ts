@@ -1,8 +1,8 @@
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 import { fileURLToPath } from 'url'
 import { readFile } from 'fs/promises'
 import escapeRegExp from 'lodash/escapeRegExp'
-import { Emoji } from '../emoji'
+import type { Emoji } from '../emoji'
 
 /**
  * The Emoji Markdown filter will take a text node and create multiple text and
@@ -34,12 +34,11 @@ export class EmojiFilter implements INodeFilter {
    */
   public createFilterTreeWalker(doc: Document): TreeWalker {
     return doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-      acceptNode: function (node) {
-        return node.parentNode !== null &&
-          ['CODE', 'PRE'].includes(node.parentNode.nodeName)
+      acceptNode: node =>
+        node.parentNode !== null &&
+        ['CODE', 'PRE'].includes(node.parentNode.nodeName)
           ? NodeFilter.FILTER_SKIP
-          : NodeFilter.FILTER_ACCEPT
-      },
+          : NodeFilter.FILTER_ACCEPT,
     })
   }
 
@@ -67,7 +66,7 @@ export class EmojiFilter implements INodeFilter {
       return null
     }
 
-    const nodes = new Array<Text | HTMLImageElement | HTMLSpanElement>()
+    const nodes: (Text | HTMLImageElement | HTMLSpanElement)[] = []
     for (let i = 0; i < emojiMatches.length; i++) {
       const emojiKey = emojiMatches[i]
       const emoji = this.allEmoji.get(emojiKey)

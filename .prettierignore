@@ -32,3 +32,5 @@ app/src/web/*
 app/src/models/diff/**
 # Progress parsers and their shared types are checked and formatted by Biome.
 app/src/lib/progress/**
+# Markdown rendering filters are checked and formatted by Biome.
+app/src/lib/markdown-filters/**

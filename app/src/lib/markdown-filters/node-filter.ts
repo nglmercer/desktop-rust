@@ -12,8 +12,8 @@ import {
   isIssueClosingContext,
 } from './close-keyword-filter'
 import { CommitMentionLinkFilter } from './commit-mention-link-filter'
-import { GitHubRepository } from '../../models/github-repository'
-import { Emoji } from '../emoji'
+import type { GitHubRepository } from '../../models/github-repository'
+import type { Emoji } from '../emoji'
 
 export interface INodeFilter {
   /**

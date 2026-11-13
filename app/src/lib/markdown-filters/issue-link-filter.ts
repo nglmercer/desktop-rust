@@ -1,7 +1,7 @@
 import escapeRegExp from 'lodash/escapeRegExp'
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 import { getHTMLURL } from '../api'
-import { INodeFilter } from './node-filter'
+import type { INodeFilter } from './node-filter'
 import { isElement } from './is-element'
 
 /** Return a regexp that matches a full issue, pull request, or discussion url
@@ -87,7 +87,7 @@ export class IssueLinkFilter implements INodeFilter {
       return false
     }
 
-    const isURlCustomFormat = /\.[a-z]+\z/.test(anchor.href)
+    const isURlCustomFormat = /\.[a-z]+z/.test(anchor.href)
     if (isURlCustomFormat) {
       return false
     }
