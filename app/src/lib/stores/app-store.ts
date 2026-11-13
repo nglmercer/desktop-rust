@@ -10507,12 +10507,32 @@ export class AppStore extends TypedBaseStore<IAppState> {
     return this.withRefreshedGitHubRepository(repository, async repository => {
       const gitStore = this.gitStoreCache.get(repository)
 
-      await gitStore.revertCommit(repository, commit, progress => {
-        this.updateRevertProgress(repository, progress)
-      })
+      let failed = false
+      let failure: unknown
+      try {
+        await gitStore.revertCommit(repository, commit, progress => {
+          this.updateRevertProgress(repository, progress)
+        })
+      } catch (error) {
+        failed = true
+        failure = error
+      }
 
-      this.updateRevertProgress(repository, null)
-      await this._refreshRepository(repository)
+      try {
+        try {
+          this.updateRevertProgress(repository, null)
+        } finally {
+          await this._refreshRepository(repository)
+        }
+      } catch (error) {
+        if (!failed) {
+          throw error
+        }
+        log.error('Failed to clean up after reverting a commit', error)
+      }
+      if (failed) {
+        throw failure
+      }
     })
   }
 
