@@ -1,9 +1,16 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
-import { ITrailer } from '../../src/lib/git'
+import type { ITrailer } from '../../src/lib/git/interpret-trailers'
 import { Commit } from '../../src/models/commit'
 import { CommitIdentity } from '../../src/models/commit-identity'
 import { getSquashedCommitDescription } from '../../src/lib/squash/squashed-commit-description'
+
+// Commit construction uses the real trailer parser without executing Git.
+vi.mock('../../src/lib/git/core', () => ({ git: vi.fn() }))
+vi.mock('../../src/lib/git/config', () => ({ getConfigValue: vi.fn() }))
+vi.mock('../../src/lib/git/repository-operation', () => ({
+  withRepositoryGitOperation: vi.fn(),
+}))
 
 describe('getSquashedCommitDescription', () => {
   const mockCoAuthorTrailers = [

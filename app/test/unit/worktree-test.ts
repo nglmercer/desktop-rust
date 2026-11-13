@@ -1,7 +1,12 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 
 import { WorktreeEntry, getWorktreeAriaLabel } from '../../src/models/worktree'
+
+// The worktree label uses Commit's real SHA formatter without invoking Git.
+vi.mock('../../src/lib/git/core', () => ({ git: vi.fn() }))
+vi.mock('../../src/lib/git/config', () => ({ getConfigValue: vi.fn() }))
+vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: vi.fn() }))
 
 function worktree(overrides: Partial<WorktreeEntry> = {}): WorktreeEntry {
   return {

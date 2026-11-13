@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { getStartPoint } from '../../src/lib/create-branch'
 import { TipState, IValidBranch, IDetachedHead } from '../../src/models/tip'

@@ -116,5 +116,19 @@
   "app/test/unit/email-test.ts",
   "app/test/unit/group-accounts-by-host-test.ts",
   "app/test/unit/find-account-test.ts",
-  "app/test/unit/find-upstream-remote-test.ts"
+  "app/test/unit/find-upstream-remote-test.ts",
+  "app/test/unit/group-branches-test.ts",
+  "app/test/unit/repository-test.ts",
+  "app/test/unit/sanitized-repository-name-test.ts",
+  "app/test/unit/clone-info-test.ts",
+  "app/test/unit/pull-request-refs-test.ts",
+  "app/test/unit/repositories-clone-grouping-test.ts",
+  "app/test/unit/repositories-list-grouping-test.ts",
+  "app/test/unit/worktree-test.ts",
+  "app/test/unit/model-type-guards-test.ts",
+  "app/test/unit/status-utils-test.ts",
+  "app/test/unit/create-branch-test.ts",
+  "app/test/unit/clone-path-safety-test.ts",
+  "app/test/unit/worktree-dropdown-test.ts",
+  "app/test/unit/squashed-commit-description-test.ts"
 ]

@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { CloneInfoLookup, resolveURLCloneInfo } from '../../src/lib/clone-info'
 import { getDotComAPIEndpoint, getEnterpriseAPIURL } from '../../src/lib/api'
 import { Account } from '../../src/models/account'

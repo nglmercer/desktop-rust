@@ -1,6 +1,6 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
-import { groupBranches } from '../../src/ui/branches'
+import { groupBranches } from '../../src/ui/branches/group-branches'
 import { Branch, BranchType } from '../../src/models/branch'
 import { CommitIdentity } from '../../src/models/commit-identity'
 

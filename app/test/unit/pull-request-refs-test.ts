@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
 
 import {
@@ -10,6 +10,11 @@ import { CommitIdentity } from '../../src/models/commit-identity'
 import { PullRequest, PullRequestRef } from '../../src/models/pull-request'
 import { GitHubRepository } from '../../src/models/github-repository'
 import { Owner } from '../../src/models/owner'
+
+// Commit construction uses the real trailer parser without executing Git.
+vi.mock('../../src/lib/git/core', () => ({ git: vi.fn() }))
+vi.mock('../../src/lib/git/config', () => ({ getConfigValue: vi.fn() }))
+vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: vi.fn() }))
 
 function makeCommit(summary: string, body: string = ''): Commit {
   const author = new CommitIdentity('A', 'a@example.com', new Date(0))
