@@ -576,6 +576,7 @@ impl Backend {
             && !matches!(
                 operation,
                 Operation::StashList
+                    | Operation::RendererStashChanges { .. }
                     | Operation::RendererStashSave { .. }
                     | Operation::RendererStashPop { .. }
                     | Operation::RendererStashDrop { .. }
@@ -2863,6 +2864,10 @@ esac
         );
         let saved = stash(json!({"method":"stash_list"})).unwrap();
         assert_eq!(saved["entries"][0]["branch"], "target");
+        let changes =
+            stash(json!({"method":"renderer_stash_changes","oid":saved["entries"][0]["oid"]}))
+                .unwrap();
+        assert!(changes.as_str().unwrap().contains("file"));
         let popped = stash(json!({"method":"renderer_stash_pop","oid":saved["entries"][0]["oid"],"index":0,"basis":saved["basis"]})).unwrap();
         assert_eq!(popped["code"], 0);
         assert_eq!(popped["retained"], false);

@@ -539,6 +539,34 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.mutateDesktopStash('/repo', oid, 'drop')).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('saved changes') })
   })
 
+  it('validates renderer stash file listings', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ':100644 100644\0file\0')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const oid = 'a'.repeat(40)
+    await expect(client.repositoryStashChanges('/repo', oid)).resolves.toBe(':100644 100644\0file\0')
+    await expect(client.repositoryStashChanges('/repo', 'HEAD')).rejects.toMatchObject({ code: 'invalid_request' })
+    invoke.mockResolvedValueOnce({})
+    await expect(client.repositoryStashChanges('/repo', oid)).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('routes stash file listings through the Rust renderer operation', async () => {
+    vi.resetModules()
+    const oid = 'a'.repeat(40)
+    const invoke = vi.fn(async (): Promise<unknown> => 'raw stash output')
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const legacyGit = vi.fn()
+    const parse = vi.fn(() => ({ files: ['parsed'] }))
+    vi.doMock('../../src/lib/git/core', () => ({ git: legacyGit }))
+    vi.doMock('../../src/lib/git/log', () => ({ parseRawLogWithNumstat: parse }))
+    vi.doMock('../../src/lib/git/update-index', () => ({ stageFiles: vi.fn() }))
+    vi.doMock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: (_path: string, _kind: string, run: () => unknown) => run() }))
+    const { getStashedFiles } = await import('../../src/lib/git/stash')
+    await expect(getStashedFiles({ path: '/repo' } as any, oid)).resolves.toEqual(['parsed'])
+    expect(parse).toHaveBeenCalledWith('raw stash output', oid, `${oid}^`)
+    expect(legacyGit).not.toHaveBeenCalled()
+  })
+
   it('reviews a pinned branch checkout and never retries an uncertain switch', async () => {
     const oid = 'b'.repeat(40)
     const preview = { basis: 'a'.repeat(64), dirty: true, target: { reference: 'refs/heads/feature', oid }, source_branch: 'main', source_head: oid, source_stash: null, occupied_worktree: null }

@@ -2271,10 +2271,17 @@ export class BackendClient {
     if (!isRecord(result) || result.code !== 0 || !isRecord(result.receipt) || typeof result.receipt.id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.receipt.id) || result.receipt.phase !== 'complete' || result.receipt.name !== name || result.receipt.new_name !== newName || result.receipt.oid !== expectedTip) throw new BackendError({ code: 'invalid_response', message: 'Branch rename outcome is uncertain; inspect branches, saved changes and rename history', retryable: false })
   }
 
-  private async desktopStashRequest(repositoryPath: string, method: 'stash_list' | 'renderer_stash_save' | 'renderer_stash_pop' | 'renderer_stash_drop', params: Record<string, unknown>): Promise<unknown> {
+  private async desktopStashRequest(repositoryPath: string, method: 'stash_list' | 'renderer_stash_changes' | 'renderer_stash_save' | 'renderer_stash_pop' | 'renderer_stash_drop', params: Record<string, unknown>): Promise<unknown> {
     return this.transport === 'wry'
       ? this.request('git_info', { operation: { type: 'stash_workflow', repository_path: repositoryPath, operation: { method, ...params } } })
       : this.repositoryRead(repositoryPath, method, params)
+  }
+
+  async repositoryStashChanges(repositoryPath: string, oid: string): Promise<string> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid)) throw new BackendError({ code: 'invalid_request', message: 'Invalid stash object ID', retryable: false })
+    const value = await this.desktopStashRequest(repositoryPath, 'renderer_stash_changes', { oid })
+    if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid stash changes response', retryable: false })
+    return value
   }
 
   async saveDesktopStash(repositoryPath: string, branch: string): Promise<boolean> {

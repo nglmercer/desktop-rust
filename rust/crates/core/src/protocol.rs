@@ -745,6 +745,9 @@ pub enum Operation {
         desktop: bool,
     },
     StashList,
+    RendererStashChanges {
+        oid: String,
+    },
     RendererStashSave {
         branch: String,
     },

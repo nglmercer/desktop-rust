@@ -636,6 +636,8 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(await client.saveDesktopStash(firstRepository, '--remote/base')).toBe(true)
       const savedStash = execFileSync('git', ['-C', firstRepository, 'rev-parse', 'stash@{0}'], { encoding: 'utf8' }).trim()
       expect(execFileSync('git', ['-C', firstRepository, 'stash', 'list'], { encoding: 'utf8' })).toContain('!!GitHub_Desktop<--remote/base>')
+      expect(await client.repositoryStashChanges(firstRepository, savedStash)).toBe(execFileSync('git', ['-C', firstRepository, 'stash', 'show', savedStash, '--raw', '--numstat', '-z', '--format=format:', '--no-show-signature', '--'], { encoding: 'utf8' }))
+      await expect(client.repositoryStashChanges(firstRepository, 'HEAD')).rejects.toMatchObject({ code: 'invalid_request' })
       await client.mutateDesktopStash(firstRepository, savedStash, 'pop')
       expect(await readFile(stashFile, 'utf8')).toBe('saved untracked content\n')
       expect(execFileSync('git', ['-C', firstRepository, 'diff', '--cached', '--name-only'], { encoding: 'utf8' })).toContain('saved-untracked.txt')

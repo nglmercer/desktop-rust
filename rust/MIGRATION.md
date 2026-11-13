@@ -1067,6 +1067,9 @@ Pop and drop bind the selected object and index to a reviewed reflog, and the
 core rejects entries without a Desktop association. A conflicting pop leaves
 the stash in place. External Git writers are not locked across the final
 reflog check and native drop, and very large stash lists still need work.
+The renderer's saved-file list now reads Git's stash-specific raw/numstat
+output through Rust, preserving configured rename and untracked-file display.
+That response remains subject to the native 2 MiB output limit.
 
 Audit of `AppStore.renameBranchCore` found that native `branch -m` alone left
 Desktop saved-change associations behind. The Rust rename service now reviews

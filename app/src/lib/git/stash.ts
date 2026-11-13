@@ -303,6 +303,13 @@ export async function getStashedFiles(
   repository: Repository,
   stashSha: string
 ): Promise<ReadonlyArray<CommittedFileChange>> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryStashChanges(repository.path, stashSha)
+    const stdout = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    return parseRawLogWithNumstat(stdout, stashSha, `${stashSha}^`).files
+  }
   const args = [
     'stash',
     'show',

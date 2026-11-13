@@ -77,6 +77,7 @@ pub use worktrees::{worktrees_at, worktrees_from_git_dir};
 mod history;
 mod index_object_backup;
 mod stash;
+mod stash_renderer;
 pub use stash::remote_deletion::{RemoteBranchDeletion, UpstreamDeletion};
 mod state;
 pub use state::OperationState;
@@ -644,6 +645,9 @@ impl Repository {
                     .await;
             }
             Operation::StashList => return self.stash_list().await,
+            Operation::RendererStashChanges { oid } => {
+                return self.renderer_stash_changes(&oid).await;
+            }
             Operation::RendererStashSave { branch } => {
                 return self.renderer_stash_save(&branch).await;
             }
@@ -1293,6 +1297,7 @@ impl Repository {
             Revert { commit, mainline } => self.replay_command("revert", &commit, mainline).await?,
             StashSave { .. }
             | StashList
+            | RendererStashChanges { .. }
             | RendererStashSave { .. }
             | RendererStashPop { .. }
             | RendererStashDrop { .. }
