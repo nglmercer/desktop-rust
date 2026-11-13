@@ -1830,8 +1830,14 @@ export class GitStore extends BaseStore {
     commit: Commit,
     progressCallback?: (fetchProgress: IRevertProgress) => void
   ): Promise<void> {
+    const tip = this.tip
+    const expected = tip.kind === TipState.Valid
+      ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
+      : tip.kind === TipState.Detached
+      ? { head: tip.currentSha, branch: null }
+      : undefined
     await this.performFailableOperation(() =>
-      revertCommit(repository, commit, this.currentRemote, progressCallback)
+      revertCommit(repository, commit, this.currentRemote, progressCallback, expected)
     )
 
     this.emitUpdate()

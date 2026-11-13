@@ -2386,6 +2386,27 @@ export class BackendClient {
     if (!isRecord(value) || value.code !== 0 || value.checked_out !== true || typeof value.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.receipt_id)) throw new BackendError({ code: 'checkout_unconfirmed', message: 'Commit checkout outcome is uncertain; inspect HEAD and checkout history', retryable: false })
   }
 
+  async revertReviewedCommit(repositoryPath: string, commit: string, expected: { readonly head: string; readonly branch: string | null; readonly merge: boolean }): Promise<void> {
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
+    if (!oid.test(commit) || !oid.test(expected.head) || (expected.branch !== null && !expected.branch.startsWith('refs/heads/'))) throw new BackendError({ code: 'invalid_request', message: 'A reviewed commit and current branch are required', retryable: false })
+    const call = (method: 'renderer_revert_preview' | 'renderer_revert', extra: Record<string, unknown> = {}) =>
+      this.transport === 'wry'
+        ? this.request('git_info', { operation: { type: 'revert_commit', repository_path: repositoryPath, operation: { method, commit, ...extra } } })
+        : this.repositoryRead(repositoryPath, method, { commit, ...extra })
+    const preview = await call('renderer_revert_preview')
+    if (!isRecord(preview) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis) || preview.commit !== commit || preview.head !== expected.head || preview.branch !== expected.branch || preview.mainline !== (expected.merge ? 1 : null)) throw new BackendError({ code: 'revert_changed', message: 'The selected commit or current branch changed; refresh before reverting', retryable: false })
+    let value: unknown
+    try { value = await call('renderer_revert', { basis: preview.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect HEAD, conflicts and revert state before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || value.commit !== commit || value.head_before !== expected.head || typeof value.head_after !== 'string' || !oid.test(value.head_after) || typeof value.stderr !== 'string' || typeof value.stdout !== 'string' || !['complete', 'conflict', 'failed'].includes(String(value.outcome))) throw new BackendError({ code: 'invalid_response', message: 'Revert outcome is uncertain; inspect HEAD and revert state', retryable: false })
+    if (value.outcome === 'complete' && value.code === 0 && value.head_after !== expected.head) return
+    if (value.outcome === 'conflict' && value.code !== 0 && value.head_after === expected.head) throw new BackendError({ code: 'revert_conflict', message: 'Revert has conflicts; resolve them or abort the revert before continuing', retryable: false })
+    throw new BackendError({ code: 'revert_failed', message: `${value.stderr || 'Revert did not complete'}; inspect HEAD and revert state before retrying`, retryable: false })
+  }
+
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
     if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })

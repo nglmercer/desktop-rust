@@ -129,6 +129,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    RevertCommit {
+        repository_path: String,
+        operation: Operation,
+    },
     AbortGitOperation {
         repository_path: String,
         operation: Operation,
@@ -415,6 +419,9 @@ impl Backend {
         | GitInfoOperation::BranchCheckout {
             repository_path, ..
         }
+        | GitInfoOperation::RevertCommit {
+            repository_path, ..
+        }
         | GitInfoOperation::AbortGitOperation {
             repository_path, ..
         }
@@ -599,6 +606,14 @@ impl Backend {
             return Err(AppError::BadArgs(
                 "unsupported branch checkout operation".into(),
             ));
+        }
+        if let GitInfoOperation::RevertCommit { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererRevertPreview { .. } | Operation::RendererRevert { .. }
+            )
+        {
+            return Err(AppError::BadArgs("unsupported revert operation".into()));
         }
         if let GitInfoOperation::FinishMergeCommit { operation, .. } = &request.operation
             && !matches!(operation, Operation::RendererFinishMergeCommit)
@@ -1397,6 +1412,10 @@ impl Backend {
                             | Operation::RendererDetach { .. },
                         ..
                     }
+                    | GitInfoOperation::RevertCommit {
+                        operation: Operation::RendererRevert { .. },
+                        ..
+                    }
             )
         );
         let checkpoint_write = matches!(
@@ -1508,6 +1527,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchCheckout { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::RevertCommit { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1708,6 +1734,85 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn wry_reverts_a_reviewed_commit() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                use std::{fs, process::Command};
+                let root = std::env::temp_dir()
+                    .join(format!("desktop-wry-revert-{}", uuid::Uuid::new_v4()));
+                fs::create_dir(&root).unwrap();
+                let git = |args: &[&str]| {
+                    let output = Command::new("git")
+                        .arg("-C")
+                        .arg(&root)
+                        .args(args)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+                };
+                git(&["init", "-q"]);
+                git(&["config", "user.name", "Test"]);
+                git(&["config", "user.email", "test@example.invalid"]);
+                fs::write(root.join("file"), "base\n").unwrap();
+                git(&["add", "file"]);
+                git(&["commit", "-qm", "base"]);
+                fs::write(root.join("file"), "change\n").unwrap();
+                git(&["commit", "-qam", "change"]);
+                let commit = git(&["rev-parse", "HEAD"]);
+                let backend = Backend::new(16).unwrap();
+                let route = |operation: Value| {
+                    backend.admit_git_info(vec![json!({"operation":{
+                        "type":"revert_commit", "repository_path":root, "operation":operation
+                    }})])
+                };
+                assert!(route(json!({"method":"stage", "paths":["file"]})).is_err());
+                let preview = backend
+                    .read(
+                        route(json!({
+                            "method":"renderer_revert_preview", "commit":commit
+                        }))
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(preview["commit"], commit);
+                let basis = preview["basis"].as_str().unwrap();
+                assert!(
+                    backend
+                        .read(
+                            route(json!({
+                                "method":"renderer_revert", "commit":commit, "basis":"invalid"
+                            }))
+                            .unwrap()
+                        )
+                        .is_err()
+                );
+                assert_eq!(git(&["rev-parse", "HEAD"]), commit);
+                let result = backend
+                    .read(
+                        route(json!({
+                            "method":"renderer_revert", "commit":commit, "basis":basis
+                        }))
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(result["outcome"], "complete");
+                assert_eq!(result["head_before"], commit);
+                assert_ne!(git(&["rev-parse", "HEAD"]), commit);
+                assert_eq!(fs::read(root.join("file")).unwrap(), b"base\n");
+                fs::remove_dir_all(root).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     #[cfg(unix)]
     #[test]

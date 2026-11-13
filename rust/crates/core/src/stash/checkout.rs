@@ -293,7 +293,7 @@ impl Repository {
         ensure_checkout(&config)?;
         Ok(config.stdout)
     }
-    async fn checkout_capture(&self, depth: u8) -> Result<Value> {
+    pub(crate) async fn checkout_capture(&self, depth: u8) -> Result<Value> {
         anyhow::ensure!(
             depth <= 8,
             "nested repository depth exceeds checkout review support"

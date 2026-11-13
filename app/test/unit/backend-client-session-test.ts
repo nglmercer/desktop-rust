@@ -606,6 +606,25 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.checkoutDetachedCommit('/repo', oid, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
   })
 
+  it('binds revert to the reviewed branch and reports conflicts without replay', async () => {
+    const commit = 'a'.repeat(40)
+    const head = 'b'.repeat(40)
+    const resultHead = 'c'.repeat(40)
+    const preview = { basis: 'd'.repeat(64), commit, head, branch: 'refs/heads/main', mainline: null }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ outcome: 'complete', code: 0, commit, head_before: head, head_after: resultHead, stdout: '', stderr: '' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const expected = { head, branch: 'refs/heads/main', merge: false }
+    await client.revertReviewedCommit('/repo', commit, expected)
+    invoke.mockResolvedValueOnce({ ...preview, head: resultHead })
+    await expect(client.revertReviewedCommit('/repo', commit, expected)).rejects.toMatchObject({ code: 'revert_changed', retryable: false })
+    invoke.mockResolvedValueOnce(preview).mockResolvedValueOnce({ outcome: 'conflict', code: 1, commit, head_before: head, head_after: head, stdout: '', stderr: '' })
+    await expect(client.revertReviewedCommit('/repo', commit, expected)).rejects.toMatchObject({ code: 'revert_conflict', retryable: false })
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.revertReviewedCommit('/repo', commit, expected)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('revert state') })
+    expect(invoke).toHaveBeenCalledTimes(7)
+  })
+
   it('routes the direct checkout helper through Rust', async () => {
     vi.resetModules()
     const oid = 'b'.repeat(40)

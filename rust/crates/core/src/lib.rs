@@ -49,6 +49,7 @@ mod paths;
 mod remote_discovery;
 pub use remote_discovery::{ManagedRemoteAction, safe_fetch_remotes, safe_remote_url};
 mod refs;
+mod renderer_revert;
 pub use refs::symbolic_ref;
 mod repository_discovery;
 pub use repository_discovery::{repository_type, trust_repository};
@@ -622,6 +623,12 @@ impl Repository {
                 return self
                     .detach_reviewed(&commit, &basis, allow_file_protocol)
                     .await;
+            }
+            Operation::RendererRevertPreview { commit } => {
+                return self.renderer_revert_preview(&commit).await;
+            }
+            Operation::RendererRevert { commit, basis } => {
+                return self.renderer_revert(&commit, &basis).await;
             }
             Operation::CheckoutHistory => return self.checkout_history().await,
             Operation::AcknowledgeCheckout { receipt_id } => {
@@ -1244,6 +1251,8 @@ impl Repository {
             | RendererCheckoutDirect { .. }
             | RendererDetachPreview { .. }
             | RendererDetach { .. }
+            | RendererRevertPreview { .. }
+            | RendererRevert { .. }
             | CheckoutHistory
             | AcknowledgeCheckout { .. } => unreachable!("handled by execute"),
             CreateBranch { .. } | CreateBranchPreview { .. } => unreachable!("handled by execute"),

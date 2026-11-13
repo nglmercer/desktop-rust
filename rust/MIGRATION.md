@@ -2380,3 +2380,13 @@ from the environment, and a changed worktree is refused. This intentionally
 discards tracked changes as the existing abort action did. External Git writers
 are not reserved between verification and Git acquiring its own locks. The
 legacy commit-and-reset path remains only for the Electron runtime.
+
+## Reviewed commit revert
+
+The Wry and WebSocket renderers use a repository-scoped Rust revert operation.
+It reviews the selected commit, branch, index and working-tree state before
+invoking native Git, and leaves Git's conflict state available for resolution
+or abort. Interrupted outcomes require inspection before retrying. External
+Git writers can still race the review, progress currently reports only start
+and finish, and interactive hook-failure handling remains to be migrated. The
+Electron path and cross-platform parity remain legacy-removal gates.

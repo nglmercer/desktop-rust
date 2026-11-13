@@ -736,6 +736,13 @@ pub enum Operation {
         commit: String,
         mainline: Option<u32>,
     },
+    RendererRevertPreview {
+        commit: String,
+    },
+    RendererRevert {
+        commit: String,
+        basis: String,
+    },
     StashSave {
         #[serde(default)]
         message: String,
