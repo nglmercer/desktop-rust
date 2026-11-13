@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, describe, it } from 'node:test'
+import { afterEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { DiffSelection, DiffSelectionType } from '../../../src/models/diff'
@@ -13,7 +13,7 @@ import {
 import { CopilotDisclaimer } from '../../../src/ui/copilot/copilot-disclaimer'
 import { GenerateCommitMessageOverrideWarning } from '../../../src/ui/generate-commit-message/generate-commit-message-override-warning'
 import type { Dispatcher } from '../../../src/ui/dispatcher'
-import { fireEvent, render, screen, waitFor } from '../../helpers/ui/render'
+import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
 
 const originalEvent = globalThis.Event
 let restoreIpcSend: (() => void) | null = null

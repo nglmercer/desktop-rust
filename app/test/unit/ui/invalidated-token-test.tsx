@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import assert from 'node:assert/strict'
 import * as React from 'react'
 import { InvalidatedToken } from '../../../src/ui/invalidated-token/invalidated-token'
 import { Accounts } from '../../../src/ui/preferences/accounts'
 import { Account } from '../../../src/models/account'
 import { DialogStackContext } from '../../../src/ui/dialog/dialog'
-import { render, screen, fireEvent, waitFor } from '../../helpers/ui/render'
+import { render, screen, fireEvent, waitFor } from '../../helpers/ui/vitest-render'
 
 describe('Session recovery dialog', () => {
   let view: ReturnType<typeof render> | undefined

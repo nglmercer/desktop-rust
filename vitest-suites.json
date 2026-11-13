@@ -187,5 +187,10 @@
   "app/test/unit/ci-checks-test.ts",
   "app/test/unit/endpoint-capabilities-test.ts",
   "app/test/unit/ipc-contract-test.ts",
-  "app/test/unit/script/version-test.ts"
+  "app/test/unit/script/version-test.ts",
+  "app/test/unit/ui/invalidated-token-test.tsx",
+  "app/test/unit/ui/issues-autocompletion-provider-test.tsx",
+  "app/test/unit/ui/copilot-animation-test.tsx",
+  "app/test/unit/ui/test-copilot-snapshot-card-dialog-test.tsx",
+  "app/test/unit/ui/commit-message-warning-dialogs-test.tsx"
 ]

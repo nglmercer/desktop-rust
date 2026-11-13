@@ -1,15 +1,15 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { CopilotAnimation } from '../../../src/ui/copilot-animation/copilot-animation'
 import { CopilotCommitPanel } from '../../../src/ui/changes/copilot-commit-panel'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
+} from '../../helpers/ui/vitest-timers'
 
 /**
  * Advance the timers one phase at a time, since timers scheduled while

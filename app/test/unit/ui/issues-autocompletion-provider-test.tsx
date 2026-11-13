@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 
 import { IIssueHit, IssuesStore } from '../../../src/lib/stores/issues-store'
 import { GitHubRepository } from '../../../src/models/github-repository'
@@ -8,12 +8,12 @@ import { Repository } from '../../../src/models/repository'
 import { IssuesAutocompletionProvider } from '../../../src/ui/autocompletion/issues-autocompletion-provider'
 import { Dispatcher } from '../../../src/ui/dispatcher'
 import { TestIssuesDatabase } from '../../helpers/databases/test-issues-database'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
+} from '../../helpers/ui/vitest-timers'
 
 /** Matches the Tooltip component's DefaultTooltipDelay */
 const TooltipDelay = 400
