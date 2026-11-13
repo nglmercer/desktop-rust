@@ -228,10 +228,30 @@ async fn write(base: &Path, r: &Receipt) -> Result<()> {
     })
     .await?
 }
-// Never publish raw transport URLs: credentials can live in userinfo, paths,
-// query strings, remote-helper commands, or local filesystem names.
 fn endpoint_view(index: usize, e: &Endpoint) -> Value {
-    json!({"index":index,"destination":format!("Push destination {}",index+1),"expected":e.expected,"available_locally":e.available_locally,"phase":e.phase,"error":e.error,"restored_as":e.restored_as})
+    // Preserve a recognizable target while removing URL credentials and query
+    // data. Ambiguous Git transport syntax stays opaque and cannot be approved.
+    let destination = if crate::remote_discovery::safe_url(&e.destination) {
+        Some(e.destination.clone())
+    } else if let Ok(mut url) = url::Url::parse(&e.destination) {
+        if matches!(url.scheme(), "http" | "https" | "ssh" | "git")
+            && url.set_username("").is_ok()
+            && url.set_password(None).is_ok()
+        {
+            url.set_query(None);
+            url.set_fragment(None);
+            let sanitized = url.to_string();
+            crate::remote_discovery::safe_url(&sanitized)
+                .then(|| format!("{sanitized} (credentials and query hidden)"))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let display_safe = destination.is_some();
+    let destination = destination.unwrap_or_else(|| format!("Push destination {} (URL hidden)", index + 1));
+    json!({"index":index,"destination":destination,"display_safe":display_safe,"expected":e.expected,"available_locally":e.available_locally,"phase":e.phase,"error":e.error,"restored_as":e.restored_as})
 }
 fn clean_error(error: &str, endpoints: &[Endpoint]) -> String {
     let mut result = error.to_owned();
@@ -1052,6 +1072,36 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn destination_review_only_displays_urls_passing_the_safe_url_policy() {
+        let endpoint = |destination: &str| Endpoint {
+            raw: destination.into(),
+            destination: destination.into(),
+            explicit: true,
+            read_url: None,
+            expected: None,
+            available_locally: false,
+            backup_ref: String::new(),
+            phase: "pending".into(),
+            error: None,
+            restored_as: Vec::new(),
+        };
+        let views: Vec<_> = [
+            "https://example.test/first.git",
+            "https://example.test/second.git",
+            "https://user:secret@example.test/third.git",
+            "https://example.test/fourth.git?token=anothersecret",
+        ].iter().enumerate().map(|(index, url)| endpoint_view(index, &endpoint(url))).collect();
+        assert_eq!(views[0]["destination"], "https://example.test/first.git");
+        assert_eq!(views[1]["destination"], "https://example.test/second.git");
+        assert_eq!(views[2]["destination"], "https://example.test/third.git (credentials and query hidden)");
+        assert_eq!(views[3]["destination"], "https://example.test/fourth.git (credentials and query hidden)");
+        assert_eq!(views[2]["display_safe"], true);
+        assert_eq!(views[3]["display_safe"], true);
+        let rendered = serde_json::to_string(&views).unwrap();
+        assert!(!rendered.contains("secret"));
+        assert!(!rendered.contains("token="));
+    }
     #[test]
     fn custom_fetch_mapping() {
         assert_eq!(

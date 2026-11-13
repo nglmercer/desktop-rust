@@ -56,6 +56,20 @@ function deliverFetchProgress(callback: ((chunk: FetchProgressChunk) => void) | 
 
 export type BackendGitPath = string | { readonly bytes: ReadonlyArray<number> }
 
+/** A remote branch deletion reviewed against all configured push destinations. */
+export interface IRemoteBranchDeletionReview {
+  readonly basis: string
+  readonly remote: string
+  readonly reference: string
+  readonly endpoints: ReadonlyArray<{ readonly index: number; readonly destination: string; readonly displaySafe: boolean; readonly expected: string | null; readonly availableLocally: boolean }>
+  readonly local?: { readonly name: string; readonly tip: string; readonly checkout: string | null }
+}
+
+export interface IRemoteBranchDeletionResult {
+  readonly receipt: string
+  readonly warnings: ReadonlyArray<string>
+}
+
 export interface ISelectedCommitReview {
   readonly basis: string
   readonly tree: string
@@ -2478,6 +2492,74 @@ export class BackendClient {
       throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the branch and checkout recovery history before retrying`, retryable: false })
     }
     if (!isRecord(result) || result.code !== 0 || result.created !== true || result.checked_out !== false || typeof result.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.receipt_id)) throw new BackendError({ code: 'invalid_response', message: 'Branch creation outcome is uncertain; inspect the branch and checkout recovery history', retryable: false })
+  }
+
+  private async branchDeletionRequest(repositoryPath: string, remote: boolean, method: string, params: Record<string, unknown>): Promise<unknown> {
+    return this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: remote ? 'remote_branch_deletion' : 'branch_deletion', repository_path: repositoryPath, operation: { method, ...params } } })
+      : this.repositoryRead(repositoryPath, method, params)
+  }
+
+  private parseRemoteDeletionReview(value: unknown, remote: string, reference: string): IRemoteBranchDeletionReview {
+    if (!isRecord(value) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || value.remote !== remote || value.reference !== reference || !Array.isArray(value.endpoints) || value.endpoints.length < 1 || value.endpoints.length > 32) throw new BackendError({ code: 'invalid_response', message: 'Invalid remote deletion review', retryable: false })
+    const endpoints = value.endpoints.map((entry, index) => {
+      if (!isRecord(entry) || entry.index !== index || typeof entry.destination !== 'string' || entry.destination.length > 16384 || typeof entry.display_safe !== 'boolean' || !(entry.expected === null || (typeof entry.expected === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(entry.expected))) || typeof entry.available_locally !== 'boolean') throw new BackendError({ code: 'invalid_response', message: 'Invalid remote deletion destination', retryable: false })
+      return { index, destination: entry.destination, displaySafe: entry.display_safe, expected: entry.expected as string | null, availableLocally: entry.available_locally }
+    })
+    return { basis: value.basis, remote, reference, endpoints }
+  }
+
+  async previewRemoteBranchDeletion(repositoryPath: string, remote: string, branch: string): Promise<IRemoteBranchDeletionReview> {
+    const request = { remote, branch, expected: null, fetch_backup: false }
+    const value = await this.branchDeletionRequest(repositoryPath, true, 'remote_branch_delete_preview', { request })
+    return this.parseRemoteDeletionReview(value, remote, `refs/heads/${branch}`)
+  }
+
+  async previewCombinedBranchDeletion(repositoryPath: string, name: string, tip: string, checkout: string | null, remote: string, branch: string): Promise<IRemoteBranchDeletionReview> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(tip)) throw new BackendError({ code: 'invalid_request', message: 'A reviewed branch tip is required', retryable: false })
+    const value = await this.branchDeletionRequest(repositoryPath, false, 'delete_branch_preview', { name: `refs/heads/${name}`, to_checkout: checkout, upstream: { expected: null, fetch_backup: false } })
+    if (!isRecord(value) || !isRecord(value.branch) || value.branch.ref !== `refs/heads/${name}` || value.branch.oid !== tip || typeof value.basis !== 'string' || !isRecord(value.upstream)) throw new BackendError({ code: 'branch_changed', message: 'Branch changed; refresh before deleting', retryable: false })
+    const upstream = this.parseRemoteDeletionReview(value.upstream, remote, `refs/heads/${branch}`)
+    if (!/^[a-f0-9]{64}$/.test(value.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid branch deletion review', retryable: false })
+    return { ...upstream, basis: value.basis, local: { name, tip, checkout } }
+  }
+
+  async applyRemoteBranchDeletion(repositoryPath: string, review: IRemoteBranchDeletionReview): Promise<IRemoteBranchDeletionResult> {
+    if (!/^[a-f0-9]{64}$/.test(review.basis) || !review.reference.startsWith('refs/heads/') || review.endpoints.some(endpoint => !endpoint.displaySafe)) throw new BackendError({ code: 'invalid_request', message: 'Each push destination must be visible before deletion', retryable: false })
+    const upstream = { expected: null, fetch_backup: false }
+    const params = review.local === undefined
+      ? { request: { remote: review.remote, branch: review.reference.slice('refs/heads/'.length), ...upstream }, basis: review.basis }
+      : { name: `refs/heads/${review.local.name}`, to_checkout: review.local.checkout, upstream, basis: review.basis, force: true, ref_only: false, strategy: 'AskForConfirmation', replace_stash: false, restore_index: false }
+    let value: unknown
+    try { value = await this.branchDeletionRequest(repositoryPath, review.local === undefined, review.local === undefined ? 'delete_remote_branch' : 'delete_branch', params) }
+    catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect local and remote branches and deletion recovery before retrying`, retryable: false }) }
+    const receipt = isRecord(value) ? (review.local === undefined ? value.receipt_id : value.remote_deletion_receipt_id) : undefined
+    if (!isRecord(value) || value.code !== 0 || typeof receipt !== 'string' || !/^[a-f0-9-]{36}$/.test(receipt)) throw new BackendError({ code: 'branch_delete_uncertain', message: 'Branch deletion did not complete; inspect local and remote branches and deletion recovery before retrying', retryable: false })
+    const remoteResult = review.local === undefined ? value : value.upstream_result
+    if (!isRecord(remoteResult) || !Array.isArray(remoteResult.warnings) || !remoteResult.warnings.every((warning: unknown) => typeof warning === 'string')) throw new BackendError({ code: 'branch_delete_uncertain', message: 'Deletion completed but its warnings could not be read; inspect deletion recovery', retryable: false })
+    return { receipt, warnings: remoteResult.warnings }
+  }
+
+  async remoteBranchDeletionHistory(repositoryPath: string): Promise<ReadonlyArray<{ readonly id: string; readonly reference: string; readonly phase: string; readonly endpoints: ReadonlyArray<{ readonly index: number; readonly destination: string; readonly displaySafe: boolean; readonly phase: string; readonly backupOid: string | null }> }>> {
+    const value = await this.branchDeletionRequest(repositoryPath, true, 'remote_deletion_history', {})
+    if (!Array.isArray(value) || value.length > 1000) throw new BackendError({ code: 'invalid_response', message: 'Invalid remote deletion history', retryable: false })
+    return value.map(record => {
+      if (!isRecord(record) || typeof record.id !== 'string' || !/^[a-f0-9-]{36}$/.test(record.id)) throw new BackendError({ code: 'invalid_response', message: 'Invalid remote deletion record', retryable: false })
+      if (typeof record.error === 'string' && !Array.isArray(record.endpoints)) return { id: record.id, reference: 'Unreadable recovery record', phase: 'unreadable', endpoints: [] }
+      if (typeof record.reference !== 'string' || typeof record.phase !== 'string' || !Array.isArray(record.endpoints) || record.endpoints.length > 32) throw new BackendError({ code: 'invalid_response', message: 'Invalid remote deletion record', retryable: false })
+      return { id: record.id, reference: record.reference, phase: record.phase, endpoints: record.endpoints.map((entry, index) => {
+        if (!isRecord(entry) || entry.index !== index || typeof entry.destination !== 'string' || entry.destination.length > 16384 || typeof entry.display_safe !== 'boolean' || typeof entry.phase !== 'string' || !(entry.backup_oid === null || (typeof entry.backup_oid === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(entry.backup_oid)))) throw new BackendError({ code: 'invalid_response', message: 'Invalid remote deletion recovery', retryable: false })
+        return { index, destination: entry.destination, displaySafe: entry.display_safe, phase: entry.phase, backupOid: entry.backup_oid as string | null }
+      }) }
+    })
+  }
+
+  async restoreRemoteBranchTip(repositoryPath: string, receiptId: string, endpoint: number, name: string): Promise<void> {
+    if (!/^[a-f0-9-]{36}$/.test(receiptId) || !Number.isSafeInteger(endpoint) || endpoint < 0 || endpoint >= 32 || name.length === 0 || name.length > 4096 || /[\0\r\n]/.test(name)) throw new BackendError({ code: 'invalid_request', message: 'Invalid recovery request', retryable: false })
+    let value: unknown
+    try { value = await this.branchDeletionRequest(repositoryPath, true, 'restore_remote_tip', { receipt_id: receiptId, endpoint, name }) }
+    catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect branches and recovery history before retrying`, retryable: false }) }
+    if (!isRecord(value) || value.code !== 0) throw new BackendError({ code: 'branch_restore_uncertain', message: 'Recovery outcome is uncertain; inspect branches before retrying', retryable: false })
   }
 
   async deleteRepositoryBranch(repositoryPath: string, name: string, expectedTip: string): Promise<void> {

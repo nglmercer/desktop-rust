@@ -131,6 +131,7 @@
   "script/crash-build.test.ts",
   "app/test/unit/git/push-terminal-chunk-test.ts",
   "app/test/unit/stores/revert-cleanup-test.ts",
+  "app/test/unit/stores/remote-branch-deletion-cleanup-test.ts",
   "app/test/unit/git/create-terminal-stream-test.ts",
   "app/test/unit/git/environment-test.ts",
   "app/test/unit/progress/git-test.ts",
@@ -274,5 +275,7 @@
   "app/test/unit/short-lived-token-rollout-test.ts",
   "app/test/unit/web-path-test.ts",
   "app/test/unit/show-notification-test.ts",
+  "app/test/unit/rust-remote-branch-deletion-test.ts",
+  "app/test/unit/ui/rust-remote-branch-deletion-dialog-test.tsx",
   "app/test/unit/notification-permission-test.ts"
 ]

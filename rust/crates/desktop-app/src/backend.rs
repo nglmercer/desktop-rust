@@ -122,6 +122,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    RemoteBranchDeletion {
+        repository_path: String,
+        operation: Operation,
+    },
     BranchRename {
         repository_path: String,
         operation: Operation,
@@ -460,6 +464,9 @@ impl Backend {
         | GitInfoOperation::BranchDeletion {
             repository_path, ..
         }
+        | GitInfoOperation::RemoteBranchDeletion {
+            repository_path, ..
+        }
         | GitInfoOperation::BranchRename {
             repository_path, ..
         }
@@ -638,10 +645,19 @@ impl Backend {
                     to_checkout: None,
                     upstream: None,
                     ..
+                } | Operation::DeleteBranchPreview {
+                    upstream: Some(_),
+                    ..
                 } | Operation::DeleteBranch {
                     to_checkout: None,
                     upstream: None,
                     ref_only: true,
+                    basis: Some(_),
+                    replace_stash: false,
+                    restore_index: false,
+                    ..
+                } | Operation::DeleteBranch {
+                    upstream: Some(_),
                     basis: Some(_),
                     replace_stash: false,
                     restore_index: false,
@@ -652,6 +668,15 @@ impl Backend {
             return Err(AppError::BadArgs(
                 "unsupported branch deletion operation".into(),
             ));
+        }
+        if let GitInfoOperation::RemoteBranchDeletion { operation, .. } = &request.operation
+            && !matches!(operation,
+                Operation::RemoteBranchDeletePreview { .. }
+                | Operation::DeleteRemoteBranch { basis: Some(_), .. }
+                | Operation::RemoteDeletionHistory
+                | Operation::RestoreRemoteTip { .. })
+        {
+            return Err(AppError::BadArgs("unsupported remote branch deletion operation".into()));
         }
         if let GitInfoOperation::BranchRename { operation, .. } = &request.operation
             && !matches!(
@@ -1633,6 +1658,10 @@ impl Backend {
                         operation: Operation::DeleteBranch { .. },
                         ..
                     }
+                    | GitInfoOperation::RemoteBranchDeletion {
+                        operation: Operation::DeleteRemoteBranch { .. } | Operation::RestoreRemoteTip { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchRename {
                         operation: Operation::RenameBranch { .. },
                         ..
@@ -1746,6 +1775,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchDeletion { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::RemoteBranchDeletion { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2039,6 +2075,48 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn wry_reviews_and_recovers_remote_branch_deletion() {
+        use std::{fs, process::Command};
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-remote-delete-{}", uuid::Uuid::new_v4()));
+            let repo = root.join("repo");
+            let first = root.join("first.git");
+            let second = root.join("second.git");
+            fs::create_dir_all(&repo).unwrap();
+            let git = |directory: &Path, arguments: &[&str]| {
+                let output = Command::new("git").arg("-C").arg(directory).args(arguments).env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
+                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                output.stdout
+            };
+            git(&root, &["init", "--bare", "-q", first.to_str().unwrap()]);
+            git(&root, &["init", "--bare", "-q", second.to_str().unwrap()]);
+            git(&repo, &["init", "-q", "-b", "main"]);
+            git(&repo, &["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "first"]);
+            git(&repo, &["push", "-q", first.to_str().unwrap(), "HEAD:refs/heads/topic"]);
+            git(&repo, &["push", "-q", second.to_str().unwrap(), "HEAD:refs/heads/topic"]);
+            git(&repo, &["remote", "add", "origin", first.to_str().unwrap()]);
+            git(&repo, &["remote", "set-url", "--add", "--push", "origin", first.to_str().unwrap()]);
+            git(&repo, &["remote", "set-url", "--add", "--push", "origin", second.to_str().unwrap()]);
+            let backend = Backend::new(8).unwrap();
+            let invoke = |operation: Value| backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"remote_branch_deletion","repository_path":repo,"operation":operation}})]).unwrap()).unwrap();
+            let request = json!({"remote":"origin","branch":"topic","expected":null,"fetch_backup":false});
+            let preview = invoke(json!({"method":"remote_branch_delete_preview","request":request}));
+            assert_eq!(preview["endpoints"].as_array().unwrap().len(), 2);
+            let deletion = invoke(json!({"method":"delete_remote_branch","request":request,"basis":preview["basis"]}));
+            assert_eq!(deletion["code"], 0);
+            for remote in [&first, &second] {
+                assert!(!Command::new("git").arg("-C").arg(remote).args(["show-ref", "--verify", "--quiet", "refs/heads/topic"]).status().unwrap().success());
+            }
+            let history = invoke(json!({"method":"remote_deletion_history"}));
+            assert_eq!(history[0]["id"], deletion["receipt_id"]);
+            let restored = invoke(json!({"method":"restore_remote_tip","receipt_id":deletion["receipt_id"],"endpoint":0,"name":"recovered-topic"}));
+            assert_eq!(restored["code"], 0);
+            git(&repo, &["show-ref", "--verify", "--quiet", "refs/heads/recovered-topic"]);
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
 
     #[test]
     fn wry_comparison_diff_returns_large_raw_response() {

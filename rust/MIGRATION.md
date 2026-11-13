@@ -1330,7 +1330,16 @@ partial outcome history, local restore and separate permanent-forget consent.
 Root generations/read revisions reject late results and global readiness
 preserves consent. Errors refresh history without replay. Discovery resolves
 canonical upstream remote/ref names independently of local branch names and
-fetch namespaces. Public records omit transport URLs and scrub known credentials.
+fetch namespaces. Public records show safe or sanitized destination identities
+and scrub known credentials; ambiguous transport syntax remains hidden.
+
+The main renderer now uses this reviewed service for remote and combined
+local/upstream branch deletion on Wry and WebSocket transports. It lists each
+effective destination and tip, blocks approval when a destination cannot be
+identified safely, preserves completed-operation warnings, and exposes local
+recovery from retained tips. After a failed combined operation it refreshes the
+repository while preserving the original failure. Electron retains its existing
+path until its transport is migrated.
 
 `crates/cli/tests/remote_delete.rs` uses private local bare remotes for differing multi-URL tips,
 fetch-only separation, stale reviews, races inside pre-push, partial success,

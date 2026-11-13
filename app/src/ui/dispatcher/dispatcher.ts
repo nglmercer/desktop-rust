@@ -1,4 +1,5 @@
 import { Disposable } from 'event-kit'
+import type { IRemoteBranchDeletionReview, IRemoteBranchDeletionResult } from '../../backend/client'
 
 import {
   IAPIOrganization,
@@ -982,6 +983,16 @@ export class Dispatcher {
     branch: Branch
   ): Promise<void> {
     return this.appStore._deleteBranch(repository, branch)
+  }
+
+  /** Review every push destination before deleting an upstream branch. */
+  public previewRemoteBranchDeletion(repository: Repository, branch: Branch): Promise<IRemoteBranchDeletionReview> {
+    return this.appStore._previewRemoteBranchDeletion(repository, branch)
+  }
+
+  /** Apply the exact branch and destination review confirmed by the user. */
+  public deleteReviewedRemoteBranch(repository: Repository, review: IRemoteBranchDeletionReview): Promise<IRemoteBranchDeletionResult> {
+    return this.appStore._deleteReviewedRemoteBranch(repository, review)
   }
 
   /** Discard the changes to the given files. */

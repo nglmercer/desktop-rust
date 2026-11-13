@@ -38,7 +38,7 @@ import {
   getCleanedEnforcedRuleDescriptions,
   migrateCopilotModelSelectionsToAccounts,
 } from './copilot-store'
-import { backend, BackendError } from '../../backend/client'
+import { backend, BackendError, type IRemoteBranchDeletionReview, type IRemoteBranchDeletionResult } from '../../backend/client'
 import { RepositorySelectionQueue } from '../../backend/repository-selection'
 import { discardBatchWithoutDialog, discardReviewedSelection } from '../git/reviewed-discard'
 import { reviewSelectedCommit } from '../git/selected-commit-review'
@@ -5826,6 +5826,32 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */
+  public async _previewRemoteBranchDeletion(repository: Repository, branch: Branch): Promise<IRemoteBranchDeletionReview> {
+    if (branch.type === BranchType.Remote) {
+      if (branch.remoteName === null) throw new Error('Cannot determine the remote for this branch')
+      return backend().previewRemoteBranchDeletion(repository.path, branch.remoteName, branch.nameWithoutRemote)
+    }
+    if (branch.upstreamRemoteName === null || branch.upstreamWithoutRemote === null) throw new Error('This branch has no remote upstream')
+    const target = this.getBranchToCheckoutAfterDelete(branch, repository)
+    return backend().previewCombinedBranchDeletion(repository.path, branch.name, branch.tip.sha, target?.name ?? null, branch.upstreamRemoteName, branch.upstreamWithoutRemote)
+  }
+
+  /** This shouldn't be called directly. See `Dispatcher`. */
+  public async _deleteReviewedRemoteBranch(repository: Repository, review: IRemoteBranchDeletionReview): Promise<IRemoteBranchDeletionResult> {
+    let receipt: IRemoteBranchDeletionResult
+    try {
+      receipt = await this.withAssistedCommitMutationResources(repository, () => backend().applyRemoteBranchDeletion(repository.path, review))
+    } catch (error) {
+      // A combined operation can switch or delete the local branch before a
+      // later remote push fails. Refresh without masking the original error.
+      await this._refreshRepository(repository).catch(refreshError => log.warn('Could not refresh after partial branch deletion', refreshError))
+      throw error
+    }
+    await this._refreshRepository(repository)
+    return receipt
+  }
+
+  /** This shouldn't be called directly. See `Dispatcher`. */
   public async _deleteBranch(
     repository: Repository,
     branch: Branch,
@@ -5846,6 +5872,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
     includeUpstream?: boolean,
     toCheckout?: Branch | null
   ): Promise<void> {
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none' && (branch.type === BranchType.Remote || includeUpstream === true)) {
+      throw new Error('Review each push destination before deleting a remote branch')
+    }
     return this.withRefreshedGitHubRepository(repository, async repository => {
       const gitStore = this.gitStoreCache.get(repository)
 
