@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { before, it, mock } from 'node:test'
+import { it, vi } from 'vitest'
 import * as React from 'react'
 import { Disposable } from 'event-kit'
 import { GitHubRepository } from '../../../src/models/github-repository'
@@ -7,13 +7,19 @@ import { Owner } from '../../../src/models/owner'
 import { PullRequest, PullRequestRef } from '../../../src/models/pull-request'
 import { Repository } from '../../../src/models/repository'
 import type { Dispatcher } from '../../../src/ui/dispatcher'
-import { render } from '../../helpers/ui/render'
+import { render } from '../../helpers/ui/vitest-render'
 
-before(() => {
-  mock.module('../../../src/ui/lib/sandboxed-markdown.tsx', {
-    namedExports: { SandboxedMarkdown: () => null },
-  })
-})
+vi.mock('../../../src/ui/lib/sandboxed-markdown.tsx', () => ({
+  SandboxedMarkdown: () => null,
+}))
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('fs-admin', () => ({}))
+vi.mock('react-confetti', () => ({ default: () => null }))
+vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
+vi.mock('../../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 it('passes the local account context through the quick view badge to CI status', async () => {
   const { PullRequestQuickView } = await import(

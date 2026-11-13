@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, before, beforeEach, describe, it, mock } from 'node:test'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import * as React from 'react'
 import { Account } from '../../../src/models/account'
 import { GitHubRepository } from '../../../src/models/github-repository'
@@ -11,12 +11,9 @@ import {
 } from '../../../src/models/repository'
 import { SignInResult } from '../../../src/lib/stores/sign-in-store'
 import type { Dispatcher } from '../../../src/ui/dispatcher'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
-import {
-  advanceTimersBy,
-  enableTestTimers,
-  resetTestTimers,
-} from '../../helpers/ui/timers'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
+import { cleanup } from '@testing-library/react'
+import { act } from 'react-dom/test-utils'
 
 const endpoint = 'https://api.github.com'
 const enterpriseEndpoint = 'https://enterprise.example.com/api/v3'
@@ -42,7 +39,7 @@ const closeDescriptor = Object.getOwnPropertyDescriptor(
 )
 
 beforeEach(() => {
-  enableTestTimers(['setTimeout'])
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true
   }
@@ -51,7 +48,8 @@ beforeEach(() => {
   }
 })
 afterEach(() => {
-  resetTestTimers()
+  cleanup()
+  vi.useRealTimers()
   if (showModalDescriptor === undefined) {
     Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal')
   } else {
@@ -68,11 +66,9 @@ afterEach(() => {
   }
 })
 
-before(() => {
-  mock.module('../../../src/ui/main-process-proxy.ts', {
-    namedExports: { sendDialogDidOpen: () => {} },
-  })
-})
+vi.mock('../../../src/ui/main-process-proxy.ts', () => ({
+  sendDialogDidOpen: () => {},
+}))
 
 function createRepository(login: string | null = null, host = endpoint) {
   const repository = new Repository(
@@ -100,7 +96,9 @@ async function renderDialog(element: React.ReactElement) {
       </DialogStackContext.Provider>
     ),
   })
-  advanceTimersBy(300)
+  act(() => {
+    vi.advanceTimersByTime(300)
+  })
   return view
 }
 
@@ -114,22 +112,22 @@ async function renderAccountDialog(
   let callback: ((result: SignInResult) => void) | undefined
   const completed: Array<Account | undefined> = []
   const order: string[] = []
-  const showAccountSignInDialog = mock.fn<
+  const showAccountSignInDialog = vi.fn<
     Dispatcher['showAccountSignInDialog']
   >(async (_endpoint, _login, resultCallback) => {
     callback = resultCallback
   })
-  const showDotComSignInDialog = mock.fn<Dispatcher['showDotComSignInDialog']>(
+  const showDotComSignInDialog = vi.fn<Dispatcher['showDotComSignInDialog']>(
     async resultCallback => {
       callback = resultCallback
     }
   )
-  const showEnterpriseSignInDialog = mock.fn<
+  const showEnterpriseSignInDialog = vi.fn<
     Dispatcher['showEnterpriseSignInDialog']
   >(async (_endpoint, resultCallback) => {
     callback = resultCallback
   })
-  const closePopup = mock.fn<Dispatcher['closePopup']>(() => {
+  const closePopup = vi.fn<Dispatcher['closePopup']>(() => {
     order.push('close-sign-in')
   })
   const dispatcher: Pick<
@@ -217,13 +215,13 @@ describe('RepositoryAccountDialog', () => {
     )
     click('Sign in')
     assert.deepStrictEqual(
-      view.showAccountSignInDialog.mock.calls[0].arguments.slice(0, 2),
+      view.showAccountSignInDialog.mock.calls[0].slice(0, 2),
       [endpoint, 'personal']
     )
     view.updateAccounts([work, personal])
     view.finishSignIn({ kind: 'success', account: personal })
     assert.deepStrictEqual(view.completed, [personal])
-    assert.deepStrictEqual(view.closePopup.mock.calls[0].arguments, [
+    assert.deepStrictEqual(view.closePopup.mock.calls[0], [
       PopupType.SignIn,
     ])
     assert.deepStrictEqual(view.order, ['close-sign-in', 'complete', 'dismiss'])
@@ -250,7 +248,7 @@ describe('RepositoryAccountDialog', () => {
   it('requires confirmation of a newly signed-in account before props update', async () => {
     const view = await renderAccountDialog(createRepository(), [])
     click('Sign in to another account')
-    assert.strictEqual(view.showDotComSignInDialog.mock.callCount(), 1)
+    assert.strictEqual(view.showDotComSignInDialog.mock.calls.length, 1)
     view.finishSignIn({ kind: 'success', account: personal })
     assert.deepStrictEqual(view.completed, [])
     assert.ok(screen.getByRole('option', { name: '@personal', hidden: true }))
@@ -265,7 +263,7 @@ describe('RepositoryAccountDialog', () => {
     )
     click('Sign in to another account')
     assert.strictEqual(
-      view.showEnterpriseSignInDialog.mock.calls[0].arguments[0],
+      view.showEnterpriseSignInDialog.mock.calls[0][0],
       enterpriseEndpoint
     )
     view.finishSignIn({ kind: 'success', account: work })
