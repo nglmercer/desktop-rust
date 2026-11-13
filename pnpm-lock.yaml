@@ -165,9 +165,6 @@ importers:
       '@types/byline':
         specifier: ^4.2.31
         version: 4.2.36
-      '@types/classnames':
-        specifier: ^2.2.2
-        version: 2.3.4
       '@types/codemirror':
         specifier: ^5.60.15
         version: 5.60.18
@@ -177,9 +174,6 @@ importers:
       '@types/dompurify':
         specifier: ^2.3.1
         version: 2.4.0
-      '@types/electron-winstaller':
-        specifier: ^4.0.0
-        version: 4.0.2(supports-color@8.1.1)
       '@types/eslint':
         specifier: ^8.4.1
         version: 8.56.12
@@ -216,9 +210,6 @@ importers:
       '@types/minimist':
         specifier: ^1.2.5
         version: 1.2.5
-      '@types/mri':
-        specifier: ^1.1.0
-        version: 1.2.0
       '@types/node':
         specifier: 22.10.9
         version: 22.10.9
@@ -1654,10 +1645,6 @@ packages:
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
-  '@types/classnames@2.3.4':
-    resolution: {integrity: sha512-dwmfrMMQb9ujX1uYGvB5ERDlOzBNywnZAZBtOe107/hORWP05ESgU4QyaanZMWYYfd2BzrG78y13/Bju8IQcMQ==}
-    deprecated: This is a stub types definition. classnames provides its own type definitions, so you do not need this installed.
-
   '@types/codemirror@5.60.18':
     resolution: {integrity: sha512-aSBOPXH2PXRYixxUpVP1sJ5+S0vEfKDvR+lABZ7Kju/9Qb0SSbZk72NihWaKoQbANyibs92q4DBfYasywxnNkA==}
 
@@ -1675,10 +1662,6 @@ packages:
 
   '@types/dompurify@2.4.0':
     resolution: {integrity: sha512-IDBwO5IZhrKvHFUl+clZxgf3hn2b/lU6H1KaBShPkQyGJUQ0xwebezIPSuiyGwfz1UzJWQl4M7BDxtHtCCPlTg==}
-
-  '@types/electron-winstaller@4.0.2':
-    resolution: {integrity: sha512-66PaOLyGNXuK8w0sAN3JjHVztTc3vM80BE9H2RwvXA9ILu89ahF4uAPBYVoyx/BCxqSXekiagaMDUgNUD5sdeA==}
-    deprecated: This is a stub types definition. electron-winstaller provides its own type definitions, so you do not need this installed.
 
   '@types/eslint@8.56.12':
     resolution: {integrity: sha512-03ruubjWyOHlmljCVoxSuNDdmfZDzsrrz0P2LeJsOXr+ZwFQ+0yQIwNCwt/GYhV7Z31fgtXJTAEs+FYlEL851g==}
@@ -1742,10 +1725,6 @@ packages:
 
   '@types/minimist@1.2.5':
     resolution: {integrity: sha512-hov8bUuiLiyFPGyFPE1lwWhmzYbirOXQNNo40+y3zow8aFVTeyn3VWL0VFFfdNddA8S4Vf0Tc062rzyNr7Paag==}
-
-  '@types/mri@1.2.0':
-    resolution: {integrity: sha512-G4+QT8Plq6q1UnOX6JgtLrEU/4QXF/Z5oNr6TWdiv9EU2hsJPbemH4rCecwNajzij+2CxrxFg2Y98Q+ViDV79Q==}
-    deprecated: This is a stub types definition. mri provides its own type definitions, so you do not need this installed.
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
@@ -4184,10 +4163,6 @@ packages:
   mkdirp@0.5.6:
     resolution: {integrity: sha512-FP+p8RB8OWpF3YZBCrP5gtADmtXApB5AMLn+vdyA+PyxCjrCs00mjyUozssO33cwDeT3wNGdLxJ5M//YqtHAJw==}
     hasBin: true
-
-  mri@1.2.0:
-    resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
-    engines: {node: '>=4'}
 
   mrmime@2.0.1:
     resolution: {integrity: sha512-Y3wQdFg2Va6etvQ5I82yUhGdsKrcYox6p7FfL1LbK2J4V01F9TGlepTIhnK24t7koZibmg82KGglhA1XK5IsLQ==}
@@ -6779,10 +6754,6 @@ snapshots:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
 
-  '@types/classnames@2.3.4':
-    dependencies:
-      classnames: 2.5.1
-
   '@types/codemirror@5.60.18':
     dependencies:
       '@types/tern': 0.23.9
@@ -6802,12 +6773,6 @@ snapshots:
   '@types/dompurify@2.4.0':
     dependencies:
       '@types/trusted-types': 2.0.7
-
-  '@types/electron-winstaller@4.0.2(supports-color@8.1.1)':
-    dependencies:
-      electron-winstaller: 5.4.4(supports-color@8.1.1)
-    transitivePeerDependencies:
-      - supports-color
 
   '@types/eslint@8.56.12':
     dependencies:
@@ -6868,10 +6833,6 @@ snapshots:
   '@types/minimatch@3.0.5': {}
 
   '@types/minimist@1.2.5': {}
-
-  '@types/mri@1.2.0':
-    dependencies:
-      mri: 1.2.0
 
   '@types/ms@2.1.0': {}
 
@@ -9802,8 +9763,6 @@ snapshots:
   mkdirp@0.5.6:
     dependencies:
       minimist: 1.2.8
-
-  mri@1.2.0: {}
 
   mrmime@2.0.1: {}
 
