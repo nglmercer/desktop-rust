@@ -736,6 +736,7 @@ impl Repository {
             }
             Operation::BranchList => return self.branch_list_with_policy().await,
             Operation::StatusContext => return self.status_context().await,
+            Operation::RendererCherryPickState => return self.renderer_cherry_pick_state().await,
             Operation::StatusConflictDetails { kind } => {
                 return self.status_conflict_details(kind).await;
             }
@@ -1099,6 +1100,7 @@ impl Repository {
             | CommitDiff { .. }
             | BranchList
             | StatusContext
+            | RendererCherryPickState
             | StatusConflictDetails { .. }
             | BranchEnumeration { .. }
             | BranchMerged { .. }

@@ -249,6 +249,7 @@ enum ReadMethod {
     WorktreesFromGitDir,
     ProtectedResources,
     StatusContext,
+    RendererCherryPickState,
     StatusConflictDetails,
     BranchEnumeration,
     BranchMerged,
@@ -980,6 +981,14 @@ impl Backend {
                         && request.commitish.is_none() =>
                 {
                     Operation::StatusContext
+                }
+                ReadMethod::RendererCherryPickState
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::RendererCherryPickState
                 }
                 ReadMethod::StatusConflictDetails
                     if request.include_untracked.is_none()
@@ -3409,6 +3418,30 @@ esac
                 .is_err()
         );
         fs::remove_file(first.join(".gitattributes")).unwrap();
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":first,"method":"renderer_cherry_pick_state"})
+                ])
+                .unwrap(),
+            Value::Null
+        );
+        let pick_head = "a".repeat(40);
+        fs::write(
+            first.join(".git/CHERRY_PICK_HEAD"),
+            format!("{pick_head}\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":first,"method":"renderer_cherry_pick_state"})
+                ])
+                .unwrap()["head"],
+            pick_head
+        );
+        assert!(backend.admit(vec![json!({"repository_path":first,"method":"renderer_cherry_pick_state","kind":"working"})]).is_err());
+        fs::remove_file(first.join(".git/CHERRY_PICK_HEAD")).unwrap();
         fs::write(first.join(".git/SQUASH_MSG"), "squash").unwrap();
         let context = backend
             .read_args(vec![

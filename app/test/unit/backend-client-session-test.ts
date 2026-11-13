@@ -120,6 +120,17 @@ describe('backend Copilot session cleanup', () => {
     ).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('reads and validates a scoped native cherry-pick snapshot', async () => {
+    const head = 'a'.repeat(40)
+    const invoke = vi.fn(async (): Promise<unknown> => ({ head, sequence: { head, abort_safety: head, todo: 'pick abc1234 subject\n' } }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryCherryPickState('/repo')).resolves.toEqual({ head, sequence: { head, abortSafety: head, todo: 'pick abc1234 subject\n' } })
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'renderer_cherry_pick_state' }))
+    invoke.mockResolvedValueOnce({ head: 'invalid', sequence: null })
+    await expect(client.repositoryCherryPickState('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('reads Git version through the native scoped service and validates the response', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => '2.44.0')
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

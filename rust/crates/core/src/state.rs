@@ -56,6 +56,83 @@ impl Repository {
             "rebaseInternalState":rebase,
         }))
     }
+    /// Read only the sequencer files needed by the renderer, without following
+    /// links or exposing arbitrary Git-directory files to a browser client.
+    pub(crate) async fn renderer_cherry_pick_state(&self) -> Result<Value> {
+        use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+        use cap_std::{
+            ambient_authority,
+            fs::{Dir, OpenOptions},
+        };
+        use std::io::Read;
+        fn read_file(dir: &Dir, name: &str, limit: u64) -> Result<Option<String>> {
+            let mut options = OpenOptions::new();
+            options.read(true).follow(FollowSymlinks::No);
+            #[cfg(unix)]
+            {
+                use cap_std::fs::OpenOptionsExt;
+                options.custom_flags(libc::O_NONBLOCK);
+            }
+            let file = match dir.open_with(name, &options) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error.into()),
+            };
+            let metadata = file.metadata()?;
+            anyhow::ensure!(
+                metadata.is_file() && metadata.len() <= limit,
+                "invalid cherry-pick state file"
+            );
+            let mut bytes = Vec::new();
+            file.take(limit + 1).read_to_end(&mut bytes)?;
+            anyhow::ensure!(
+                bytes.len() as u64 <= limit,
+                "cherry-pick state file is too large"
+            );
+            Ok(Some(
+                String::from_utf8(bytes).context("invalid cherry-pick state encoding")?,
+            ))
+        }
+        let directory = Dir::open_ambient_dir(self.git_directory().await?, ambient_authority())?;
+        let Some(head) = read_file(&directory, "CHERRY_PICK_HEAD", 128)? else {
+            return Ok(Value::Null);
+        };
+        let head = head.trim();
+        anyhow::ensure!(
+            (head.len() == 40 || head.len() == 64) && head.bytes().all(|b| b.is_ascii_hexdigit()),
+            "invalid cherry-pick head"
+        );
+        fn read_sequence(directory: &Dir) -> Result<Option<Value>> {
+            Ok(match directory.open_dir_nofollow("sequencer") {
+                Ok(dir) => {
+                    let head = read_file(&dir, "head", 128)?;
+                    let safety = read_file(&dir, "abort-safety", 128)?;
+                    let todo = read_file(&dir, "todo", 1024 * 1024)?;
+                    match (head, safety, todo) {
+                        (Some(head), Some(safety), Some(todo)) => {
+                            Some(json!({"head":head,"abort_safety":safety,"todo":todo}))
+                        }
+                        _ => None,
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            })
+        }
+        let sequence = read_sequence(&directory)?;
+        if read_sequence(&directory)? != sequence {
+            return Ok(Value::Null);
+        }
+        if read_file(&directory, "CHERRY_PICK_HEAD", 128)?
+            .as_deref()
+            .map(str::trim)
+            != Some(head)
+        {
+            return Ok(Value::Null);
+        }
+        Ok(json!({"head":head,"sequence":sequence}))
+    }
+
     pub(crate) async fn ahead_behind(&self, range: &str) -> Result<Value> {
         let output = self
             .run(&args(&[
@@ -307,5 +384,63 @@ impl Repository {
             branches.push(json!({"name":name,"ref":reference,"oid":oid,"current":current,"local":local,"upstream":(!upstream.is_empty()).then(||String::from_utf8_lossy(upstream).into_owned()),"worktree":(!worktree.is_empty()).then(||String::from_utf8_lossy(worktree).into_owned())}));
         }
         Ok(Value::Array(branches))
+    }
+}
+
+#[cfg(test)]
+mod cherry_pick_state_tests {
+    use super::*;
+    use std::process::Command;
+
+    #[tokio::test]
+    async fn reads_bounded_sequencer_without_following_links() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-pick-state-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["init", "-q"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let repo = Repository::open(&root).await.unwrap();
+        assert_eq!(
+            repo.renderer_cherry_pick_state().await.unwrap(),
+            Value::Null
+        );
+        let git_dir = root.join(".git");
+        let hash = "a".repeat(40);
+        fs::write(git_dir.join("CHERRY_PICK_HEAD"), format!("{hash}\n")).unwrap();
+        assert_eq!(
+            repo.renderer_cherry_pick_state().await.unwrap(),
+            json!({"head":hash,"sequence":null})
+        );
+        fs::create_dir(git_dir.join("sequencer")).unwrap();
+        fs::write(git_dir.join("sequencer/head"), format!("{hash}\n")).unwrap();
+        fs::write(git_dir.join("sequencer/abort-safety"), format!("{hash}\n")).unwrap();
+        fs::write(
+            git_dir.join("sequencer/todo"),
+            "pick abc1234 first\npick def5678 second\n",
+        )
+        .unwrap();
+        let value = repo.renderer_cherry_pick_state().await.unwrap();
+        assert_eq!(value["sequence"]["head"], format!("{hash}\n"));
+        assert_eq!(
+            value["sequence"]["todo"],
+            "pick abc1234 first\npick def5678 second\n"
+        );
+        fs::write(git_dir.join("sequencer/todo"), vec![b'x'; 1024 * 1024 + 1]).unwrap();
+        assert!(repo.renderer_cherry_pick_state().await.is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(git_dir.join("sequencer/todo")).unwrap();
+            std::os::unix::fs::symlink(git_dir.join("config"), git_dir.join("sequencer/todo"))
+                .unwrap();
+            assert!(repo.renderer_cherry_pick_state().await.is_err());
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }

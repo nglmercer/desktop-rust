@@ -2278,3 +2278,12 @@ a fresh conflict basis and retains an undo record. Manually edited resolutions
 retain the prior allowance for conflict markers. The surrounding merge, rebase
 and cherry-pick workflows and their remaining legacy calls still require
 migration; this change does not close those removal gates.
+
+## Cherry-pick state reads
+
+The renderer reads active cherry-pick and sequencer state through a scoped Rust
+operation rather than opening Git metadata files. Reads are bounded, reject
+symlinks and changing state, and support a missing sequencer for a single pick.
+The continuation guard now awaits its state check. Cherry-pick execution,
+progress streaming, hook handling and remaining recovery callers still require
+migration before the legacy module can be removed.

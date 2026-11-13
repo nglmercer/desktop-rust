@@ -166,6 +166,7 @@ pub enum Operation {
     BranchList,
     /// Renderer operation markers and the interactive rebase's original refs.
     StatusContext,
+    RendererCherryPickState,
     StatusConflictDetails {
         kind: StatusConflictKind,
     },

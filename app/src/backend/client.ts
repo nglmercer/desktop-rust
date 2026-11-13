@@ -2342,6 +2342,16 @@ export class BackendClient {
     }
   }
 
+  /** Read the active cherry-pick sequencer from its repository-owned Git directory. */
+  async repositoryCherryPickState(repositoryPath: string): Promise<{ readonly head: string; readonly sequence: { readonly head: string; readonly abortSafety: string; readonly todo: string } | null } | null> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_cherry_pick_state', {})
+    if (value === null) return null
+    if (!isRecord(value) || typeof value.head !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value.head)) throw new BackendError({ code: 'invalid_response', message: 'Invalid cherry-pick state', retryable: false })
+    if (value.sequence === null) return { head: value.head, sequence: null }
+    if (!isRecord(value.sequence) || typeof value.sequence.head !== 'string' || value.sequence.head.length > 128 || typeof value.sequence.abort_safety !== 'string' || value.sequence.abort_safety.length > 128 || typeof value.sequence.todo !== 'string' || value.sequence.todo.length > 1_048_576) throw new BackendError({ code: 'invalid_response', message: 'Invalid cherry-pick sequence', retryable: false })
+    return { head: value.head, sequence: { head: value.sequence.head, abortSafety: value.sequence.abort_safety, todo: value.sequence.todo } }
+  }
+
   async repositoryStatusContext(repositoryPath: string, creation = false): Promise<{
     readonly mergeHeadFound: boolean
     readonly squashMsgFound: boolean
