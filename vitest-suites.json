@@ -132,6 +132,7 @@
   "app/test/unit/git/push-terminal-chunk-test.ts",
   "app/test/unit/stores/revert-cleanup-test.ts",
   "app/test/unit/stores/remote-branch-deletion-cleanup-test.ts",
+  "app/test/unit/stores/multi-commit-undo-test.ts",
   "app/test/unit/git/create-terminal-stream-test.ts",
   "app/test/unit/git/environment-test.ts",
   "app/test/unit/progress/git-test.ts",

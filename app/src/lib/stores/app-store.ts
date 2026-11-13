@@ -12009,13 +12009,16 @@ export class AppStore extends TypedBaseStore<IAppState> {
       operationDetail.kind === MultiCommitOperationKind.CherryPick &&
       operationDetail.branchCreated
     ) {
-      this._deleteBranch(
-        repository,
-        tip.branch,
-        false,
-        operationDetail.sourceBranch
-      )
-      return true
+      const gitStore = this.gitStoreCache.get(repository)
+      const result = await gitStore.performFailableOperation(async () => {
+        const target = operationDetail.sourceBranch ?? this.getBranchToCheckoutAfterDelete(tip.branch, repository)
+        if (target === null) throw new Error('No branch is available to check out before undo')
+        await checkoutBranch(repository, target, gitStore.currentRemote)
+        await this.deleteLocalBranchAndUpstreamBranch(repository, tip.branch, false)
+        return true
+      })
+      await this._refreshRepository(repository).catch(error => log.warn('Could not refresh after undoing branch creation', error))
+      return result === true
     }
 
     const gitStore = this.gitStoreCache.get(repository)
