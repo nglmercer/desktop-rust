@@ -1,0 +1,17 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.7/schema.json",
+  "files": {
+    "includes": [
+      "app/src/**/*.{js,jsx,ts,tsx,mts}",
+      "app/typings/**/*.{js,jsx,ts,tsx,mts}",
+      "app/test/**/*.{js,jsx,ts,tsx,mts}",
+      "script/**/*.{ts,tsx,mts}",
+      "rust/tests/**/*.{ts,tsx,mts}",
+      "biome-rules/**/*.ts",
+      "eslint-rules/**/*.{js,mts}"
+    ]
+  },
+  "formatter": { "enabled": false },
+  "linter": { "rules": { "preset": "none" } },
+  "plugins": ["./biome-rules/insecure-random.ts"]
+}

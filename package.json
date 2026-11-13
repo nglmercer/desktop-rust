@@ -44,8 +44,9 @@
     "lint:fix": "npm run prettier -- --write && npm run lint:src:fix && biome check --write . --",
     "markdownlint": "markdownlint **/*.{md,mdx} --config .markdownlint.js --rules .markdownlint-rules.js --ignore node_modules --ignore gemoji",
     "prettier": "prettier --check \"./**/*.{ts,tsx,js,json,jsx,scss,html,yaml,yml}\" \"./eslint-rules/**/*.mts\"",
-    "lint:src": "npm run eslint-check && npm run eslint --",
-    "lint:src:fix": "npm run eslint -- --fix",
+    "lint:src": "npm run lint:security && npm run eslint-check && npm run eslint --",
+    "lint:src:fix": "npm run lint:security && npm run eslint -- --fix",
+    "lint:security": "tsc -p biome-rules/tsconfig.json && biome lint --config-path=biome.security.json . --diagnostic-level=error",
     "eslint": "eslint --cache --rulesdir ./eslint-rules \"./eslint-rules/**/*.{js,mts}\" \"./script/**/*.ts{,x}\" \"./app/{src,typings,test}/**/*.{j,t}s{,x}\" \"./changelog.json\"",
     "eslint-check": "eslint --print-config .eslintrc.* | eslint-config-prettier-check",
     "validate-electron-version": "node --import tsx script/validate-electron-version.ts",
@@ -126,17 +127,18 @@
     "semver": "^7.6.3",
     "style-loader": "^3.3.1",
     "ts-loader": "^9",
+    "tsx": "^4.19.3",
     "typescript": "^6.0.3",
     "vite": "^7.0.0",
     "webpack": "^5.111.0",
     "webpack-bundle-analyzer": "^4.5.0",
     "webpack-dev-middleware": "^7.4.5",
     "webpack-hot-middleware": "^2.25.1",
-    "webpack-merge": "^6.0.1",
-    "tsx": "^4.19.3"
+    "webpack-merge": "^6.0.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",
+    "@biomejs/runtime": "2.6.7",
     "@electron/packager": "^20.3.0",
     "@github/markdownlint-github": "^0.8.3",
     "@playwright/test": "^1.58.2",
@@ -189,10 +191,10 @@
     "node-test-github-reporter": "^1.3.2",
     "playwright": "^1.58.2",
     "reserved-words": "^0.1.2",
+    "schema-utils": "^4.8.3",
+    "tslib": "^2.9.1",
     "vite-plugin-node-polyfills": "^0.28.0",
     "vitest": "3.2.7",
-    "webpack-cli": "^6.0.1",
-    "tslib": "^2.9.1",
-    "schema-utils": "^4.8.3"
+    "webpack-cli": "^6.0.1"
   }
 }

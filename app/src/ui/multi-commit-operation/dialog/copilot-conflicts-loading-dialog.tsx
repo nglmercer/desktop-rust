@@ -99,7 +99,7 @@ const ThemeLabels: Record<LoadingTheme, string> = {
 function randomDwell(): number {
   return (
     MinDwellSeconds +
-    // eslint-disable-next-line insecure-random
+    // biome-ignore lint/plugin: Display timing does not need cryptographic randomness.
     Math.floor(Math.random() * (MaxDwellSeconds - MinDwellSeconds + 1))
   )
 }

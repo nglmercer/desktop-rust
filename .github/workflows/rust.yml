@@ -39,6 +39,8 @@ on:
       - 'tsconfig.json'
       - 'tsconfig.notifications.json'
       - 'biome.json'
+      - 'biome.security.json'
+      - 'biome-rules/**'
       - 'vitest.config.ts'
       - 'vitest-suites.json'
       - 'vite.config.ts'
@@ -96,6 +98,8 @@ on:
       - 'tsconfig.json'
       - 'tsconfig.notifications.json'
       - 'biome.json'
+      - 'biome.security.json'
+      - 'biome-rules/**'
       - 'vitest.config.ts'
       - 'vitest-suites.json'
       - 'vite.config.ts'
@@ -149,6 +153,7 @@ jobs:
       - name: Check migrated frontend tooling and tests
         run: |
           npm run lint:biome
+          npm run lint:security
           npm run check:eslint
           npm run check:types
           npm run compile:script

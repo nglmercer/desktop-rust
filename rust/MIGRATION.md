@@ -39,6 +39,13 @@ configuration YAML files. The generated pnpm and issue-triage lockfiles retain
 their previous formatting policy. Parsed YAML documents were compared before
 and after formatting to verify that their values did not change.
 
+The insecure-random rule now runs as a pinned Biome TypeScript plugin across
+application code, scripts and Rust integration tests. Its checks retain the
+legacy rule's direct and computed member behavior, including escaped names,
+and three non-security uses have explicit Biome suppressions. The plugin API
+is a Biome developer preview; rule tests and a dedicated CI check protect this
+migration while the remaining custom ESLint rules stay in place.
+
 Linux CI now exercises the active `github-desktop-rs` Wry webview: its
 isolated smoke run waits for the shared React renderer to mount and performs
 both shell and Rust backend IPC calls. The obsolete `desktop-native` smoke

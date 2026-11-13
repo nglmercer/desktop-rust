@@ -154,6 +154,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.6.7
         version: 2.6.7
+      '@biomejs/runtime':
+        specifier: 2.6.7
+        version: 2.6.7(@biomejs/biome@2.6.7)
       '@electron/packager':
         specifier: ^20.3.0
         version: 20.3.0(supports-color@8.1.1)
@@ -676,6 +679,11 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@biomejs/runtime@2.6.7':
+    resolution: {integrity: sha512-Unt8NmvAkPr1dUhbsfOr/jr6sXU9KqqrSr26RAoQV2alQBVulIKyhqGEyewW0yTA7KdELskDzPuqmZ1SyJ7UVg==}
+    peerDependencies:
+      '@biomejs/biome': ^2.6.7
 
   '@colors/colors@1.6.0':
     resolution: {integrity: sha512-Ir+AOibqzrIsL6ajt3Rz3LskB7OiMVHqltZmspbW/TJuTVuyOMirVqAkjfY6JISiLHgyNqicAC8AyHHGzNd/dA==}
@@ -5875,6 +5883,10 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.6.7':
     optional: true
+
+  '@biomejs/runtime@2.6.7(@biomejs/biome@2.6.7)':
+    dependencies:
+      '@biomejs/biome': 2.6.7
 
   '@colors/colors@1.6.0': {}
 
