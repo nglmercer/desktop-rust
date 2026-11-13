@@ -3,9 +3,6 @@
   "version": "0.9.12",
   "main": "dist/index.js",
   "license": "MIT",
-  "bin": {
-    "desktop-trampoline": "build/Release/desktop-trampoline"
-  },
   "scripts": {
     "build": "tsc",
     "install": "node-gyp rebuild && tsc",

@@ -2703,7 +2703,6 @@ packages:
 
   desktop-trampoline@file:vendor/desktop-trampoline:
     resolution: {directory: vendor/desktop-trampoline, type: directory}
-    hasBin: true
 
   detect-libc@1.0.3:
     resolution: {integrity: sha512-pGjwhsmsp4kL2RTz08wcOlGN83otlqHeD/Z5T8GXZB+/YcpQ/dgo+lbU8ZsGxV0HIvqqxo9l7mqYwyYMD9bKDg==}
