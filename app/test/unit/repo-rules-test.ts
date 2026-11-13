@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import {
   APIRepoRuleMetadataOperator,
@@ -13,6 +13,12 @@ import {
 } from '../../src/models/repo-rules'
 import { Repository } from '../../src/models/repository'
 import { getEnforcedRuleDescriptions } from '../../src/lib/stores/copilot-store'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 const creationRule: IAPIRepoRule = {
   ruleset_id: 1,

@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { matchMentionableUsers } from '../../../src/lib/stores/github-user-store'
 import { IMentionableUser } from '../../../src/lib/databases/github-user-database'

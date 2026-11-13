@@ -219,5 +219,11 @@
   "app/test/unit/ui/small-action-and-dialog-surfaces-test.tsx",
   "app/test/unit/authenticated-image-filter-test.ts",
   "app/test/unit/authenticated-image-token-handler-test.ts",
-  "app/test/unit/authenticated-image-token-resolver-test.ts"
+  "app/test/unit/authenticated-image-token-resolver-test.ts",
+  "app/test/unit/popup-manager-test.ts",
+  "app/test/unit/stores/github-user-store-test.ts",
+  "app/test/unit/main-process/spell-checker-menu-test.ts",
+  "app/test/unit/copilot-commit-message-prompt-test.ts",
+  "app/test/unit/repo-rules-test.ts",
+  "app/test/unit/copilot-conflict-resolution-model-test.ts"
 ]

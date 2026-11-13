@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import {
   buildCommitMessageSystemPrompt,
   buildCommitMessageUserPrompt,
@@ -11,6 +11,12 @@ import {
   IRepoRulesMetadataRule,
   RepoRuleEnforced,
 } from '../../src/models/repo-rules'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 function makeRule(
   humanDescription: string,

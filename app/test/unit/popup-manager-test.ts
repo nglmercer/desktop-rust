@@ -1,8 +1,14 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import { PopupManager } from '../../src/lib/popup-manager'
 import { Account } from '../../src/models/account'
 import { Popup, PopupType } from '../../src/models/popup'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 describe('PopupManager', () => {
   describe('currentPopup', () => {
