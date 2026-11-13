@@ -340,7 +340,9 @@ explicit oversized-file consent, but the renderer's normal commit workflow
 still uses the legacy path: hook progress, interactive hook failure handling,
 and full commit integration remain required. Successful typed publication
 returns bounded stdout and stderr tails after completion, including hook output;
-it does not stream output. The reference fence and its
+it does not stream output. The typed preparation and publication calls accept
+an abort signal; cancellation is an uncertain mutation and directs callers to
+inspect checkpoint history before retrying. The reference fence and its
 prepared OID receipt are retained in the checkpoint; the receipt is only a
 proposed update, is not proof of publication, and is not fsynced by the Git
 hook. Recovery locks HEAD, the direct branch and both indexes; verifies the

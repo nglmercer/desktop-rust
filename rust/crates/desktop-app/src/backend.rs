@@ -1175,6 +1175,17 @@ impl Backend {
                 ..
             })
         );
+        let checkpoint_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::CommitCheckpoint {
+                operation: Operation::PrepareSelectedCommit { .. }
+                    | Operation::PublishSelectedCommit { .. }
+                    | Operation::RecoverPublishedCommitCheckpoint { .. }
+                    | Operation::CloseUnchangedCommitCheckpoint { .. }
+                    | Operation::ForgetCommitCheckpoint { .. },
+                ..
+            })
+        );
         let initialization = matches!(
             job.operation,
             BackendOperation::GitInfo(GitInfoOperation::InitializeRepository { .. })
@@ -1388,11 +1399,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         }))
@@ -1403,6 +1414,66 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn wry_cancels_a_running_commit_hook_with_checkpoint_retained() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            use std::os::unix::fs::PermissionsExt;
+            let root = std::env::temp_dir().join(format!("desktop-wry-commit-cancel-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&root).unwrap();
+            let git = |args: &[&str]| {
+                let output = std::process::Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                String::from_utf8(output.stdout).unwrap().trim().to_owned()
+            };
+            git(&["init", "-q"]);
+            git(&["config", "user.name", "Test"]);
+            git(&["config", "user.email", "test@example.invalid"]);
+            git(&["config", "commit.gpgsign", "false"]);
+            std::fs::write(root.join("file"), b"before\n").unwrap();
+            git(&["add", "file"]);
+            git(&["commit", "-qm", "initial"]);
+            let head = git(&["rev-parse", "HEAD"]);
+            let original_index = std::fs::read(root.join(".git/index")).unwrap();
+            std::fs::write(root.join("file"), b"selected\n").unwrap();
+            let hook = root.join(".git/hooks/pre-commit");
+            std::fs::write(&hook, "#!/bin/sh\nprintf started > .git/commit-hook-started\nsleep 60\nprintf finished > .git/commit-hook-finished\n").unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let backend = Backend::new(16).unwrap();
+            let call = |kind: &str, operation: Value| {
+                backend.read(backend.admit_git_info(vec![json!({"operation":{"type":kind,"repository_path":root,"operation":operation}})]).unwrap())
+            };
+            let review = call("selected_commit_preview", json!({"method":"selected_commit_preview","paths":["file"],"remove_paths":[],"partial_selections":[],"allow_empty":false,"amend_head":null,"expected_head":null})).unwrap();
+            let prepared = call("commit_checkpoint", json!({"method":"prepare_selected_commit","paths":["file"],"remove_paths":[],"partial_selections":[],"allow_empty":false,"amend_head":null,"expected_head":null,"basis":review["basis"]})).unwrap();
+            let checkpoint = prepared["id"].as_str().unwrap();
+            let request_id = uuid::Uuid::new_v4();
+            let job = backend.admit_git_info(vec![json!({"request_id":request_id,"operation":{"type":"commit_checkpoint","repository_path":root,"operation":{"method":"publish_selected_commit","checkpoint_id":checkpoint,"message":"message\n","no_verify":false,"sign_off":false,"allow_large_files":false}}})]).unwrap();
+            std::thread::scope(|scope| {
+                let worker = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn_scoped(scope, || backend.read(job)).unwrap();
+                let marker = root.join(".git/commit-hook-started");
+                let deadline = std::time::Instant::now() + Duration::from_secs(15);
+                while !marker.exists() && !worker.is_finished() && std::time::Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                if !marker.exists() {
+                    backend.cancel(&[json!({"request_id":request_id})]).unwrap();
+                    let result = worker.join().unwrap();
+                    if result.as_ref().err().is_some_and(|error| error.to_string().contains("does not support")) { return; }
+                    panic!("commit hook did not start: {result:?}");
+                }
+                backend.cancel(&[json!({"request_id":request_id})]).unwrap();
+                let result = worker.join().unwrap();
+                assert!(matches!(result, Err(AppError::Coded { code, message, .. }) if code == "cancelled" && message.contains("inspect commit checkpoints")));
+                assert_eq!(git(&["rev-parse", "HEAD"]), head);
+                assert_eq!(std::fs::read(root.join(".git/index")).unwrap(), original_index);
+                assert!(!root.join(".git/commit-hook-finished").exists());
+                assert_eq!(call("commit_checkpoint", json!({"method":"inspect_commit_checkpoint","checkpoint_id":checkpoint})).unwrap()["state"], "publishing");
+                assert_eq!(call("commit_checkpoint", json!({"method":"close_unchanged_commit_checkpoint","checkpoint_id":checkpoint})).unwrap()["state"], "closed");
+            });
+            std::fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
     use std::{fs, process::Command};
 
     #[cfg(unix)]

@@ -426,7 +426,12 @@ class WryTransport {
         isRecord(params) &&
         isRecord(params.operation) &&
         params.operation.type === 'initialize_repository'
-      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization
+      const checkpointWrite =
+        method === 'git_info' && isRecord(params) && isRecord(params.operation) &&
+        params.operation.type === 'commit_checkpoint' && isRecord(params.operation.operation) &&
+        typeof params.operation.operation.method === 'string' &&
+        ['prepare_selected_commit', 'publish_selected_commit', 'recover_published_commit_checkpoint', 'close_unchanged_commit_checkpoint', 'forget_commit_checkpoint'].includes(params.operation.operation.method)
+      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite
       const nativeError = (error: unknown): BackendError => {
         const result = toBackendError(error)
         if (!mutating || !result.retryable) return result
@@ -485,6 +490,8 @@ class WryTransport {
               ? 'Remote update cancelled; inspect Git configuration before retrying'
               : discardWrite
               ? 'Discard operation cancelled; inspect the file and recovery history before retrying'
+              : checkpointWrite
+              ? 'Commit operation cancelled; inspect commit checkpoints before retrying'
               : initialization
               ? 'Repository initialization cancelled; inspect the destination before retrying'
               : lfsWrite
@@ -510,6 +517,8 @@ class WryTransport {
                 ? 'Remote update timed out; inspect Git configuration before retrying'
                 : discardWrite
                 ? 'Discard operation timed out; inspect the file and recovery history before retrying'
+                : checkpointWrite
+                ? 'Commit operation timed out; inspect commit checkpoints before retrying'
                 : initialization
                 ? 'Repository initialization timed out; inspect the destination before retrying'
                 : lfsWrite
@@ -1907,31 +1916,31 @@ export class BackendClient {
     return value.matches
   }
 
-  private async commitCheckpointRequest(repositoryPath: string, operation: Record<string, unknown>): Promise<unknown> {
+  private async commitCheckpointRequest(repositoryPath: string, operation: Record<string, unknown>, options: Pick<BackendRequestOptions, 'signal' | 'deadlineMs'> = {}): Promise<unknown> {
     return this.transport === 'wry'
-      ? this.request('git_info', { operation: { type: 'commit_checkpoint', repository_path: repositoryPath, operation } })
-      : this.repositoryRead(repositoryPath, operation.method as string, operation)
+      ? this.request('git_info', { operation: { type: 'commit_checkpoint', repository_path: repositoryPath, operation } }, options)
+      : this.repositoryRead(repositoryPath, operation.method as string, operation, options)
   }
 
-  async prepareSelectedCommit(repositoryPath: string, selection: SelectedCommitSelection, basis: string): Promise<string> {
+  async prepareSelectedCommit(repositoryPath: string, selection: SelectedCommitSelection, basis: string, options: Pick<BackendRequestOptions, 'signal' | 'deadlineMs'> = {}): Promise<string> {
     if (!/^[a-f0-9]{64}$/.test(basis)) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit review basis', retryable: false })
     const operation = { method: 'prepare_selected_commit', paths: selection.paths ?? [], remove_paths: selection.remove_paths ?? [], partial_selections: selection.partial_selections ?? [], allow_empty: selection.allow_empty ?? false, amend_head: selection.amend_head ?? null, expected_head: selection.expected_head ?? null, basis }
     const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
     if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Selected commit preparation exceeds the transport limit', retryable: false })
     let value: unknown
-    try { value = await this.commitCheckpointRequest(repositoryPath, operation) }
+    try { value = await this.commitCheckpointRequest(repositoryPath, operation, options) }
     catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
     if (!isRecord(value) || value.state !== 'prepared' || value.basis !== basis || typeof value.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.id)) throw new BackendError({ code: 'invalid_response', message: 'Preparation outcome is uncertain; inspect commit checkpoints', retryable: false })
     return value.id
   }
 
-  async publishSelectedCommit(repositoryPath: string, id: string, message: string, options: { readonly noVerify?: boolean; readonly signOff?: boolean; readonly allowLargeFiles?: boolean } = {}): Promise<IPublishedSelectedCommit> {
+  async publishSelectedCommit(repositoryPath: string, id: string, message: string, options: { readonly noVerify?: boolean; readonly signOff?: boolean; readonly allowLargeFiles?: boolean; readonly signal?: AbortSignal; readonly deadlineMs?: number } = {}): Promise<IPublishedSelectedCommit> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || message.trim().length === 0 || message.includes('\0')) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint or message', retryable: false })
     const operation = { method: 'publish_selected_commit', checkpoint_id: id, message, no_verify: options.noVerify ?? false, sign_off: options.signOff ?? false, allow_large_files: options.allowLargeFiles ?? false }
     const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
     if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Commit message exceeds the transport limit', retryable: false })
     let value: unknown
-    try { value = await this.commitCheckpointRequest(repositoryPath, operation) }
+    try { value = await this.commitCheckpointRequest(repositoryPath, operation, { signal: options.signal, deadlineMs: options.deadlineMs }) }
     catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
     if (!isRecord(value) || value.id !== id || value.state !== 'complete' || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid) || typeof value.stdout !== 'string' || value.stdout.length > 131_072 || typeof value.stderr !== 'string' || value.stderr.length > 131_072 || typeof value.output_truncated !== 'boolean') throw new BackendError({ code: 'invalid_response', message: 'Commit outcome is uncertain; inspect commit checkpoints', retryable: false })
     return { oid: value.oid, stdout: value.stdout, stderr: value.stderr, outputTruncated: value.output_truncated }

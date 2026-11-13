@@ -6,6 +6,32 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('cancels a Rust commit without treating its outcome as retryable', async () => {
+    const invoke = vi.fn(() => new Promise<unknown>(() => {}))
+    const send = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send, on: vi.fn() } })
+    const client = new BackendClient()
+    const controller = new AbortController()
+    const id = '12345678-1234-4234-8234-123456789abc'
+    const pending = client.publishSelectedCommit('/repo', id, 'message', { signal: controller.signal })
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ type: 'commit_checkpoint', operation: expect.objectContaining({ method: 'publish_selected_commit', checkpoint_id: id }) }), request_id: expect.any(String) }))
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect commit checkpoints') })
+    expect(send).toHaveBeenCalledWith('desktop.backend.cancel', { request_id: expect.any(String) })
+  })
+
+  it('cancels checkpoint preparation and directs the caller to inspect history', async () => {
+    const invoke = vi.fn(() => new Promise<unknown>(() => {}))
+    const send = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send, on: vi.fn() } })
+    const controller = new AbortController()
+    const pending = new BackendClient().prepareSelectedCommit('/repo', { paths: ['file'] }, 'a'.repeat(64), { signal: controller.signal, deadlineMs: 20_000 })
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ deadline_ms: 20_000 }))
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect commit checkpoints') })
+    expect(send).toHaveBeenCalledWith('desktop.backend.cancel', { request_id: expect.any(String) })
+  })
+
   it.each([
     { type: 'set', key: 'user.name', value: 'Alice' },
     { type: 'set', key: 'init.defaultbranch', value: 'trunk' },
