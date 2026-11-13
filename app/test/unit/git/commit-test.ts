@@ -1,4 +1,4 @@
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from 'vitest'
 import assert from 'node:assert'
 import * as path from 'path'
 import { readFile, rename, unlink, writeFile } from 'fs/promises'
@@ -439,9 +439,8 @@ describe('git/commit', () => {
     })
 
     for (const oldPath of [PathspecMagicFileName, 'file*.txt']) {
-      it(
+      it.skipIf(process.platform === 'win32')(
         `partially commits a rename from ${oldPath} without staging unrelated changes`,
-        { skip: process.platform === 'win32' },
         async t => {
           const repo = await setupEmptyRepository(t)
           const original = 'line1\nline2\nline3\nline4\nline5\n'

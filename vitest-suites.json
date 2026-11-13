@@ -319,5 +319,6 @@
   "app/test/unit/patch-formatter-test.ts",
   "app/test/unit/write-default-readme-test.ts",
   "app/test/unit/git-info-test.ts",
-  "app/test/unit/git/file-version-fence-test.ts"
+  "app/test/unit/git/file-version-fence-test.ts",
+  "app/test/unit/git/commit-test.ts"
 ]
