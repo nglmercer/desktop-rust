@@ -3,7 +3,16 @@
 import * as Path from 'path'
 import { spawnSync, SpawnSyncOptions } from 'child_process'
 
-import { getAppInstallCommands, getNpmCommand } from './npm'
+import { getAppInstallCommands, getNpmCommand, isPnpmInstall } from './npm'
+
+// pnpm owns both workspace projects. Its install is the Rust/Vite workflow;
+// the separate npm app install and Electron setup below are only for the
+// legacy Electron workflow. In particular, pnpm's npm_execpath may be a
+// native executable rather than JavaScript that Node can run.
+if (isPnpmInstall()) {
+  console.log('Skipping legacy Electron setup for the pnpm workspace.')
+  process.exit(0)
+}
 
 const root = Path.dirname(__dirname)
 

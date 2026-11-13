@@ -2,14 +2,78 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { cp, mkdir, readFile, realpath, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
-import { execFile } from 'child_process'
+import { execFile, spawnSync } from 'child_process'
 import { promisify } from 'util'
 import { createTempDirectory } from '../app/test/helpers/temp'
-import { getAppInstallCommands, getNpmCommand } from './npm'
+import { getAppInstallCommands, getNpmCommand, isPnpmInstall } from './npm'
 
 const execFileP = promisify(execFile)
 
 describe('npm commands', () => {
+  it('selects pnpm installs without changing the npm workflow', () => {
+    assert.equal(isPnpmInstall('pnpm/11.17.0 npm/? node/v22'), true)
+    assert.equal(isPnpmInstall('npm/11.17.0 node/v22'), false)
+    assert.equal(isPnpmInstall(''), false)
+  })
+
+  it('skips Electron setup for pnpm before running any package manager', () => {
+    const root = resolve(__dirname, '..')
+    const result = spawnSync(
+      process.execPath,
+      [
+        require.resolve('ts-node/dist/bin.js'),
+        '-P',
+        'script/tsconfig.json',
+        'script/post-install.ts',
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 15_000,
+        env: {
+          ...process.env,
+          npm_config_user_agent: 'pnpm/11.17.0 npm/? node/v22',
+          npm_execpath: join(root, 'missing-package-manager'),
+        },
+      }
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /Skipping legacy Electron setup/)
+  })
+
+  it('keeps npm installs on the legacy setup path', async t => {
+    const root = resolve(__dirname, '..')
+    const directory = await createTempDirectory(t)
+    const fakeNpm = join(directory, 'fake-npm.js')
+    await writeFile(
+      fakeNpm,
+      'console.log(JSON.stringify(process.argv.slice(2))); process.exit(23)'
+    )
+    const result = spawnSync(
+      process.execPath,
+      [
+        require.resolve('ts-node/dist/bin.js'),
+        '-P',
+        'script/tsconfig.json',
+        'script/post-install.ts',
+      ],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 15_000,
+        env: {
+          ...process.env,
+          npm_config_user_agent: 'npm/11.17.0 node/v22',
+          npm_execpath: fakeNpm,
+          npm_command: 'ci',
+        },
+      }
+    )
+    assert.equal(result.status, 23, result.stderr)
+    assert.match(result.stdout, /"ci","--prefix","app"/)
+    assert.doesNotMatch(result.stdout, /Skipping legacy Electron setup/)
+  })
+
   it('uses Node and preserves arguments without a shell', () => {
     const cli = 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js'
     const args = ['run', 'prettier', '--', '--write', 'path with spaces.json']
