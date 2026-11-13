@@ -1,6 +1,7 @@
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
-import { createTempDirectory, TestCleanupContext } from './temp'
+import { createTempDirectory } from './temp'
+import type { TestCleanupContext } from './temp'
 
 /** Isolate Git configuration and enable ownership checks for a test. */
 export async function setupOwnershipCheck(t: TestCleanupContext) {
