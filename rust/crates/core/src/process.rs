@@ -318,6 +318,17 @@ pub(crate) async fn run_bound_checkout(path: &Path, args: &[OsString]) -> Result
     run_command(path, bound_git_command(), args, None, 2 * 1024 * 1024, None).await
 }
 
+/// Run a local tracking-branch fetch with bounded output and explicit stdin.
+pub(crate) async fn run_bound_local_fetch(
+    path: &Path,
+    args: &[OsString],
+    input: Vec<u8>,
+) -> Result<RawOutput> {
+    let mut command = bound_git_command();
+    command.env("GIT_REFLOG_ACTION", "pull");
+    run_command(path, command, args, Some(input), 2 * 1024 * 1024, None).await
+}
+
 /// Continue a Git operation without invoking an inherited interactive editor.
 pub(crate) async fn run_bound_noninteractive(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     let mut command = bound_git_command();

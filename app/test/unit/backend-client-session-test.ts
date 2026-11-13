@@ -606,6 +606,22 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.checkoutDetachedCommit('/repo', oid, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
   })
 
+  it('reviews tracking branch fast-forwards and never replays an interrupted mutation', async () => {
+    const branches = [{ ref: 'refs/heads/feature', sha: 'a'.repeat(40), upstreamRef: 'refs/remotes/origin/feature', upstreamSha: 'b'.repeat(40) }]
+    const request = { branches: [{ ref: branches[0].ref, sha: branches[0].sha, upstream_ref: branches[0].upstreamRef, upstream_sha: branches[0].upstreamSha }], recurse_submodules: false }
+    const preview = { request, basis: 'c'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ code: 1 })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.fastForwardRepositoryBranches('/repo', branches, false)).resolves.toBeUndefined()
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'fast_forward_branches', repository_path: '/repo', operation: { method: 'renderer_fast_forward', request, basis: preview.basis } } }))
+    invoke.mockResolvedValueOnce({ ...preview, request: { ...request, recurse_submodules: true } })
+    await expect(client.fastForwardRepositoryBranches('/repo', branches, false)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.fastForwardRepositoryBranches('/repo', branches, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('inspect tracking branches') })
+    expect(invoke).toHaveBeenCalledTimes(5)
+  })
+
   it('reviews mixed reset and never replays an interrupted mutation', async () => {
     const request = { target: 'a'.repeat(40), head: 'b'.repeat(40), branch: 'refs/heads/main', undo: true }
     const preview = { request, basis: 'c'.repeat(64) }

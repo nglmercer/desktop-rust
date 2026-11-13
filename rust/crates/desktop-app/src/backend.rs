@@ -165,6 +165,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    FastForwardBranches {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -470,6 +474,9 @@ impl Backend {
         | GitInfoOperation::MixedReset {
             repository_path, ..
         }
+        | GitInfoOperation::FastForwardBranches {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -726,6 +733,17 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported mixed reset operation".into(),
+            ));
+        }
+        if let GitInfoOperation::FastForwardBranches { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererFastForwardPreview { .. }
+                    | Operation::RendererFastForward { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported branch fast-forward operation".into(),
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
@@ -1518,6 +1536,10 @@ impl Backend {
                         operation: Operation::RendererMixedReset { .. },
                         ..
                     }
+                    | GitInfoOperation::FastForwardBranches {
+                        operation: Operation::RendererFastForward { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1720,6 +1742,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::MixedReset { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::FastForwardBranches { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1984,6 +2013,30 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn wry_fast_forwards_reviewed_tracking_branches() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-ff-{}", uuid::Uuid::new_v4())); fs::create_dir(&root).unwrap();
+            let git = |args: &[&str]| { let out = Command::new("git").arg("-C").arg(&root).args(args).output().unwrap(); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
+            git(&["init", "-q", "-b", "main"]); git(&["config", "user.name", "Test"]); git(&["config", "user.email", "test@example.invalid"]); git(&["config", "commit.gpgsign", "false"]);
+            fs::write(root.join("file"), "base\n").unwrap(); git(&["add", "file"]); git(&["commit", "-qm", "base"]); let old = git(&["rev-parse", "HEAD"]); git(&["branch", "tracking", &old]);
+            fs::write(root.join("file"), "next\n").unwrap(); git(&["commit", "-qam", "next"]); let new = git(&["rev-parse", "HEAD"]);
+            git(&["config", "remote.origin.url", "https://example.invalid/repo"]); git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]); git(&["config", "branch.tracking.remote", "origin"]); git(&["config", "branch.tracking.merge", "refs/heads/topic"]); git(&["update-ref", "refs/remotes/origin/topic", &new]);
+            fs::write(root.join(".git/FETCH_HEAD"), "keep\n").unwrap();
+            let request = json!({"branches":[{"ref":"refs/heads/tracking","sha":old,"upstream_ref":"refs/remotes/origin/topic","upstream_sha":new}],"recurse_submodules":false});
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"fast_forward_branches","repository_path":root,"operation":operation}})]);
+            assert!(route(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(route(json!({"method":"renderer_fast_forward_preview","request":request})).unwrap()).unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_fast_forward","request":request,"basis":"bad"})).unwrap()).is_err());
+            let result = backend.read(route(json!({"method":"renderer_fast_forward","request":request,"basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(result["code"], 0);
+            assert_eq!(git(&["rev-parse", "tracking"]), new);
+            assert_eq!(fs::read(root.join(".git/FETCH_HEAD")).unwrap(), b"keep\n");
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
     }
 
     #[test]

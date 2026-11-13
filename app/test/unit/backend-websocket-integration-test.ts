@@ -106,6 +106,32 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('fast-forwards reviewed tracking branches without touching FETCH_HEAD', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-ff-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      const sessionUrl = line.startsWith('Open ') ? line.slice(5) : ''
+      expect(sessionUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#token=/)
+      dom = new JSDOM('', { url: sessionUrl })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+      const repository = path.join(directory, 'repository')
+      await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
+      const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args], { encoding: 'utf8' }).trim()
+      git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false')
+      await writeFile(path.join(repository, 'file'), 'base\n'); git('add', 'file'); git('commit', '-qm', 'base')
+      const sha = git('rev-parse', 'HEAD'); git('branch', 'tracking', sha)
+      await writeFile(path.join(repository, 'file'), 'new\n'); git('commit', '-qam', 'new'); const upstreamSha = git('rev-parse', 'HEAD')
+      git('config', 'remote.origin.url', 'https://example.invalid/repo'); git('config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'); git('config', 'branch.tracking.remote', 'origin'); git('config', 'branch.tracking.merge', 'refs/heads/topic'); git('update-ref', 'refs/remotes/origin/topic', upstreamSha)
+      await writeFile(path.join(repository, '.git', 'FETCH_HEAD'), 'keep\n')
+      const branches = [{ ref: 'refs/heads/tracking', sha, upstreamRef: 'refs/remotes/origin/topic', upstreamSha }]
+      await expect(client.fastForwardRepositoryBranches(repository, [{ ...branches[0], sha: '0'.repeat(40) }], false)).rejects.toThrow()
+      await client.fastForwardRepositoryBranches(repository, branches, false)
+      expect(git('rev-parse', 'tracking')).toBe(upstreamSha)
+      expect(await readFile(path.join(repository, '.git', 'FETCH_HEAD'), 'utf8')).toBe('keep\n')
+    }, 90_000)
+
     it('performs reviewed mixed reset without changing working bytes', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-reset-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })

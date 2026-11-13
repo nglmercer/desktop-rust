@@ -2453,3 +2453,17 @@ index with its normal reflog behavior. As with the existing mixed reset, staged
 content that differs from the working file is no longer in the index after the
 operation. Independent Git writers can race review and Git taking locks; hard
 and soft reset, first-commit undo and cross-platform parity remain open.
+
+## Local tracking-branch fast-forward
+
+Wry and WebSocket use Rust to review and fast-forward local tracking branches
+after network operations. The review checks each configured upstream and both
+ref object IDs, the current branch, configuration and linked worktrees. Git's
+local fetch enforces its usual fast-forward and checked-out-worktree rules,
+keeps `FETCH_HEAD` unchanged, uses the `pull` reflog action, respects the
+existing submodule-recursion choice, and accepts Git's partial-success exit 1.
+Inputs are bounded to 4096 branches and one MiB of refspecs; large Git ref or
+configuration responses can also exceed the existing command-output bound.
+Nested submodule operations do not inherit the parent repository's assigned
+account grant. Independent writers can race review and Git's ref locks; remote
+network fetch and cross-platform parity remain open.

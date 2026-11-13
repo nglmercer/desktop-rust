@@ -284,7 +284,7 @@ impl Repository {
             creation: None,
         })
     }
-    pub(super) async fn checkout_configuration(&self) -> Result<Vec<u8>> {
+    pub(crate) async fn checkout_configuration(&self) -> Result<Vec<u8>> {
         let config = crate::process::configuration(
             &self.path,
             &args(&["config", "--null", "--list", "--includes", "--show-origin"]),

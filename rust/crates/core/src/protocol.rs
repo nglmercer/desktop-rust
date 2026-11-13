@@ -320,6 +320,13 @@ pub enum Operation {
         request: RendererMixedResetRequest,
         basis: String,
     },
+    RendererFastForwardPreview {
+        request: RendererFastForwardRequest,
+    },
+    RendererFastForward {
+        request: RendererFastForwardRequest,
+        basis: String,
+    },
     RendererRebaseStart {
         request: RendererRebaseStartRequest,
         basis: String,
@@ -1014,6 +1021,23 @@ pub struct RendererMixedResetRequest {
     pub head: String,
     pub branch: Option<String>,
     pub undo: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererFastForwardRequest {
+    pub branches: Vec<RendererTrackingBranch>,
+    pub recurse_submodules: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererTrackingBranch {
+    #[serde(rename = "ref")]
+    pub reference: String,
+    pub sha: String,
+    pub upstream_ref: String,
+    pub upstream_sha: String,
 }
 
 fn history_limit() -> u16 {

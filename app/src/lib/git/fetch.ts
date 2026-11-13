@@ -5,6 +5,8 @@ import { FetchProgressParser, executionOptionsWithProgress } from '../progress'
 import { IRemote } from '../../models/remote'
 import { ITrackingBranch } from '../../models/branch'
 import { envForRemoteOperation } from './environment'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 async function getFetchArgs(
   remote: string,
@@ -120,6 +122,11 @@ export async function fastForwardBranches(
   recurseSubmodules = true
 ): Promise<void> {
   if (branches.length === 0) {
+    return
+  }
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().fastForwardRepositoryBranches(repository.path, branches, recurseSubmodules), true)
     return
   }
 

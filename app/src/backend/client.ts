@@ -2581,6 +2581,26 @@ export class BackendClient {
     if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the squash'}; inspect the repository`, retryable: false })
   }
 
+  /** Fast-forward reviewed local tracking branches without rewriting FETCH_HEAD. */
+  async fastForwardRepositoryBranches(repositoryPath: string, branches: ReadonlyArray<{ readonly ref: string; readonly sha: string; readonly upstreamRef: string; readonly upstreamSha: string }>, recurseSubmodules: boolean): Promise<void> {
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
+    if (branches.length === 0 || branches.length > 4096 || branches.some(branch => !branch.ref.startsWith('refs/heads/') || !branch.upstreamRef.startsWith('refs/remotes/') || !oid.test(branch.sha) || !oid.test(branch.upstreamSha) || branch.sha.length !== branch.upstreamSha.length)) throw new BackendError({ code: 'invalid_request', message: 'Reviewed tracking branches are required', retryable: false })
+    const request = { branches: branches.map(branch => ({ ref: branch.ref, sha: branch.sha, upstream_ref: branch.upstreamRef, upstream_sha: branch.upstreamSha })), recurse_submodules: recurseSubmodules }
+    const call = (method: 'renderer_fast_forward_preview' | 'renderer_fast_forward', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'fast_forward_branches', repository_path: repositoryPath, operation: { method, request, ...extra } } })
+      : this.repositoryRead(repositoryPath, method, { request, ...extra })
+    const preview = await call('renderer_fast_forward_preview')
+    if (!isRecord(preview) || !isRecord(preview.request) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis) || preview.request.recurse_submodules !== recurseSubmodules || !Array.isArray(preview.request.branches) || preview.request.branches.length !== request.branches.length) throw new BackendError({ code: 'invalid_response', message: 'Invalid fast-forward review', retryable: false })
+    if (preview.request.branches.some((branch, index) => !isRecord(branch) || Object.entries(request.branches[index]).some(([key, value]) => branch[key] !== value))) throw new BackendError({ code: 'invalid_response', message: 'Invalid fast-forward review', retryable: false })
+    let result: unknown
+    try { result = await call('renderer_fast_forward', { basis: preview.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect tracking branches before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || (result.code !== 0 && result.code !== 1)) throw new BackendError({ code: 'invalid_response', message: 'Fast-forward outcome is uncertain; inspect tracking branches', retryable: false })
+  }
+
   /** Reset HEAD and the index after reviewing the exact current repository state. */
   async mixedResetRepository(repositoryPath: string, request: { readonly target: string; readonly head: string; readonly branch: string | null; readonly undo: boolean }): Promise<void> {
     const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/

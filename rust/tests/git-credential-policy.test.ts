@@ -433,6 +433,79 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       suite.assertPrivateStorage(repo)
     }, 120_000)
 
+    it('scopes same-repository credentials for tracking-branch fast-forward hooks', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('tracking-fast-forward-credentials')
+      const old = repo.git('rev-parse', 'HEAD').toString().trim()
+      repo.git('branch', 'broker-reference-hook', old)
+      repo.git(
+        'branch',
+        '--set-upstream-to',
+        'origin/fork-main',
+        'broker-reference-hook'
+      )
+      repo.write('file', 'new upstream content\n')
+      repo.git('commit', '-qam', 'upstream')
+      const next = repo.git('rev-parse', 'HEAD').toString().trim()
+      repo.git('update-ref', 'refs/remotes/origin/fork-main', next)
+      suite.assign(repo)
+      const sentinel = 'synthetic-private-caller-configuration'
+      suite.update({ fixture_secret: sentinel })
+      const inherited = suite.env.GIT_CONFIG_PARAMETERS
+      suite.env.GIT_CONFIG_PARAMETERS = `'desktop.fixtureSecret=${sentinel}'`
+      const output = path.join(suite.root, 'fast-forward-hook-result.json')
+      writeFileSync(
+        path.join(repo.root, '.git', 'hooks', 'reference-transaction'),
+        '#!/bin/sh\nexec "$ACCOUNT_NODE" "$CREDENTIALS_REFERENCE_FIXTURE" "$@"\n',
+        { mode: 0o700 }
+      )
+      Object.assign(suite.env, {
+        CREDENTIALS_REFERENCE_FIXTURE: path.resolve(
+          'rust/tests/fixtures/reference-credential-hook.ts'
+        ),
+        CREDENTIALS_HOOK_OUTPUT: output,
+        CREDENTIALS_HOOK_HOST: suite.service.host,
+      })
+      try {
+        const request = {
+          branches: [
+            {
+              ref: 'refs/heads/broker-reference-hook',
+              sha: old,
+              upstream_ref: 'refs/remotes/origin/fork-main',
+              upstream_sha: next,
+            },
+          ],
+          recurse_submodules: false,
+        }
+        const preview = suite.rpc(repo, 'renderer_fast_forward_preview', {
+          request,
+        })
+        assert.equal(
+          suite.rpc(repo, 'renderer_fast_forward', {
+            request,
+            basis: preview.basis,
+          }).code,
+          0
+        )
+        assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
+          ok: true,
+          caller_parameter: true,
+          code: 0,
+          phase: 'prepared',
+        })
+        assert.equal(
+          repo.git('rev-parse', 'broker-reference-hook').toString().trim(),
+          next
+        )
+        assert.ok(!existsSync(suite.nativeLog))
+        suite.assertPrivateStorage(repo)
+      } finally {
+        if (inherited === undefined) delete suite.env.GIT_CONFIG_PARAMETERS
+        else suite.env.GIT_CONFIG_PARAMETERS = inherited
+      }
+    }, 120_000)
+
     it('passes the scoped credential and caller configuration into reference transaction hooks', () => {
       suite.configure({ host: suite.service.host })
       const repo = suite.seed('reference-hook-credentials')

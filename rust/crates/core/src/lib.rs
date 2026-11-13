@@ -50,6 +50,7 @@ mod remote_discovery;
 pub use remote_discovery::{ManagedRemoteAction, safe_fetch_remotes, safe_remote_url};
 mod refs;
 mod renderer_cherry_pick;
+mod renderer_fast_forward;
 mod renderer_merge;
 mod renderer_rebase;
 mod renderer_reset;
@@ -682,6 +683,12 @@ impl Repository {
             }
             Operation::RendererMixedResetPreview { request } => {
                 return self.renderer_mixed_reset_preview(&request).await;
+            }
+            Operation::RendererFastForwardPreview { request } => {
+                return self.renderer_fast_forward_preview(&request).await;
+            }
+            Operation::RendererFastForward { request, basis } => {
+                return self.renderer_fast_forward(&request, &basis).await;
             }
             Operation::RendererMixedReset { request, basis } => {
                 return self.renderer_mixed_reset(&request, &basis).await;
@@ -1336,6 +1343,8 @@ impl Repository {
             | RendererRebaseStartPreview { .. }
             | RendererMergeStartPreview { .. }
             | RendererMixedResetPreview { .. }
+            | RendererFastForwardPreview { .. }
+            | RendererFastForward { .. }
             | RendererMixedReset { .. }
             | RendererMergeStart { .. }
             | RendererRebaseStart { .. }

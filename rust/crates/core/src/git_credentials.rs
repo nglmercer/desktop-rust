@@ -388,6 +388,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::RendererRebaseContinue { .. }
             | Operation::RendererRebaseStart { .. }
             | Operation::RendererMergeStart { .. }
+            | Operation::RendererFastForward { .. }
             | Operation::Revert { .. }
             | Operation::RendererRevertPreview { .. }
             | Operation::RendererRevert { .. }

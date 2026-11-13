@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   checkoutHead: vi.fn(),
   resetIndex: vi.fn(),
   mixedReset: vi.fn(),
+  fastForward: vi.fn(),
   updateIndex: vi.fn(),
   applyPatch: vi.fn(),
   unstageAll: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('../../src/backend/client', () => ({
     repositoryCheckoutHeadPaths: mocks.checkoutHead,
     repositoryResetIndex: mocks.resetIndex,
     mixedResetRepository: mocks.mixedReset,
+    fastForwardRepositoryBranches: mocks.fastForward,
     repositoryUpdateIndex: mocks.updateIndex,
     repositoryUnstageAll: mocks.unstageAll,
     repositoryRemoveIndexAll: mocks.removeIndexAll,
@@ -64,6 +66,7 @@ import { unstageAllFiles } from '../../src/lib/git/rm'
 import { checkoutPaths } from '../../src/lib/git/checkout'
 import { stageFiles } from '../../src/lib/git/update-index'
 import { deleteRef } from '../../src/lib/git/update-ref'
+import { fastForwardBranches } from '../../src/lib/git/fetch'
 
 describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
   beforeEach(() => {
@@ -288,6 +291,17 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
     await expect(unstageAll(repository)).rejects.toThrow('unstage failed')
     expect(mocks.unstageAll).toHaveBeenCalledWith('/repo')
     expect(mocks.scope).toHaveBeenCalledTimes(2)
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+  it('fast-forwards reviewed tracking branches through Rust', async () => {
+    const repository = { path: '/repo' } as Repository
+    const branches = [{ ref: 'refs/heads/feature', sha: 'a'.repeat(40), upstreamRef: 'refs/remotes/origin/feature', upstreamSha: 'b'.repeat(40) }]
+    await fastForwardBranches(repository, [])
+    expect(mocks.fastForward).not.toHaveBeenCalled()
+    await fastForwardBranches(repository, branches, false)
+    expect(mocks.fastForward).toHaveBeenCalledWith('/repo', branches, false)
+    await fastForwardBranches(repository, branches, true)
+    expect(mocks.fastForward).toHaveBeenLastCalledWith('/repo', branches, true)
     expect(mocks.git).not.toHaveBeenCalled()
   })
   it('routes reviewed mixed reset and undo through Rust', async () => {
