@@ -6,6 +6,8 @@ license.workspace = true
 
 [features]
 clone-prototype = []
+# Packaged executables must not discover Copilot from an arbitrary working tree.
+packaged-runtime = []
 
 [dependencies]
 cap-std = "4.0.3"

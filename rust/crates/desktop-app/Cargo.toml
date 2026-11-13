@@ -11,6 +11,10 @@ repository.workspace = true
 name = "github-desktop-rs"
 path = "src/main.rs"
 
+[features]
+# Packaged binaries must never read assets from the build checkout.
+packaged-ui = ["desktop_core/packaged-ui", "desktop_backend/packaged-runtime"]
+
 [dependencies]
 desktop_core.workspace = true
 desktop_backend = { package = "desktop-core", path = "../core" }

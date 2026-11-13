@@ -10,6 +10,10 @@ repository.workspace = true
 [lib]
 name = "desktop_shell_core_legacy"
 
+[features]
+# Packaged shells must not discover dependencies from their build checkout.
+packaged-ui = []
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

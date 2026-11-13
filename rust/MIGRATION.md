@@ -14,6 +14,16 @@ implementations indefinitely is not the final architecture.
 
 `node --import tsx script/package-rust.ts` now builds the Vite assets, the
 CLI with `embedded-ui`, and the active Wry shell before staging the package.
+Both binaries use Cargo's release profile. The desktop shell is built with
+`packaged-ui`, which serves embedded assets and metadata even if debug
+assertions or the development disk override are enabled; it does not depend
+on the checkout used to build it. The packaged shell and CLI look for the
+Copilot SDK beside their executables; if it is absent they do not search the
+working tree or build checkout. An explicit nonempty `DESKTOP_COPILOT_DIR`
+selects the shell SDK before the adjacent layout; `COPILOT_RUNTIME_ROOT`
+overrides default Rust runtime discovery when no host-selected root is set.
+Empty overrides are ignored. The shell also recognizes its earlier `copilot`
+sibling layout.
 It refuses cross-platform labels, retains an existing package if preparation
 fails, and no longer builds the older `desktop-native` host. On Linux the
 staged CLI was run outside the checkout and served the embedded renderer.

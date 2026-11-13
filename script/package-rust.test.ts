@@ -57,8 +57,8 @@ function fixture(): string {
   )
   for (const file of [
     'node_modules/vite/bin/vite.js',
-    `rust/target/debug/desktop-rs${suffix}`,
-    `rust/target/debug/github-desktop-rs${suffix}`,
+    `rust/target/release/desktop-rs${suffix}`,
+    `rust/target/release/github-desktop-rs${suffix}`,
     'out/vite-dist/index.html',
     'out/vite-dist/highlighter.js',
     'out/vite-dist/ipc-shim.js',
@@ -99,8 +99,8 @@ beforeEach(() => {
         ? 'desktop-rs'
         : 'github-desktop-rs'
       const directory = process.env.FAKE_BAD_ARTIFACT
-        ? 'rust/target/other/debug'
-        : 'rust/target/debug'
+        ? 'rust/target/debug'
+        : 'rust/target/release'
       const executable = path.join(options.cwd, directory, `${name}${suffix}`)
       return {
         status: 0,
@@ -174,18 +174,22 @@ describe('Rust packaging', () => {
       ],
       [
         'build',
+        '--release',
         '--locked',
         '-p',
         'desktop-cli',
         '--features',
-        'embedded-ui',
+        'embedded-ui,packaged-runtime',
         '--message-format=json-render-diagnostics',
       ],
       [
         'build',
+        '--release',
         '--locked',
         '-p',
         'desktop-app',
+        '--features',
+        'packaged-ui',
         '--message-format=json-render-diagnostics',
       ],
     ])
@@ -206,7 +210,7 @@ describe('Rust packaging', () => {
     expect(copilotPlatform('linux', true)).toBe('linuxmusl')
   })
 
-  it('rejects a Cargo artifact for another target instead of using a stale binary', () => {
+  it('rejects a debug Cargo artifact instead of packaging a development shell', () => {
     vi.stubEnv('CARGO_TARGET_DIR', '')
     vi.stubEnv('FAKE_BAD_ARTIFACT', '1')
     expect(() => packageRust(fixture())).toThrow('expected host binary')
@@ -273,6 +277,26 @@ describe('Rust packaging', () => {
     write(root, previous, 'keep')
     rmSync(path.join(root, 'out/vite-dist/highlighter.js'))
     expect(() => packageRust(root)).toThrow('highlighter.js')
+    expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
+  })
+
+  it('preserves an existing package when the release build fails', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    const root = fixture()
+    const previous = `dist/Test Desktop-dev-${host}-${process.arch}/previous`
+    write(root, previous, 'keep')
+    const normalSpawn = spawn.getMockImplementation()
+    if (normalSpawn === undefined) {
+      throw new Error('missing spawn fixture')
+    }
+    spawn.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'cargo') {
+        return { status: 1, stdout: '', stderr: '' }
+      }
+      return normalSpawn(...args)
+    })
+    expect(() => packageRust(root)).toThrow('cargo build --release')
     expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
   })
 })

@@ -11,6 +11,7 @@ path = "src/main.rs"
 [features]
 embedded-ui = ["desktop-bridge/embedded-ui"]
 clone-prototype = ["desktop-core/clone-prototype"]
+packaged-runtime = ["desktop-core/packaged-runtime"]
 
 [[example]]
 name = "selected_clone_prototype"

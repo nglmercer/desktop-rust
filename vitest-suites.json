@@ -1,5 +1,6 @@
 [
   "app/test/unit/web-open-path-test.ts",
+  "rust/tests/wry-packaged-release.test.ts",
   "rust/tests/wry-terminal-ui.test.ts",
   "app/test/unit/git/rev-parse-test.ts",
   "rust/tests/wry-open-terminal.test.ts",

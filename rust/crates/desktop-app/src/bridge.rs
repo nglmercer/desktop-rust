@@ -35,6 +35,7 @@ use include_dir::{Dir, include_dir};
 use crate::host::AppEvent;
 
 static VITE_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
+#[cfg(not(feature = "packaged-ui"))]
 const DEV_VITE_DIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../out/vite-dist");
 
 /// Injected before any page script runs. It defines `window.__desktop`,
@@ -714,12 +715,14 @@ fn asset_cache_control(path: &str) -> &'static str {
 /// Load an asset, preferring the on-disk `out/vite-dist` in debug builds so
 /// `cargo run` picks up the latest `pnpm vite:build` / `pnpm vite:dev`
 /// output without needing a `cargo` rebuild. The embedded `VITE_DIST` is
-/// the release fallback (single-file binary).
+/// the release fallback (single-file binary). Packaged builds disable disk
+/// overrides altogether, including when debug assertions are enabled.
 ///
 /// This is the correct answer to the hash churn problem: Vite writes
 /// `assets/index-[hash].js` and a new `index.html` every build, but cargo's
 /// `include_dir!` snapshot does not track that. Serving from disk in dev
 /// makes `cargo run -p desktop-app` always serve the current hash.
+#[cfg(not(feature = "packaged-ui"))]
 fn load_disk(path: &str) -> Option<Vec<u8>> {
     let full = std::path::Path::new(DEV_VITE_DIST).join(path);
     // Don't escape the bundle root even in dev.
@@ -734,13 +737,13 @@ fn asset(path: &str) -> Option<(Cow<'static, str>, Cow<'static, [u8]>)> {
     // assets/ and the static resources the UI loads by URL.
     let path = if path.is_empty() { "index.html" } else { path };
     // Debug: always fresh from disk, so hashes never get stale.
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(feature = "packaged-ui")))]
     {
         if let Some(bytes) = load_disk(path) {
             return Some((mime_for(path).into(), Cow::Owned(bytes)));
         }
     }
-    #[cfg(not(debug_assertions))]
+    #[cfg(all(not(debug_assertions), not(feature = "packaged-ui")))]
     {
         if std::env::var("DESKTOP_SERVE_FROM_DISK").is_ok() {
             if let Some(bytes) = load_disk(path) {
@@ -809,7 +812,8 @@ fn copilot_entry(root: &std::path::Path, rest: &str) -> Value {
 }
 
 /// Describe a resource: a file, a directory with its entries, or `null` when
-/// absent. Debug builds consult the on-disk bundle first to discover new assets.
+/// absent. Non-packaged debug builds consult the on-disk bundle first to
+/// discover new assets.
 fn bundle_entry(path: &str, copilot_dir: Option<&std::path::Path>) -> Value {
     let path = path.trim_matches('/');
     if path.contains("..") || path.contains('\\') || path.contains(':') {
@@ -827,7 +831,7 @@ fn bundle_entry(path: &str, copilot_dir: Option<&std::path::Path>) -> Value {
         };
     }
     // Debug: disk is authoritative for the current hash.
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(feature = "packaged-ui")))]
     {
         let base = std::path::Path::new(DEV_VITE_DIST).join(path);
         if base.is_file() {
@@ -1016,12 +1020,33 @@ mod tests {
         assert_eq!(mime_for("static/x.svg"), "image/svg+xml");
     }
 
+    #[cfg(feature = "packaged-ui")]
+    #[test]
+    fn packaged_assets_and_listings_ignore_checkout_files() {
+        let name = format!("packaging-probe-{}.txt", uuid::Uuid::new_v4());
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../out/vite-dist")
+            .join(&name);
+        struct RemoveFile(std::path::PathBuf);
+        impl Drop for RemoveFile {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = RemoveFile(path.clone());
+        std::fs::write(&path, b"must not be served").unwrap();
+        assert!(path.is_file());
+        assert!(asset(&name).is_none());
+        assert_eq!(bundle_entry(&name, None), Value::Null);
+        assert!(path.is_file());
+    }
+
+    #[cfg(all(debug_assertions, not(feature = "packaged-ui")))]
     #[test]
     fn asset_prefers_fresh_disk_hash_in_dev() {
         // In debug the on-disk `out/vite-dist` is authoritative. Create a
         // fresh hashed name, verify `asset` returns it without rebuilding
         // the embedded snapshot from `include_dir!`.
-        #[cfg(debug_assertions)]
         {
             let tmp = std::path::Path::new(DEV_VITE_DIST).join("assets/stale-check-0a1b2c.js");
             std::fs::create_dir_all(tmp.parent().unwrap()).unwrap();

@@ -161,7 +161,7 @@ export function packageRust(
         message.target?.name === name &&
         message.executable
     )?.executable
-    const expected = path.join(target, 'debug', `${name}${suffix}`)
+    const expected = path.join(target, 'release', `${name}${suffix}`)
     if (!artifact || path.resolve(artifact) !== path.resolve(expected)) {
       throw new Error(
         `Cargo did not produce the expected host binary ${expected}`
@@ -170,12 +170,30 @@ export function packageRust(
     return artifact
   }
   // The optional embedded UI is necessary for the CLI's browser frontend.
+  // The packaged-ui feature prevents the shell from using the build
+  // checkout's out/vite-dist after relocation, even with debug overrides.
   const cli = runCargo(
-    ['build', '--locked', '-p', 'desktop-cli', '--features', 'embedded-ui'],
+    [
+      'build',
+      '--release',
+      '--locked',
+      '-p',
+      'desktop-cli',
+      '--features',
+      'embedded-ui,packaged-runtime',
+    ],
     'desktop-rs'
   )
   const gui = runCargo(
-    ['build', '--locked', '-p', 'desktop-app'],
+    [
+      'build',
+      '--release',
+      '--locked',
+      '-p',
+      'desktop-app',
+      '--features',
+      'packaged-ui',
+    ],
     'github-desktop-rs'
   )
   const ui = path.join(repo, 'out/vite-dist')

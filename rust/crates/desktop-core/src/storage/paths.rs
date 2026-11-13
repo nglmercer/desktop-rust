@@ -141,6 +141,7 @@ fn home() -> PathBuf {
 }
 
 /// Node's name for this OS and CPU, as used by the Copilot SDK packages.
+#[cfg(any(test, not(feature = "packaged-ui")))]
 fn node_platform_and_arch() -> (&'static str, &'static str) {
     let platform = match std::env::consts::OS {
         "windows" => "win32",
@@ -158,48 +159,132 @@ fn node_platform_and_arch() -> (&'static str, &'static str) {
 /// Locate `copilot-sdk-<platform>-<arch>`:
 ///
 /// 1. `DESKTOP_COPILOT_DIR`, for an explicit install;
-/// 2. `copilot/` next to the executable, where a packaged build places it;
-/// 3. the development tree, where pnpm keeps the optional package under
-///    `node_modules/.pnpm` (or `app/node_modules` for a hoisted install).
+/// 2. `copilot-sdk/` next to the executable, or the older `copilot/` layout;
+/// 3. in non-packaged builds only, the development tree's optional package.
 fn find_copilot_dir(exec_path: &Path) -> Option<PathBuf> {
-    let (platform, arch) = node_platform_and_arch();
-    let package = format!("copilot-sdk-{platform}-{arch}");
+    find_copilot_dir_with_override(
+        exec_path,
+        std::env::var_os("DESKTOP_COPILOT_DIR").map(PathBuf::from),
+    )
+}
 
-    if let Some(dir) = std::env::var_os("DESKTOP_COPILOT_DIR").map(PathBuf::from) {
-        if dir.join("prebuilds").is_dir() {
-            return Some(dir);
-        }
-    }
-    if let Some(dir) = exec_path.parent().map(|parent| parent.join("copilot")) {
-        if dir.join("prebuilds").is_dir() {
-            return Some(dir);
-        }
-    }
-
+fn find_copilot_dir_with_override(exec_path: &Path, explicit: Option<PathBuf>) -> Option<PathBuf> {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
         .join("..");
-    let hoisted = repo
-        .join("app")
-        .join("node_modules")
-        .join("@github")
-        .join(&package);
-    if hoisted.join("prebuilds").is_dir() {
-        return Some(hoisted);
-    }
-    let store = repo.join("node_modules").join(".pnpm");
-    let prefix = format!("@github+{package}@");
-    std::fs::read_dir(store).ok()?.flatten().find_map(|entry| {
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with(&prefix) {
-            return None;
+    find_copilot_dir_in(exec_path, explicit, &repo)
+}
+
+fn find_copilot_dir_in(
+    exec_path: &Path,
+    explicit: Option<PathBuf>,
+    repo: &Path,
+) -> Option<PathBuf> {
+    if let Some(dir) = explicit.filter(|dir| !dir.as_os_str().is_empty()) {
+        if dir.join("prebuilds").is_dir() {
+            return Some(dir);
         }
-        let dir = entry
-            .path()
+    }
+    if let Some(parent) = exec_path.parent() {
+        for name in ["copilot-sdk", "copilot"] {
+            let dir = parent.join(name);
+            if dir.join("prebuilds").is_dir() {
+                return Some(dir);
+            }
+        }
+    }
+
+    #[cfg(feature = "packaged-ui")]
+    {
+        let _ = repo;
+        None
+    }
+
+    #[cfg(not(feature = "packaged-ui"))]
+    {
+        let (platform, arch) = node_platform_and_arch();
+        let package = format!("copilot-sdk-{platform}-{arch}");
+        let hoisted = repo
+            .join("app")
             .join("node_modules")
             .join("@github")
             .join(&package);
-        dir.join("prebuilds").is_dir().then_some(dir)
-    })
+        if hoisted.join("prebuilds").is_dir() {
+            return Some(hoisted);
+        }
+        let store = repo.join("node_modules").join(".pnpm");
+        let prefix = format!("@github+{package}@");
+        std::fs::read_dir(store).ok()?.flatten().find_map(|entry| {
+            let name = entry.file_name();
+            if !name.to_string_lossy().starts_with(&prefix) {
+                return None;
+            }
+            let dir = entry
+                .path()
+                .join("node_modules")
+                .join("@github")
+                .join(&package);
+            dir.join("prebuilds").is_dir().then_some(dir)
+        })
+    }
+}
+
+#[cfg(test)]
+mod copilot_discovery_tests {
+    use super::*;
+
+    #[test]
+    fn adjacent_sdk_takes_precedence_and_legacy_layout_remains_supported() {
+        let root = std::env::temp_dir().join(format!(
+            "desktop-copilot-location-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bin = root.join("bin");
+        let sdk = bin.join("copilot-sdk");
+        let legacy = bin.join("copilot");
+        let custom = root.join("explicit");
+        let checkout = root.join("checkout");
+        let (platform, arch) = node_platform_and_arch();
+        let checkout_sdk = checkout
+            .join("app/node_modules/@github")
+            .join(format!("copilot-sdk-{platform}-{arch}"));
+        std::fs::create_dir_all(sdk.join("prebuilds")).unwrap();
+        std::fs::create_dir_all(legacy.join("prebuilds")).unwrap();
+        std::fs::create_dir_all(custom.join("prebuilds")).unwrap();
+        std::fs::create_dir_all(checkout_sdk.join("prebuilds")).unwrap();
+        let executable = bin.join("github-desktop-rs");
+        assert_eq!(
+            find_copilot_dir_in(&executable, Some(custom.clone()), &checkout),
+            Some(custom)
+        );
+        assert_eq!(
+            find_copilot_dir_with_override(&executable, None),
+            Some(sdk.clone())
+        );
+        std::fs::remove_dir_all(&sdk).unwrap();
+        assert_eq!(
+            find_copilot_dir_with_override(&executable, None),
+            Some(legacy.clone())
+        );
+        std::fs::remove_dir_all(&legacy).unwrap();
+        #[cfg(feature = "packaged-ui")]
+        {
+            assert_eq!(find_copilot_dir_in(&executable, None, &checkout), None);
+            assert_eq!(
+                find_copilot_dir_in(&executable, Some(PathBuf::new()), &checkout),
+                None
+            );
+        }
+        #[cfg(not(feature = "packaged-ui"))]
+        assert_eq!(
+            find_copilot_dir_in(&executable, None, &checkout),
+            Some(checkout_sdk)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

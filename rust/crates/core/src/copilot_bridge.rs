@@ -224,10 +224,10 @@ async fn token_from_gh(program: &std::path::Path) -> Result<String> {
 }
 
 impl Repository {
-    fn copilot_runtime_root(&self) -> std::path::PathBuf {
+    fn copilot_runtime_root(&self) -> Option<std::path::PathBuf> {
         self.copilot_runtime_root
             .clone()
-            .unwrap_or_else(default_runtime_root)
+            .or_else(default_runtime_root)
     }
 
     async fn copilot_credential(
@@ -321,8 +321,11 @@ impl Repository {
         Cancellation::current().check()?;
         let root = runtime_root
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| self.copilot_runtime_root());
-        let capability: CopilotCapability = probe(&root);
+            .or_else(|| self.copilot_runtime_root());
+        let capability: CopilotCapability = root.as_deref().map_or_else(
+            || CopilotCapability::unavailable("Copilot runtime is not installed"),
+            probe,
+        );
         Ok(serde_json::to_value(capability)?)
     }
 
@@ -353,7 +356,9 @@ impl Repository {
     ) -> Result<Value> {
         Cancellation::current().check()?;
         validate_model_options(model.as_deref(), reasoning_effort.as_deref())?;
-        let runtime_root = self.copilot_runtime_root();
+        let runtime_root = self
+            .copilot_runtime_root()
+            .context("Copilot runtime is not installed")?;
         let capability = probe(&runtime_root);
         if !capability.available {
             anyhow::bail!("{}", capability.reason);
@@ -568,7 +573,9 @@ impl Repository {
             ),
             "No GitHub account is assigned to this repository"
         );
-        let root = self.copilot_runtime_root();
+        let root = self
+            .copilot_runtime_root()
+            .context("Copilot runtime is not installed")?;
         let cap = probe(&root);
         if !cap.available {
             anyhow::bail!("{}", cap.reason);
@@ -854,6 +861,92 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(feature = "packaged-runtime")]
+    #[test]
+    fn packaged_runtime_ignores_untrusted_working_directory() {
+        let marker = "DESKTOP_PACKAGED_RUNTIME_TEST_CHILD";
+        if let Ok(mode) = std::env::var(marker) {
+            let found = default_runtime_root();
+            if mode == "adjacent" {
+                let expected = std::env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("copilot-sdk");
+                assert_eq!(found, Some(expected));
+            } else if mode == "explicit" {
+                assert_eq!(
+                    found,
+                    std::env::var_os("COPILOT_RUNTIME_ROOT").map(std::path::PathBuf::from)
+                );
+            } else {
+                assert_eq!(found, None);
+            }
+            return;
+        }
+        let Some((platform, arch)) = crate::copilot::current_runtime_platform() else {
+            return;
+        };
+        let root = std::env::temp_dir().join(format!("packaged-runtime-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("bin");
+        let working = root.join("untrusted");
+        let sdk = working
+            .join("node_modules/@github")
+            .join(format!("copilot-sdk-{platform}-{arch}"));
+        let name = if platform == "win32" {
+            "copilot-runtime.exe"
+        } else {
+            "copilot-runtime"
+        };
+        let sdk_build = sdk.join("prebuilds").join(format!("{platform}-{arch}"));
+        let root_build = working.join("prebuilds").join(format!("{platform}-{arch}"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&sdk_build).unwrap();
+        std::fs::create_dir_all(&root_build).unwrap();
+        std::fs::write(
+            sdk.join("package.json"),
+            serde_json::json!({"version":crate::copilot::COPILOT_SDK_VERSION}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(sdk_build.join(name), b"untrusted runtime").unwrap();
+        std::fs::write(root_build.join(name), b"untrusted runtime").unwrap();
+        assert_eq!(installed_runtime_in(&working), Some(sdk));
+        let executable = bin.join(if cfg!(windows) { "test.exe" } else { "test" });
+        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        let explicit = root.join("explicit-sdk");
+        std::fs::create_dir_all(&explicit).unwrap();
+        let run = |mode: &str| {
+            let output = std::process::Command::new(&executable)
+                .args([
+                    "--exact",
+                    "copilot_bridge::tests::packaged_runtime_ignores_untrusted_working_directory",
+                    "--nocapture",
+                ])
+                .current_dir(&working)
+                .env(marker, mode)
+                .env(
+                    "COPILOT_RUNTIME_ROOT",
+                    if mode == "explicit" {
+                        explicit.as_os_str()
+                    } else {
+                        std::ffi::OsStr::new("")
+                    },
+                )
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run("missing");
+        std::fs::create_dir_all(bin.join("copilot-sdk/prebuilds")).unwrap();
+        run("adjacent");
+        run("explicit");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn gh_token_lookup_is_bounded_and_cancellable() {
         let root = std::env::temp_dir().join(format!("copilot-gh-{}", uuid::Uuid::new_v4()));
@@ -887,6 +980,7 @@ mod tests {
     }
 }
 
+#[cfg(any(test, not(feature = "packaged-runtime")))]
 fn installed_runtime_in(ancestor: &std::path::Path) -> Option<std::path::PathBuf> {
     let (platform, arch) = crate::copilot::current_runtime_platform()?;
     let name = format!("copilot-sdk-{platform}-{arch}");
@@ -908,13 +1002,13 @@ fn installed_runtime_in(ancestor: &std::path::Path) -> Option<std::path::PathBuf
     })
 }
 
-fn default_runtime_root() -> std::path::PathBuf {
+fn default_runtime_root() -> Option<std::path::PathBuf> {
     // Mirrors `getCopilotRuntimePath` from `app/src/lib/copilot-runtime.ts`:
     // runtime shipped in the SDK package. For the canonical Rust-owned
     // client the root is discovered from the packaged SDK; when absent the
     // capability probe reports unavailable rather than guessing.
-    if let Ok(root) = std::env::var("COPILOT_RUNTIME_ROOT") {
-        return std::path::PathBuf::from(root);
+    if let Some(root) = std::env::var_os("COPILOT_RUNTIME_ROOT").filter(|root| !root.is_empty()) {
+        return Some(std::path::PathBuf::from(root));
     }
     // Bundled layout: next to the binary / next to the repo (dev).
     if let Ok(exe) = std::env::current_exe() {
@@ -923,34 +1017,44 @@ fn default_runtime_root() -> std::path::PathBuf {
             .unwrap_or(std::path::Path::new("."))
             .join("copilot-sdk");
         if candidate.exists() {
-            return candidate;
+            return Some(candidate);
         }
     }
-    // pnpm store layout (dev): node_modules/.pnpm/@github+copilot-sdk-<plat>/...
-    // Search from both cwd ancestors and exe ancestors (the bridge runs with
-    // cwd inside the repository under test, so cwd ancestors may miss the
-    // workspace root where node_modules lives).
-    let mut roots: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.extend(cwd.ancestors().map(|p| p.to_owned()));
+    // Packaged binaries must not discover an executable from the repository
+    // they happened to be launched in, or from the build checkout.
+    #[cfg(feature = "packaged-runtime")]
+    {
+        None
     }
-    if let Ok(exe) = std::env::current_exe() {
-        let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
-        roots.extend(exe_dir.ancestors().map(|p| p.to_owned()));
-    }
-    // Also walk up from the workspace root via CARGO_MANIFEST_DIR if available
-    // at compile time this is rust/crates/core, but at runtime we search from there too.
-    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
-        roots.extend(
-            std::path::PathBuf::from(&manifest)
-                .ancestors()
-                .map(|p| p.to_owned()),
-        );
-    }
-    for ancestor in roots {
-        if let Some(candidate) = installed_runtime_in(&ancestor) {
-            return candidate;
+
+    #[cfg(not(feature = "packaged-runtime"))]
+    {
+        // pnpm store layout (dev): node_modules/.pnpm/@github+copilot-sdk-<plat>/...
+        // Search from both cwd ancestors and exe ancestors (the bridge runs with
+        // cwd inside the repository under test, so cwd ancestors may miss the
+        // workspace root where node_modules lives).
+        let mut roots: Vec<std::path::PathBuf> = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            roots.extend(cwd.ancestors().map(|p| p.to_owned()));
         }
+        if let Ok(exe) = std::env::current_exe() {
+            let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
+            roots.extend(exe_dir.ancestors().map(|p| p.to_owned()));
+        }
+        // Also walk up from the workspace root via CARGO_MANIFEST_DIR if available
+        // at compile time this is rust/crates/core, but at runtime we search from there too.
+        if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+            roots.extend(
+                std::path::PathBuf::from(&manifest)
+                    .ancestors()
+                    .map(|p| p.to_owned()),
+            );
+        }
+        for ancestor in roots {
+            if let Some(candidate) = installed_runtime_in(&ancestor) {
+                return Some(candidate);
+            }
+        }
+        Some(std::path::PathBuf::from("."))
     }
-    std::path::PathBuf::from(".")
 }
