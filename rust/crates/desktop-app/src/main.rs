@@ -45,6 +45,28 @@ use crate::host::{AppEvent, TaoHost, WindowInfo};
 const APP_URL: &str = "desktop://localhost/index.html";
 
 fn main() {
+    // Git invokes the current application binary as a private credential
+    // helper. Dispatch it before initializing the GUI or its event loop.
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments.next().as_deref() == Some(std::ffi::OsStr::new("__credential-helper")) {
+        let operation = arguments
+            .next()
+            .and_then(|value| value.into_string().ok())
+            .unwrap_or_default();
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| {
+                runtime
+                    .block_on(desktop_backend::git_credential_helper(&operation))
+                    .map_err(std::io::Error::other)
+            });
+        if let Err(error) = result {
+            eprintln!("github-desktop-rs: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Err(error) = run() {
         eprintln!("github-desktop-rs: {error}");
         std::process::exit(1);
