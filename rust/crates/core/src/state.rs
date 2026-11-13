@@ -1,9 +1,43 @@
 //! Branch tracking and in-progress Git operations, including linked worktrees.
 use crate::{Repository, args, os_from_bytes};
 use anyhow::{Context, Result, bail};
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::{
+    ambient_authority,
+    fs::{Dir, OpenOptions},
+};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{fs, path::PathBuf};
+use std::{fs, io::Read, path::PathBuf};
+
+fn read_operation_file(dir: &Dir, name: &str, limit: u64) -> Result<Option<String>> {
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = match dir.open_with(name, &options) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let metadata = file.metadata()?;
+    anyhow::ensure!(
+        metadata.is_file() && metadata.len() <= limit,
+        "invalid Git operation state file"
+    );
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= limit,
+        "Git operation state file is too large"
+    );
+    Ok(Some(
+        String::from_utf8(bytes).context("invalid Git operation state encoding")?,
+    ))
+}
 
 #[derive(Debug, Serialize)]
 pub struct OperationState {
@@ -59,42 +93,8 @@ impl Repository {
     /// Read only the sequencer files needed by the renderer, without following
     /// links or exposing arbitrary Git-directory files to a browser client.
     pub(crate) async fn renderer_cherry_pick_state(&self) -> Result<Value> {
-        use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
-        use cap_std::{
-            ambient_authority,
-            fs::{Dir, OpenOptions},
-        };
-        use std::io::Read;
-        fn read_file(dir: &Dir, name: &str, limit: u64) -> Result<Option<String>> {
-            let mut options = OpenOptions::new();
-            options.read(true).follow(FollowSymlinks::No);
-            #[cfg(unix)]
-            {
-                use cap_std::fs::OpenOptionsExt;
-                options.custom_flags(libc::O_NONBLOCK);
-            }
-            let file = match dir.open_with(name, &options) {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(error) => return Err(error.into()),
-            };
-            let metadata = file.metadata()?;
-            anyhow::ensure!(
-                metadata.is_file() && metadata.len() <= limit,
-                "invalid cherry-pick state file"
-            );
-            let mut bytes = Vec::new();
-            file.take(limit + 1).read_to_end(&mut bytes)?;
-            anyhow::ensure!(
-                bytes.len() as u64 <= limit,
-                "cherry-pick state file is too large"
-            );
-            Ok(Some(
-                String::from_utf8(bytes).context("invalid cherry-pick state encoding")?,
-            ))
-        }
         let directory = Dir::open_ambient_dir(self.git_directory().await?, ambient_authority())?;
-        let Some(head) = read_file(&directory, "CHERRY_PICK_HEAD", 128)? else {
+        let Some(head) = read_operation_file(&directory, "CHERRY_PICK_HEAD", 128)? else {
             return Ok(Value::Null);
         };
         let head = head.trim();
@@ -105,9 +105,9 @@ impl Repository {
         fn read_sequence(directory: &Dir) -> Result<Option<Value>> {
             Ok(match directory.open_dir_nofollow("sequencer") {
                 Ok(dir) => {
-                    let head = read_file(&dir, "head", 128)?;
-                    let safety = read_file(&dir, "abort-safety", 128)?;
-                    let todo = read_file(&dir, "todo", 1024 * 1024)?;
+                    let head = read_operation_file(&dir, "head", 128)?;
+                    let safety = read_operation_file(&dir, "abort-safety", 128)?;
+                    let todo = read_operation_file(&dir, "todo", 1024 * 1024)?;
                     match (head, safety, todo) {
                         (Some(head), Some(safety), Some(todo)) => {
                             Some(json!({"head":head,"abort_safety":safety,"todo":todo}))
@@ -123,7 +123,7 @@ impl Repository {
         if read_sequence(&directory)? != sequence {
             return Ok(Value::Null);
         }
-        if read_file(&directory, "CHERRY_PICK_HEAD", 128)?
+        if read_operation_file(&directory, "CHERRY_PICK_HEAD", 128)?
             .as_deref()
             .map(str::trim)
             != Some(head)
@@ -131,6 +131,44 @@ impl Repository {
             return Ok(Value::Null);
         }
         Ok(json!({"head":head,"sequence":sequence}))
+    }
+
+    /// Read rebase progress and identity from fixed, bounded Git state files.
+    pub(crate) async fn renderer_rebase_state(&self) -> Result<Value> {
+        fn read_progress(root: &Dir) -> Result<Option<Value>> {
+            let dir = match root.open_dir_nofollow("rebase-merge") {
+                Ok(dir) => dir,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error.into()),
+            };
+            Ok(Some(json!({
+                "original": read_operation_file(&dir, "orig-head", 8192)?,
+                "branch": read_operation_file(&dir, "head-name", 8192)?,
+                "onto": read_operation_file(&dir, "onto", 8192)?,
+                "current": read_operation_file(&dir, "msgnum", 8192)?,
+                "total": read_operation_file(&dir, "end", 8192)?,
+            })))
+        }
+        let root = Dir::open_ambient_dir(self.git_directory().await?, ambient_authority())?;
+        let Some(head) = read_operation_file(&root, "REBASE_HEAD", 128)? else {
+            return Ok(Value::Null);
+        };
+        let head = head.trim();
+        anyhow::ensure!(
+            (head.len() == 40 || head.len() == 64)
+                && head.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "invalid rebase head"
+        );
+        let progress = read_progress(&root)?;
+        if read_progress(&root)? != progress
+            || read_operation_file(&root, "REBASE_HEAD", 128)?
+                .as_deref()
+                .map(str::trim)
+                != Some(head)
+        {
+            return Ok(Value::Null);
+        }
+        Ok(json!({"head":head,"progress":progress}))
     }
 
     pub(crate) async fn ahead_behind(&self, range: &str) -> Result<Value> {
@@ -391,6 +429,56 @@ impl Repository {
 mod cherry_pick_state_tests {
     use super::*;
     use std::process::Command;
+
+    #[tokio::test]
+    async fn reads_rebase_state_and_rejects_unsafe_progress() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-rebase-state-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["init", "-q"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let repo = Repository::open(&root).await.unwrap();
+        assert_eq!(repo.renderer_rebase_state().await.unwrap(), Value::Null);
+        let git_dir = root.join(".git");
+        let head = "a".repeat(40);
+        fs::write(git_dir.join("REBASE_HEAD"), format!("{head}\n")).unwrap();
+        assert_eq!(
+            repo.renderer_rebase_state().await.unwrap(),
+            json!({"head":head,"progress":null})
+        );
+        let rebase = git_dir.join("rebase-merge");
+        fs::create_dir(&rebase).unwrap();
+        for (name, content) in [
+            ("orig-head", format!("{head}\n")),
+            ("head-name", "refs/heads/topic\n".into()),
+            ("onto", format!("{head}\n")),
+            ("msgnum", "2\n".into()),
+            ("end", "4\n".into()),
+        ] {
+            fs::write(rebase.join(name), content).unwrap();
+        }
+        let state = repo.renderer_rebase_state().await.unwrap();
+        assert_eq!(state["progress"]["current"], "2\n");
+        assert_eq!(state["progress"]["total"], "4\n");
+        fs::remove_file(rebase.join("head-name")).unwrap();
+        assert!(repo.renderer_rebase_state().await.unwrap()["progress"]["branch"].is_null());
+        fs::write(rebase.join("end"), vec![b'x'; 8193]).unwrap();
+        assert!(repo.renderer_rebase_state().await.is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(rebase.join("end")).unwrap();
+            std::os::unix::fs::symlink(git_dir.join("config"), rebase.join("end")).unwrap();
+            assert!(repo.renderer_rebase_state().await.is_err());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn reads_bounded_sequencer_without_following_links() {

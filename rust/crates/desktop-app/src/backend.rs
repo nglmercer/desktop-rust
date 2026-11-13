@@ -250,6 +250,7 @@ enum ReadMethod {
     ProtectedResources,
     StatusContext,
     RendererCherryPickState,
+    RendererRebaseState,
     StatusConflictDetails,
     BranchEnumeration,
     BranchMerged,
@@ -989,6 +990,14 @@ impl Backend {
                         && request.commitish.is_none() =>
                 {
                     Operation::RendererCherryPickState
+                }
+                ReadMethod::RendererRebaseState
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::RendererRebaseState
                 }
                 ReadMethod::StatusConflictDetails
                     if request.include_untracked.is_none()
@@ -3426,6 +3435,26 @@ esac
                 .unwrap(),
             Value::Null
         );
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":first,"method":"renderer_rebase_state"})
+                ])
+                .unwrap(),
+            Value::Null
+        );
+        let rebase_head = "b".repeat(40);
+        fs::write(first.join(".git/REBASE_HEAD"), format!("{rebase_head}\n")).unwrap();
+        assert_eq!(
+            backend
+                .read_args(vec![
+                    json!({"repository_path":first,"method":"renderer_rebase_state"})
+                ])
+                .unwrap()["head"],
+            rebase_head
+        );
+        assert!(backend.admit(vec![json!({"repository_path":first,"method":"renderer_rebase_state","kind":"working"})]).is_err());
+        fs::remove_file(first.join(".git/REBASE_HEAD")).unwrap();
         let pick_head = "a".repeat(40);
         fs::write(
             first.join(".git/CHERRY_PICK_HEAD"),

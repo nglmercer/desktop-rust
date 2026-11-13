@@ -101,5 +101,6 @@
   "app/test/unit/progress/lfs-test.ts",
   "app/test/unit/progress/clone-test.ts",
   "app/test/unit/rust-conflict-resolution-routing-test.ts",
-  "app/test/unit/rust-cherry-pick-routing-test.ts"
+  "app/test/unit/rust-cherry-pick-routing-test.ts",
+  "app/test/unit/rust-rebase-state-routing-test.ts"
 ]

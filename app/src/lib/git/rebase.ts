@@ -31,6 +31,8 @@ import { Branch } from '../../models/branch'
 import { join } from 'path'
 import { readFile } from 'fs/promises'
 import { pathExists } from '../path-exists'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation } from './repository-operation'
 
 /** The app-specific results from attempting to rebase a repository */
 export enum RebaseResult {
@@ -88,6 +90,16 @@ function isRebaseHeadSet(repository: Repository) {
 export async function getRebaseInternalState(
   repository: Repository
 ): Promise<RebaseInternalState | null> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const state = await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+    const progress = state?.progress
+    if (progress?.original == null || progress.branch == null || progress.onto == null) return null
+    return {
+      originalBranchTip: progress.original.trim(),
+      targetBranch: progress.branch.startsWith('refs/heads/') ? progress.branch.substring(11).trim() : progress.branch,
+      baseBranchTip: progress.onto.trim(),
+    }
+  }
   const isRebase = await isRebaseHeadSet(repository)
 
   if (!isRebase) {
@@ -151,9 +163,19 @@ export async function getRebaseSnapshot(repository: Repository): Promise<{
   progress: IMultiCommitOperationProgress
   commits: ReadonlyArray<CommitOneLine>
 } | null> {
-  const rebaseHead = await isRebaseHeadSet(repository)
-  if (!rebaseHead) {
-    return null
+  const native = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  const state = native
+    ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+    : undefined
+  if (state === null || (!native && !(await isRebaseHeadSet(repository)))) return null
+  const readProgress = async (name: 'msgnum' | 'end' | 'orig-head' | 'onto'): Promise<string> => {
+    if (state !== undefined && state !== null) {
+      const progress = state.progress
+      const value = progress === null ? null : name === 'msgnum' ? progress.current : name === 'end' ? progress.total : name === 'orig-head' ? progress.original : progress.onto
+      if (value === null) throw new Error('Missing rebase progress')
+      return value
+    }
+    return readFile(join(repository.resolvedGitDir, 'rebase-merge', name), 'utf8')
   }
 
   let next: number = -1
@@ -167,10 +189,7 @@ export async function getRebaseSnapshot(repository: Repository): Promise<{
 
   try {
     // this contains the patch number that was recently applied to the repository
-    const nextText = await readFile(
-      join(repository.resolvedGitDir, 'rebase-merge', 'msgnum'),
-      'utf8'
-    )
+    const nextText = await readProgress('msgnum')
 
     next = parseInt(nextText, 10)
 
@@ -182,10 +201,7 @@ export async function getRebaseSnapshot(repository: Repository): Promise<{
     }
 
     // this contains the total number of patches to be applied to the repository
-    const lastText = await readFile(
-      join(repository.resolvedGitDir, 'rebase-merge', 'end'),
-      'utf8'
-    )
+    const lastText = await readProgress('end')
 
     last = parseInt(lastText, 10)
 
@@ -196,17 +212,11 @@ export async function getRebaseSnapshot(repository: Repository): Promise<{
       last = -1
     }
 
-    originalBranchTip = await readFile(
-      join(repository.resolvedGitDir, 'rebase-merge', 'orig-head'),
-      'utf8'
-    )
+    originalBranchTip = await readProgress('orig-head')
 
     originalBranchTip = originalBranchTip.trim()
 
-    baseBranchTip = await readFile(
-      join(repository.resolvedGitDir, 'rebase-merge', 'onto'),
-      'utf8'
-    )
+    baseBranchTip = await readProgress('onto')
 
     baseBranchTip = baseBranchTip.trim()
   } catch {}
@@ -263,6 +273,10 @@ export async function getRebaseSnapshot(repository: Repository): Promise<{
  */
 async function readRebaseHead(repository: Repository): Promise<string | null> {
   try {
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      const state = await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+      return state?.head ?? null
+    }
     const rebaseHead = join(repository.resolvedGitDir, 'REBASE_HEAD')
     const rebaseCurrentCommitOutput = await readFile(rebaseHead, 'utf8')
     return rebaseCurrentCommitOutput.trim()

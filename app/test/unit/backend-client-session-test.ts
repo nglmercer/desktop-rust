@@ -120,6 +120,17 @@ describe('backend Copilot session cleanup', () => {
     ).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('reads and validates a scoped native rebase snapshot', async () => {
+    const head = 'a'.repeat(40)
+    const invoke = vi.fn(async (): Promise<unknown> => ({ head, progress: { original: head, branch: 'refs/heads/main', onto: head, current: '1', total: '2' } }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryRebaseState('/repo')).resolves.toMatchObject({ head, progress: { current: '1', total: '2' } })
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'renderer_rebase_state' }))
+    invoke.mockResolvedValueOnce({ head, progress: { current: 2 } })
+    await expect(client.repositoryRebaseState('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('reads and validates a scoped native cherry-pick snapshot', async () => {
     const head = 'a'.repeat(40)
     const invoke = vi.fn(async (): Promise<unknown> => ({ head, sequence: { head, abort_safety: head, todo: 'pick abc1234 subject\n' } }))

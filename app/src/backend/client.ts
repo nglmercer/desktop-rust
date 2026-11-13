@@ -2342,6 +2342,22 @@ export class BackendClient {
     }
   }
 
+  /** Read the active rebase and its fixed progress files from the Rust host. */
+  async repositoryRebaseState(repositoryPath: string): Promise<{ readonly head: string; readonly progress: { readonly original: string | null; readonly branch: string | null; readonly onto: string | null; readonly current: string | null; readonly total: string | null } | null } | null> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_rebase_state', {})
+    if (value === null) return null
+    if (!isRecord(value) || typeof value.head !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value.head)) throw new BackendError({ code: 'invalid_response', message: 'Invalid rebase state', retryable: false })
+    if (value.progress === null) return { head: value.head, progress: null }
+    if (!isRecord(value.progress)) throw new BackendError({ code: 'invalid_response', message: 'Invalid rebase progress', retryable: false })
+    const progress = value.progress
+    const read = (key: string): string | null => {
+      const field = progress[key]
+      if (field === null || (typeof field === 'string' && field.length <= 8192)) return field
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid rebase progress field', retryable: false })
+    }
+    return { head: value.head, progress: { original: read('original'), branch: read('branch'), onto: read('onto'), current: read('current'), total: read('total') } }
+  }
+
   /** Read the active cherry-pick sequencer from its repository-owned Git directory. */
   async repositoryCherryPickState(repositoryPath: string): Promise<{ readonly head: string; readonly sequence: { readonly head: string; readonly abortSafety: string; readonly todo: string } | null } | null> {
     const value = await this.repositoryRead(repositoryPath, 'renderer_cherry_pick_state', {})

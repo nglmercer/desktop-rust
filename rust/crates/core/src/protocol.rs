@@ -167,6 +167,7 @@ pub enum Operation {
     /// Renderer operation markers and the interactive rebase's original refs.
     StatusContext,
     RendererCherryPickState,
+    RendererRebaseState,
     StatusConflictDetails {
         kind: StatusConflictKind,
     },

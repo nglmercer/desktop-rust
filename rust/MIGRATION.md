@@ -2287,3 +2287,11 @@ symlinks and changing state, and support a missing sequencer for a single pick.
 The continuation guard now awaits its state check. Cherry-pick execution,
 progress streaming, hook handling and remaining recovery callers still require
 migration before the legacy module can be removed.
+
+## Rebase state reads
+
+The native renderer now reads the rebase head and merge progress through a
+repository-scoped Rust operation. Fixed, bounded state files are read without
+following symlinks and rechecked for changes. The renderer uses this state for
+progress, internal-state display, and the continuation guard; execution, hook
+handling, apply-backend parity, and the remaining legacy callers are still open.
