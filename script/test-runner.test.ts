@@ -12,7 +12,9 @@ it('runs legacy and Vitest suites together with ordinary CommonJS resolution', a
   const directory = await mkdtemp(join(tmpdir(), 'desktop-test-runner-'))
   try {
     const fixture = join(directory, 'legacy-test.ts')
-    await writeFile(fixture, `
+    await writeFile(
+      fixture,
+      `
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -24,7 +26,8 @@ it('loads the actual Copilot SDK and test DOM', () => {
   assert.equal(typeof window.document.createElement, 'function')
   writeFileSync(process.env.DESKTOP_RUNNER_SENTINEL, 'legacy passed')
 })
-`)
+`
+    )
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       DESKTOP_RUNNER_SENTINEL: join(directory, 'passed'),

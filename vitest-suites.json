@@ -204,5 +204,8 @@
   "app/test/unit/copilot-byok-test.ts",
   "app/test/unit/local-storage-test.ts",
   "app/test/unit/commit-mode-storage-test.ts",
-  "app/test/unit/assisted-commit-push-storage-test.ts"
+  "app/test/unit/assisted-commit-push-storage-test.ts",
+  "app/test/unit/dds-converter-test.ts",
+  "app/test/unit/mock-api-test.ts",
+  "app/test/unit/welcome-test.ts"
 ]
