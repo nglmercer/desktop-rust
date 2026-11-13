@@ -53,6 +53,39 @@ describe('browser Windows path compatibility', () => {
     }
   })
 
+  it('matches Node normalization of drive-like and device paths', () => {
+    for (const path of [
+      'foo/../C:/outside',
+      'foo/../C:outside',
+      'folder/device:/file',
+      'folder/device:',
+      'CON:',
+      'CON:/file',
+      'CON:/../file',
+      'PRN:/file',
+      'AUX:',
+      'COM1:',
+      'COM¹:/file',
+      'LPT9:/file',
+      'foo/../CON:/file',
+      'folder/name:stream',
+    ]) {
+      const normalized = browserWin32.normalize(path)
+      expect(normalized, path).toBe(nodeWin32.normalize(path))
+      expect(browserWin32.isAbsolute(normalized), path).toBe(false)
+      expect(browserWin32.join('C:\\base', path), path).toBe(
+        nodeWin32.join('C:\\base', path)
+      )
+      expect(browserWin32.resolve('C:\\base', path), path).toBe(
+        nodeWin32.resolve('C:\\base', path)
+      )
+    }
+    const namespaced = '\\\\.\\CON:/file'
+    expect(browserWin32.normalize(namespaced)).toBe(nodeWin32.normalize(namespaced))
+    expect(browserWin32.join('C:\\base', namespaced)).toBe(nodeWin32.join('C:\\base', namespaced))
+    expect(browserWin32.resolve('C:\\base', namespaced)).toBe(nodeWin32.resolve('C:\\base', namespaced))
+  })
+
   it('matches Node across Windows roots, separators, dots and suffixes', () => {
     const roots = [
       '', 'C:', 'C:\\', 'D:/', '/', '\\',

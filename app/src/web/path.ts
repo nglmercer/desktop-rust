@@ -12,6 +12,7 @@ interface IParsedPath {
 }
 
 const isSep = (c: string) => c === '\\' || c === '/'
+const reservedDeviceName = /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$/i
 
 /** Length of the root portion: `C:\`, `C:`, `\\server\share\` or `\`. */
 function rootLength(p: string): number {
@@ -70,9 +71,33 @@ function normalizeSegments(rest: string, absolute: boolean): string[] {
   return out
 }
 
-function normalize(p: string): string {
+function normalizeInternal(
+  p: string,
+  canonicalizeNamespacedDevice: boolean,
+  protectRelativeDevices: boolean
+): string {
   if (p.length === 0) {
     return '.'
+  }
+  const namespacedDevice = /^[\\/]{2}[.?][\\/]([^\\/:]+):([\s\S]*)$/.exec(p)
+  if (
+    canonicalizeNamespacedDevice &&
+    namespacedDevice &&
+    reservedDeviceName.test(namespacedDevice[1])
+  ) {
+    const rest = namespacedDevice[2]
+    let tail = normalizeSegments(rest, true).join('\\')
+    if (tail.length > 0 && isSep(rest[rest.length - 1])) tail += '\\'
+    return `\\\\?\\${namespacedDevice[1]}:\\${tail}`
+  }
+  const colon = p.indexOf(':')
+  const reservedDevice = colon > 0 && reservedDeviceName.test(p.slice(0, colon))
+  if (protectRelativeDevices && reservedDevice) {
+    const rest = p.slice(colon + 1)
+    let tail = normalizeSegments(rest, false).join('\\') || '.'
+    if (rest.length > 0 && isSep(rest[rest.length - 1])) tail += '\\'
+    // Match Node's reserved-device handling for CVE-2025-27210.
+    return `.\\${p.slice(0, colon + 1)}${tail}`
   }
   const { root, rest, absolute } = splitRoot(p)
   const trailing = rest.length > 0 && isSep(rest[rest.length - 1])
@@ -84,7 +109,21 @@ function normalize(p: string): string {
   if (tail.length > 0 && trailing) {
     tail += '\\'
   }
+  if (
+    protectRelativeDevices &&
+    !absolute &&
+    root.length === 0 &&
+    colon !== -1 &&
+    (/^[a-zA-Z]:/.test(tail) || /:(?:[\\/]|$)/.test(p))
+  ) {
+    // Keep a relative path from becoming drive-qualified after normalization.
+    return `.\\${tail}`
+  }
   return root + tail
+}
+
+function normalize(p: string): string {
+  return normalizeInternal(p, true, true)
 }
 
 function isAbsolute(p: string): boolean {
@@ -92,7 +131,22 @@ function isAbsolute(p: string): boolean {
 }
 
 function join(...parts: string[]): string {
-  const joined = parts.filter(part => part.length > 0).join('\\')
+  const nonempty = parts.filter(part => part.length > 0)
+  let joined = nonempty.join('\\')
+  // Node deliberately leaves reserved-device segments unnormalized to avoid
+  // treating their following `..` as ordinary directory traversal.
+  if (
+    joined.split('\\').some(part => {
+      const colon = part.indexOf(':')
+      return colon > 0 && reservedDeviceName.test(part.slice(0, colon))
+    })
+  ) {
+    const first = nonempty[0]
+    const explicitUNC =
+      first.length > 2 && isSep(first[0]) && isSep(first[1]) && !isSep(first[2])
+    if (!explicitUNC) joined = joined.replace(/^[\\/]{2,}/, '\\')
+    return joined.replace(/\//g, '\\')
+  }
   return joined.length === 0 ? '.' : normalize(joined)
 }
 
@@ -108,7 +162,7 @@ function resolve(...parts: string[]): string {
       break
     }
   }
-  const normalized = normalize(resolved)
+  const normalized = normalizeInternal(resolved, false, false)
   // Node never returns a trailing separator except for a bare root.
   return normalized.length > rootLength(normalized)
     ? normalized.replace(/\\+$/, '')
