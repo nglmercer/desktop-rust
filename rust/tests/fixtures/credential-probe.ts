@@ -8,6 +8,9 @@ interface Probe {
   invalid: [string, string][]
   rawInvalid: [string, string][]
   child: string
+  childGitDir: string
+  parentGitDir: string
+  parentGitDirAlias: string | null
   output: string
   scenario: string
   host: string
@@ -22,10 +25,16 @@ const secrets = [
 ]
 const expected: string = scenario.users.AliceCase.token
 const rows: Array<{ label: string; ok: boolean; code: number | null }> = []
-function run(payload: string, args: string[], cwd?: string) {
+function run(
+  payload: string,
+  args: string[],
+  cwd?: string,
+  extraEnv?: NodeJS.ProcessEnv
+) {
   return spawnSync(args[0], args.slice(1), {
     input: payload,
     cwd,
+    env: { ...process.env, ...extraEnv },
     encoding: 'utf8',
     timeout: 12_000,
   })
@@ -63,6 +72,37 @@ for (const [index, payload] of control.valid.entries())
 for (const [label, payload] of control.invalid)
   record(label, run(payload, args))
 record('submodule-cannot-borrow', run(control.valid[0], args, control.child))
+record(
+  'submodule-git-dir-at-parent-cannot-borrow',
+  run(control.valid[0], args, undefined, { GIT_DIR: control.childGitDir })
+)
+record(
+  'parent-explicit-git-dir',
+  run(control.valid[0], args, undefined, { GIT_DIR: control.parentGitDir }),
+  true
+)
+if (control.parentGitDirAlias !== null)
+  record(
+    'parent-symlinked-git-dir',
+    run(control.valid[0], args, undefined, {
+      GIT_DIR: control.parentGitDirAlias,
+    }),
+    true
+  )
+record(
+  'submodule-common-dir-cannot-borrow',
+  run(control.valid[0], args, undefined, {
+    GIT_DIR: control.parentGitDir,
+    GIT_COMMON_DIR: control.childGitDir,
+  })
+)
+record(
+  'submodule-worktree-cannot-borrow',
+  run(control.valid[0], args, undefined, {
+    GIT_DIR: control.parentGitDir,
+    GIT_WORK_TREE: control.child,
+  })
+)
 const helpers = spawnSync(
   'git',
   ['config', '--get-all', `credential.https://${control.host}.helper`],

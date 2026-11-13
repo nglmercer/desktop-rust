@@ -1839,8 +1839,15 @@ private capability never enter Git arguments, persisted configuration, registry
 records, review certificates or browser RPC.
 
 Intent comes from effective native fetch URLs, every push destination and the
-reviewed remote-deletion endpoint set. Local hooks/filters use the saved source;
-child submodules receive no parent grant. The broker verifies the stored numeric
+reviewed remote-deletion endpoint set. Local hooks/filters use the saved source.
+For ordinary Git subprocesses the helper also reports its Git directory,
+common directory and worktree overrides; the broker rejects contexts that do
+not match the selected worktree, including ordinary recursive submodules that
+report a nested Git directory from the parent directory. These fields are
+self-reported: a malicious descendant holding the capability can forge or omit
+them, so they do not authenticate a
+caller and do not establish a safe clone lease. On Windows, paths containing
+unpaired UTF-16 code units fail closed. The broker verifies the stored numeric
 actor and destination repository access, pins the captured session, rechecks the
 saved-record/source witness and revokes itself on cancellation/completion. Git
 2.46+ proactive Basic authentication, final-layer quoted configuration overrides

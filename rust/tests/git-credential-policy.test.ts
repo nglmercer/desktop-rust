@@ -1,11 +1,12 @@
 // @vitest-environment node
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   existsSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
@@ -38,10 +39,18 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       suite.configure({ host: suite.service.host })
       const repo = suite.seed('reviewed-fetch-credentials')
       suite.assign(repo)
-      const request = { remote: 'origin', expected_url: `${suite.service.url}/fork/repo.git`, recurse_submodules: false }
+      const request = {
+        remote: 'origin',
+        expected_url: `${suite.service.url}/fork/repo.git`,
+        recurse_submodules: false,
+      }
       const preview = suite.rpc(repo, 'renderer_fetch_preview', { request })
       suite.clearTransport()
-      assert.equal(suite.rpc(repo, 'renderer_fetch', { request, basis: preview.basis }).code, 0)
+      assert.equal(
+        suite.rpc(repo, 'renderer_fetch', { request, basis: preview.basis })
+          .code,
+        0
+      )
       suite.assertActor()
       assert.ok(!existsSync(suite.nativeLog))
       suite.assertPrivateStorage(repo)
@@ -51,12 +60,24 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       suite.configure({ host: suite.service.host })
       const repo = suite.seed('reviewed-remote-head-credentials')
       suite.assign(repo)
-      const request = { remote: 'origin', expected_url: `${suite.service.url}/fork/repo.git`, recurse_submodules: false }
+      const request = {
+        remote: 'origin',
+        expected_url: `${suite.service.url}/fork/repo.git`,
+        recurse_submodules: false,
+      }
       const fetch = suite.rpc(repo, 'renderer_fetch_preview', { request })
-      assert.equal(suite.rpc(repo, 'renderer_fetch', { request, basis: fetch.basis }).code, 0)
-      const preview = suite.rpc(repo, 'renderer_remote_head_preview', { request })
+      assert.equal(
+        suite.rpc(repo, 'renderer_fetch', { request, basis: fetch.basis }).code,
+        0
+      )
+      const preview = suite.rpc(repo, 'renderer_remote_head_preview', {
+        request,
+      })
       suite.clearTransport()
-      const result = suite.rpc(repo, 'renderer_remote_head', { request, basis: preview.basis })
+      const result = suite.rpc(repo, 'renderer_remote_head', {
+        request,
+        basis: preview.basis,
+      })
       assert.ok(result.code === 0 || result.code === 1)
       suite.assertActor()
       assert.ok(!existsSync(suite.nativeLog))
@@ -332,6 +353,9 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       repo.git('commit', '-qm', 'submodule')
       const control = path.join(suite.root, 'credential-probes.json')
       const output = path.join(suite.root, 'credential-probes-result.json')
+      const gitDirAlias = path.join(suite.root, 'parent-git-dir-alias')
+      if (process.platform !== 'win32')
+        symlinkSync(path.join(repo.root, '.git'), gitDirAlias)
       const base = `protocol=https\nhost=${suite.service.host}\n`
       const valid = [
         `${base}path=fork/repo.git\n\n`,
@@ -375,6 +399,15 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
           invalid,
           rawInvalid,
           child: childPath,
+          childGitDir: child
+            .git('rev-parse', '--absolute-git-dir')
+            .toString()
+            .trim(),
+          parentGitDir: repo
+            .git('rev-parse', '--absolute-git-dir')
+            .toString()
+            .trim(),
+          parentGitDirAlias: process.platform === 'win32' ? null : gitDirAlias,
           output,
           scenario: suite.scenario,
           host: suite.service.host,
@@ -419,6 +452,184 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       suite.clearTransport()
       assert.equal(suite.rpc(child, 'fetch', { remote: 'origin' }).code, 0)
       suite.assertActor('bobcase')
+    }, 120_000)
+
+    it('uses the assigned account from a linked worktree', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('credential-linked-worktree')
+      const linkedPath = path.join(
+        suite.root,
+        'credential-linked-worktree-checkout'
+      )
+      repo.git('worktree', 'add', '-qb', 'linked-test', linkedPath, 'HEAD')
+      const linked = repo.at(linkedPath)
+      suite.cli(['repositories', 'add', linkedPath])
+      suite.assign(linked)
+      suite.clearTransport()
+      assert.equal(suite.rpc(linked, 'fetch', { remote: 'origin' }).code, 0)
+      suite.assertActor()
+      suite.assertPrivateStorage(linked)
+    }, 120_000)
+
+    it('refuses parent credentials during a real recursive submodule fetch', () => {
+      suite.configure({ host: suite.service.host })
+      const source = suite.seed('recursive-credential-source')
+      const bare = path.join(suite.service.projects, 'fork/repo.git')
+      source.git(
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'add',
+        '-q',
+        bare,
+        'child'
+      )
+      source.git(
+        'config',
+        '-f',
+        '.gitmodules',
+        'submodule.child.url',
+        `${suite.service.url}/fork/repo.git`
+      )
+      source.git('add', '--all')
+      source.git('commit', '-qm', 'add submodule')
+      source.git('push', '-q', bare, 'HEAD:refs/heads/main')
+
+      const targetPath = path.join(suite.root, 'recursive-credential-target')
+      const clone = spawnSync(
+        suite.realGit,
+        ['clone', '-q', bare, targetPath],
+        { env: suite.env, encoding: 'utf8', timeout: 20_000 }
+      )
+      assert.ifError(clone.error)
+      assert.equal(clone.status, 0, clone.stderr)
+      const target = source.at(targetPath)
+      const baselinePath = path.join(
+        suite.root,
+        'recursive-credential-baseline'
+      )
+      const baselineClone = spawnSync(
+        suite.realGit,
+        ['clone', '-q', bare, baselinePath],
+        { env: suite.env, encoding: 'utf8', timeout: 20_000 }
+      )
+      assert.ifError(baselineClone.error)
+      assert.equal(baselineClone.status, 0, baselineClone.stderr)
+      const baseline = source.at(baselinePath)
+      baseline.git(
+        'remote',
+        'set-url',
+        'origin',
+        `${suite.service.url}/fork/repo.git`
+      )
+      suite.cli(['repositories', 'add', baselinePath])
+      suite.assign(baseline)
+      target.git('config', 'submodule.child.url', bare)
+      target.git(
+        '-c',
+        'protocol.file.allow=always',
+        'submodule',
+        'update',
+        '--init',
+        '--',
+        'child'
+      )
+      target
+        .at(path.join(targetPath, 'child'))
+        .git(
+          'remote',
+          'set-url',
+          'origin',
+          `${suite.service.url}/fork/repo.git`
+        )
+      target.git(
+        'remote',
+        'set-url',
+        'origin',
+        `${suite.service.url}/fork/repo.git`
+      )
+      suite.cli(['repositories', 'add', targetPath])
+      suite.assign(target)
+
+      const child = source.at(path.join(source.root, 'child'))
+      child.write('advance.txt', 'new submodule commit\n')
+      child.git('add', 'advance.txt')
+      child.git(
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.invalid',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-qm',
+        'advance'
+      )
+      child.git('push', '-q', bare, 'HEAD:refs/heads/subfixture')
+      source.git('add', 'child')
+      source.git('commit', '-qm', 'advance submodule')
+      source.git('push', '-q', bare, 'HEAD:refs/heads/main')
+
+      const request = {
+        remote: 'origin',
+        expected_url: `${suite.service.url}/fork/repo.git`,
+        recurse_submodules: true,
+      }
+      const baselineRequest = { ...request, recurse_submodules: false }
+      const baselinePreview = suite.rpc(baseline, 'renderer_fetch_preview', {
+        request: baselineRequest,
+      })
+      suite.clearTransport()
+      assert.equal(
+        suite.rpc(baseline, 'renderer_fetch', {
+          request: baselineRequest,
+          basis: baselinePreview.basis,
+        }).code,
+        0
+      )
+      const baselineRecords = suite.service.records()
+      const preview = suite.rpc(target, 'renderer_fetch_preview', { request })
+      suite.clearTransport()
+      const result = suite.rpc(
+        target,
+        'renderer_fetch',
+        { request, basis: preview.basis },
+        { fail: true }
+      )
+      assert.match(
+        String(result.stderr || result.stdout),
+        /"code":1/,
+        'nested fetch should be refused without its own account'
+      )
+      const records = suite.service.records()
+      assert.ok(
+        records.some(row => row.actor === 'alicecase'),
+        'parent fetch must authenticate'
+      )
+      assert.deepEqual(
+        records.filter(row => row.actor !== null),
+        baselineRecords.filter(row => row.actor !== null),
+        'submodule must not authenticate with the parent account'
+      )
+      const wanted = child.git('rev-parse', 'HEAD').toString().trim()
+      const nestedObject = spawnSync(
+        suite.realGit,
+        [
+          '-C',
+          path.join(targetPath, 'child'),
+          'cat-file',
+          '-e',
+          `${wanted}^{commit}`,
+        ],
+        { env: { ...suite.env, GIT_NO_LAZY_FETCH: '1' }, timeout: 10_000 }
+      )
+      assert.notEqual(
+        nestedObject.status,
+        0,
+        'the protected submodule commit must remain unfetched'
+      )
+      assert.ok(!existsSync(suite.nativeLog))
+      suite.assertPrivateStorage(target)
     }, 120_000)
 
     it('does not lend the parent account to renderer submodule updates', () => {

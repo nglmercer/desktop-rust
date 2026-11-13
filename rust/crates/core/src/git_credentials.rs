@@ -106,6 +106,9 @@ struct Request {
     capability: String,
     operation: String,
     directory: String,
+    git_dir: Option<String>,
+    git_common_dir: Option<String>,
+    git_work_tree: Option<String>,
     input: String,
 }
 #[derive(Serialize, Deserialize)]
@@ -555,6 +558,22 @@ impl Lease {
             root.path() == self.repository.path(),
             "Nested repository requires its own account selection"
         );
+        // Git can execute a submodule credential helper from the parent
+        // worktree while GIT_DIR identifies the nested repository. CWD alone
+        // is therefore insufficient to bind the helper to this lease.
+        if request.git_dir.is_some() {
+            let expected = bound_helper_git_directory(&self.repository, false).await?;
+            validate_helper_path(request.git_dir.as_deref(), &directory, &expected)?;
+        }
+        if request.git_common_dir.is_some() {
+            let expected = bound_helper_git_directory(&self.repository, true).await?;
+            validate_helper_path(request.git_common_dir.as_deref(), &directory, &expected)?;
+        }
+        validate_helper_path(
+            request.git_work_tree.as_deref(),
+            &directory,
+            self.repository.path(),
+        )?;
         ensure!(
             context
                 .username()
@@ -608,6 +627,49 @@ impl Lease {
         self.cancellation.check()?;
         Ok(Reply::output(&session.git_credential_response(login)?))
     }
+}
+
+async fn bound_helper_git_directory(repository: &Repository, common: bool) -> Result<PathBuf> {
+    let args = if common {
+        crate::args(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    } else {
+        crate::args(&["rev-parse", "--absolute-git-dir"])
+    };
+    // Ignore broker-process Git directory overrides: the expected context is
+    // defined by the selected worktree, not by inherited environment state.
+    let output = crate::process::run_bound_discovery(repository.path(), &args).await?;
+    ensure!(output.code == 0, "Cannot inspect selected Git directory");
+    let bytes = output
+        .stdout
+        .strip_suffix(b"\n")
+        .context("Invalid Git directory response")?;
+    Ok(PathBuf::from(crate::os_from_bytes(bytes)?))
+}
+
+fn validate_helper_path(
+    encoded: Option<&str>,
+    cwd: &std::path::Path,
+    expected: &std::path::Path,
+) -> Result<()> {
+    let Some(encoded) = encoded else {
+        return Ok(());
+    };
+    let raw = crate::os_from_bytes(&STANDARD.decode(encoded)?)?;
+    let path = PathBuf::from(raw);
+    ensure!(
+        !path.as_os_str().is_empty(),
+        "Invalid helper Git directory context"
+    );
+    let actual = if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    };
+    ensure!(
+        actual.canonicalize()? == expected.canonicalize()?,
+        "Nested repository requires its own account selection"
+    );
+    Ok(())
 }
 
 /// Applied centrally so checkout/commit hooks, LFS and gh checkout descendants
@@ -894,6 +956,11 @@ async fn helper_inner(operation: &str) -> Result<Reply> {
         capability: std::env::var(CAPABILITY)?,
         operation: operation.to_owned(),
         directory: STANDARD.encode(std::env::current_dir()?.as_os_str().as_encoded_bytes()),
+        git_dir: std::env::var_os("GIT_DIR").map(|value| STANDARD.encode(value.as_encoded_bytes())),
+        git_common_dir: std::env::var_os("GIT_COMMON_DIR")
+            .map(|value| STANDARD.encode(value.as_encoded_bytes())),
+        git_work_tree: std::env::var_os("GIT_WORK_TREE")
+            .map(|value| STANDARD.encode(value.as_encoded_bytes())),
         input: STANDARD.encode(input),
     };
     tokio::time::timeout(Duration::from_secs(35), async {
@@ -907,6 +974,84 @@ async fn helper_inner(operation: &str) -> Result<Reply> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn helper_expected_git_directories_ignore_inherited_git_overrides() {
+        use std::{fs, process::Command};
+        const CHILD: &str = "DESKTOP_TEST_HELPER_GIT_DIR_CHILD";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = std::path::PathBuf::from(root);
+            let repo = super::Repository::open(&root).await.unwrap();
+            let git = super::bound_helper_git_directory(&repo, false)
+                .await
+                .unwrap();
+            let common = super::bound_helper_git_directory(&repo, true)
+                .await
+                .unwrap();
+            assert_eq!(
+                git.canonicalize().unwrap(),
+                root.join(".git").canonicalize().unwrap()
+            );
+            assert_eq!(
+                common.canonicalize().unwrap(),
+                root.join(".git").canonicalize().unwrap()
+            );
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("desktop-bound-helper-{}", uuid::Uuid::new_v4()));
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        for directory in [&root, &nested] {
+            assert!(
+                Command::new("git")
+                    .arg("init")
+                    .arg("-q")
+                    .arg(directory)
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_COMMON_DIR")
+                    .env_remove("GIT_WORK_TREE")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "git_credentials::tests::helper_expected_git_directories_ignore_inherited_git_overrides", "--nocapture"])
+            .env(CHILD, &root)
+            .env("GIT_DIR", nested.join(".git"))
+            .env("GIT_COMMON_DIR", nested.join(".git"))
+            .env("GIT_WORK_TREE", &nested)
+            .output().unwrap();
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helper_context_paths_are_canonical_and_invalid_values_fail_closed() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use std::{fs, os::unix::fs::symlink};
+        let root =
+            std::env::temp_dir().join(format!("desktop-helper-context-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("gitdir")).unwrap();
+        fs::create_dir(root.join("other")).unwrap();
+        symlink(root.join("gitdir"), root.join("alias")).unwrap();
+        let expected = root.join("gitdir");
+        let encode = |value: &str| STANDARD.encode(value.as_bytes());
+        assert!(super::validate_helper_path(None, &root, &expected).is_ok());
+        assert!(super::validate_helper_path(Some(&encode("gitdir")), &root, &expected).is_ok());
+        assert!(super::validate_helper_path(Some(&encode("alias")), &root, &expected).is_ok());
+        assert!(super::validate_helper_path(Some(&encode("other")), &root, &expected).is_err());
+        assert!(super::validate_helper_path(Some(&encode("")), &root, &expected).is_err());
+        assert!(super::validate_helper_path(Some("%%%"), &root, &expected).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn scoped_read_inherits_cancellation_and_aborts_when_dropped() {
         let token = super::Cancellation::default();
