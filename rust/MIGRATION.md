@@ -2583,7 +2583,11 @@ empty destination; post-check rejects account registration and recovery, so
 the user must inspect both locations before retrying. A same-user process can
 also replace the private broker HOME between its creation and no-follow open;
 this follows the existing same-user hook and filter trust boundary. Native
-Android, LFS and cross-platform parity remain to be verified. The browser clone
+Linux HTTPS tests with real Git LFS verify checkout using the selected account
+and rejection of an LFS endpoint belonging to another repository. When Git LFS
+is installed, assigned-account operations currently require Unicode storage
+paths for log isolation, even when the repository has no LFS objects. Android
+and cross-platform parity remain to be verified. The browser clone
 dialog offers an explicit selected-account HTTPS mode without submodules; it
 requires the same account in GitHub CLI and an absent destination. Completed
 clones remain unselected and must be added explicitly. The dialog lists pending

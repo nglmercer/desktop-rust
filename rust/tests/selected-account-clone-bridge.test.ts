@@ -1,7 +1,8 @@
 // @vitest-environment node
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
@@ -273,5 +274,38 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !
       assert.deepEqual(retained, stage.subarray(0, stage.lastIndexOf('/')))
       assert.ok(existsSync(Buffer.concat([retained, Buffer.from('/broker-home')])))
     } finally { unblockTransfer() }
+  }, 90_000)
+
+  it.skipIf(!process.env.DESKTOP_TEST_GIT_LFS)('checks out real LFS objects using the selected account only', async () => {
+    const repo = suite.seed('bridge-lfs-source', false)
+    const content = Buffer.from('selected clone LFS content\0\n')
+    const oid = createHash('sha256').update(content).digest('hex')
+    repo.write('.gitattributes', '*.asset filter=lfs diff=lfs merge=lfs -text\n')
+    repo.write('large.asset', `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${content.length}\n`)
+    repo.git('add', '.gitattributes', 'large.asset')
+    repo.git('commit', '-qm', 'add LFS pointer')
+    suite.service.seed(repo)
+    writeFileSync(path.join(suite.service.objects, oid), content)
+    symlinkSync(String(process.env.DESKTOP_TEST_GIT_LFS), path.join(suite.root, 'bin', 'git-lfs'))
+    const install = spawnSync(suite.realGit, ['lfs', 'install', '--skip-repo'], { env: suite.env, encoding: 'utf8' })
+    assert.equal(install.status, 0, install.stderr)
+    suite.clearTransport()
+    const destination = path.join(suite.root, 'bridge-lfs-clone')
+    const result = await bounded(uiClone.nativeClone(url, destination, account(), undefined, () => {}), 60_000)
+    assert.equal(result.path, destination)
+    assert.deepEqual(readFileSync(path.join(destination, 'large.asset')), content)
+    assert.ok(suite.service.records().some(row => row.path === '/fork/repo.git/info/lfs/objects/batch' && row.actor === 'alicecase'))
+    suite.assertActor()
+    clean(result)
+
+    repo.write('.lfsconfig', `[lfs]\n\turl = https://${suite.service.host}/other/repo.git/info/lfs\n`)
+    repo.git('add', '.lfsconfig')
+    repo.git('commit', '-qm', 'configure unrelated LFS repository')
+    suite.service.seed(repo)
+    suite.clearTransport()
+    const refused = path.join(suite.root, 'bridge-lfs-foreign')
+    await assert.rejects(bounded(uiClone.nativeClone(url, refused, account(), undefined, () => {}), 60_000), error => { clean(String(error)); return true })
+    assert.equal(existsSync(refused), false)
+    assert.ok(!suite.service.records().some(row => String(row.path).startsWith('/other/repo.git') && row.actor !== null))
   }, 90_000)
 })
