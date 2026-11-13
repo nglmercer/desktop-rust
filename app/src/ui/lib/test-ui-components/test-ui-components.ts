@@ -1,4 +1,4 @@
-import { TestMenuEvent } from '../../../web/menu-shim'
+import { TestMenuEvent } from '../../../lib/menu-event'
 import {
   isRepositoryWithGitHubRepository,
   Repository,

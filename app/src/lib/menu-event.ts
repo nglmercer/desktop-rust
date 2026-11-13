@@ -98,6 +98,6 @@ const TestMenuEvents = [
 
 export type TestMenuEvent = typeof TestMenuEvents[number]
 
-export function isTestMenuEvent(value: any): value is TestMenuEvent {
-  return TestMenuEvents.includes(value)
+export function isTestMenuEvent(value: unknown): value is TestMenuEvent {
+  return TestMenuEvents.some(event => event === value)
 }

@@ -26,7 +26,7 @@ import {
   isMacOSAndNoLongerSupportedByElectron,
   isWindowsAndNoLongerSupportedByElectron,
 } from '../lib/get-os'
-import { MenuEvent, isTestMenuEvent } from '../web/menu-shim'
+import { MenuEvent, isTestMenuEvent } from '../lib/menu-event'
 import {
   Repository,
   getGitHubHtmlUrl,
