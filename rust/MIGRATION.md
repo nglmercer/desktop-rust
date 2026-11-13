@@ -2426,6 +2426,12 @@ not authorize continuation: the renderer refuses apply-backend continuation
 before staging, and the review certificate remains merge-backend only. An
 external Git process can still change rebase state between that preflight and
 the renderer's separate staging requests; those requests are not one transaction.
+Discard and checkout operation certificates also bind all `rebase-apply`
+entries, including pending patches, without following symlinks. The review
+rejects special files and trees exceeding 100,000 entries, 128 directory levels
+or 2 GiB. Existing undo records created by earlier versions while `rebase-apply`
+existed (including `git am`) have the old certificate and are refused with their
+backups retained; records created without apply state keep the previous certificate.
 Execution, hook handling and remaining legacy callers are still open.
 
 ## Git operation aborts

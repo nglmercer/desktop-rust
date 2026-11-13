@@ -1545,6 +1545,22 @@ mod future_stack_tests {
 }
 
 pub(crate) fn operation_certificate(directory: &Path) -> Result<String> {
+    // Git's apply backend consumes numbered patches and other files beyond
+    // the small set of progress markers below. Bind the entire tree before
+    // reading those markers and recheck it afterwards. Keep the pre-existing
+    // certificate unchanged when there is no apply operation, so recovery
+    // journals created by older versions remain usable in that common case.
+    let apply_path = directory.join("rebase-apply");
+    let apply = match fs::symlink_metadata(&apply_path) {
+        Ok(metadata) => {
+            anyhow::ensure!(metadata.is_dir(), "Invalid rebase-apply state directory");
+            Some(crate::renderer_worktree::operation_tree_certificate(
+                &apply_path,
+            )?)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
     let mut digest = Sha256::new();
     for name in [
         "MERGE_HEAD",
@@ -1572,6 +1588,14 @@ pub(crate) fn operation_certificate(directory: &Path) -> Result<String> {
         "rebase-apply/applying",
     ] {
         digest.update(name.as_bytes());
+        // The no-follow tree snapshot covers all apply files. Opening these
+        // paths separately would follow links if another process replaced a
+        // marker between snapshots. Preserve the old missing-file hash when
+        // no apply directory is present.
+        if name.starts_with("rebase-apply/") {
+            digest.update([0]);
+            continue;
+        }
         match fs::File::open(directory.join(name)) {
             Ok(file) => {
                 let mut bytes = Vec::new();
@@ -1593,5 +1617,204 @@ pub(crate) fn operation_certificate(directory: &Path) -> Result<String> {
     for name in ["sequencer", "rebase-merge", "rebase-apply"] {
         digest.update([u8::from(directory.join(name).exists())]);
     }
+    if let Some(before) = apply {
+        let after = crate::renderer_worktree::operation_tree_certificate(&apply_path)?;
+        anyhow::ensure!(before == after, "Rebase apply state changed during review");
+        digest.update(b"rebase-apply-tree\0");
+        digest.update(before);
+    } else {
+        anyhow::ensure!(
+            fs::symlink_metadata(&apply_path)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+            "Rebase apply state changed during review"
+        );
+    }
     Ok(format!("{:x}", digest.finalize()))
+}
+
+#[cfg(test)]
+mod operation_certificate_tests {
+    use super::*;
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("desktop-operation-state-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn retains_previous_certificate_without_apply_state() {
+        let root = Fixture::new();
+        assert_eq!(
+            operation_certificate(&root.0).unwrap(),
+            "6846082f1dac78ec4fc6fdedc08a48d00ad23efc7dc0e432f541c027f3b147bd"
+        );
+    }
+
+    #[test]
+    fn binds_apply_patch_and_all_other_tree_entries() {
+        let root = Fixture::new();
+        let apply = root.0.join("rebase-apply");
+        fs::create_dir(&apply).unwrap();
+        fs::write(apply.join("next"), b"1\n").unwrap();
+        fs::write(apply.join("0001"), b"first patch\n").unwrap();
+        let first = operation_certificate(&root.0).unwrap();
+        fs::write(apply.join("0001"), b"other patch\n").unwrap();
+        let changed = operation_certificate(&root.0).unwrap();
+        assert_ne!(first, changed);
+        fs::write(apply.join("author-script"), b"author\n").unwrap();
+        assert_ne!(changed, operation_certificate(&root.0).unwrap());
+        fs::create_dir(apply.join("nested")).unwrap();
+        fs::write(apply.join("nested/message"), b"message\n").unwrap();
+        let nested = operation_certificate(&root.0).unwrap();
+        fs::write(apply.join("nested/message"), b"changed\n").unwrap();
+        assert_ne!(nested, operation_certificate(&root.0).unwrap());
+    }
+
+    #[test]
+    fn refuses_oversized_apply_state() {
+        let root = Fixture::new();
+        let apply = root.0.join("rebase-apply");
+        fs::create_dir(&apply).unwrap();
+        let file = fs::File::create(apply.join("0001")).unwrap();
+        file.set_len(2 * 1024 * 1024 * 1024 + 1).unwrap();
+        assert!(operation_certificate(&root.0).is_err());
+    }
+
+    #[tokio::test]
+    async fn real_apply_rebase_discards_only_after_reviewing_remaining_patches() {
+        let root = Fixture::new();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root.0)
+                .args(args)
+                .env("HOME", &root.0)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap()
+        };
+        let run = |args: &[&str]| {
+            let output = git(args);
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.name", "Test"]);
+        run(&["config", "user.email", "test@example.invalid"]);
+        fs::write(root.0.join("file"), "base\n").unwrap();
+        run(&["add", "--", "file"]);
+        run(&["-c", "commit.gpgsign=false", "commit", "-qm", "base"]);
+        run(&["switch", "-qc", "topic"]);
+        fs::write(root.0.join("file"), "topic\n").unwrap();
+        run(&["-c", "commit.gpgsign=false", "commit", "-qam", "topic"]);
+        run(&["switch", "-q", "main"]);
+        fs::write(root.0.join("file"), "main\n").unwrap();
+        run(&["-c", "commit.gpgsign=false", "commit", "-qam", "main"]);
+        run(&["switch", "-q", "topic"]);
+        assert!(!git(&["rebase", "--apply", "main"]).status.success());
+
+        fs::write(root.0.join("extra"), "untracked\n").unwrap();
+        let repo = Repository::open(&root.0).await.unwrap();
+        let path = GitPath::Text("extra".into());
+        let preview = repo
+            .discard_preview(path.clone(), DiscardScope::WorkingTree, None)
+            .await
+            .unwrap();
+        let patch = root.0.join(".git/rebase-apply/0001");
+        let original = fs::read(&patch).unwrap();
+        fs::write(&patch, b"changed patch\n").unwrap();
+        assert!(
+            repo.discard(
+                path.clone(),
+                DiscardScope::WorkingTree,
+                None,
+                preview["basis"].as_str().unwrap()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(root.0.join("extra")).unwrap(),
+            "untracked\n"
+        );
+        fs::write(&patch, original).unwrap();
+        let preview = repo
+            .discard_preview(path.clone(), DiscardScope::WorkingTree, None)
+            .await
+            .unwrap();
+        let result = repo
+            .discard(
+                path,
+                DiscardScope::WorkingTree,
+                None,
+                preview["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(!root.0.join("extra").exists());
+        let id = result["undo_id"].as_str().unwrap();
+        let journal = repo.discard_directory().await.unwrap().join(id);
+        let mut record = read_record(&journal, id).unwrap();
+        let current = record.operation.clone();
+        // A stale legacy certificate must refuse undo without consuming the
+        // saved data. Restoring the current certificate makes it usable again.
+        record.operation =
+            Some("6846082f1dac78ec4fc6fdedc08a48d00ad23efc7dc0e432f541c027f3b147bd".into());
+        write_record(&journal, &record).unwrap();
+        assert!(repo.undo_discard(id).await.is_err());
+        assert!(!root.0.join("extra").exists());
+        assert!(journal.join("0.before").exists());
+        record.operation = current;
+        write_record(&journal, &record).unwrap();
+        repo.undo_discard(id).await.unwrap();
+        assert_eq!(
+            fs::read_to_string(root.0.join("extra")).unwrap(),
+            "untracked\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn binds_non_utf8_names_and_rejects_symlinks() {
+        use std::os::unix::{ffi::OsStringExt, fs::symlink};
+        let root = Fixture::new();
+        let apply = root.0.join("rebase-apply");
+        fs::create_dir(&apply).unwrap();
+        let raw = apply.join(OsString::from_vec(vec![b'p', 0xff]));
+        fs::write(&raw, b"one").unwrap();
+        let first = operation_certificate(&root.0).unwrap();
+        fs::write(raw, b"two").unwrap();
+        assert_ne!(first, operation_certificate(&root.0).unwrap());
+        symlink(root.0.join("outside"), apply.join("patch")).unwrap();
+        assert!(operation_certificate(&root.0).is_err());
+        fs::remove_file(apply.join("patch")).unwrap();
+        fs::remove_dir_all(&apply).unwrap();
+        symlink(&root.0, &apply).unwrap();
+        assert!(operation_certificate(&root.0).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_fifo_without_opening_it() {
+        use std::os::unix::ffi::OsStrExt;
+        let root = Fixture::new();
+        let apply = root.0.join("rebase-apply");
+        fs::create_dir(&apply).unwrap();
+        let fifo = std::ffi::CString::new(apply.join("patch").as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert!(operation_certificate(&root.0).is_err());
+    }
 }

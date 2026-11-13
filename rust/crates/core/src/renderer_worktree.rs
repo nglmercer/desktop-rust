@@ -8,6 +8,15 @@ use std::path::{Component, Path, PathBuf};
 
 /// Force removal destroys ignored and untracked files too. Bind every entry.
 pub(crate) fn removal_tree_certificate(path: &Path) -> Result<Vec<u8>> {
+    tree_certificate(path, true)
+}
+
+/// Bind all operation state bytes while refusing links which Git could follow.
+pub(crate) fn operation_tree_certificate(path: &Path) -> Result<Vec<u8>> {
+    tree_certificate(path, false)
+}
+
+fn tree_certificate(path: &Path, allow_symlinks: bool) -> Result<Vec<u8>> {
     use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
     use cap_std::{
         ambient_authority,
@@ -22,6 +31,7 @@ pub(crate) fn removal_tree_certificate(path: &Path) -> Result<Vec<u8>> {
         entries: &mut usize,
         bytes: &mut u64,
         depth: usize,
+        allow_symlinks: bool,
     ) -> Result<()> {
         anyhow::ensure!(
             depth <= 128,
@@ -74,8 +84,12 @@ pub(crate) fn removal_tree_certificate(path: &Path) -> Result<Vec<u8>> {
             if metadata.is_dir() {
                 digest.update(b"directory\0");
                 let child = dir.open_dir_nofollow(&name)?;
-                walk(&child, digest, entries, bytes, depth + 1)?;
+                walk(&child, digest, entries, bytes, depth + 1, allow_symlinks)?;
             } else if metadata.file_type().is_symlink() {
+                anyhow::ensure!(
+                    allow_symlinks,
+                    "Git operation state contains a symbolic link"
+                );
                 digest.update(b"symlink\0");
                 let target = dir.read_link_contents(&name)?;
                 digest.update((target.as_os_str().as_encoded_bytes().len() as u64).to_le_bytes());
@@ -179,7 +193,7 @@ pub(crate) fn removal_tree_certificate(path: &Path) -> Result<Vec<u8>> {
     let parent = Dir::open_ambient_dir(parent, ambient_authority())?;
     let root = parent.open_dir_nofollow(name)?;
     let mut digest = Sha256::new();
-    walk(&root, &mut digest, &mut 0, &mut 0, 0)?;
+    walk(&root, &mut digest, &mut 0, &mut 0, 0, allow_symlinks)?;
     Ok(digest.finalize().to_vec())
 }
 
