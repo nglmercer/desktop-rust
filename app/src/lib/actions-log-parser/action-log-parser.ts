@@ -22,15 +22,15 @@ import {
   commandEnd,
   commandStart,
   hashChar,
-  IAnsiEscapeCodeState,
-  ILine,
-  ILogLine,
-  ILogLineTemplateData,
-  IParsedContent,
-  IParsedOutput,
-  IParseNode,
-  IRGBColor,
-  IStyle,
+  type IAnsiEscapeCodeState,
+  type ILine,
+  type ILogLine,
+  type ILogLineTemplateData,
+  type IParsedContent,
+  type IParsedOutput,
+  type IParseNode,
+  type IRGBColor,
+  type IStyle,
   newLineChar,
   NodeType,
   unsetValue,
@@ -141,7 +141,7 @@ export class ActionsLogParser {
         const timestamp = match && new Date(match[1])
 
         let ts = ''
-        if (match && timestamp && !isNaN(Number(timestamp))) {
+        if (match && timestamp && !Number.isNaN(Number(timestamp))) {
           ts = timestamp.toUTCString()
           line = line.substring(match[0].length)
         }
@@ -526,7 +526,7 @@ export class ActionsLogParser {
 
             for (const currentCode of codes) {
               const style = state.style as IStyle
-              const codeNumber = parseInt(currentCode)
+              const codeNumber = parseInt(currentCode, 10)
               if (setForeground && isSingleColorCode) {
                 // set foreground color using 8-bit (256 color) palette - Esc[ 38:5:<n> m
                 if (codeNumber >= 0 && codeNumber < 16) {
@@ -619,7 +619,7 @@ export class ActionsLogParser {
           }
 
           codes = []
-        } else if (isNaN(parseInt(character))) {
+        } else if (Number.isNaN(parseInt(character, 10))) {
           // if this is not a number, eg: 0K, this isn't something we support
           code = ''
           isCommandActive = false
@@ -647,7 +647,7 @@ export class ActionsLogParser {
             state.output = currentText
             result.push(state)
             // deep copy exisiting style for the line to preserve different styles between commands
-            let previousStyle
+            let previousStyle: IStyle | undefined
             if (state.style) {
               previousStyle = Object.assign({}, state.style)
             }

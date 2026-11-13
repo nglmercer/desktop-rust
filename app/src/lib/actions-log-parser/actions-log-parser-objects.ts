@@ -1,3 +1,4 @@
+// biome-ignore lint/suspicious/noConstEnum: Preserve the existing inlined enum representation.
 export const enum NodeType {
   Plain = 0,
   Command = 1,

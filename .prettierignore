@@ -34,3 +34,5 @@ app/src/models/diff/**
 app/src/lib/progress/**
 # Markdown rendering filters are checked and formatted by Biome.
 app/src/lib/markdown-filters/**
+# Action log parsers are checked and formatted by Biome.
+app/src/lib/actions-log-parser/**

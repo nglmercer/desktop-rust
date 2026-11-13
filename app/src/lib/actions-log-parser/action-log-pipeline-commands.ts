@@ -1,4 +1,4 @@
-import { IParseNode, NodeType } from './actions-log-parser-objects'
+import { type IParseNode, NodeType } from './actions-log-parser-objects'
 
 export enum Resets {
   Reset = '0',

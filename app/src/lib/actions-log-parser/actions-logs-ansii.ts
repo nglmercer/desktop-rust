@@ -18,6 +18,7 @@ export const UrlRegex =
  */
 // eslint-disable-next-line no-control-regex
 export const _ansiEscapeCodeRegex =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI sequences begin with the ESC control character.
   /(?:\u001b\[)(?:[?|#])?(?:(?:[0-9]{1,3})?(?:(?:;[0-9]{0,3})*)?[A-Z|a-z])/
 
 /**
