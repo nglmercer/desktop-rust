@@ -45,6 +45,16 @@ if (typeof window !== 'undefined' && !Reflect.get(window, '__desktop')) {
               window.matchMedia?.('(prefers-color-scheme: dark)').matches ??
               false
             )
+          case 'write-clipboard-text': {
+            const [text] = args
+            if (typeof text !== 'string') {
+              throw new TypeError('Clipboard text must be a string')
+            }
+            if (!navigator.clipboard?.writeText) {
+              throw new Error('Clipboard access is unavailable')
+            }
+            return navigator.clipboard.writeText(text)
+          }
         }
       }
       // Only typed methods are implemented by the WebSocket bridge.
@@ -89,13 +99,19 @@ if (typeof window !== 'undefined' && !Reflect.get(window, '__desktop')) {
       const listeners = subscriptions.get(channel)
       listeners?.get(listener)?.()
       listeners?.delete(listener)
-      if (listeners?.size === 0) subscriptions.delete(channel)
+      if (listeners?.size === 0) {
+        subscriptions.delete(channel)
+      }
       return Reflect.get(window, '__desktop')
     },
     removeAllListeners: (channel?: string) => {
       for (const [event, listeners] of subscriptions) {
-        if (channel !== undefined && channel !== event) continue
-        for (const unsubscribe of listeners.values()) unsubscribe()
+        if (channel !== undefined && channel !== event) {
+          continue
+        }
+        for (const unsubscribe of listeners.values()) {
+          unsubscribe()
+        }
         subscriptions.delete(event)
       }
       return Reflect.get(window, '__desktop')

@@ -71,17 +71,44 @@ describe('loopback bridge event shim', () => {
       .on('repository_changed', first)
       .on('repository_changed', first)
       .on('repository_changed', second)
-    for (const listener of listeners.get('repository_changed') ?? [])
+    for (const listener of listeners.get('repository_changed') ?? []) {
       listener({ root_id: 'one' })
+    }
     expect(first).toHaveBeenCalledOnce()
     expect(first).toHaveBeenCalledWith({ sender: null }, { root_id: 'one' })
     expect(second).toHaveBeenCalledOnce()
     shim.removeListener('repository_changed', first)
-    for (const listener of listeners.get('repository_changed') ?? [])
+    for (const listener of listeners.get('repository_changed') ?? []) {
       listener({ root_id: 'two' })
+    }
     expect(first).toHaveBeenCalledOnce()
     expect(second).toHaveBeenCalledTimes(2)
     shim.removeAllListeners()
     expect(listeners.get('repository_changed')?.size).toBe(0)
+  })
+  it('writes copy actions through the browser clipboard instead of the bridge', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    await import('../../src/web/electron-shim-loader')
+    const shim = Reflect.get(window, '__desktop') as IShim
+    await expect(
+      shim.invoke('write-clipboard-text', 'hello')
+    ).resolves.toBeUndefined()
+    expect(writeText).toHaveBeenCalledWith('hello')
+    expect(request).not.toHaveBeenCalled()
+    writeText.mockRejectedValueOnce(new Error('permission denied'))
+    await expect(shim.invoke('write-clipboard-text', 'hello')).rejects.toThrow(
+      'permission denied'
+    )
+    await expect(shim.invoke('write-clipboard-text', 1)).rejects.toThrow(
+      'Clipboard text must be a string'
+    )
+    Reflect.deleteProperty(navigator, 'clipboard')
+    await expect(shim.invoke('write-clipboard-text', 'hello')).rejects.toThrow(
+      'Clipboard access is unavailable'
+    )
   })
 })
