@@ -290,6 +290,39 @@ pub async fn run_stash(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     .await
 }
 
+/// Run a destructive repository operation without inherited Git directory overrides.
+fn bound_git_command() -> Command {
+    let mut command = git_native_paths(None);
+    for variable in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_SHALLOW_FILE",
+    ] {
+        command.env_remove(variable);
+    }
+    command.env("LC_ALL", "C");
+    command
+}
+
+pub(crate) async fn run_bound_checkout(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    run_command(path, bound_git_command(), args, None, 2 * 1024 * 1024, None).await
+}
+
+/// Discover a repository without inherited command-scoped Git configuration.
+pub(crate) async fn run_bound_discovery(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    let mut command = bound_git_command();
+    command
+        .env("GIT_CONFIG_COUNT", "0")
+        .env_remove("GIT_CONFIG_PARAMETERS")
+        .env_remove("GIT_CONFIG");
+    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+}
+
 /// Branch switches and their hooks use native path semantics. Fix diagnostic
 /// locale so local-overwrite refusal is distinguishable from other failures.
 pub async fn run_checkout(path: &Path, args: &[OsString]) -> Result<RawOutput> {

@@ -479,7 +479,7 @@ impl Backend {
                         | desktop_backend::RecoveryKind::Rebase
                         | desktop_backend::RecoveryKind::CherryPick,
                     action: desktop_backend::RecoveryAction::Abort,
-                }
+                } | Operation::RendererAbortSquash { .. }
             )
         {
             return Err(AppError::BadArgs("unsupported Git abort operation".into()));
@@ -1591,6 +1591,16 @@ mod tests {
             assert_eq!(result["code"], 0, "{result}");
             let parents = String::from_utf8(git(&["rev-list", "--parents", "-n", "1", "HEAD"])).unwrap();
             assert_eq!(parents.split_whitespace().count(), 3);
+            let head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
+            let branch = String::from_utf8(git(&["symbolic-ref", "HEAD"])).unwrap().trim().to_owned();
+            fs::write(root.join(".git/SQUASH_MSG"), "squash\n").unwrap();
+            fs::write(root.join("file"), "changed\n").unwrap();
+            let squash = |expected_head: &str| backend.admit_git_info(vec![json!({"operation":{"type":"abort_git_operation","repository_path":root,"operation":{"method":"renderer_abort_squash","expected_head":expected_head,"expected_branch":branch}}})]).unwrap();
+            assert!(backend.read(squash(&"0".repeat(head.len()))).is_err());
+            assert_eq!(fs::read(root.join("file")).unwrap(), b"changed\n");
+            assert_eq!(backend.read(squash(&head)).unwrap()["code"], 0);
+            assert_eq!(fs::read(root.join("file")).unwrap(), b"resolved\n");
+            assert!(!root.join(".git/SQUASH_MSG").exists());
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

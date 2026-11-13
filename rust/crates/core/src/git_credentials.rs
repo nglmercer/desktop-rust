@@ -361,6 +361,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::RendererUpdateSubmodules { .. }
             | Operation::InitialCommit { .. }
             | Operation::RendererFinishMergeCommit
+            | Operation::RendererAbortSquash { .. }
             | Operation::ManageRemote { .. }
             | Operation::Stage { .. }
             | Operation::SelectDiff { .. }

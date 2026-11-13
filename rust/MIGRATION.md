@@ -2310,6 +2310,16 @@ remain separate legacy-removal gates.
 Wry and WebSocket merge completion now invoke a fixed Rust Git operation using
 the existing index and Git's prepared merge or squash message. Git runs normal
 hooks and performs the existing message cleanup; cancellation is reported as
-an uncertain commit outcome. Squash abort intentionally retains its legacy
-commit-and-reset path until reset is migrated as one verified workflow. Other
-commit, rebase and cherry-pick execution and hook-interaction gates remain open.
+an uncertain commit outcome. Other commit, rebase and cherry-pick execution
+and hook-interaction gates remain open.
+
+## Squash merge abort
+
+The native squash abort verifies the selected branch, tip, squash marker, and
+absence of another Git operation, then uses Git hard reset without creating a
+temporary commit. Repository discovery and the reset ignore inherited Git
+directory overrides; discovery also ignores command-scoped Git configuration
+from the environment, and a changed worktree is refused. This intentionally
+discards tracked changes as the existing abort action did. External Git writers
+are not reserved between verification and Git acquiring its own locks. The
+legacy commit-and-reset path remains only for the Electron runtime.

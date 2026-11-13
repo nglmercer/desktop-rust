@@ -15,6 +15,87 @@ const LARGE_BLOB_LIMIT: u64 = 100 * 1024 * 1024;
 mod trailer_tests {
     use super::*;
     #[tokio::test]
+    async fn aborts_squash_only_at_the_reviewed_branch_and_tip() {
+        use std::{fs, process::Command};
+        let root =
+            std::env::temp_dir().join(format!("desktop-abort-squash-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let run = |arguments: &[&str]| {
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap()
+        };
+        let git = |arguments: &[&str]| {
+            let output = run(arguments);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        fs::write(root.join("file"), "base\n").unwrap();
+        git(&["add", "file"]);
+        git(&["commit", "-qm", "base"]);
+        git(&["checkout", "-qb", "side"]);
+        fs::write(root.join("file"), "side\n").unwrap();
+        git(&["commit", "-qam", "side"]);
+        git(&["checkout", "-q", "-"]);
+        fs::write(root.join("file"), "main\n").unwrap();
+        git(&["commit", "-qam", "main"]);
+        let head = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        let branch = String::from_utf8(git(&["symbolic-ref", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        let repo = Repository::open(&root).await.unwrap();
+        assert!(repo.renderer_abort_squash(&head, &branch).await.is_err());
+        assert!(!run(&["merge", "--squash", "side"]).status.success());
+        fs::write(root.join("untracked"), "keep").unwrap();
+        let before = fs::read(root.join("file")).unwrap();
+        assert!(
+            repo.renderer_abort_squash(&"0".repeat(head.len()), &branch)
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.renderer_abort_squash(&head, "refs/heads/wrong")
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(root.join("file")).unwrap(), before);
+        assert!(root.join(".git/SQUASH_MSG").exists());
+        let result = repo
+            .execute(crate::Operation::RendererAbortSquash {
+                expected_head: head.clone(),
+                expected_branch: branch.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0, "{result}");
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"main\n");
+        assert_eq!(fs::read(root.join("untracked")).unwrap(), b"keep");
+        assert!(!root.join(".git/SQUASH_MSG").exists());
+        assert_eq!(
+            String::from_utf8(git(&["rev-parse", "HEAD"]))
+                .unwrap()
+                .trim(),
+            head
+        );
+        assert!(git(&["ls-files", "--unmerged"]).is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn finishes_only_active_merge_or_squash_with_git_message_cleanup() {
         use std::{fs, process::Command};
         for squash in [false, true] {
@@ -787,6 +868,84 @@ impl Repository {
 
     pub(crate) async fn commit_preview(&self) -> Result<Value> {
         Ok(serde_json::to_value(self.capture_commit_preview().await?)?)
+    }
+
+    /// Abort a squash against the exact branch and tip reviewed by the UI.
+    pub(crate) async fn renderer_abort_squash(
+        &self,
+        expected_head: &str,
+        expected_branch: &str,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            (expected_head.len() == 40 || expected_head.len() == 64)
+                && expected_head.bytes().all(|b| b.is_ascii_hexdigit()),
+            "Invalid expected squash tip"
+        );
+        anyhow::ensure!(
+            expected_branch.starts_with("refs/heads/")
+                && !expected_branch.contains(['\0', '\n', '\r']),
+            "Invalid expected squash branch"
+        );
+        let root =
+            process::run_bound_checkout(&self.path, &args(&["rev-parse", "--show-toplevel"]))
+                .await?;
+        anyhow::ensure!(root.code == 0, "Cannot inspect repository worktree");
+        let root = PathBuf::from(crate::os_from_bytes(
+            root.stdout.strip_suffix(b"\n").unwrap_or(&root.stdout),
+        )?)
+        .canonicalize()?;
+        anyhow::ensure!(
+            root == self.path.canonicalize()?,
+            "Repository worktree changed; refresh before aborting the squash"
+        );
+        let directory =
+            process::run_bound_checkout(&self.path, &args(&["rev-parse", "--absolute-git-dir"]))
+                .await?;
+        anyhow::ensure!(directory.code == 0, "Cannot inspect repository metadata");
+        let directory = PathBuf::from(crate::os_from_bytes(
+            directory
+                .stdout
+                .strip_suffix(b"\n")
+                .unwrap_or(&directory.stdout),
+        )?);
+        let squash = std::fs::symlink_metadata(directory.join("SQUASH_MSG"))
+            .context("No active squash message; refresh the repository")?;
+        anyhow::ensure!(
+            squash.is_file() && !squash.file_type().is_symlink(),
+            "Squash message is not a regular file"
+        );
+        for marker in [
+            "MERGE_HEAD",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "rebase-merge",
+            "rebase-apply",
+            "sequencer",
+        ] {
+            match std::fs::symlink_metadata(directory.join(marker)) {
+                Ok(_) => bail!(
+                    "Another Git operation is in progress; refresh before aborting the squash"
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let head =
+            process::run_bound_checkout(&self.path, &args(&["rev-parse", "--verify", "HEAD"]))
+                .await?;
+        let branch =
+            process::run_bound_checkout(&self.path, &args(&["symbolic-ref", "--quiet", "HEAD"]))
+                .await?;
+        anyhow::ensure!(
+            head.code == 0
+                && branch.code == 0
+                && String::from_utf8_lossy(&head.stdout).trim() == expected_head
+                && String::from_utf8_lossy(&branch.stdout).trim() == expected_branch,
+            "Branch or HEAD changed; refresh before aborting the squash"
+        );
+        let output =
+            process::run_bound_checkout(&self.path, &args(&["reset", "--hard", "HEAD"])).await?;
+        Ok(serde_json::to_value(output.text())?)
     }
 
     /// Finish the current merge or squash using Git's existing index and message.

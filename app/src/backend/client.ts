@@ -2360,6 +2360,23 @@ export class BackendClient {
     return result.stdout
   }
 
+  /** Abort a squash only if the reviewed branch and tip are still current. */
+  async abortRepositorySquashMerge(repositoryPath: string, expectedHead: string, expectedBranch: string): Promise<void> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedHead) || !expectedBranch.startsWith('refs/heads/') || /[\0\r\n]/.test(expectedBranch)) throw new BackendError({ code: 'invalid_request', message: 'Invalid squash abort basis', retryable: false })
+    const operation = { method: 'renderer_abort_squash', expected_head: expectedHead, expected_branch: expectedBranch }
+    let result: unknown
+    try {
+      result = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'abort_git_operation', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the branch, index and working files before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Squash abort outcome is uncertain; inspect the repository', retryable: false })
+    if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the squash'}; inspect the repository`, retryable: false })
+  }
+
   /** Abort only the named in-progress Git operation; never replay an uncertain result. */
   async abortRepositoryGitOperation(repositoryPath: string, kind: 'merge' | 'rebase' | 'cherry_pick'): Promise<void> {
     const operation = { method: 'recover', kind, action: 'abort' }

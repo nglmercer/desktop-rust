@@ -96,8 +96,7 @@ export async function createCommit(
 export async function createMergeCommit(
   repository: Repository,
   files: ReadonlyArray<WorkingDirectoryFileChange>,
-  manualResolutions: ReadonlyMap<string, ManualConflictResolution> = new Map(),
-  options: { readonly useNative?: boolean } = {}
+  manualResolutions: ReadonlyMap<string, ManualConflictResolution> = new Map()
 ): Promise<string> {
   // apply manual conflict resolutions
   for (const [path, resolution] of manualResolutions) {
@@ -114,7 +113,7 @@ export async function createMergeCommit(
   const otherFiles = files.filter(f => !manualResolutions.has(f.path))
 
   await stageFiles(repository, otherFiles)
-  if (options.useNative !== false && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     const stdout = await withRepositoryGitOperation(repository.path, 'mutation', () =>
       backend().finishRepositoryMergeCommit(repository.path), true)
     return stdout.split(']')[0].split(' ')[1]

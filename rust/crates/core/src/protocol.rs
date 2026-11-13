@@ -169,6 +169,10 @@ pub enum Operation {
     RendererCherryPickState,
     RendererRebaseState,
     RendererFinishMergeCommit,
+    RendererAbortSquash {
+        expected_head: String,
+        expected_branch: String,
+    },
     StatusConflictDetails {
         kind: StatusConflictKind,
     },

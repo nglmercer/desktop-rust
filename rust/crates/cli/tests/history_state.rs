@@ -425,3 +425,96 @@ fn pinned_history_tracking_and_recovery() {
     let history: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(history["commits"][0]["summary"], "C");
 }
+
+#[test]
+fn squash_abort_ignores_inherited_git_directory_overrides() {
+    let f = Fixture::new();
+    f.write("file", "base\n");
+    f.commit("base");
+    let head = f.git_text(&["rev-parse", "HEAD"]);
+    let branch = f.git_text(&["symbolic-ref", "HEAD"]);
+    let other = f.root.join("other");
+    assert!(
+        f.command("git")
+            .arg("clone")
+            .arg("-q")
+            .arg(&f.repo)
+            .arg(&other)
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::write(f.repo.join("file"), "target changed\n").unwrap();
+    fs::write(other.join("file"), "other changed\n").unwrap();
+    fs::write(f.repo.join(".git/SQUASH_MSG"), "target\n").unwrap();
+    fs::write(other.join(".git/SQUASH_MSG"), "other\n").unwrap();
+    let mut redirected = f
+        .command(env!("CARGO_BIN_EXE_desktop-rs"))
+        .arg("-C")
+        .arg(&f.repo)
+        .args(["repo", "-"])
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "core.worktree")
+        .env("GIT_CONFIG_VALUE_0", &other)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    redirected
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            json!({"method":"renderer_abort_squash","expected_head":head,"expected_branch":branch})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let redirected = redirected.wait_with_output().unwrap();
+    if redirected.status.success() {
+        let value: Value = serde_json::from_slice(&redirected.stdout).unwrap();
+        assert_eq!(value["code"], 0, "{value}");
+        assert_eq!(fs::read(f.repo.join("file")).unwrap(), b"base\n");
+    } else {
+        assert_eq!(fs::read(f.repo.join("file")).unwrap(), b"target changed\n");
+    }
+    assert_eq!(fs::read(other.join("file")).unwrap(), b"other changed\n");
+    fs::write(f.repo.join("file"), "target changed\n").unwrap();
+    fs::write(f.repo.join(".git/SQUASH_MSG"), "target\n").unwrap();
+    let mut child = f
+        .command(env!("CARGO_BIN_EXE_desktop-rs"))
+        .arg("-C")
+        .arg(&f.repo)
+        .args(["repo", "-"])
+        .env("GIT_DIR", other.join(".git"))
+        .env("GIT_WORK_TREE", &other)
+        .env("GIT_INDEX_FILE", other.join(".git/index"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            json!({"method":"renderer_abort_squash","expected_head":head,"expected_branch":branch})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["code"], 0, "{value}");
+    assert_eq!(fs::read(f.repo.join("file")).unwrap(), b"base\n");
+    assert_eq!(fs::read(other.join("file")).unwrap(), b"other changed\n");
+    assert!(!f.repo.join(".git/SQUASH_MSG").exists());
+    assert!(other.join(".git/SQUASH_MSG").exists());
+}

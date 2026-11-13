@@ -37,13 +37,6 @@ describe.each(['wry', 'ws'])('Rust merge completion through %s', transport => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('keeps the squash-abort commit and reset on the same legacy path', async () => {
-    mocks.git.mockResolvedValue({ stdout: '[main abc1234] merge\n' })
-    await expect(createMergeCommit(repository, [], new Map(), { useNative: false })).resolves.toBe('legacy')
-    expect(mocks.finish).not.toHaveBeenCalled()
-    expect(mocks.git).toHaveBeenCalledOnce()
-  })
-
   it('does not fall back or replay after an uncertain outcome', async () => {
     mocks.finish.mockRejectedValue(new Error('inspect HEAD'))
     await expect(createMergeCommit(repository, [])).rejects.toThrow('inspect HEAD')

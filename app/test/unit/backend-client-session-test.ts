@@ -131,6 +131,19 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenCalledTimes(2)
   })
 
+  it('binds squash abort to the reviewed branch and tip', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const head = 'a'.repeat(40)
+    await client.abortRepositorySquashMerge('/repo', head, 'refs/heads/main')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'abort_git_operation', repository_path: '/repo', operation: { method: 'renderer_abort_squash', expected_head: head, expected_branch: 'refs/heads/main' } } }))
+    await expect(client.abortRepositorySquashMerge('/repo', 'bad', 'refs/heads/main')).rejects.toMatchObject({ code: 'invalid_request', retryable: false })
+    invoke.mockRejectedValueOnce({ code: 'cancelled', message: 'interrupted', retryable: true })
+    await expect(client.abortRepositorySquashMerge('/repo', head, 'refs/heads/main')).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('working files') })
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('uses a restricted native abort and does not retry uncertain results', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' }))
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

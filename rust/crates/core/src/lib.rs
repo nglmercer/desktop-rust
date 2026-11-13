@@ -124,7 +124,8 @@ impl Repository {
     /// Resolve the working tree root so all clients agree on relative paths.
     pub async fn open(path: &Path) -> Result<Self> {
         let path = path.canonicalize().context("resolve repository path")?;
-        let output = process::run(&path, &args(&["rev-parse", "--show-toplevel"])).await?;
+        let output =
+            process::run_bound_discovery(&path, &args(&["rev-parse", "--show-toplevel"])).await?;
         if output.code != 0 {
             bail!("not a working tree: {}", output.text().stderr.trim());
         }
@@ -388,6 +389,14 @@ impl Repository {
             Operation::InitialCommit { paths } => return self.initial_commit(paths).await,
             Operation::RendererFinishMergeCommit => {
                 return self.renderer_finish_merge_commit().await;
+            }
+            Operation::RendererAbortSquash {
+                expected_head,
+                expected_branch,
+            } => {
+                return self
+                    .renderer_abort_squash(&expected_head, &expected_branch)
+                    .await;
             }
             Operation::Commit {
                 summary,
@@ -1178,7 +1187,8 @@ impl Repository {
             | CloseUnchangedCommitCheckpoint { .. }
             | ForgetCommitCheckpoint { .. }
             | InitialCommit { .. }
-            | RendererFinishMergeCommit => {
+            | RendererFinishMergeCommit
+            | RendererAbortSquash { .. } => {
                 unreachable!("handled by execute")
             }
             Checkout { .. }

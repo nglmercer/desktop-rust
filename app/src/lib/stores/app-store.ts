@@ -9163,12 +9163,22 @@ export class AppStore extends TypedBaseStore<IAppState> {
       changesState: { workingDirectory },
     } = this.repositoryStateCache.get(repository)
 
-    // Keep the commit and the following reset on the same path until reset is migrated.
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      const { tip } = branchesState
+      if (tip.kind !== TipState.Valid) {
+        log.error('Could not abort squash merge: the current branch is unavailable')
+        return
+      }
+      await gitStore.performFailableOperation(() =>
+        backend().abortRepositorySquashMerge(repository.path, tip.branch.tip.sha, tip.branch.ref)
+      )
+      return
+    }
+
     const commitResult = await this._finishConflictedMerge(
       repository,
       workingDirectory,
-      new Map<string, ManualConflictResolution>(),
-      false
+      new Map<string, ManualConflictResolution>()
     )
 
     // By committing, we clear out the SQUASH_MSG (and anything else git would
@@ -9202,8 +9212,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
   public async _finishConflictedMerge(
     repository: Repository,
     workingDirectory: WorkingDirectoryStatus,
-    manualResolutions: Map<string, ManualConflictResolution>,
-    useNative = true
+    manualResolutions: Map<string, ManualConflictResolution>
   ): Promise<string | undefined> {
     return this.withAssistedCommitMutationResources(repository, async () => {
       this.assistedCommits.state.assertAvailable(repository)
@@ -9211,8 +9220,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
         this.finishConflictedMergeCore(
           repository,
           workingDirectory,
-          manualResolutions,
-          useNative
+          manualResolutions
         )
       )
     })
@@ -9221,8 +9229,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private async finishConflictedMergeCore(
     repository: Repository,
     workingDirectory: WorkingDirectoryStatus,
-    manualResolutions: Map<string, ManualConflictResolution>,
-    useNative: boolean
+    manualResolutions: Map<string, ManualConflictResolution>
   ): Promise<string | undefined> {
     /**
      *  The assumption made here is that all other files that were part of this merge
@@ -9244,7 +9251,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
     const gitStore = this.gitStoreCache.get(repository)
     return await gitStore.performFailableOperation(() =>
-      createMergeCommit(repository, conflictedFiles, manualResolutions, { useNative })
+      createMergeCommit(repository, conflictedFiles, manualResolutions)
     )
   }
 
