@@ -9,7 +9,7 @@ import { Credentials } from './fixtures/credentials'
 
 const prototype = path.resolve('rust/target/debug/examples/selected_clone_prototype')
 
-describe.skip('selected-account clone prototype (disabled pending safe child-local descriptor lifetime)', () => {
+describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !== 'linux')('selected-account clone prototype', () => {
   let suite: Credentials
   let url: string
   beforeAll(async () => {
@@ -30,7 +30,7 @@ describe.skip('selected-account clone prototype (disabled pending safe child-loc
     return result
   }
   function intents() {
-    const ledger = `${suite.registry}.clone-intents.json`
+    const ledger = `${suite.registry}.clone-intents-v2.json`
     if (!existsSync(ledger)) return []
     return JSON.parse(readFileSync(ledger, 'utf8')) as Array<Record<string, unknown>>
   }

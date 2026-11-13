@@ -10,6 +10,9 @@ use std::{
 #[derive(Clone)]
 pub struct Registry {
     path: PathBuf,
+    // Exact descriptor paths remain valid in cloned registries used by
+    // detached blocking operations after the caller is cancelled.
+    owned_handles: Option<std::sync::Arc<Vec<std::sync::Arc<fs::File>>>>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -96,6 +99,8 @@ pub(crate) struct CloneIntent {
     pub(crate) destination: PathBuf,
     pub(crate) device: u64,
     pub(crate) inode: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) parent_identity: Option<(u64, u64)>,
     pub(crate) account: StoredAccount,
 }
 
@@ -235,8 +240,7 @@ impl SavedRepositories {
         use std::collections::HashSet;
         let mut paths = HashSet::new();
         let mut clone_ids = HashSet::new();
-        let mut clone_destinations = HashSet::new();
-        anyhow::ensure!(self.clone_intents.len() <= 1000, "Invalid clone recovery ledger");
+        anyhow::ensure!(self.clone_intents.len() <= 2000, "Invalid clone recovery ledger");
         for intent in &self.clone_intents {
             let parent = intent.stage.parent().context("Invalid clone recovery stage")?;
             let name = parent.file_name().and_then(|name| name.to_str()).and_then(|name| name.strip_prefix(".desktop-clone-"));
@@ -252,7 +256,6 @@ impl SavedRepositories {
                     && !intent.url.contains(['@', '?', '#', '\n', '\r', '\0'])
                     && crate::RepositoryIdentity::from_url(&intent.url).is_ok()
                     && clone_ids.insert(&intent.id)
-                    && clone_destinations.insert(&intent.destination)
                     && intent.stage.is_absolute()
                     && intent.destination.is_absolute()
                     && intent.stage.file_name().is_some_and(|name| name == "repository")
@@ -416,7 +419,14 @@ impl Registry {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path: std::path::absolute(&path).unwrap_or(path),
+            owned_handles: None,
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn with_owned_handles(mut self, handles: Vec<std::sync::Arc<fs::File>>) -> Self {
+        self.owned_handles = Some(std::sync::Arc::new(handles));
+        self
     }
 
     /// Credential-free identity for this registry's configuration namespace.
@@ -462,18 +472,39 @@ impl Registry {
     }
 
     fn read_clone_intents(&self) -> Result<Vec<CloneIntent>> {
-        let path = self.clone_intents_path();
-        match read_private_sidecar(&path, 16 * 1024 * 1024)? {
-            Some(value) => Ok(serde_json::from_slice(&value).context("Invalid clone recovery ledger")?),
-            None => Ok(Vec::new()),
+        let mut records = Vec::new();
+        for (path, v2) in [(self.clone_intents_path(), false), (self.clone_intents_v2_path(), true)] {
+            if let Some(value) = read_private_sidecar(&path, 16 * 1024 * 1024)? {
+                let entries = serde_json::from_slice::<Vec<CloneIntent>>(&value).context("Invalid clone recovery ledger")?;
+                anyhow::ensure!(entries.len() <= 1000, "Invalid clone recovery ledger");
+                anyhow::ensure!(entries.iter().all(|item| item.parent_identity.is_some() == v2), "Invalid clone recovery ledger version");
+                records.extend(entries);
+            }
         }
+        Ok(records)
+    }
+
+    fn clone_intents_v2_path(&self) -> PathBuf {
+        let mut path = self.path.as_os_str().to_os_string();
+        path.push(".clone-intents-v2.json");
+        path.into()
     }
 
     fn write_clone_intents(&self, previous: &[CloneIntent], next: &[CloneIntent]) -> Result<()> {
-        let expected = serde_json::to_vec(previous)?;
-        crate::storage::update(&self.clone_intents_path(), || self.read_clone_intents(), |current| {
+        let legacy = |items: &[CloneIntent]| items.iter().filter(|item| item.parent_identity.is_none()).cloned().collect::<Vec<_>>();
+        anyhow::ensure!(serde_json::to_vec(&legacy(previous))? == serde_json::to_vec(&legacy(next))?, "Older clone recovery records require manual inspection");
+        let expected = serde_json::to_vec(&previous.iter().filter(|item| item.parent_identity.is_some()).collect::<Vec<_>>())?;
+        let next_v2 = next.iter().filter(|item| item.parent_identity.is_some()).cloned().collect::<Vec<_>>();
+        anyhow::ensure!(serde_json::to_vec_pretty(&next_v2)?.len().saturating_add(1) <= 16 * 1024 * 1024, "Clone recovery ledger is full; inspect existing records");
+        let path = self.clone_intents_v2_path();
+        crate::storage::update(&path, || {
+            match read_private_sidecar(&path, 16 * 1024 * 1024)? {
+                Some(bytes) => Ok(serde_json::from_slice::<Vec<CloneIntent>>(&bytes)?),
+                None => Ok(Vec::new()),
+            }
+        }, |current| {
             anyhow::ensure!(serde_json::to_vec(current)? == expected, "Clone recovery ledger changed");
-            *current = next.to_vec();
+            *current = next_v2;
             Ok(())
         })?;
         Ok(())
@@ -520,6 +551,7 @@ impl Registry {
     fn begin_clone_intent(&self, intent: CloneIntent) -> Result<()> {
         self.update(|data| {
             anyhow::ensure!(data.record_for_path(&intent.destination).is_none(), "Clone destination is already saved");
+            anyhow::ensure!(data.clone_intents.iter().filter(|saved| saved.parent_identity.is_some()).count() < 1000, "Clone recovery ledger is full; inspect existing records");
             anyhow::ensure!(!data.clone_intents.iter().any(|saved| saved.destination == intent.destination), "Another clone already needs recovery for this destination");
             data.clone_intents.push(intent.clone());
             Ok(())
@@ -531,12 +563,20 @@ impl Registry {
     fn finish_clone_intent(&self, intent: &CloneIntent, select: bool) -> Result<SavedRepositoryRecord> {
         // Hash outside the global registry lock; the short locked section
         // checks both the ledger and the destination's directory identity.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let (parent, certificate_path) = pinned_clone_destination(intent)?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        verify_clone_certificate(&certificate_path, intent)?;
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         verify_clone_identity(&intent.destination, intent.device, intent.inode)?;
-        verify_clone_certificate(&intent.destination, intent)?;
         let mut completed = None;
         self.update(|data| {
+            anyhow::ensure!(data.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
             let saved = data.clone_intents.iter().find(|saved| saved.id == intent.id).context("Clone recovery record changed")?;
-            anyhow::ensure!(saved.phase == "ready" && saved.certificate == intent.certificate && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)?, "Clone recovery record changed");
+            anyhow::ensure!(saved.phase == "ready" && saved.certificate == intent.certificate && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && saved.parent_identity == intent.parent_identity && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)?, "Clone recovery record changed");
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            { let _ = pinned_clone_destination(intent)?; }
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
             verify_clone_identity(&intent.destination, intent.device, intent.inode)?;
             let record = if let Some(existing) = data.record_for_path(&intent.destination) {
                 anyhow::ensure!(existing.id == intent.id && serde_json::to_vec(&existing.account)? == serde_json::to_vec(&saved.account)?, "Clone destination was saved separately; inspect it before retrying");
@@ -552,14 +592,17 @@ impl Registry {
             completed = Some(record);
             Ok(())
         })?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        drop(parent);
         let completed = completed.context("Clone publication could not be saved")?;
         // The main registry must be durable before removing the separate
         // journal. If interrupted here, the stable record ID makes replay
         // idempotent and never adopts another repository's account.
         self.update(|data| {
+            anyhow::ensure!(data.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
             let saved = data.clone_intents.iter().find(|saved| saved.id == intent.id).context("Clone recovery record changed")?;
             let record = data.record_by_id(&intent.id).context("Clone publication record changed")?;
-            anyhow::ensure!(saved.phase == "ready" && saved.certificate == intent.certificate && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)? && record.path == intent.destination && serde_json::to_vec(&record.account)? == serde_json::to_vec(&intent.account)?, "Clone publication record changed");
+            anyhow::ensure!(saved.phase == "ready" && saved.certificate == intent.certificate && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && saved.parent_identity == intent.parent_identity && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)? && record.path == intent.destination && serde_json::to_vec(&record.account)? == serde_json::to_vec(&intent.account)?, "Clone publication record changed");
             data.clone_intents.retain(|saved| saved.id != intent.id);
             Ok(())
         })?;
@@ -570,8 +613,9 @@ impl Registry {
         anyhow::ensure!(matches!((from, to), ("downloading", "checkout") | ("checkout", "ready")), "Invalid clone recovery transition");
         anyhow::ensure!((to == "ready") == certificate.is_some(), "Invalid clone recovery certificate");
         self.update(|data| {
+            anyhow::ensure!(data.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
             let saved = data.clone_intents.iter_mut().find(|saved| saved.id == intent.id).context("Clone recovery record changed")?;
-            anyhow::ensure!(saved.phase == from && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)?, "Clone recovery record changed");
+            anyhow::ensure!(saved.phase == from && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && saved.parent_identity == intent.parent_identity && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)?, "Clone recovery record changed");
             saved.phase = to.into();
             saved.certificate = certificate.clone();
             Ok(())
@@ -579,10 +623,29 @@ impl Registry {
         Ok(())
     }
 
+    fn ensure_uncontested_clone(&self, intent: &CloneIntent) -> Result<()> {
+        let state = self.read()?;
+        anyhow::ensure!(state.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
+        Ok(())
+    }
+
     /// Recovery records contain no credential material. They are returned only
     /// on an explicit recovery request, never in the regular repository list.
     pub fn clone_recovery_records(&self) -> Result<serde_json::Value> {
-        Ok(serde_json::to_value(self.read()?.clone_intents)?)
+        let state = self.read()?;
+        let mut counts = std::collections::HashMap::new();
+        for intent in &state.clone_intents { *counts.entry(&intent.destination).or_insert(0_usize) += 1; }
+        let records = state.clone_intents.iter().map(|intent| {
+            let conflicted = counts.get(&intent.destination) != Some(&1);
+            let recoverable = !conflicted && intent.parent_identity.is_some() && intent.phase == "ready";
+            let mut value = serde_json::to_value(intent)?;
+            let object = value.as_object_mut().context("Invalid clone recovery record")?;
+            object.remove("parent_identity");
+            object.insert("recoverable".into(), serde_json::Value::Bool(recoverable));
+            object.insert("conflicted".into(), serde_json::Value::Bool(conflicted));
+            Ok(value)
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(serde_json::Value::Array(records))
     }
 
     pub fn select(&self, root: PathBuf) -> Result<SavedRepositories> {
@@ -1021,19 +1084,8 @@ fn verify_clone_certificate(path: &Path, intent: &CloneIntent) -> Result<()> {
     Ok(())
 }
 
-/// Until an intent is durably saved, clean up only the empty directories we
-/// created. Never recursively remove an unexpectedly populated directory.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-struct UnrecordedCloneStage {
-    container: PathBuf,
-    handle: fs::File,
-    device: u64,
-    inode: u64,
-    armed: bool,
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-fn pinned_clone_directory(handle: &fs::File, proc_root: &Path) -> Result<PathBuf> {
+pub(crate) fn pinned_clone_directory(handle: &fs::File, proc_root: &Path) -> Result<PathBuf> {
     use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
     let expected = handle.metadata()?;
     anyhow::ensure!(expected.is_dir(), "Clone staging path is not a directory");
@@ -1042,26 +1094,82 @@ fn pinned_clone_directory(handle: &fs::File, proc_root: &Path) -> Result<PathBuf
     anyhow::ensure!(actual.is_dir() && actual.dev() == expected.dev() && actual.ino() == expected.ino(), "Cannot safely pin clone staging directory");
     Ok(path)
 }
+/// Walk an already-canonical parent without ever following a substituted link.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-impl Drop for UnrecordedCloneStage {
-    fn drop(&mut self) {
-        if self.armed {
-            if let Ok(directory) = pinned_clone_directory(&self.handle, Path::new("/proc")) {
-                let _ = fs::remove_dir(directory.join("repository"));
-            }
-            if verify_clone_identity(&self.container, self.device, self.inode).is_ok() {
-                let _ = fs::remove_dir(&self.container);
-            }
-        }
+pub(crate) fn open_clone_parent(path: &Path) -> Result<fs::File> {
+    use std::os::{fd::{AsRawFd, FromRawFd}, unix::{ffi::OsStrExt, fs::OpenOptionsExt}};
+    use std::path::Component;
+    anyhow::ensure!(path.is_absolute(), "Clone parent must be absolute");
+    let mut directory = fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open("/")?;
+    let mut expected = PathBuf::from("/");
+    for component in path.components() {
+        let Component::Normal(name) = component else {
+            anyhow::ensure!(matches!(component, Component::RootDir), "Invalid clone parent component");
+            continue;
+        };
+        let name = std::ffi::CString::new(name.as_bytes()).context("Invalid clone parent component")?;
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+        if fd < 0 { return Err(std::io::Error::last_os_error()).context("Cannot safely open clone parent"); }
+        directory = unsafe { fs::File::from_raw_fd(fd) };
+        expected.push(std::ffi::OsStr::from_bytes(name.as_bytes()));
+        let pinned = pinned_clone_directory(&directory, Path::new("/proc"))?;
+        anyhow::ensure!(fs::canonicalize(&pinned)? == expected, "Clone parent changed while opening directories");
     }
+    Ok(directory)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn canonical_clone_destination(path: &Path) -> Result<PathBuf> {
+    let absolute = if path.is_absolute() { path.to_owned() } else { std::env::current_dir()?.join(path) };
+    let name = absolute.file_name().context("destination needs a directory name")?;
+    let parent = absolute.parent().context("destination needs a parent directory")?
+        .canonicalize().context("Selected-account clone requires an existing destination parent")?;
+    Ok(parent.join(name))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn ensure_clone_destination_outside_sensitive_home(destination: &Path, home: &Path) -> Result<()> {
+    anyhow::ensure!(destination != home && ![".ssh", ".gnupg", ".config", ".gitconfig"].iter().any(|name| {
+        let path = home.join(name);
+        destination.starts_with(&path) || fs::canonicalize(&path).is_ok_and(|resolved| destination.starts_with(resolved))
+    }), "Clone destination targets a sensitive system location");
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn revalidate_clone_parent(handle: &fs::File, expected: &Path, home: &Path) -> Result<()> {
+    let pinned = pinned_clone_directory(handle, Path::new("/proc"))?;
+    let actual = fs::canonicalize(pinned).context("Clone parent is unavailable")?;
+    anyhow::ensure!(actual == expected, "Clone parent changed during account verification");
+    ensure_clone_destination_outside_sensitive_home(&actual.join(".desktop-clone-check"), home)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn pinned_clone_destination(intent: &CloneIntent) -> Result<(fs::File, PathBuf)> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let parent_path = intent.destination.parent().context("Invalid clone destination")?;
+    let parent = open_clone_parent(parent_path)?;
+    let metadata = parent.metadata()?;
+    anyhow::ensure!(Some((metadata.dev(), metadata.ino())) == intent.parent_identity, "Clone destination parent changed; inspect it before recovery");
+    let path = pinned_clone_directory(&parent, Path::new("/proc"))?.join(intent.destination.file_name().context("Invalid clone destination")?);
+    let child = fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&path)?;
+    let metadata = child.metadata()?;
+    anyhow::ensure!((metadata.dev(), metadata.ino()) == (intent.device, intent.inode), "Published clone directory changed");
+    Ok((parent, path))
 }
 
 /// Publish or resume publication of an owned staging directory without ever
 /// replacing an existing destination. The source and target parents remain
 /// pinned by directory handles across the rename and identity check.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn publish_clone_intent(intent: &CloneIntent) -> Result<()> {
-    use cap_std::{ambient_authority, fs::Dir};
+fn publish_clone_intent(registry: &Registry, intent: &CloneIntent) -> Result<()> {
+    publish_clone_intent_before_rename(registry, intent, || Ok(()), || Ok(()))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn publish_clone_intent_before_rename(registry: &Registry, intent: &CloneIntent, before_lock: impl FnOnce() -> Result<()>, after_recheck: impl FnOnce() -> Result<()>) -> Result<()> {
+    use cap_std::fs::Dir;
+    use std::os::unix::fs::MetadataExt;
     use std::{ffi::{CString, OsStr}, os::{fd::AsRawFd, unix::ffi::OsStrExt}};
     fn identity(directory: &Dir, name: &OsStr) -> Result<Option<(u64, u64)>> {
         let name = CString::new(name.as_bytes()).context("Invalid clone path")?;
@@ -1083,20 +1191,37 @@ fn publish_clone_intent(intent: &CloneIntent) -> Result<()> {
     let target_parent = intent.destination.parent().context("Invalid clone destination")?;
     let source_name = intent.stage.file_name().context("Invalid clone staging name")?;
     let target_name = intent.destination.file_name().context("Invalid clone destination name")?;
-    let source_dir = Dir::open_ambient_dir(source_parent, ambient_authority()).context("Clone staging directory is unavailable")?;
-    let target_dir = Dir::open_ambient_dir(target_parent, ambient_authority()).context("Clone destination directory is unavailable")?;
+    let expected_parent = intent.parent_identity.context("Older clone recovery requires manual inspection")?;
+    let target_handle = open_clone_parent(target_parent).context("Clone destination directory is unavailable")?;
+    let metadata = target_handle.metadata()?;
+    anyhow::ensure!((metadata.dev(), metadata.ino()) == expected_parent, "Clone destination parent changed; inspect it before recovery");
+    let source_handle = open_clone_parent(source_parent).context("Clone staging directory is unavailable")?;
+    let source_dir = Dir::from_std_file(source_handle);
+    let target_dir = Dir::from_std_file(target_handle);
     let expected = (intent.device, intent.inode);
     match identity(&source_dir, source_name)? {
         Some(actual) => {
             anyhow::ensure!(actual == expected, "Clone staging directory changed; inspect it before recovery");
-            verify_clone_certificate(&intent.stage, intent)?;
+            let pinned_source = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), source_dir.as_raw_fd())).join(source_name);
+            verify_clone_certificate(&pinned_source, intent)?;
             anyhow::ensure!(identity(&source_dir, source_name)? == Some(expected), "Clone staging directory changed during review");
+            before_lock()?;
+            // Legacy writers use this same lock. Keep it through the short
+            // identity check and rename, never through the tree scan above.
+            let lock = crate::storage::lock(&registry.path)?;
+            let state = registry.read()?;
+            anyhow::ensure!(state.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
+            let saved = state.clone_intents.iter().find(|saved| saved.id == intent.id).context("Clone recovery record changed")?;
+            anyhow::ensure!(saved.phase == "ready" && saved.certificate == intent.certificate && saved.url == intent.url && saved.stage == intent.stage && saved.destination == intent.destination && saved.device == intent.device && saved.inode == intent.inode && saved.parent_identity == intent.parent_identity && serde_json::to_vec(&saved.account)? == serde_json::to_vec(&intent.account)?, "Clone recovery record changed");
+            anyhow::ensure!(identity(&source_dir, source_name)? == Some(expected), "Clone staging directory changed during review");
+            after_recheck()?;
             crate::cancellation::Cancellation::current().check()?;
             let source = CString::new(source_name.as_bytes()).context("Invalid clone staging name")?;
             let target = CString::new(target_name.as_bytes()).context("Invalid clone destination name")?;
             // Both names are single path components and both parent FDs remain live.
             let result = unsafe { libc::renameat2(source_dir.as_raw_fd(), source.as_ptr(), target_dir.as_raw_fd(), target.as_ptr(), libc::RENAME_NOREPLACE as _) };
             if result != 0 { return Err(std::io::Error::last_os_error()).context("Clone destination cannot be published without replacing existing data"); }
+            drop(lock);
             source_dir.open(".")?.into_std().sync_all()?;
             target_dir.open(".")?.into_std().sync_all()?;
         }
@@ -1104,7 +1229,8 @@ fn publish_clone_intent(intent: &CloneIntent) -> Result<()> {
     }
     anyhow::ensure!(identity(&target_dir, target_name)? == Some(expected), "Published clone differs from the reviewed staging directory");
     verify_clone_identity(&intent.destination, intent.device, intent.inode)?;
-    verify_clone_certificate(&intent.destination, intent)
+    let pinned_target = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), target_dir.as_raw_fd())).join(target_name);
+    verify_clone_certificate(&pinned_target, intent)
 }
 
 #[cfg(not(unix))]
@@ -1224,7 +1350,6 @@ pub struct CloneAccount {
 /// Clone privately with a selected account. A write-ahead recovery record
 /// precedes transport and publication never replaces data.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-#[allow(dead_code)]
 async fn clone_repository_selected_unavailable_implementation(
     registry: Registry,
     url: &str,
@@ -1237,60 +1362,59 @@ async fn clone_repository_selected_unavailable_implementation(
     for value in [&options.branch, &options.default_branch].into_iter().flatten() {
         anyhow::ensure!(!value.is_empty() && value.len() <= 4096 && !value.starts_with('-') && !value.chars().any(char::is_control), "Invalid clone branch");
     }
-    let destination = prepare_destination(path)?;
+    let destination = canonical_clone_destination(path)?;
+    let home = std::env::var_os("HOME").filter(|value| !value.is_empty()).context("Cannot inspect the user's home directory")?;
+    let home = fs::canonicalize(home).context("Cannot inspect the user's home directory")?;
+    ensure_clone_destination_outside_sensitive_home(&destination, &home)?;
     match fs::symlink_metadata(&destination) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
         Ok(_) => bail!("Selected-account clone requires a destination that does not yet exist"),
         Err(error) => return Err(error).context("Cannot inspect clone destination"),
     }
     let parent = destination.parent().context("repository needs a parent directory")?;
+    let parent_handle = std::sync::Arc::new(open_clone_parent(parent).context("Selected-account clone requires an existing destination parent")?);
+    let parent_metadata = parent_handle.metadata()?;
+    let pinned_parent = pinned_clone_directory(&parent_handle, Path::new("/proc"))?;
     let host = account.host.to_ascii_lowercase();
     let chosen = crate::github_api::ChosenAccount { host: &host, login: &account.login, id: Some(account.id) };
-    crate::git_credentials::clone::verify_clone_account(parent, url, chosen).await?;
-    let rewritten = process::run(parent, &args(&["ls-remote", "--get-url", "--", url])).await?;
+    crate::git_credentials::clone::verify_clone_account(&pinned_parent, url, chosen).await?;
+    let rewritten = process::run(&pinned_parent, &args(&["ls-remote", "--get-url", "--", url])).await?;
     anyhow::ensure!(rewritten.code == 0 && rewritten.stdout.strip_suffix(b"\n") == Some(url.as_bytes()), "Selected-account clone does not support URL rewrites");
-    let container = parent.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4()));
-    fs::DirBuilder::new().mode(0o700).create(&container).context("Cannot create private clone staging directory")?;
-    let container_handle = match fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&container) {
-        Ok(handle) => handle,
-        Err(error) => { let _ = fs::remove_dir(&container); return Err(error).context("Cannot pin clone staging container"); }
+    revalidate_clone_parent(&parent_handle, parent, &home)?;
+    let clone_id = uuid::Uuid::new_v4().to_string();
+    let container = parent.join(format!(".desktop-clone-{clone_id}"));
+    let anchored_container = pinned_parent.join(container.file_name().context("Invalid clone staging name")?);
+    fs::DirBuilder::new().mode(0o700).create(&anchored_container).context("Cannot create private clone staging directory")?;
+    macro_rules! staging_try {
+        ($operation:expr) => {
+            $operation.with_context(|| format!("Clone staging is retained for inspection at {}", container.display()))?
+        };
+    }
+    let container_handle = match fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&anchored_container) {
+        Ok(handle) => std::sync::Arc::new(handle),
+        Err(error) => return Err(error).with_context(|| format!("Cannot pin clone staging container; inspect {}", container.display())),
     };
-    let container_metadata = container_handle.metadata()?;
-    let unrecorded = UnrecordedCloneStage { container: container.clone(), handle: container_handle.try_clone()?, device: container_metadata.dev(), inode: container_metadata.ino(), armed: true };
-    verify_clone_identity(&container, container_metadata.dev(), container_metadata.ino())?;
-    let pinned_container = pinned_clone_directory(&container_handle, Path::new("/proc"))?;
+    let container_metadata = staging_try!(container_handle.metadata());
+    staging_try!(verify_clone_identity(&container, container_metadata.dev(), container_metadata.ino()));
+    let pinned_container = staging_try!(pinned_clone_directory(&container_handle, Path::new("/proc")));
     let stage = container.join("repository");
     let anchored_stage = pinned_container.join("repository");
-    fs::DirBuilder::new().mode(0o700).create(&anchored_stage).context("Cannot create private clone staging repository")?;
-    let stage_handle = fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&anchored_stage).context("Cannot pin clone staging directory")?;
-    let metadata = stage_handle.metadata()?;
+    staging_try!(fs::DirBuilder::new().mode(0o700).create(&anchored_stage).context("Cannot create private clone staging repository"));
+    let stage_handle = std::sync::Arc::new(staging_try!(fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC).open(&anchored_stage).context("Cannot pin clone staging directory")));
+    let metadata = staging_try!(stage_handle.metadata());
     anyhow::ensure!(metadata.is_dir(), "Clone staging path is not a directory");
-    verify_clone_identity(&stage, metadata.dev(), metadata.ino())?;
-    let pinned_stage = pinned_clone_directory(&stage_handle, Path::new("/proc"))?;
-    container_handle.sync_all()?;
-    fs::File::open(parent)?.sync_all()?;
+    staging_try!(verify_clone_identity(&stage, metadata.dev(), metadata.ino()));
+    let pinned_stage = staging_try!(pinned_clone_directory(&stage_handle, Path::new("/proc")));
+    staging_try!(container_handle.sync_all());
+    staging_try!(parent_handle.sync_all());
     let stored = StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: host.clone(), login: account.login.clone(), id: account.id }, association: None, source_remote: Some("origin".into()) };
-    let mut intent = CloneIntent { id: uuid::Uuid::new_v4().to_string(), phase: "downloading".into(), url: url.to_owned(), certificate: None, stage: stage.clone(), destination: destination.clone(), device: metadata.dev(), inode: metadata.ino(), account: stored.clone() };
+    let mut intent = CloneIntent { id: clone_id, phase: "downloading".into(), url: url.to_owned(), certificate: None, stage: stage.clone(), destination: destination.clone(), device: metadata.dev(), inode: metadata.ino(), parent_identity: Some((parent_metadata.dev(), parent_metadata.ino())), account: stored.clone() };
     let initial_registry = registry.clone();
     let initial_intent = intent.clone();
-    crate::cancellation::blocking(move || {
-        // The blocking task owns the guard even if its async caller is dropped.
-        let mut unrecorded = unrecorded;
-        match initial_registry.begin_clone_intent(initial_intent.clone()) {
-            Ok(()) => { unrecorded.armed = false; Ok(()) }
-            Err(error) => {
-                // Directory sync can fail after the atomic registry rename.
-                // Preserve the stage when the durable outcome is uncertain.
-                unrecorded.armed = match initial_registry.read() {
-                    Ok(state) => !state.clone_intents.iter().any(|saved| saved.id == initial_intent.id),
-                    Err(_) => false,
-                };
-                Err(error)
-            }
-        }
-    }).await?;
+    crate::cancellation::blocking(move || initial_registry.begin_clone_intent(initial_intent)).await
+        .with_context(|| format!("Clone staging could not be recorded; inspect {}", stage.display()))?;
     let work = async {
-        crate::git_credentials::clone::clone_no_checkout(parent, url, &pinned_stage, options.branch.as_deref(), options.default_branch.as_deref(), chosen, options.report_progress).await?;
+        crate::git_credentials::clone::clone_no_checkout(&pinned_parent, url, &pinned_stage, &stage_handle, &container_handle, &container, options.branch.as_deref(), options.default_branch.as_deref(), chosen, options.report_progress).await?;
         verify_clone_identity(&stage, intent.device, intent.inode)?;
         let phase_registry = registry.clone();
         let phase_intent = intent.clone();
@@ -1299,7 +1423,7 @@ async fn clone_repository_selected_unavailable_implementation(
         // Templates are installed after the provisional broker has stopped.
         let init = process::initialization_command(&pinned_stage, &args(&["init", "--quiet"])).await?;
         anyhow::ensure!(init.code == 0, "Cannot install clone templates");
-        let mut repository = Repository::open(&pinned_stage).await?;
+        let mut repository = Repository::open_pinned(&pinned_stage).await?;
         anyhow::ensure!(repository.path() == stage, "Clone staging path changed");
         verify_clone_identity(&stage, intent.device, intent.inode)?;
         // All repository subprocesses and the temporary saved-record binding
@@ -1307,7 +1431,8 @@ async fn clone_repository_selected_unavailable_implementation(
         repository.path = pinned_stage.clone();
         let origin = process::run(&pinned_stage, &args(&["remote", "get-url", "--", "origin"])).await?;
         anyhow::ensure!(origin.code == 0 && origin.stdout.strip_suffix(b"\n") == Some(url.as_bytes()), "Clone source changed during checkout");
-        let temporary_registry = Registry::new(pinned_container.join("registry.json"));
+        let temporary_registry = Registry::new(pinned_container.join("registry.json"))
+            .with_owned_handles(vec![container_handle.clone(), stage_handle.clone()]);
         let save_registry = temporary_registry.clone();
         let save_stage = pinned_stage.clone();
         let save_account = stored.clone();
@@ -1343,72 +1468,122 @@ async fn clone_repository_selected_unavailable_implementation(
         let origin = process::run(&pinned_stage, &args(&["remote", "get-url", "--", "origin"])).await?;
         anyhow::ensure!(origin.code == 0 && origin.stdout.strip_suffix(b"\n") == Some(url.as_bytes()), "Clone source changed during checkout");
         verify_clone_identity(&stage, intent.device, intent.inode)?;
-        let certificate_path = stage.clone();
-        let certificate = crate::cancellation::blocking(move || clone_certificate(&certificate_path)).await?;
+        let certificate_handle = container_handle.clone();
+        let certificate = crate::cancellation::blocking(move || {
+            let path = pinned_clone_directory(&certificate_handle, Path::new("/proc"))?.join("repository");
+            clone_certificate(&path)
+        }).await?;
         let phase_registry = registry.clone();
         let phase_intent = intent.clone();
         let phase_certificate = certificate.clone();
         crate::cancellation::blocking(move || phase_registry.advance_clone_intent(&phase_intent, "checkout", "ready", Some(phase_certificate))).await?;
         intent.phase = "ready".into();
         intent.certificate = Some(certificate);
+        let conflict_registry = registry.clone();
+        let conflict_intent = intent.clone();
+        crate::cancellation::blocking(move || conflict_registry.ensure_uncontested_clone(&conflict_intent)).await?;
         let publish_intent = intent.clone();
-        crate::cancellation::blocking(move || publish_clone_intent(&publish_intent)).await?;
+        let publish_registry = registry.clone();
+        crate::cancellation::blocking(move || publish_clone_intent(&publish_registry, &publish_intent)).await?;
         let save_registry = registry.clone();
         let save_intent = intent.clone();
         let record = crate::cancellation::blocking(move || save_registry.finish_clone_intent(&save_intent, false)).await?;
-        let repository = Repository::open(&destination).await?.with_saved_record(registry.clone(), record.id);
-        let _ = fs::remove_file(pinned_container.join("registry.json"));
-        let _ = fs::remove_file(pinned_container.join("registry.lock"));
-        if verify_clone_identity(&container, container_metadata.dev(), container_metadata.ino()).is_ok() {
-            let _ = fs::remove_dir(&container);
-        }
+        let mut repository = Repository::open_pinned(&pinned_stage).await?;
+        anyhow::ensure!(repository.path() == destination, "Published clone destination changed; inspect it before retrying");
+        repository.path = destination.clone();
+        repository.retained_clone_staging = Some(container.clone());
+        let repository = repository.with_saved_record(registry.clone(), record.id);
+        // A same-user hook can replace entries in this exposed container. Do
+        // not unlink them based on a raceable ownership check; retain it for
+        // explicit inspection even after publication succeeds.
         drop(stage_handle);
         drop(container_handle);
         Ok::<_, anyhow::Error>(repository)
     }.await;
-    work.map_err(|_| anyhow::anyhow!("Clone may have completed; inspect recovery record {} and the destination or staging directory {} before retrying", intent.id, stage.display()))
+    let broker_home = container.join("broker-home");
+    work.map_err(|_| anyhow::anyhow!("Clone may have completed; inspect recovery record {}, staging directory {}, and broker HOME {} if present before retrying", intent.id, stage.display(), broker_home.display()))
 }
 
 /// Resume only a finished staged clone, rechecking its actor, origin and
 /// directory identity. Earlier phases are intentionally not replayed.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-#[allow(dead_code)]
-async fn recover_selected_clone_unavailable_implementation(registry: Registry, id: &str) -> Result<SavedRepositoryRecord> {
-    let intent = registry.read()?.clone_intents.into_iter().find(|intent| intent.id == id).context("Clone recovery record not found")?;
+async fn recover_selected_clone_unavailable_implementation(registry: Registry, id: &str) -> Result<(SavedRepositoryRecord, PathBuf)> {
+    use std::os::unix::fs::MetadataExt;
+    let state = registry.read()?;
+    let intent = state.clone_intents.iter().find(|intent| intent.id == id).cloned().context("Clone recovery record not found")?;
+    anyhow::ensure!(state.clone_intents.iter().filter(|saved| saved.destination == intent.destination).count() == 1, "Conflicting clone recovery records require manual inspection");
     anyhow::ensure!(intent.phase == "ready", "Clone download or checkout was interrupted; inspect its staging directory before retrying");
+    let expected_parent = intent.parent_identity.context("Older clone recovery requires manual inspection")?;
+    let parent = open_clone_parent(intent.destination.parent().context("Invalid clone destination")?)?;
+    let metadata = parent.metadata()?;
+    anyhow::ensure!((metadata.dev(), metadata.ino()) == expected_parent, "Clone destination parent changed; inspect it before recovery");
     let candidate = match fs::symlink_metadata(&intent.stage) {
         Ok(_) => &intent.stage,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => &intent.destination,
         Err(error) => return Err(error).context("Cannot inspect clone staging directory"),
     };
-    verify_clone_identity(candidate, intent.device, intent.inode)?;
-    let certificate_path = candidate.to_owned();
+    let candidate_handle = open_clone_parent(candidate)?;
+    let metadata = candidate_handle.metadata()?;
+    anyhow::ensure!((metadata.dev(), metadata.ino()) == (intent.device, intent.inode), "Clone recovery directory changed");
+    let pinned_candidate = pinned_clone_directory(&candidate_handle, Path::new("/proc"))?;
+    let candidate_parent = open_clone_parent(candidate.parent().context("Invalid clone recovery parent")?)?;
+    let certificate_name = candidate.file_name().context("Invalid clone recovery name")?.to_owned();
     let certificate_intent = intent.clone();
-    crate::cancellation::blocking(move || verify_clone_certificate(&certificate_path, &certificate_intent)).await?;
-    let repository = Repository::open(candidate).await?;
+    crate::cancellation::blocking(move || {
+        let path = pinned_clone_directory(&candidate_parent, Path::new("/proc"))?.join(certificate_name);
+        verify_clone_certificate(&path, &certificate_intent)
+    }).await?;
+    let repository = Repository::open_pinned(&pinned_candidate).await?;
     anyhow::ensure!(repository.path() == candidate, "Clone recovery path changed");
-    let origin = process::run(candidate, &args(&["remote", "get-url", "--", "origin"])).await?;
+    let origin = process::run(&pinned_candidate, &args(&["remote", "get-url", "--", "origin"])).await?;
     anyhow::ensure!(origin.code == 0 && origin.stdout.strip_suffix(b"\n") == Some(intent.url.as_bytes()), "Clone recovery source changed");
     let crate::AccountAssignment::Assigned { host, login, id } = &intent.account.assignment else { bail!("Clone recovery account is invalid") };
     let account = crate::github_api::ChosenAccount { host, login, id: Some(*id) };
-    crate::git_credentials::clone::verify_clone_account(candidate, &intent.url, account).await?;
+    crate::git_credentials::clone::verify_clone_account(&pinned_candidate, &intent.url, account).await?;
+    let home = std::env::var_os("HOME").filter(|value| !value.is_empty()).context("Cannot inspect the user's home directory")?;
+    let home = fs::canonicalize(home).context("Cannot inspect the user's home directory")?;
+    ensure_clone_destination_outside_sensitive_home(&intent.destination, &home)?;
     let publish_intent = intent.clone();
-    crate::cancellation::blocking(move || publish_clone_intent(&publish_intent)).await.map_err(|_| anyhow::anyhow!("Clone may have been published; inspect its destination and recovery record before retrying"))?;
+    let publish_registry = registry.clone();
+    crate::cancellation::blocking(move || publish_clone_intent(&publish_registry, &publish_intent)).await.map_err(|_| anyhow::anyhow!("Clone may have been published; inspect its destination and recovery record before retrying"))?;
     let save_registry = registry.clone();
     let save_intent = intent.clone();
     let record = crate::cancellation::blocking(move || save_registry.finish_clone_intent(&save_intent, false)).await.map_err(|_| anyhow::anyhow!("Clone may have been published; inspect its destination and recovery record before retrying"))?;
     // A recovered process no longer holds the original staging-container
     // descriptor. Leave its metadata for explicit inspection rather than
     // deleting files through a potentially replaced pathname.
-    Ok(record)
+    let retained = intent.stage.parent().context("Invalid clone staging path")?.to_owned();
+    Ok((record, retained))
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub async fn recover_selected_clone(registry: Registry, id: &str) -> Result<SavedRepositoryRecord> {
+    recover_selected_clone_with_staging(registry, id).await.map(|(record, _)| record)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub async fn recover_selected_clone_with_staging(registry: Registry, id: &str) -> Result<(SavedRepositoryRecord, PathBuf)> {
+    recover_selected_clone_unavailable_implementation(registry, id).await
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub async fn recover_selected_clone(_registry: Registry, _id: &str) -> Result<SavedRepositoryRecord> {
-    bail!("Selected-account clone recovery is temporarily unavailable; inspect the staging directory before retrying")
+    bail!("Selected-account clone recovery is unavailable on this platform")
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub async fn recover_selected_clone_with_staging(_registry: Registry, _id: &str) -> Result<(SavedRepositoryRecord, PathBuf)> {
+    bail!("Selected-account clone recovery is unavailable on this platform")
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub async fn clone_repository_selected(registry: Registry, url: &str, path: &Path, options: CloneOptions, account: CloneAccount) -> Result<Repository> {
+    clone_repository_selected_unavailable_implementation(registry, url, path, options, account).await
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub async fn clone_repository_selected(_registry: Registry, _url: &str, _path: &Path, _options: CloneOptions, _account: CloneAccount) -> Result<Repository> {
-    bail!("Selected-account cloning is temporarily unavailable")
+    bail!("Selected-account clone is unavailable on this platform")
 }
 
 pub async fn clone_repository_with_options(
@@ -1564,6 +1739,113 @@ fn config_directory(mut env: impl FnMut(&str) -> Option<std::ffi::OsString>) -> 
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    #[ignore = "requires the offline selected-account HTTPS fixture"]
+    async fn child_fd_selected_clone_fixture() {
+        let destination = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_DESTINATION").expect("fixture destination"));
+        let registry_path = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_REGISTRY").expect("fixture registry"));
+        let url = std::env::var("DESKTOP_TEST_CLONE_URL").expect("fixture URL");
+        let host = std::env::var("DESKTOP_TEST_CLONE_HOST").expect("fixture host");
+        let registry = Registry::new(registry_path);
+        let repository = clone_repository_selected_unavailable_implementation(
+            registry.clone(), &url, &destination,
+            CloneOptions { branch: None, default_branch: Some("main".into()), recursive: false, report_progress: false },
+            CloneAccount { host: host.clone(), login: "AliceCase".into(), id: 101 },
+        ).await.unwrap();
+        assert_eq!(repository.path(), destination);
+        assert_eq!(fs::read(destination.join("file")).unwrap(), b"base\n");
+        let state = registry.read().unwrap();
+        assert!(state.selected.is_none());
+        let record = state.record_for_path(&destination).unwrap();
+        assert_eq!(record.account.assignment, crate::AccountAssignment::Assigned { host, login: "AliceCase".into(), id: 101 });
+        let retained = destination.parent().unwrap().join(format!(".desktop-clone-{}", record.id));
+        assert_eq!(repository.retained_clone_staging(), Some(retained.as_path()));
+        assert!(retained.join("broker-home").is_dir());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    #[ignore = "requires the offline selected-account HTTPS fixture"]
+    async fn child_fd_selected_clone_recovery_fixture() {
+        let destination = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_DESTINATION").expect("fixture destination"));
+        let registry_path = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_REGISTRY").expect("fixture registry"));
+        let started = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_STARTED").expect("fixture start gate"));
+        let release = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_RELEASE").expect("fixture release gate"));
+        let url = std::env::var("DESKTOP_TEST_CLONE_URL").expect("fixture URL");
+        let host = std::env::var("DESKTOP_TEST_CLONE_HOST").expect("fixture host");
+        let obstruction = destination.clone();
+        let blocker = tokio::spawn(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                while !started.exists() { tokio::time::sleep(std::time::Duration::from_millis(25)).await; }
+            }).await.unwrap();
+            fs::create_dir(&obstruction).unwrap();
+            fs::write(obstruction.join("user-data"), "preserve").unwrap();
+            fs::write(release, "release").unwrap();
+        });
+        let registry = Registry::new(registry_path);
+        let result = clone_repository_selected_unavailable_implementation(
+            registry.clone(), &url, &destination,
+            CloneOptions { branch: None, default_branch: Some("main".into()), recursive: false, report_progress: false },
+            CloneAccount { host: host.clone(), login: "AliceCase".into(), id: 101 },
+        ).await;
+        blocker.await.unwrap();
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(destination.join("user-data")).unwrap(), "preserve");
+        let pending = registry.read().unwrap().clone_intents;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].phase, "ready");
+        fs::remove_file(destination.join("user-data")).unwrap();
+        fs::remove_dir(&destination).unwrap();
+        if std::env::var_os("DESKTOP_TEST_CLONE_PREPARE_RECOVERY_ONLY").is_some() {
+            return;
+        }
+        let (record, retained) = recover_selected_clone_unavailable_implementation(registry.clone(), &pending[0].id).await.unwrap();
+        assert_eq!(record.path, destination);
+        assert_eq!(retained, pending[0].stage.parent().unwrap());
+        assert_eq!(fs::read(destination.join("file")).unwrap(), b"base\n");
+        let state = registry.read().unwrap();
+        assert!(state.selected.is_none());
+        assert!(state.clone_intents.is_empty());
+        assert_eq!(record.account.assignment, crate::AccountAssignment::Assigned { host, login: "AliceCase".into(), id: 101 });
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    #[ignore = "requires a clone recovery journal from the offline HTTPS fixture"]
+    async fn child_fd_changed_home_recovery_fixture() {
+        let registry = Registry::new(PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_REGISTRY").expect("fixture registry")));
+        let pending = registry.read().unwrap().clone_intents;
+        assert_eq!(pending.len(), 1);
+        let intent = &pending[0];
+        let error = recover_selected_clone_unavailable_implementation(registry.clone(), &intent.id).await.err().expect("changed HOME must prevent recovery");
+        assert!(error.to_string().contains("sensitive system location"));
+        assert!(!intent.destination.exists());
+        assert!(intent.stage.is_dir());
+        assert!(registry.read().unwrap().record_for_path(&intent.destination).is_none());
+        assert_eq!(registry.read().unwrap().clone_intents.len(), 1);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    #[ignore = "requires the offline selected-account HTTPS fixture"]
+    async fn child_fd_clone_admission_failure_fixture() {
+        let destination = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_DESTINATION").expect("fixture destination"));
+        let registry_path = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_REGISTRY").expect("fixture registry"));
+        let url = std::env::var("DESKTOP_TEST_CLONE_URL").expect("fixture URL");
+        let host = std::env::var("DESKTOP_TEST_CLONE_HOST").expect("fixture host");
+        let error = clone_repository_selected_unavailable_implementation(
+            Registry::new(registry_path), &url, &destination,
+            CloneOptions { branch: None, default_branch: Some("main".into()), recursive: false, report_progress: false },
+            CloneAccount { host, login: "AliceCase".into(), id: 101 },
+        ).await.err().expect("fixture registry is a directory");
+        let parent = destination.parent().unwrap();
+        let retained = fs::read_dir(parent).unwrap().filter_map(Result::ok).find(|entry| entry.file_name().to_string_lossy().starts_with(".desktop-clone-")).expect("retained staging container");
+        assert!(format!("{error:#}").contains(&retained.path().join("repository").display().to_string()));
+        assert!(retained.path().join("repository").is_dir());
+        assert!(!destination.exists());
+    }
 
     #[cfg(unix)]
     #[tokio::test]
@@ -2167,16 +2449,108 @@ mod tests {
         fixture.registry.add(root, true).unwrap();
         let intent = CloneIntent {
             id: uuid::Uuid::new_v4().to_string(), phase: "downloading".into(), url: "https://github.com/alice/repository.git".into(), certificate: None,
-            stage: fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository"), destination: fixture.directory.join("clone"), device: 1, inode: 1,
+            stage: fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository"), destination: fixture.directory.join("clone"), device: 1, inode: 1, parent_identity: Some((1, 1)),
             account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
         };
         fixture.registry.begin_clone_intent(intent).unwrap();
+        assert!(!fixture.registry.clone_intents_path().exists(), "new intents must be invisible to older binaries");
+        assert!(fixture.registry.clone_intents_v2_path().exists());
         let bytes = fs::read(&fixture.registry.path).unwrap();
         let legacy: LegacyRegistry = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(legacy.version, 1);
         assert_eq!(fixture.registry.read().unwrap().clone_intents.len(), 1);
         let public = fixture.registry.read().unwrap().public_view().unwrap();
         assert!(public.get("clone_intents").is_none());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    async fn legacy_clone_journal_remains_readable_and_inspection_only() {
+        let fixture = RegistryFixture::new();
+        let intent = CloneIntent {
+            id: uuid::Uuid::new_v4().to_string(), phase: "ready".into(), url: "https://github.com/alice/repository.git".into(), certificate: Some("0".repeat(64)),
+            stage: fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository"), destination: fixture.directory.join("old"),
+            device: 1, inode: 1, parent_identity: None,
+            account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
+        };
+        let legacy = serde_json::to_vec(&vec![intent.clone()]).unwrap();
+        fs::write(fixture.registry.clone_intents_path(), &legacy).unwrap();
+        let mut next = intent.clone();
+        next.id = uuid::Uuid::new_v4().to_string();
+        next.stage = fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository");
+        next.destination = fixture.directory.join("new");
+        next.phase = "downloading".into();
+        next.certificate = None;
+        next.parent_identity = Some((1, 1));
+        fixture.registry.begin_clone_intent(next).unwrap();
+        assert_eq!(fixture.registry.read().unwrap().clone_intents.len(), 2);
+        assert!(fixture.registry.clone_recovery_records().unwrap().as_array().unwrap().iter().all(|record| record["recoverable"] == false));
+        assert_eq!(fs::read(fixture.registry.clone_intents_path()).unwrap(), legacy);
+        let error = recover_selected_clone_unavailable_implementation(fixture.registry.clone(), &intent.id).await.err().expect("legacy intent must not be recovered");
+        assert!(error.to_string().contains("manual inspection"));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    async fn conflicting_legacy_and_v2_clones_leave_registry_readable() {
+        let fixture = RegistryFixture::new();
+        let unrelated = fixture.directory.join("saved");
+        fixture.registry.add(unrelated.clone(), true).unwrap();
+        let mut intent = CloneIntent {
+            id: uuid::Uuid::new_v4().to_string(), phase: "ready".into(), url: "https://github.com/alice/repository.git".into(), certificate: Some("0".repeat(64)),
+            stage: fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository"), destination: fixture.directory.join("target"),
+            device: 1, inode: 1, parent_identity: Some((1, 1)),
+            account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
+        };
+        fixture.registry.begin_clone_intent(intent.clone()).unwrap();
+        intent.id = uuid::Uuid::new_v4().to_string();
+        intent.stage = fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository");
+        intent.parent_identity = None;
+        fs::write(fixture.registry.clone_intents_path(), serde_json::to_vec(&vec![intent.clone()]).unwrap()).unwrap();
+        let state = fixture.registry.read().unwrap();
+        assert_eq!(state.selected, Some(unrelated));
+        assert_eq!(state.clone_intents.len(), 2);
+        let records = fixture.registry.clone_recovery_records().unwrap();
+        assert!(records.as_array().unwrap().iter().all(|record| record["conflicted"] == true && record["recoverable"] == false));
+        assert!(fixture.registry.ensure_uncontested_clone(&intent).is_err());
+        assert!(recover_selected_clone_unavailable_implementation(fixture.registry.clone(), &intent.id).await.is_err());
+        assert!(!intent.destination.exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn independently_full_legacy_and_v2_journals_keep_registry_readable() {
+        let fixture = RegistryFixture::new();
+        let unrelated = fixture.directory.join("saved");
+        fixture.registry.add(unrelated.clone(), true).unwrap();
+        let mut legacy = Vec::new();
+        let mut current = Vec::new();
+        for index in 0..2000_u128 {
+            let id = uuid::Uuid::from_u128(index + 1).to_string();
+            let intent = CloneIntent {
+                id: id.clone(), phase: "downloading".into(), url: "https://github.com/alice/repository.git".into(), certificate: None,
+                stage: fixture.directory.join(format!(".desktop-clone-{id}")).join("repository"), destination: fixture.directory.join(format!("target-{index}")),
+                device: 1, inode: 1, parent_identity: (index >= 1000).then_some((1, 1)),
+                account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
+            };
+            if index < 1000 { legacy.push(intent); } else { current.push(intent); }
+        }
+        fs::write(fixture.registry.clone_intents_path(), serde_json::to_vec(&legacy).unwrap()).unwrap();
+        fs::write(fixture.registry.clone_intents_v2_path(), serde_json::to_vec(&current).unwrap()).unwrap();
+        let state = fixture.registry.read().unwrap();
+        assert_eq!(state.selected, Some(unrelated));
+        assert_eq!(state.clone_intents.len(), 2000);
+        fs::remove_file(fixture.registry.clone_intents_path()).unwrap();
+        let mut extra = current[0].clone();
+        extra.id = uuid::Uuid::new_v4().to_string();
+        extra.stage = fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository");
+        extra.destination = fixture.directory.join("unique-over-limit");
+        assert!(fixture.registry.begin_clone_intent(extra).is_err());
+        assert_eq!(fixture.registry.read().unwrap().clone_intents.len(), 1000);
+        let mut oversized = current[0].clone();
+        oversized.url = format!("https://github.com/alice/{}", "a".repeat(16 * 1024 * 1024));
+        assert!(fixture.registry.write_clone_intents(&current, &[oversized]).is_err());
+        assert_eq!(fixture.registry.read().unwrap().clone_intents.len(), 1000);
     }
 
     #[cfg(unix)]
@@ -2222,31 +2596,23 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
-    fn unrecorded_clone_staging_cleans_only_empty_owned_directories() {
-        use std::os::unix::fs::MetadataExt;
+    fn failed_clone_admission_preserves_empty_replacement_and_original_stage() {
         let fixture = RegistryFixture::new();
-        let empty = fixture.directory.join("empty");
-        fs::create_dir_all(empty.join("repository")).unwrap();
-        let handle = fs::File::open(&empty).unwrap();
-        let metadata = handle.metadata().unwrap();
-        drop(UnrecordedCloneStage { container: empty.clone(), handle, device: metadata.dev(), inode: metadata.ino(), armed: true });
-        assert!(!empty.exists());
-        let occupied = fixture.directory.join("occupied");
-        fs::create_dir_all(occupied.join("repository")).unwrap();
-        fs::write(occupied.join("repository").join("user-data"), "preserve").unwrap();
-        let handle = fs::File::open(&occupied).unwrap();
-        let metadata = handle.metadata().unwrap();
-        drop(UnrecordedCloneStage { container: occupied.clone(), handle, device: metadata.dev(), inode: metadata.ino(), armed: true });
-        assert_eq!(fs::read_to_string(occupied.join("repository").join("user-data")).unwrap(), "preserve");
-        let replaced = fixture.directory.join("replaced");
-        fs::create_dir_all(replaced.join("repository")).unwrap();
-        let handle = fs::File::open(&replaced).unwrap();
-        let metadata = handle.metadata().unwrap();
-        let guard = UnrecordedCloneStage { container: replaced.clone(), handle, device: metadata.dev(), inode: metadata.ino(), armed: true };
-        fs::rename(&replaced, fixture.directory.join("original-container")).unwrap();
-        fs::create_dir_all(replaced.join("repository")).unwrap();
-        drop(guard);
-        assert!(replaced.join("repository").is_dir());
+        let container = fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4()));
+        let stage = container.join("repository");
+        let original = container.join("original");
+        fs::create_dir_all(&stage).unwrap();
+        fs::rename(&stage, &original).unwrap();
+        fs::create_dir(&stage).unwrap();
+        let invalid_registry = Registry::new(fixture.directory.clone());
+        let intent = CloneIntent {
+            id: uuid::Uuid::new_v4().to_string(), phase: "downloading".into(), url: "https://github.com/alice/repository.git".into(), certificate: None,
+            stage: stage.clone(), destination: fixture.directory.join("target"), device: 1, inode: 1, parent_identity: Some((1, 1)),
+            account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
+        };
+        assert!(invalid_registry.begin_clone_intent(intent).is_err());
+        assert!(stage.is_dir());
+        assert!(original.is_dir());
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -2263,6 +2629,141 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
+    fn clone_parent_walk_rejects_swapped_symlink_without_creating_children() {
+        use std::os::unix::fs::symlink;
+        let fixture = RegistryFixture::new();
+        let approved = fixture.directory.join("approved");
+        let protected = fixture.directory.join("protected");
+        let missing = fixture.directory.join("missing").join("nested");
+        assert!(open_clone_parent(&missing).is_err());
+        assert!(canonical_clone_destination(&missing.join("repo")).is_err());
+        assert!(!fixture.directory.join("missing").exists());
+        fs::create_dir(&approved).unwrap();
+        fs::create_dir(&protected).unwrap();
+        let destination = canonical_clone_destination(&approved.join("repo")).unwrap();
+        fs::rename(&approved, fixture.directory.join("displaced")).unwrap();
+        symlink(&protected, &approved).unwrap();
+        assert!(open_clone_parent(destination.parent().unwrap()).is_err());
+        assert!(!protected.join("repo").exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn clone_destination_resolves_symlink_parent_before_dot_dot() {
+        use std::os::unix::fs::symlink;
+        let fixture = RegistryFixture::new();
+        let real = fixture.directory.join("real");
+        fs::create_dir_all(real.join("nested")).unwrap();
+        let alias = fixture.directory.join("alias");
+        symlink(real.join("nested"), &alias).unwrap();
+        assert_eq!(canonical_clone_destination(&alias.join("..").join("repo")).unwrap(), real.join("repo"));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    async fn clone_discovery_stays_on_pinned_directory_after_path_swap() {
+        use std::os::unix::fs::symlink;
+        let fixture = RegistryFixture::new();
+        let stage = fixture.directory.join("stage");
+        let displaced = fixture.directory.join("displaced");
+        let victim = fixture.directory.join("victim");
+        fs::create_dir(&stage).unwrap();
+        fs::create_dir(&victim).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet"]).arg(&stage).status().unwrap().success());
+        let handle = fs::File::open(&stage).unwrap();
+        let pinned = pinned_clone_directory(&handle, Path::new("/proc")).unwrap();
+        fs::rename(&stage, &displaced).unwrap();
+        symlink(&victim, &stage).unwrap();
+        let repository = Repository::open_pinned(&pinned).await.unwrap();
+        assert_eq!(repository.path(), displaced);
+        assert_eq!(fs::read_dir(victim).unwrap().count(), 0);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn clone_sensitive_home_rejects_symlinked_credential_directory() {
+        use std::os::unix::fs::symlink;
+        let fixture = RegistryFixture::new();
+        let home = fixture.directory.join("home");
+        let credentials = fixture.directory.join("credentials");
+        fs::create_dir(&home).unwrap();
+        fs::create_dir(&credentials).unwrap();
+        symlink(&credentials, home.join(".ssh")).unwrap();
+        assert!(ensure_clone_destination_outside_sensitive_home(&credentials.join("new"), &home).is_err());
+        assert!(ensure_clone_destination_outside_sensitive_home(&home.join("projects/repo"), &home).is_ok());
+        assert_eq!(fs::read_dir(credentials).unwrap().count(), 0);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn clone_recovery_sensitive_policy_uses_current_home() {
+        let fixture = RegistryFixture::new();
+        let old_home = fixture.directory.join("old-home");
+        let current_home = fixture.directory.join("current-home");
+        fs::create_dir_all(current_home.join(".ssh")).unwrap();
+        fs::create_dir(&old_home).unwrap();
+        let destination = current_home.join(".ssh").join("repo");
+        assert!(ensure_clone_destination_outside_sensitive_home(&destination, &old_home).is_ok());
+        assert!(ensure_clone_destination_outside_sensitive_home(&destination, &current_home).is_err());
+        assert!(!destination.exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn clone_parent_moved_into_sensitive_home_fails_before_staging() {
+        let fixture = RegistryFixture::new();
+        let home = fixture.directory.join("home");
+        let protected = home.join(".ssh");
+        let approved = home.join("projects");
+        fs::create_dir_all(&protected).unwrap();
+        fs::create_dir(&approved).unwrap();
+        let handle = open_clone_parent(&approved).unwrap();
+        let moved = protected.join("moved");
+        fs::rename(&approved, &moved).unwrap();
+        assert!(revalidate_clone_parent(&handle, &approved, &home).is_err());
+        assert_eq!(fs::read_dir(&moved).unwrap().count(), 0);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn detached_clone_registry_write_owns_its_directory_descriptors() {
+        let fixture = RegistryFixture::new();
+        let owned = fixture.directory.join("owned");
+        let stage = owned.join("repository");
+        let unrelated = fixture.directory.join("unrelated");
+        fs::create_dir_all(&stage).unwrap();
+        fs::create_dir(&unrelated).unwrap();
+        let container_handle = std::sync::Arc::new(fs::File::open(&owned).unwrap());
+        let stage_handle = std::sync::Arc::new(fs::File::open(&stage).unwrap());
+        let registry = Registry::new(pinned_clone_directory(&container_handle, Path::new("/proc")).unwrap().join("registry.json"))
+            .with_owned_handles(vec![container_handle.clone(), stage_handle.clone()]);
+        let stage_path = pinned_clone_directory(&stage_handle, Path::new("/proc")).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let work = tokio::spawn(async move {
+            crate::cancellation::blocking(move || {
+                started_tx.send(()).unwrap();
+                resume_rx.recv().unwrap();
+                let account = StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) };
+                let result = registry.add_assigned_clone(stage_path, account);
+                done_tx.send(result.is_ok()).unwrap();
+                result.map(|_| ())
+            }).await
+        });
+        started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        work.abort();
+        drop(container_handle);
+        drop(stage_handle);
+        let _replacement = fs::File::open(&unrelated).unwrap();
+        resume_tx.send(()).unwrap();
+        assert!(done_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap());
+        assert!(owned.join("registry.json").exists());
+        assert_eq!(fs::read_dir(unrelated).unwrap().count(), 0);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
     fn clone_publication_is_no_replace_and_recoverable_after_rename() {
         use std::os::unix::fs::MetadataExt;
         let fixture = RegistryFixture::new();
@@ -2274,7 +2775,7 @@ mod tests {
         let stat = fs::symlink_metadata(&stage).unwrap();
         let mut intent = CloneIntent {
             id: uuid::Uuid::new_v4().to_string(), phase: "downloading".into(), url: "https://github.com/alice/repository.git".into(), certificate: None, stage: stage.clone(), destination: destination.clone(),
-            device: stat.dev(), inode: stat.ino(),
+            device: stat.dev(), inode: stat.ino(), parent_identity: Some((fs::metadata(&fixture.directory).unwrap().dev(), fs::metadata(&fixture.directory).unwrap().ino())),
             account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
         };
         fixture.registry.begin_clone_intent(intent.clone()).unwrap();
@@ -2284,17 +2785,18 @@ mod tests {
         fixture.registry.advance_clone_intent(&intent, "checkout", "ready", Some(certificate.clone())).unwrap();
         intent.phase = "ready".into();
         intent.certificate = Some(certificate);
+        assert_eq!(fixture.registry.clone_recovery_records().unwrap()[0]["recoverable"], true);
         assert!(fixture.registry.read().unwrap().public_view().unwrap().get("clone_intents").is_none());
         fs::create_dir(&destination).unwrap();
         fs::write(destination.join("data"), "unrelated").unwrap();
-        assert!(publish_clone_intent(&intent).is_err());
+        assert!(publish_clone_intent(&fixture.registry, &intent).is_err());
         assert_eq!(fs::read_to_string(destination.join("data")).unwrap(), "unrelated");
         assert_eq!(fs::read_to_string(stage.join("data")).unwrap(), "owned");
         fs::remove_dir_all(&destination).unwrap();
-        publish_clone_intent(&intent).unwrap();
+        publish_clone_intent(&fixture.registry, &intent).unwrap();
         assert!(!stage.exists());
         // A crash after rename but before registry update is safe to resume.
-        publish_clone_intent(&intent).unwrap();
+        publish_clone_intent(&fixture.registry, &intent).unwrap();
         let moved = fixture.directory.join("moved");
         fs::rename(&destination, &moved).unwrap();
         fs::create_dir(&destination).unwrap();
@@ -2328,15 +2830,110 @@ mod tests {
         let intent = CloneIntent {
             id: uuid::Uuid::new_v4().to_string(), phase: "ready".into(), url: "https://github.com/alice/repository.git".into(),
             certificate: Some(clone_certificate(&stage).unwrap()), stage: stage.clone(), destination: fixture.directory.join("target"),
-            device: stat.dev(), inode: stat.ino(),
+            device: stat.dev(), inode: stat.ino(), parent_identity: Some((fs::metadata(&fixture.directory).unwrap().dev(), fs::metadata(&fixture.directory).unwrap().ino())),
             account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
         };
         fixture.registry.begin_clone_intent(intent.clone()).unwrap();
         fs::write(stage.join("data"), "changed").unwrap();
         assert_eq!(fs::symlink_metadata(&stage).unwrap().ino(), intent.inode);
-        assert!(publish_clone_intent(&intent).is_err());
+        assert!(publish_clone_intent(&fixture.registry, &intent).is_err());
         assert!(!intent.destination.exists());
         assert_eq!(fs::read_to_string(stage.join("data")).unwrap(), "changed");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn clone_publication_rejects_parent_replacement() {
+        use std::os::unix::fs::{MetadataExt, symlink};
+        let fixture = RegistryFixture::new();
+        let approved = fixture.directory.join("approved");
+        let protected = fixture.directory.join("protected");
+        fs::create_dir(&approved).unwrap();
+        fs::create_dir(&protected).unwrap();
+        let stage = approved.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("data"), "owned").unwrap();
+        let metadata = fs::metadata(&stage).unwrap();
+        let parent = fs::metadata(&approved).unwrap();
+        let intent = CloneIntent {
+            id: uuid::Uuid::new_v4().to_string(), phase: "ready".into(), url: "https://github.com/alice/repository.git".into(),
+            certificate: Some(clone_certificate(&stage).unwrap()), stage, destination: approved.join("target"),
+            device: metadata.dev(), inode: metadata.ino(), parent_identity: Some((parent.dev(), parent.ino())),
+            account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
+        };
+        fs::rename(&approved, fixture.directory.join("displaced")).unwrap();
+        symlink(&protected, &approved).unwrap();
+        assert!(publish_clone_intent(&fixture.registry, &intent).is_err());
+        assert_eq!(fs::read_dir(&protected).unwrap().count(), 0);
+        fs::remove_file(&approved).unwrap();
+        fs::create_dir(&approved).unwrap();
+        assert!(publish_clone_intent(&fixture.registry, &intent).is_err());
+        assert_eq!(fs::read_dir(&approved).unwrap().count(), 0);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    async fn clone_source_swap_does_not_register_or_overwrite_user_data() {
+        use std::os::unix::fs::MetadataExt;
+        let fixture = RegistryFixture::new();
+        let stage = fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("reviewed"), "preserve").unwrap();
+        let destination = fixture.directory.join("target");
+        let moved = stage.with_file_name("original");
+        let metadata = fs::metadata(&stage).unwrap();
+        let parent = fs::metadata(&fixture.directory).unwrap();
+        let intent = CloneIntent {
+            id: uuid::Uuid::new_v4().to_string(), phase: "ready".into(), url: "https://github.com/alice/repository.git".into(),
+            certificate: Some(clone_certificate(&stage).unwrap()), stage: stage.clone(), destination: destination.clone(),
+            device: metadata.dev(), inode: metadata.ino(), parent_identity: Some((parent.dev(), parent.ino())),
+            account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
+        };
+        fixture.registry.begin_clone_intent(intent.clone()).unwrap();
+        assert!(publish_clone_intent_before_rename(&fixture.registry, &intent, || Ok(()), || {
+            fs::rename(&stage, &moved)?;
+            fs::create_dir(&stage)?;
+            fs::write(stage.join("replacement"), "preserve")?;
+            Ok(())
+        }).is_err());
+        assert_eq!(fs::read_to_string(moved.join("reviewed")).unwrap(), "preserve");
+        assert_eq!(fs::read_to_string(destination.join("replacement")).unwrap(), "preserve");
+        assert!(fixture.registry.read().unwrap().record_for_path(&destination).is_none());
+        assert!(recover_selected_clone_unavailable_implementation(fixture.registry.clone(), &intent.id).await.is_err());
+        assert_eq!(fs::read_to_string(moved.join("reviewed")).unwrap(), "preserve");
+        assert_eq!(fs::read_to_string(destination.join("replacement")).unwrap(), "preserve");
+        assert!(fixture.registry.read().unwrap().record_for_path(&destination).is_none());
+        assert_eq!(fixture.registry.read().unwrap().clone_intents.len(), 1);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn legacy_intent_arriving_before_publish_blocks_rename() {
+        use std::os::unix::fs::MetadataExt;
+        let fixture = RegistryFixture::new();
+        let stage = fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("data"), "preserve").unwrap();
+        let metadata = fs::metadata(&stage).unwrap();
+        let parent = fs::metadata(&fixture.directory).unwrap();
+        let intent = CloneIntent {
+            id: uuid::Uuid::new_v4().to_string(), phase: "ready".into(), url: "https://github.com/alice/repository.git".into(),
+            certificate: Some(clone_certificate(&stage).unwrap()), stage: stage.clone(), destination: fixture.directory.join("target"),
+            device: metadata.dev(), inode: metadata.ino(), parent_identity: Some((parent.dev(), parent.ino())),
+            account: StoredAccount { revision: 1, assignment: crate::AccountAssignment::Assigned { host: "github.com".into(), login: "alice".into(), id: 1 }, association: None, source_remote: Some("origin".into()) },
+        };
+        fixture.registry.begin_clone_intent(intent.clone()).unwrap();
+        let mut legacy = intent.clone();
+        legacy.id = uuid::Uuid::new_v4().to_string();
+        legacy.stage = fixture.directory.join(format!(".desktop-clone-{}", uuid::Uuid::new_v4())).join("repository");
+        legacy.parent_identity = None;
+        assert!(publish_clone_intent_before_rename(&fixture.registry, &intent, || {
+            fs::write(fixture.registry.clone_intents_path(), serde_json::to_vec(&vec![legacy])?)?;
+            Ok(())
+        }, || Ok(())).is_err());
+        assert!(!intent.destination.exists());
+        assert_eq!(fs::read_to_string(stage.join("data")).unwrap(), "preserve");
+        assert_eq!(fixture.registry.read().unwrap().clone_intents.len(), 2);
     }
 
     #[test]

@@ -317,8 +317,15 @@ enum ManagementOperation {
         preferences: desktop_core::PreferencesPatch,
     },
     ListRepositories,
-    ListCloneRecoveries,
-    RecoverClone { recovery_id: String },
+    ListCloneRecoveries {
+        #[serde(default)]
+        report_recovery_status: bool,
+    },
+    RecoverClone {
+        recovery_id: String,
+        #[serde(default)]
+        report_retained_staging: bool,
+    },
     RepositoryBinding {
         path: desktop_core::GitPath,
     },
@@ -433,6 +440,8 @@ enum ManagementOperation {
         #[serde(default)]
         report_progress: bool,
         #[serde(default)]
+        report_retained_staging: bool,
+        #[serde(default)]
         account: Option<desktop_core::CloneAccount>,
     },
 }
@@ -455,6 +464,36 @@ enum CreationStatusAction {
     ConflictDetails {
         kind: desktop_core::StatusConflictKind,
     },
+}
+
+fn retained_staging_path_value(path: &std::path::Path) -> serde_json::Value {
+    let value = match path.to_str() {
+        Some(text) => desktop_core::GitPath::Text(text.to_owned()),
+        None => desktop_core::GitPath::Bytes { bytes: path.as_os_str().as_encoded_bytes().to_vec() },
+    };
+    json!(value)
+}
+
+#[cfg(test)]
+mod retained_staging_tests {
+    use super::*;
+
+    #[test]
+    fn text_path_keeps_the_existing_git_path_shape() {
+        assert_eq!(retained_staging_path_value(std::path::Path::new("/tmp/stage")), json!("/tmp/stage"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_path_round_trips_without_losing_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+        let bytes = b"/tmp/clone-\xff".to_vec();
+        let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(bytes.clone()));
+        let value = retained_staging_path_value(&path);
+        assert_eq!(value, json!({"bytes": bytes}));
+        let decoded: desktop_core::GitPath = serde_json::from_value(value).unwrap();
+        assert_eq!(desktop_core::directory_path(decoded).unwrap(), path);
+    }
 }
 
 async fn execute(
@@ -605,14 +644,32 @@ async fn execute(
                 .await?
                 .public_view()
         }
-        ApplicationOperation::Management(ListCloneRecoveries) => {
+        ApplicationOperation::Management(ListCloneRecoveries { report_recovery_status }) => {
             anyhow::ensure!(expected_repository.is_none(), "Clone recovery cannot use a selected-repository binding");
-            cancellation::blocking(move || registry.clone_recovery_records()).await
+            let mut records = cancellation::blocking(move || registry.clone_recovery_records()).await?;
+            if !report_recovery_status {
+                for record in records.as_array_mut().ok_or_else(|| anyhow::anyhow!("Clone recovery response is invalid"))? {
+                    if let Some(record) = record.as_object_mut() {
+                        record.remove("recoverable");
+                        record.remove("conflicted");
+                    }
+                }
+            }
+            Ok(records)
         }
-        ApplicationOperation::Management(RecoverClone { recovery_id }) => {
+        ApplicationOperation::Management(RecoverClone { recovery_id, report_retained_staging }) => {
             anyhow::ensure!(expected_repository.is_none(), "Clone recovery cannot use a selected-repository binding");
             anyhow::ensure!(uuid::Uuid::parse_str(&recovery_id).is_ok_and(|value| value.to_string() == recovery_id), "Invalid clone recovery ID");
-            anyhow::bail!("Selected-account clone recovery is temporarily unavailable; inspect the staging directory before retrying")
+            let (record, retained) = desktop_core::recover_selected_clone_with_staging(registry, &recovery_id).await?;
+            let response: anyhow::Result<serde_json::Value> = (|| {
+                let mut response = serde_json::to_value(record)?;
+                if report_retained_staging {
+                    response.as_object_mut().ok_or_else(|| anyhow::anyhow!("Recovered clone response is invalid"))?
+                        .insert("retained_staging".into(), retained_staging_path_value(&retained));
+                }
+                Ok(response)
+            })();
+            response.map_err(|_| anyhow::anyhow!("Clone was recovered and saved; inspect the destination before retrying"))
         }
         ApplicationOperation::Management(RepositorySafeFetchRemotes { path }) => {
             anyhow::ensure!(
@@ -831,9 +888,34 @@ async fn execute(
             state.changes.send_replace(snapshot.clone());
             Ok(snapshot)
         }
-        ApplicationOperation::Management(CloneRepository { account: Some(_), .. }) => {
+        ApplicationOperation::Management(CloneRepository { url, path, branch, default_branch, recursive, report_progress, report_retained_staging, account: Some(account) }) => {
             anyhow::ensure!(expected_repository.is_none(), "Clone cannot use a selected-repository binding");
-            anyhow::bail!("Selected-account cloning is temporarily unavailable")
+            let destination = desktop_core::directory_path(path)?;
+            let assigned = desktop_core::AccountAssignment::Assigned { host: account.host.to_ascii_lowercase(), login: account.login.clone(), id: account.id };
+            let repository = desktop_core::clone_repository_selected(
+                registry.clone(), &url, &destination,
+                desktop_core::CloneOptions { branch, default_branch, recursive, report_progress }, account,
+            ).await?;
+            let finished: anyhow::Result<serde_json::Value> = async {
+                let account_view = repository.execute(Operation::RepositoryAccount).await?;
+                let bound_record = account_view["scope_id"].as_str().ok_or_else(|| anyhow::anyhow!("Clone account binding is unavailable"))?.to_owned();
+                let snapshot = repository.execute(Operation::Snapshot).await?;
+                let root = repository.path().to_owned();
+                let saved = registry.clone();
+                let record_root = root.clone();
+                let record = cancellation::blocking(move || saved.record_for_path(&record_root)).await?
+                    .ok_or_else(|| anyhow::anyhow!("Clone account is unavailable"))?;
+                anyhow::ensure!(record.id == bound_record && record.account.assignment == assigned, "Clone account changed after completion");
+                // Cross-version selection remains explicit.
+                let mut response = json!({"kind":"clone_completed_unselected", "record":record, "snapshot":snapshot});
+                if report_retained_staging {
+                    let path = repository.retained_clone_staging().ok_or_else(|| anyhow::anyhow!("Clone staging path is unavailable"))?;
+                    response.as_object_mut().ok_or_else(|| anyhow::anyhow!("Clone response is invalid"))?
+                        .insert("retained_staging".into(), retained_staging_path_value(path));
+                }
+                Ok(response)
+            }.await;
+            finished.map_err(|_| anyhow::anyhow!("Clone completed and was saved; inspect the destination before retrying"))
         }
         ApplicationOperation::Management(operation) => {
             let selecting = matches!(operation, SelectRepository { .. });
@@ -851,8 +933,10 @@ async fn execute(
                     default_branch,
                     recursive,
                     report_progress,
+                    report_retained_staging,
                     account,
                 } => {
+                    anyhow::ensure!(!report_retained_staging, "Retained staging is available only for selected-account clones");
                     let destination = desktop_core::directory_path(path)?;
                     let options = desktop_core::CloneOptions {
                             branch,

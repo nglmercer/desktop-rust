@@ -20,7 +20,7 @@ async function bounded<T>(promise: Promise<T>, ms = 30_000): Promise<T> {
   } finally { if (timer !== undefined) clearTimeout(timer) }
 }
 
-describe.skip('selected-account clone bridge (disabled pending safe child-local descriptor lifetime)', () => {
+describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !== 'linux')('selected-account clone bridge', () => {
   let suite: Credentials
   let server: ChildProcess
   let client: BackendClient
@@ -81,6 +81,7 @@ describe.skip('selected-account clone bridge (disabled pending safe child-local 
     const result = await bounded(client.request('clone_repository', { url, path: destination, account: account(), report_progress: true }, { onProgress: chunk => progress.push(Buffer.from(chunk.data, 'base64').toString('utf8')) }), 60_000)
     clean(result); clean(progress)
     assert.equal(object(result).kind, 'clone_completed_unselected')
+    assert.equal(Object.hasOwn(object(result), 'retained_staging'), false)
     assert.equal(readFileSync(path.join(destination, 'file'), 'utf8'), 'base\n')
     suite.assertActor()
     const registry = object(JSON.parse(readFileSync(suite.registry, 'utf8')))
@@ -90,6 +91,21 @@ describe.skip('selected-account clone bridge (disabled pending safe child-local 
     assert.ok(progress.length > 0, 'expected clone progress notifications')
     assert.ok(progress.every(line => /^(remote: )?(Enumerating objects|Counting objects|Compressing objects|Receiving objects|Resolving deltas|Checking out files|Updating files|Filtering content): (\d{1,3})% \(\3\/100\)\r$/.test(line)))
     await bounded(client.request('open_repository', { path: destination }))
+  }, 90_000)
+
+  it('returns a byte-preserving retained staging path only when requested', async () => {
+    const parent = Buffer.concat([Buffer.from(`${suite.root}/parent-`), Buffer.from([0xff])])
+    mkdirSync(parent)
+    const destination = Buffer.concat([parent, Buffer.from('/repo')])
+    const result = object(await bounded(client.request('clone_repository', {
+      url, path: { bytes: Array.from(destination) }, account: account(), report_retained_staging: true,
+    }), 60_000))
+    assert.equal(result.kind, 'clone_completed_unselected')
+    const record = object(result.record)
+    const retained = object(result.retained_staging)
+    const expected = Buffer.concat([parent, Buffer.from(`/.desktop-clone-${String(record.id)}`)])
+    assert.deepEqual(Buffer.from(retained.bytes as number[]), expected)
+    assert.ok(existsSync(Buffer.concat([expected, Buffer.from('/broker-home')])))
   }, 90_000)
 
   it('checks out the requested branch and refuses unsupported options before staging', async () => {
@@ -143,14 +159,66 @@ describe.skip('selected-account clone bridge (disabled pending safe child-local 
       const pending = await bounded(client.request('list_clone_recoveries')) as Array<Record<string, unknown>>
       const record = pending.find(row => row.destination === destination)
       assert.equal(record?.phase, 'ready')
+      assert.equal(Object.hasOwn(record ?? {}, 'recoverable'), false)
+      assert.equal(Object.hasOwn(record ?? {}, 'conflicted'), false)
+      const withStatus = await bounded(client.request('list_clone_recoveries', { report_recovery_status: true })) as Array<Record<string, unknown>>
+      const status = withStatus.find(row => row.destination === destination)
+      assert.equal(status?.recoverable, true)
+      assert.equal(status?.conflicted, false)
       rmSync(destination, { recursive: true })
-      const recovered = object(await bounded(client.request('recover_clone', { recovery_id: record?.id }), 60_000))
+      const recovered = object(await bounded(client.request('recover_clone', { recovery_id: record?.id, report_retained_staging: true }), 60_000))
       clean(recovered)
       assert.equal(recovered.path, destination)
+      assert.equal(recovered.retained_staging, path.dirname(String(record?.stage)))
+      assert.ok(existsSync(path.join(String(recovered.retained_staging), 'broker-home')))
       assert.equal(readFileSync(path.join(destination, 'file'), 'utf8'), 'base\n')
       const registry = object(JSON.parse(readFileSync(suite.registry, 'utf8')))
       assert.equal(registry.selected, path.join(suite.root, 'bridge-clone'))
       assert.deepEqual(await bounded(client.request('list_clone_recoveries')), [])
+    } finally { unblockTransfer() }
+  }, 90_000)
+
+  it('preserves the prior recovery response shape unless staging is requested', async () => {
+    const destination = path.join(suite.root, 'bridge-recovery-legacy-response')
+    blockTransfer()
+    const cloning = client.request('clone_repository', { url, path: destination, account: account() })
+    try {
+      await waitForTransfer()
+      mkdirSync(destination)
+      writeFileSync(path.join(destination, 'user-data'), 'preserve')
+      unblockTransfer()
+      await assert.rejects(bounded(cloning, 60_000))
+      const pending = await bounded(client.request('list_clone_recoveries')) as Array<Record<string, unknown>>
+      const record = pending.find(row => row.destination === destination)
+      assert.equal(record?.phase, 'ready')
+      rmSync(destination, { recursive: true })
+      const recovered = object(await bounded(client.request('recover_clone', { recovery_id: record?.id }), 60_000))
+      assert.equal(recovered.path, destination)
+      assert.equal(Object.hasOwn(recovered, 'retained_staging'), false)
+    } finally { unblockTransfer() }
+  }, 90_000)
+
+  it('returns recovery staging bytes without UTF-8 conversion', async () => {
+    const parent = Buffer.concat([Buffer.from(`${suite.root}/recovery-parent-`), Buffer.from([0xff])])
+    mkdirSync(parent)
+    const destination = Buffer.concat([parent, Buffer.from('/repo')])
+    blockTransfer()
+    const cloning = client.request('clone_repository', { url, path: { bytes: Array.from(destination) }, account: account() })
+    try {
+      await waitForTransfer()
+      mkdirSync(destination)
+      writeFileSync(Buffer.concat([destination, Buffer.from('/user-data')]), 'preserve')
+      unblockTransfer()
+      await assert.rejects(bounded(cloning, 60_000))
+      const pending = await bounded(client.request('list_clone_recoveries')) as Array<Record<string, unknown>>
+      const record = pending.find(row => typeof row.destination === 'object' && row.destination !== null && Buffer.from(object(row.destination).bytes as number[]).equals(destination))
+      assert.equal(record?.phase, 'ready')
+      const stage = Buffer.from(object(record?.stage).bytes as number[])
+      rmSync(destination, { recursive: true })
+      const recovered = object(await bounded(client.request('recover_clone', { recovery_id: record?.id, report_retained_staging: true }), 60_000))
+      const retained = Buffer.from(object(recovered.retained_staging).bytes as number[])
+      assert.deepEqual(retained, stage.subarray(0, stage.lastIndexOf('/')))
+      assert.ok(existsSync(Buffer.concat([retained, Buffer.from('/broker-home')])))
     } finally { unblockTransfer() }
   }, 90_000)
 })

@@ -260,7 +260,13 @@ async fn scope_selected<T>(
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .context("Start private Git credential broker")?;
+    #[cfg(not(test))]
     let helper = std::env::current_exe().context("Locate Git credential helper")?;
+    #[cfg(test)]
+    let helper = match std::env::var_os("DESKTOP_TEST_CLONE_HELPER") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => std::env::current_exe().context("Locate Git credential helper")?,
+    };
     let lease = Arc::new(Lease {
         repository: repository.clone(),
         pinned_clone_root: clone::pinned_checkout_active(),

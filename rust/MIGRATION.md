@@ -2531,41 +2531,51 @@ defaults for old clients. These options are covered by real Git and WebSocket
 tests, including a rewritten external helper in a submodule. Requests without
 an account retain native Git credential configuration.
 
-An experimental selected-account clone implementation can name a stored
+An opt-in selected-account clone can name a stored
 account and numeric actor for an HTTPS clone. It verifies the account and
 repository, rejects URL rewrites and redirects, and uses an isolated Git
 configuration and private credential broker for a no-checkout network phase.
-Git uses a private HOME for this phase;
-the supported TLS and proxy settings are copied explicitly. Templates are
+Git uses a private HOME for this phase; the supported TLS and proxy settings
+are copied explicitly. Templates are
 installed only after the provisional broker ends, and checkout uses the saved
 account broker. The clone is staged privately and published with a no-replace
 rename after a no-follow contents and metadata review. The saved result is not
 selected automatically; callers must explicitly open it.
 
-The selected-account WebSocket clone and recovery endpoints are temporarily
-disabled. Their descriptor paths can outlive the server in a detached child,
-allowing PID reuse to redirect a later access; recovery records remain
-available for inspection. A child-local descriptor design still needs verified
-Git/helper inheritance and cancellation and server-shutdown tests before these
-operations can be enabled safely.
+The network Git child inherits its staging and private HOME directory handles
+and refers to them through child-local descriptors. Offline HTTPS tests cover
+the credential helper, an escaped child after parent exit, an abruptly killed
+Rust parent, and the absence of descriptor paths in the resulting Git data.
+Checkout uses the existing saved-account trust model: user-configured hooks and
+filters run with that credential scope.
 
-The private clone journal is separate from the version-1 registry. It records
-download, checkout and ready phases before publication. `list_clone_recoveries`
-shows pending records; the disabled recovery implementation only resumes a
-ready publication after rechecking its actor, origin, directory identity and
-reviewed contents.
+New clone intents use a private v2 journal separate from the version-1
+registry and earlier clone journal. With `report_recovery_status`,
+`list_clone_recoveries` marks conflicting and older intents for manual
+inspection; the default response keeps its earlier shape. Recovery only
+resumes a ready v2 publication after rechecking its actor, origin, current HOME-sensitive path,
+parent and directory identities, and reviewed contents.
 Interrupted downloads and checkouts require inspection and are not replayed.
 A saved record is committed before the journal is cleared, allowing recovery if
-the process stops between those writes. Recovery leaves private staging
-metadata for inspection because the original directory handle is no longer
-available.
+the process stops between those writes. Clone and recovery retain the private
+staging container, temporary registry metadata and broker HOME for inspection;
+callers may set `report_retained_staging` to include its byte-preserving path
+in the result. Errors before journal admission report the staging path where
+possible; an abruptly cancelled process may leave an unrecorded hidden
+`.desktop-clone-*` directory in the chosen parent.
 
 This route is limited to Linux and Android with accessible `/proc` descriptor
-paths, an absent destination, nonrecursive HTTPS and a GitHub CLI account that
-can be verified. The review currently supports at most 100,000 entries, 2 GiB
+paths, an absent destination with an existing parent, nonrecursive HTTPS and a
+GitHub CLI account that can be verified. The review currently supports at most 100,000 entries, 2 GiB
 of regular-file data including `.git`, and depth 128. Same-user filesystem
-writers can still race the final review. Native Android, LFS and cross-platform
-parity remain to be verified. Wry, Electron and the browser clone workflow do
+writers can still relocate a parent after its final check or swap a staging
+name just before rename. The latter can move an unreviewed directory into an
+empty destination; post-check rejects account registration and recovery, so
+the user must inspect both locations before retrying. A same-user process can
+also replace the private broker HOME between its creation and no-follow open;
+this follows the existing same-user hook and filter trust boundary. Native
+Android, LFS and cross-platform parity remain to be verified. Wry, Electron and
+the browser clone workflow do
 not yet use this route; recursive submodule account scopes and full clone error
 detail remain open.
 
@@ -2574,7 +2584,7 @@ It forwards only fixed phase labels and numeric percentages, discarding raw
 remote output and rewritten URLs; notifications are bounded and best effort.
 Cancellation interrupts the Git process group on Unix and leaves the caller
 responsible for inspecting any partial destination. Windows process-tree
-cancellation, Git LFS progress, selected-account clone and recovery safety, and
+cancellation, Git LFS progress, recursive selected-account isolation, and
 routing the browser clone workflow through this endpoint remain open.
 
 Wry and browser WebSocket remote-HEAD refresh use a reviewed Rust operation. It binds

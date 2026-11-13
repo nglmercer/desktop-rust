@@ -105,7 +105,7 @@ pub use creation::CreationFile;
 pub use protocol::*;
 pub use registry::{
     CloneAccount, CloneOptions, Registry, SavedRepositories, SavedRepositoryRecord, clone_repository,
-    clone_repository_selected, clone_repository_with_options, initialize, initialize_desktop_repository, recover_selected_clone,
+    clone_repository_selected, clone_repository_with_options, initialize, initialize_desktop_repository, recover_selected_clone, recover_selected_clone_with_staging,
 };
 use serde_json::Value;
 use std::{
@@ -121,6 +121,7 @@ type NativeSessions = Arc<Mutex<std::collections::HashMap<String, NativeSessionS
 #[derive(Clone)]
 pub struct Repository {
     path: PathBuf,
+    retained_clone_staging: Option<PathBuf>,
     gate: Arc<Mutex<()>>,
     saved_scope: Option<SavedRepositoryScope>,
     copilot_runtime_root: Option<PathBuf>,
@@ -138,14 +139,21 @@ impl Repository {
     /// Resolve the working tree root so all clients agree on relative paths.
     pub async fn open(path: &Path) -> Result<Self> {
         let path = path.canonicalize().context("resolve repository path")?;
+        Self::open_pinned(&path).await
+    }
+
+    /// Run Git discovery from the supplied path without resolving it first.
+    /// Selected clone uses this only with a held directory descriptor path.
+    pub(crate) async fn open_pinned(path: &Path) -> Result<Self> {
         let output =
-            process::run_bound_discovery(&path, &args(&["rev-parse", "--show-toplevel"])).await?;
+            process::run_bound_discovery(path, &args(&["rev-parse", "--show-toplevel"])).await?;
         if output.code != 0 {
             bail!("not a working tree: {}", output.text().stderr.trim());
         }
         let root = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
         Ok(Self {
             path: PathBuf::from(os_from_bytes(root)?),
+            retained_clone_staging: None,
             gate: Arc::new(Mutex::new(())),
             saved_scope: None,
             copilot_runtime_root: None,
@@ -154,6 +162,12 @@ impl Repository {
                 copilot_bridge::MAX_NATIVE_SESSIONS,
             )),
         })
+    }
+
+    /// Private clone artifacts retained for explicit inspection, when this
+    /// handle was returned by a selected-account clone.
+    pub fn retained_clone_staging(&self) -> Option<&Path> {
+        self.retained_clone_staging.as_deref()
     }
 
     /// Associate this handle with a registry without reading or creating files.
@@ -1700,6 +1714,7 @@ mod future_size_tests {
     fn repository_operation_future_fits_normal_process_stacks() {
         let repository = Repository {
             path: PathBuf::from("."),
+            retained_clone_staging: None,
             gate: Arc::new(Mutex::new(())),
             saved_scope: None,
             copilot_runtime_root: None,

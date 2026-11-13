@@ -37,7 +37,22 @@ struct CloneLease {
 struct Guard {
     lease: Arc<CloneLease>,
     broker: Option<tokio::task::JoinHandle<()>>,
-    directory: PathBuf,
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn create_broker_home_before_create(parent: &std::fs::File, expected: &Path, before_create: impl FnOnce() -> Result<()>) -> Result<std::fs::File> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let pinned_parent = crate::registry::pinned_clone_directory(parent, Path::new("/proc"))?;
+    before_create()?;
+    ensure!(std::fs::canonicalize(&pinned_parent)? == expected, "Clone staging container changed before broker initialization");
+    let anchored = pinned_parent.join("broker-home");
+    std::fs::DirBuilder::new().mode(0o700).create(&anchored).context("Cannot create private clone directory")?;
+    let home = std::fs::OpenOptions::new().read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&anchored).context("Cannot pin private clone HOME")?;
+    let pinned_home = crate::registry::pinned_clone_directory(&home, Path::new("/proc"))?;
+    ensure!(std::fs::canonicalize(pinned_home)? == expected.join("broker-home"), "Clone temporary HOME changed during creation");
+    Ok(home)
 }
 
 /// Verify the chosen actor before creating a persistent recovery record.
@@ -87,7 +102,6 @@ impl Drop for Guard {
         if let Some(broker) = self.broker.take() {
             broker.abort();
         }
-        let _ = std::fs::remove_dir(&self.directory);
     }
 }
 
@@ -98,11 +112,15 @@ pub(crate) async fn clone_no_checkout(
     path: &Path,
     url: &str,
     destination: &Path,
+    destination_handle: &std::fs::File,
+    container_handle: &std::fs::File,
+    container: &Path,
     branch: Option<&str>,
     default_branch: Option<&str>,
     account: ChosenAccount<'_>,
     progress: bool,
 ) -> Result<()> {
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     use std::os::unix::fs::DirBuilderExt;
     let id = account
         .id
@@ -243,12 +261,31 @@ pub(crate) async fn clone_no_checkout(
         .await
         .context("Cannot start clone credential broker")?;
     let address = listener.local_addr()?.to_string();
+    #[cfg(not(test))]
     let helper = std::env::current_exe()?;
-    let temporary = std::env::temp_dir().join(format!("desktop-clone-{}", uuid::Uuid::new_v4()));
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&temporary)
-        .context("Cannot create private clone directory")?;
+    #[cfg(test)]
+    let helper = match std::env::var_os("DESKTOP_TEST_CLONE_HELPER") {
+        Some(path) => PathBuf::from(path),
+        None => std::env::current_exe()?,
+    };
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let temporary_handle = create_broker_home_before_create(container_handle, container, || Ok(()))?;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let command_directory = crate::registry::pinned_clone_directory(&temporary_handle, Path::new("/proc"))?;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let child_home = {
+        use std::os::fd::AsRawFd;
+        PathBuf::from(format!("/proc/self/fd/{}", temporary_handle.as_raw_fd()))
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let command_directory = {
+        let _ = container_handle;
+        let temporary = container.join("broker-home");
+        std::fs::DirBuilder::new().mode(0o700).create(&temporary).context("Cannot create private clone directory")?;
+        temporary
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let child_home = command_directory.clone();
     let secrets = [
         "https_proxy",
         "HTTPS_PROXY",
@@ -273,7 +310,7 @@ pub(crate) async fn clone_no_checkout(
         address,
         capability: uuid::Uuid::new_v4().to_string(),
         helper,
-        directory: temporary.clone(),
+        directory: child_home,
         cancellation: Cancellation::default(),
     });
     let broker_lease = lease.clone();
@@ -284,7 +321,6 @@ pub(crate) async fn clone_no_checkout(
     let guard = Guard {
         lease: lease.clone(),
         broker: Some(broker),
-        directory: temporary.clone(),
     };
     let mut args = crate::args(&["clone", "--no-checkout", "--no-recurse-submodules"]);
     if progress {
@@ -300,11 +336,22 @@ pub(crate) async fn clone_no_checkout(
         );
     }
     args.extend(crate::args(&["--", url]));
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::fd::AsRawFd;
+        args.push(format!("/proc/self/fd/{}", destination_handle.as_raw_fd()).into());
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     args.push(destination.as_os_str().to_owned());
     let output = CURRENT
         .scope(
             lease.clone(),
-            crate::process::run_clone(&temporary, &args, progress),
+            async {
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                { crate::process::run_clone_with_inherited_fd(&command_directory, &args, progress, destination_handle, Some(&temporary_handle)).await }
+                #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                { let _ = destination_handle; crate::process::run_clone(&command_directory, &args, progress).await }
+            },
         )
         .await;
     lease.cancellation.cancel();
@@ -459,4 +506,27 @@ pub(super) fn secrets() -> Option<Vec<Vec<u8>>> {
             values
         })
         .ok()
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+mod tests {
+    use super::*;
+
+    /// Run only from the offline HTTPS fixture; public clone remains disabled.
+    #[tokio::test]
+    #[ignore = "requires the offline selected-account HTTPS fixture"]
+    async fn child_fd_authenticated_clone_fixture() {
+        if let Some(path) = std::env::var_os("DESKTOP_TEST_CLONE_PID_FILE") {
+            std::fs::write(path, std::process::id().to_string()).unwrap();
+        }
+        let stage = PathBuf::from(std::env::var_os("DESKTOP_TEST_CLONE_STAGE").expect("fixture stage"));
+        let url = std::env::var("DESKTOP_TEST_CLONE_URL").expect("fixture URL");
+        let host = std::env::var("DESKTOP_TEST_CLONE_HOST").expect("fixture host");
+        let handle = std::fs::File::open(&stage).unwrap();
+        let account = ChosenAccount { host: &host, login: "AliceCase", id: Some(101) };
+        let container = stage.parent().unwrap();
+        let container_handle = std::fs::File::open(container).unwrap();
+        clone_no_checkout(container, &url, &stage, &handle, &container_handle, container, None, Some("main"), account, false).await.unwrap();
+        assert!(stage.join(".git").is_dir());
+    }
 }

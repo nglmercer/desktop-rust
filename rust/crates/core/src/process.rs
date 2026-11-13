@@ -59,7 +59,69 @@ pub(crate) async fn run_clone(
     args: &[OsString],
     report_progress: bool,
 ) -> Result<RawOutput> {
+    run_clone_inner(path, args, report_progress, &[]).await
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(crate) async fn run_clone_with_inherited_fd(
+    path: &Path,
+    args: &[OsString],
+    report_progress: bool,
+    handle: &std::fs::File,
+    home: Option<&std::fs::File>,
+) -> Result<RawOutput> {
+    use std::os::fd::AsRawFd;
+    let mut descriptors = vec![handle.as_raw_fd()];
+    if let Some(home) = home { descriptors.push(home.as_raw_fd()); }
+    anyhow::ensure!(descriptors.iter().all(|fd| *fd >= 3), "Clone directory descriptor overlaps a standard stream");
+    run_clone_inner(path, args, report_progress, &descriptors).await
+}
+
+async fn run_clone_inner(
+    path: &Path,
+    args: &[OsString],
+    report_progress: bool,
+    inherited_fds: &[i32],
+) -> Result<RawOutput> {
     let mut command = git_native_paths(None);
+    #[cfg(unix)]
+    if !inherited_fds.is_empty() {
+        #[cfg(test)]
+        {
+            let fd = inherited_fds[0];
+            let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+            if unsafe { libc::fstat(fd, metadata.as_mut_ptr()) } != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            let metadata = unsafe { metadata.assume_init() };
+            command.env("DESKTOP_TEST_CLONE_CHILD_FD", fd.to_string())
+                .env("DESKTOP_TEST_CLONE_CHILD_IDENTITY", format!("{}:{}", metadata.st_dev, metadata.st_ino));
+            if let Some(home_fd) = inherited_fds.get(1) {
+                let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+                if unsafe { libc::fstat(*home_fd, metadata.as_mut_ptr()) } != 0 {
+                    return Err(std::io::Error::last_os_error().into());
+                }
+                let metadata = unsafe { metadata.assume_init() };
+                command.env("DESKTOP_TEST_CLONE_HOME_IDENTITY", format!("{}:{}", metadata.st_dev, metadata.st_ino));
+            }
+        }
+        // This runs after fork, so clearing CLOEXEC changes only the child's
+        // descriptor table. The parent descriptor remains private.
+        let descriptors = inherited_fds.to_vec();
+        unsafe {
+            command.pre_exec(move || {
+                for fd in &descriptors {
+                    let flags = libc::fcntl(*fd, libc::F_GETFD);
+                    if flags < 0 || libc::fcntl(*fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = inherited_fds;
     // Fixed diagnostics allow safe classification without forwarding Git's
     // potentially credential-bearing error output to the caller.
     command.env("LC_ALL", "C");
@@ -1248,6 +1310,47 @@ async fn read_bounded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    async fn clone_inherits_child_local_directory_fd_without_persisting_it() {
+        use std::os::fd::AsRawFd;
+        let root = std::env::temp_dir().join(format!("desktop-child-fd-{}", uuid::Uuid::new_v4()));
+        let source = root.join("source.git");
+        let destination = root.join("destination");
+        std::fs::create_dir_all(&destination).unwrap();
+        let init = std::process::Command::new("git").args(["init", "--bare", "--quiet"]).arg(&source).status().unwrap();
+        assert!(init.success());
+        let handle = std::fs::File::open(&destination).unwrap();
+        let fd = handle.as_raw_fd();
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC, 0);
+        let args = vec!["clone".into(), "--no-checkout".into(), "--".into(), source.as_os_str().to_owned(), format!("/proc/self/fd/{fd}").into()];
+        let result = run_clone_with_inherited_fd(&root, &args, false, &handle, None).await.unwrap();
+        assert_eq!(result.code, 0, "{}", String::from_utf8_lossy(&result.stderr));
+        assert!(destination.join(".git").is_dir());
+        assert!(!std::fs::read_to_string(destination.join(".git/config")).unwrap().contains("/proc/self/fd"));
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC, 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[tokio::test]
+    async fn clone_rejects_directory_fd_overlapping_standard_stream() {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        const CHILD: &str = "DESKTOP_TEST_CLONE_CLOSED_STDIN";
+        if std::env::var_os(CHILD).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "process::tests::clone_rejects_directory_fd_overlapping_standard_stream", "--nocapture"])
+                .env(CHILD, "1").status().unwrap();
+            assert!(status.success());
+            return;
+        }
+        let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
+        assert_eq!(unsafe { libc::dup2(directory.as_raw_fd(), 0) }, 0);
+        let handle = unsafe { std::fs::File::from_raw_fd(0) };
+        let error = run_clone_with_inherited_fd(Path::new("/"), &[], false, &handle, None).await.err().unwrap();
+        assert!(error.to_string().contains("standard stream"));
+    }
 
     #[tokio::test]
     async fn clone_progress_never_forwards_split_proxy_credentials() {
