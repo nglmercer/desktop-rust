@@ -831,6 +831,7 @@ pub async fn clone_repository(url: &str, path: &Path) -> Result<Repository> {
         || url.starts_with('-')
         || url.contains(['\0', '\n', '\r'])
         || url.starts_with("ext::")
+        || url.starts_with("ext.exe::")
     {
         bail!("invalid clone URL");
     }
@@ -838,9 +839,17 @@ pub async fn clone_repository(url: &str, path: &Path) -> Result<Repository> {
     let parent = destination
         .parent()
         .context("repository needs a parent directory")?;
-    let mut command = args(&["clone", "--", url]);
+    let mut command = args(&[
+        "-c",
+        "protocol.ext.allow=never",
+        "-c",
+        "protocol.ext.exe.allow=never",
+        "clone",
+        "--",
+        url,
+    ]);
     command.push(destination.as_os_str().to_owned());
-    let output = process::run(parent, &command).await?;
+    let output = process::run_clone(parent, &command).await?;
     if output.code != 0 {
         bail!("{}", output.text().stderr);
     }
@@ -904,6 +913,97 @@ fn config_directory(mut env: impl FnMut(&str) -> Option<std::ffi::OsString>) -> 
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clone_rejects_rewritten_external_helpers_even_with_allowlist() {
+        use std::{os::unix::fs::PermissionsExt, process::Command};
+        const CHILD: &str = "DESKTOP_TEST_CLONE_PROTOCOL_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let fixture = RegistryFixture::new();
+            let root = fixture.directory.clone();
+            let script = root.join("external-helper");
+            fs::write(
+                &script,
+                "#!/bin/sh\n: > \"$DESKTOP_CLONE_TEST_MARKER\"\nexit 1\n",
+            )
+            .unwrap();
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+            let config = root.join("gitconfig");
+            let setting = format!("url.ext::{}.insteadOf", script.display());
+            assert!(
+                Command::new("git")
+                    .args(["config", "--file"])
+                    .arg(&config)
+                    .arg(setting)
+                    .arg("https://unsafe.invalid/repo")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "registry::tests::clone_rejects_rewritten_external_helpers_even_with_allowlist",
+                    "--nocapture",
+                ])
+                .env(CHILD, &root)
+                .env("HOME", &root)
+                .env("GIT_CONFIG_GLOBAL", &config)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_ALLOW_PROTOCOL", "file:ext:ext.exe")
+                .env("DESKTOP_CLONE_TEST_MARKER", root.join("executed"))
+                .env_remove("GIT_CONFIG_COUNT")
+                .env_remove("GIT_CONFIG_PARAMETERS")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(!root.join("executed").exists());
+            return;
+        }
+        let root = PathBuf::from(std::env::var_os(CHILD).unwrap());
+        let source = root.join("source.git");
+        assert!(
+            Command::new("git")
+                .args(["init", "--bare", "-q"])
+                .arg(&source)
+                .status()
+                .unwrap()
+                .success()
+        );
+        // Prove that this isolated rewrite really invokes only our fixture
+        // helper without the guard; otherwise an unused config would make the
+        // negative assertion below vacuous.
+        let control = Command::new("git")
+            .args(["clone", "--", "https://unsafe.invalid/repo"])
+            .arg(root.join("control"))
+            .output()
+            .unwrap();
+        assert!(!control.status.success());
+        assert!(root.join("executed").exists());
+        fs::remove_file(root.join("executed")).unwrap();
+        assert!(
+            clone_repository("https://unsafe.invalid/repo", &root.join("blocked"))
+                .await
+                .is_err()
+        );
+        assert!(!root.join("executed").exists());
+        assert!(
+            clone_repository("ext.exe::invalid", &root.join("blocked-exe"))
+                .await
+                .is_err()
+        );
+        let local = format!("file://{}", source.display());
+        assert!(
+            clone_repository(&local, &root.join("allowed"))
+                .await
+                .is_ok()
+        );
+    }
 
     struct RegistryFixture {
         directory: PathBuf,

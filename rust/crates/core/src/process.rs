@@ -36,6 +36,26 @@ pub async fn run(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     run_git(path, args, None, None).await
 }
 
+/// Apply Desktop's clone transport policy after URL rewrites, including when
+/// an inherited allowlist would otherwise override Git's protocol settings.
+pub(crate) async fn run_clone(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    let mut command = git_native_paths(None);
+    if let Some(value) = std::env::var_os("GIT_ALLOW_PROTOCOL") {
+        let value = value
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("Invalid Git protocol allowlist"))?;
+        let filtered = value
+            .split(':')
+            .filter(|protocol| {
+                !protocol.eq_ignore_ascii_case("ext") && !protocol.eq_ignore_ascii_case("ext.exe")
+            })
+            .collect::<Vec<_>>()
+            .join(":");
+        command.env("GIT_ALLOW_PROTOCOL", filtered);
+    }
+    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+}
+
 pub(crate) async fn repository_discovery(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     let mut command = git_command(None);
     command.env("LC_ALL", "C");
