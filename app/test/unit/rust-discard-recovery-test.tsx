@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repository } from '../../src/models/repository'
 import type { Dispatcher } from '../../src/ui/dispatcher'
+import { PopupType } from '../../src/models/popup'
 
 const mocks = vi.hoisted(() => ({
   history: vi.fn(),
@@ -17,11 +18,15 @@ const mocks = vi.hoisted(() => ({
   commitHistory: vi.fn(),
   recoverCommit: vi.fn(),
   closeCommit: vi.fn(),
+  forgetPreparedCommit: vi.fn(),
+  inspectCommit: vi.fn(),
+  showPopup: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
     repositoryDiscardHistory: mocks.history,
     listCommitCheckpoints: mocks.commitHistory,
+    inspectCommitCheckpoint: mocks.inspectCommit,
   }),
 }))
 vi.mock('../../src/ui/dialog', () => {
@@ -33,7 +38,7 @@ vi.mock('../../src/ui/dialog', () => {
     DefaultDialogFooter: () => null,
   }
 })
-import { DiscardRecovery } from '../../src/ui/changes/discard-recovery'
+import { DiscardRecovery, DiscardRecoveryDialog } from '../../src/ui/changes/discard-recovery'
 
 const repository = { path: '/repo' } as Repository
 const dispatcher = {
@@ -41,6 +46,8 @@ const dispatcher = {
   forgetRepositoryDiscard: mocks.forget,
   recoverPublishedCommitCheckpoint: mocks.recoverCommit,
   closeUnchangedCommitCheckpoint: mocks.closeCommit,
+  forgetPreparedCommitCheckpoint: mocks.forgetPreparedCommit,
+  showPopup: mocks.showPopup,
 } as unknown as Dispatcher
 const id = '12345678-1234-1234-1234-123456789abc'
 const record = {
@@ -69,6 +76,46 @@ afterEach(() => {
 })
 
 describe('discard recovery history', () => {
+  it('opens recovery through the application popup stack', () => {
+    render(<DiscardRecovery repository={repository} dispatcher={dispatcher} disabled={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
+    expect(mocks.showPopup).toHaveBeenCalledWith({ type: PopupType.RecoveryHistory, repository })
+  })
+
+  it('shows a prepared commit and requires confirmation before discarding it', async () => {
+    mocks.history.mockResolvedValue([])
+    mocks.commitHistory.mockResolvedValueOnce([
+      { id, state: 'prepared', head: null, branch: 'refs/heads/main' },
+    ]).mockResolvedValueOnce([])
+    mocks.forgetPreparedCommit.mockResolvedValue(undefined)
+    mocks.inspectCommit.mockResolvedValue({ id, state: 'prepared', branch_matches: true, head_matches: true, index_matches: false, operation_matches: true })
+    render(<DiscardRecoveryDialog onDismissed={() => {}} repository={repository} dispatcher={dispatcher} />)
+    await screen.findByText('Prepared commit was not published')
+    expect(screen.getByText(id)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Recover commit' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect prepared attempt' }))
+    await screen.findByText(/index changed/)
+    expect(mocks.inspectCommit).toHaveBeenCalledWith('/repo', id)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove prepared attempt' }))
+    expect(mocks.forgetPreparedCommit).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Discard prepared attempt' }))
+    await waitFor(() => expect(mocks.forgetPreparedCommit).toHaveBeenCalledWith(repository, id))
+    await screen.findByText('No recovery records.')
+  })
+
+  it('retains the prepared attempt if the backend rejects deletion', async () => {
+    mocks.history.mockResolvedValue([])
+    mocks.commitHistory.mockResolvedValue([
+      { id, state: 'prepared', head: null, branch: 'refs/heads/main' },
+    ])
+    mocks.forgetPreparedCommit.mockRejectedValue(new Error('Commit checkpoint requires recovery'))
+    render(<DiscardRecoveryDialog onDismissed={() => {}} repository={repository} dispatcher={dispatcher} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove prepared attempt' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Discard prepared attempt' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('requires recovery')
+    expect(screen.getByText(id)).toBeTruthy()
+  })
+
   it('closes an unchanged interrupted commit while keeping its backup', async () => {
     mocks.history.mockResolvedValue([])
     mocks.commitHistory
@@ -80,13 +127,12 @@ describe('discard recovery history', () => {
       ])
     mocks.closeCommit.mockResolvedValue(undefined)
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     fireEvent.click(
       await screen.findByRole('button', { name: 'Close unchanged attempt' })
     )
@@ -101,13 +147,12 @@ describe('discard recovery history', () => {
       new Error('Commit history unavailable')
     )
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     expect((await screen.findByRole('alert')).textContent).toContain(
       'Commit history unavailable'
     )
@@ -121,13 +166,12 @@ describe('discard recovery history', () => {
       { id, state: 'published', head: null, branch: 'refs/heads/main' },
     ])
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     expect((await screen.findByRole('alert')).textContent).toContain(
       'Discard history unavailable'
     )
@@ -145,13 +189,12 @@ describe('discard recovery history', () => {
       ])
     mocks.recoverCommit.mockResolvedValue(undefined)
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     fireEvent.click(
       await screen.findByRole('button', { name: 'Recover commit' })
     )
@@ -168,13 +211,12 @@ describe('discard recovery history', () => {
     ])
     mocks.recoverCommit.mockRejectedValue(new Error('Index changed'))
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     fireEvent.click(
       await screen.findByRole('button', { name: 'Recover commit' })
     )
@@ -189,13 +231,12 @@ describe('discard recovery history', () => {
       .mockResolvedValueOnce([{ ...record, state: 'undone' }])
     mocks.undo.mockResolvedValue(undefined)
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     await screen.findByText('file.txt')
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(mocks.undo).toHaveBeenCalledWith(repository, id))
@@ -207,13 +248,12 @@ describe('discard recovery history', () => {
     mocks.history.mockResolvedValue([{ ...record, state: 'prepared' }])
     mocks.undo.mockRejectedValue(new Error('File changed since discard'))
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Recover' }))
     expect((await screen.findByRole('alert')).textContent).toContain(
       'File changed since discard'
@@ -226,13 +266,12 @@ describe('discard recovery history', () => {
     mocks.history.mockResolvedValueOnce([record]).mockResolvedValueOnce([])
     mocks.forget.mockResolvedValue(undefined)
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     fireEvent.click(
       await screen.findByRole('button', { name: 'Delete backup' })
     )
@@ -251,13 +290,12 @@ describe('discard recovery history', () => {
     mocks.history.mockResolvedValue([{ ...record, state: 'undone' }])
     mocks.forget.mockRejectedValue(new Error('Backup is busy'))
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     fireEvent.click(
       await screen.findByRole('button', { name: 'Delete backup' })
     )
@@ -280,13 +318,12 @@ describe('discard recovery history', () => {
         })
     )
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     fireEvent.click(
       await screen.findByRole('button', { name: 'Delete backup' })
     )
@@ -303,13 +340,12 @@ describe('discard recovery history', () => {
       { ...record, state: 'invalid', files: [] },
     ])
     render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     await screen.findByText(/Unreadable recovery record/)
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
   })
@@ -325,24 +361,22 @@ describe('discard recovery history', () => {
       )
       .mockResolvedValueOnce([])
     const view = render(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         key="first"
         repository={repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     view.rerender(
-      <DiscardRecovery
+      <DiscardRecoveryDialog
         key="second"
         repository={{ path: '/other' } as Repository}
         dispatcher={dispatcher}
-        disabled={false}
+        onDismissed={() => {}}
       />
     )
     resolveFirst([record])
-    fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
     await screen.findByText('No recovery records.')
     expect(screen.queryByText('file.txt')).toBeNull()
     expect(mocks.history).toHaveBeenLastCalledWith('/other')

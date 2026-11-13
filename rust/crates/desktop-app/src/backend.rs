@@ -86,6 +86,13 @@ enum GitInfoOperation {
     Read {},
     Version {},
     GlobalConfigPath {},
+    AvailableEditors {},
+    OpenGlobalGitConfigEditor { name: String },
+    OpenNamedEditor {
+        repository_path: String,
+        path: Option<desktop_backend::GitPath>,
+        name: String,
+    },
     CloneSelected {
         url: String,
         path: desktop_backend::GitPath,
@@ -560,6 +567,7 @@ impl Backend {
         | GitInfoOperation::FastForwardBranches {
             repository_path, ..
         }
+        | GitInfoOperation::OpenNamedEditor { repository_path, .. }
         | GitInfoOperation::FetchRemote {
             repository_path, ..
         }
@@ -1799,6 +1807,14 @@ impl Backend {
                         return match operation {
                             GitInfoOperation::Version {} => desktop_backend::git_version().await.map(serde_json::Value::String),
                             GitInfoOperation::GlobalConfigPath {} => desktop_backend::git_global_config_path().await.map(serde_json::Value::String),
+                            GitInfoOperation::AvailableEditors {} => desktop_backend::available_editors(desktop_backend::ExternalEditor::Automatic).await,
+                            GitInfoOperation::OpenGlobalGitConfigEditor { name } => desktop_backend::open_global_git_config_editor(name).await,
+                            GitInfoOperation::OpenNamedEditor { repository_path, path, name } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                repo.open_editor(path, desktop_backend::ExternalEditor::Named { name }).await
+                            }
                             GitInfoOperation::CloneSelected { url, path, default_branch, account } => {
                                 return self.clone_selected(url, path, default_branch, account).await;
                             }
@@ -2164,6 +2180,65 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn wry_editor_rejects_unknown_names_and_repository_escape() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+        let root = std::env::temp_dir().join(format!("desktop-wry-editor-{}", uuid::Uuid::new_v4()));
+        assert!(std::process::Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
+        std::fs::write(root.join("file"), "test").unwrap();
+        let backend = Backend::new(8).unwrap();
+        let invoke = |path: &str, name: &str| {
+            let job = backend.admit_git_info(vec![json!({"operation":{"type":"open_named_editor","repository_path":root,"path":path,"name":name}})]).unwrap();
+            backend.read(job)
+        };
+        assert!(invoke("file", "/bin/sh").is_err());
+        assert!(invoke("../outside", "Visual Studio Code").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wry_editor_launches_detected_editor_in_real_repository() {
+        use std::os::unix::fs::PermissionsExt;
+        const ROOT_ENV: &str = "DESKTOP_WRY_EDITOR_TEST_ROOT";
+        if let Some(root) = std::env::var_os(ROOT_ENV) {
+            std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(move || {
+                let root = std::path::PathBuf::from(root);
+                let repo = root.join("repo");
+                let backend = Backend::new(8).unwrap();
+                let invalid = backend.admit_git_info(vec![json!({"operation":{"type":"open_global_git_config_editor","name":"/bin/sh"}})]).unwrap();
+                assert!(backend.read(invalid).is_err());
+                assert!(!root.join("git config").exists());
+                assert!(backend.admit_git_info(vec![json!({"operation":{"type":"open_global_git_config_editor","name":"Visual Studio Code","path":"/etc/passwd"}})]).is_err());
+                let global = backend.admit_git_info(vec![json!({"operation":{"type":"open_global_git_config_editor","name":"Visual Studio Code"}})]).unwrap();
+                assert_eq!(backend.read(global).unwrap()["code"], 0);
+                assert_eq!(std::fs::read_to_string(root.join("capture")).unwrap(), format!("--\n{}\n", root.join("git config").display()));
+                let job = backend.admit_git_info(vec![json!({"operation":{"type":"open_named_editor","repository_path":repo,"path":"file with spaces","name":"Visual Studio Code"}})]).unwrap();
+                assert_eq!(backend.read(job).unwrap()["code"], 0);
+                assert_eq!(std::fs::read_to_string(root.join("capture")).unwrap(), format!("--\n{}\n", repo.join("file with spaces").display()));
+            }).unwrap().join().unwrap();
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("desktop-wry-editor-launch-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "-q"]).arg(root.join("repo")).status().unwrap().success());
+        std::fs::write(root.join("repo/file with spaces"), "test").unwrap();
+        let editor = root.join("bin/code");
+        std::fs::write(&editor, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$DESKTOP_WRY_EDITOR_TEST_ROOT/capture\"\n").unwrap();
+        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let paths = std::iter::once(root.join("bin")).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())).collect::<Vec<_>>();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "backend::tests::wry_editor_launches_detected_editor_in_real_repository", "--nocapture"])
+            .env(ROOT_ENV, &root)
+            .env("GIT_CONFIG_GLOBAL", root.join("git config"))
+            .env("PATH", std::env::join_paths(paths).unwrap())
+            .status().unwrap();
+        let launched = root.join("capture").is_file();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(status.success() && launched);
+    }
 
     #[test]
     fn wry_reviews_and_recovers_remote_branch_deletion() {

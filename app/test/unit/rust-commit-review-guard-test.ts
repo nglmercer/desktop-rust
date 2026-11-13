@@ -21,7 +21,7 @@ vi.mock('../../src/lib/git/stage', () => ({
   stageManualConflictResolution: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
-  backend: () => ({ verifySelectedIndex: mocks.verify }),
+  backend: () => ({ transportKind: 'none', verifySelectedIndex: mocks.verify }),
 }))
 import { createCommit } from '../../src/lib/git/commit'
 
@@ -31,6 +31,9 @@ describe('selected commit review guard', () => {
     tree: 'a'.repeat(40),
     head: 'b'.repeat(40),
     branch: 'refs/heads/main',
+    basis: 'c'.repeat(64),
+    selection: {},
+    review: { threshold_bytes: 0, staged_count: 0, files: [], large_files: [] },
   }
   beforeEach(() => {
     vi.resetAllMocks()

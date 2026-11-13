@@ -322,11 +322,9 @@ The read shares the current 2 MiB Git output limit.
 Date cutoffs outside 1970–2037 are rejected because Git's approximate-date
 parser can silently reinterpret them as a different date.
 
-The renderer's selected-file size preflight now uses Rust on Wry and WebSocket.
-It fails on inaccessible paths rather than silently skipping them, treats a
-symlink as the link Git records, and batches large selections. This is an
-early worktree check, not a substitute for the staged-blob guard; ordinary
-selected-file commit staging and publication are still legacy workflows.
+The renderer's ordinary selected-file commit uses Rust on Wry and WebSocket.
+It reviews the selected blobs before preparing and publishing a checkpoint;
+oversized-file consent is bound to that review basis.
 Rust now exposes a selected-commit preview that builds a private index from
 HEAD for whole-file and certified partial selections. Its basis includes the
 repository identity, request, HEAD and branch, repository-operation state,
@@ -342,19 +340,12 @@ data and run configured clean filters. The renderer now translates selected
 whole files and certified partial lines into this preview and warns on
 oversized, non-LFS blobs. Explicitly allowed empty commits are also reviewed,
 including on unborn branches, without staging unrelated files; the permission
-is included in the review basis. A browser test verifies that a commit attempt reaches
-the Rust preview without changing HEAD or the index. The renderer retains the
-exact selection request with its review so it can be used for checkpoint
-preparation without reconstructing selected lines. The following resource
+is included in the review basis. The renderer retains the exact selection
+request with its review for checkpoint preparation. The following resource
 discovery now uses Rust on both transports, including linked worktrees,
 canonical aliases, and Git's transitive alternate-object graph. Invalid paths
-and unresolved object routing fail closed. A browser test reaches this typed
-discovery and then encounters the still-legacy commit step. After staging,
-the renderer compares a tree computed from a private copy of the live index,
-plus HEAD and branch, against the review. A mismatch stops the commit and may
-leave the staged index changed. This observation does not lock the index or
-refs through Git's commit and hooks; the renderer has not yet migrated to the
-typed publication and recovery workflow described below.
+and unresolved object routing fail closed. The legacy Electron path retains its
+staged-tree check; it can leave the staged index changed after a mismatch.
 Rust also has a commit reference fence that preserves existing Git hooks and
 checks the reviewed branch, old tip, ordered parents and tree during Git's reference
 transaction. The tree is mandatory, so a pre-commit hook that changes staged
@@ -372,9 +363,12 @@ under the live index lock. A real Git test covers a hook that changes the tree
 and a successful commit with preexisting staged changes. Interrupted and
 completed checkpoints are retained and cannot be forgotten by the preparation
 cleanup operation. Typed publication is available on Wry and WebSocket with
-explicit oversized-file consent, but the renderer's normal commit workflow
-still uses the legacy path: hook progress, interactive hook failure handling,
-and full commit integration remain required. On Unix, typed publication now
+explicit oversized-file consent and is used by the renderer's normal Rust
+commit workflow. Chromium coverage verifies a line-selected commit against
+HEAD, the index and working file, then a failing hook and checkpoint recovery.
+Ignoring an individual failed hook is not yet supported by the native path;
+the interface reports this and leaves the checkpoint for inspection. On Unix,
+typed publication now
 offers request-scoped, best-effort hook start/finish/failure notifications on
 Wry and WebSocket. It reads Git Trace2 through a private bounded pipe and emits
 only recognized hook names and statuses; it preserves an existing Trace2 event
@@ -397,8 +391,9 @@ ref and reviewed commit; missing receipts, concurrent changes and invalid
 backups are refused. Checkpoint use is protected by an OS lock released when
 the owner exits; legacy lock files without the new marker remain blocked for
 manual investigation. Git's own index and reference lock files can still need
-investigation after a hard interruption. The recovery history UI now exposes
-interrupted commit recovery through both Rust transports.
+investigation after a hard interruption. Recovery history exposes prepared and
+interrupted commits through both Rust transports, including inspection and
+explicit removal of a still-prepared checkpoint.
 An interrupted attempt can also be closed from recovery history when HEAD,
 the branch, index and repository-operation state still match its original
 checkpoint under locks. Closing retains the backups and does not claim that a
@@ -2149,6 +2144,14 @@ terminal-only editor; the CLI replaces its process to preserve TTY, signals and
 exit status. GUI processes are reaped while the service runs, report immediate
 failure and remain independent on shutdown. Existing preference files migrate
 through a default field without being rewritten by reads.
+
+The shared renderer now uses Rust discovery and a named-editor launch for Wry
+and WebSocket. Repository targets remain confined to the selected repository;
+opening global Git configuration uses a separate operation whose path is
+resolved by the host. The renderer does not yet support custom editor commands,
+and Rust's PATH-based discovery does not cover all Electron-discovered Windows
+registry entries or macOS bundles. Tests exercise both transports with real Git
+and a controlled editor process; platform-specific catalogs remain unverified.
 
 `stage_conflict` stages the saved working file through a temporary index. Its
 certificate binds selected conflict entries, working content/mode, repository

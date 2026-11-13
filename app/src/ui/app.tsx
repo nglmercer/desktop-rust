@@ -113,6 +113,7 @@ import { ApplicationTheme } from './lib/application-theme'
 import { RepositoryStateCache } from '../lib/stores/repository-state-cache'
 import { PopupType, Popup } from '../models/popup'
 import { OversizedFiles } from './changes/oversized-files-warning'
+import { DiscardRecoveryDialog } from './changes/discard-recovery'
 import { PushNeedsPullWarning } from './push-needs-pull'
 import { getCurrentBranchForcePushState } from '../lib/rebase'
 import { Banner, BannerType } from '../models/banner'
@@ -1728,6 +1729,14 @@ export class App extends React.Component<IAppProps, IAppState> {
             onDismissed={onPopupDismissedFn}
           />
         )
+      case PopupType.RecoveryHistory:
+        return (
+          <DiscardRecoveryDialog
+            repository={popup.repository}
+            dispatcher={this.props.dispatcher}
+            onDismissed={onPopupDismissedFn}
+          />
+        )
       case PopupType.Preferences:
         let repository = this.getRepository()
 
@@ -2189,6 +2198,7 @@ export class App extends React.Component<IAppProps, IAppState> {
             dispatcher={this.props.dispatcher}
             context={popup.context}
             repository={popup.repository}
+            reviewBasis={popup.reviewBasis}
           />
         )
       case PopupType.CommitConflictsWarning:

@@ -6,8 +6,9 @@ import { unstageAll } from './reset'
 import { ManualConflictResolution } from '../../models/manual-conflict-resolution'
 import { stageManualConflictResolution } from './stage'
 import { ITextDiff, ILargeTextDiff } from '../../models/diff'
-import { backend, type ISelectedCommitReview } from '../../backend/client'
-import { withRepositoryGitOperation } from './repository-operation'
+import { backend } from '../../backend/client'
+import { withRepositoryGitOperation, withoutRepositoryGitAccess } from './repository-operation'
+import type { ISelectedCommitReviewWithSelection } from './selected-commit-review'
 
 /**
  * @param repository repository to execute merge in
@@ -29,9 +30,80 @@ export async function createCommit(
       string,
       ITextDiff | ILargeTextDiff
     >
-    readonly selectedReview?: Pick<ISelectedCommitReview, 'tree' | 'head' | 'branch'>
+    readonly selectedReview?: ISelectedCommitReviewWithSelection
+    readonly allowLargeFiles?: boolean
   } & HookCallbackOptions
 ): Promise<string> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const review = options?.selectedReview
+    if (review === undefined) {
+      throw new Error('The selected changes must be reviewed before committing.')
+    }
+    if (backend().transportKind === 'wry' && (window as any).__desktop?.supportsCommitRequestProgress !== true) {
+      throw new Error('Request-owned commit progress requires a matching desktop backend')
+    }
+    const controller = new AbortController()
+    const listeners = new Set<(chunk: string | Buffer | Buffer[]) => void>()
+    const buffered: Buffer[] = []
+    let bufferedBytes = 0
+    let failedHook: string | undefined
+    const notify = (operation: () => void) => {
+      try {
+        withoutRepositoryGitAccess(operation)
+      } catch (error) {
+        log.error('Commit observer failed', error)
+      }
+    }
+    notify(() => options?.onTerminalOutputAvailable?.(callback => {
+      for (const chunk of buffered) notify(() => callback(chunk))
+      listeners.add(callback)
+      return { unsubscribe: () => listeners.delete(callback) }
+    }))
+    const checkpoint = await backend().prepareSelectedCommit(
+      repository.path,
+      review.selection,
+      review.basis,
+      { signal: controller.signal }
+    )
+    try {
+      const result = await backend().publishSelectedCommit(
+        repository.path,
+        checkpoint,
+        message,
+        {
+          noVerify: options?.noVerify,
+          signOff: options?.signOff,
+          allowLargeFiles: options?.allowLargeFiles,
+          signal: controller.signal,
+          onHookProgress: progress => {
+            if (progress.status === 'failed') failedHook = progress.hookName
+            notify(() => options?.onHookProgress?.(
+              progress.status === 'started'
+                ? { hookName: progress.hookName, status: 'started', abort: () => controller.abort() }
+                : { hookName: progress.hookName, status: progress.status as 'finished' | 'failed' }
+            ))
+          },
+          onOutput: output => {
+            const chunk = Buffer.from(output.bytes)
+            if (bufferedBytes + chunk.length <= 256 * 1024) {
+              buffered.push(chunk)
+              bufferedBytes += chunk.length
+            }
+            for (const listener of listeners) notify(() => listener(chunk))
+          },
+        }
+      )
+      return result.oid
+    } catch (error) {
+      if (failedHook !== undefined) {
+        throw new Error(
+          `The ${failedHook} hook failed. Inspect commit checkpoint ${checkpoint} before retrying. Ignoring an individual failed hook is not supported by the native backend.`,
+          { cause: error }
+        )
+      }
+      throw new Error(`Commit outcome may be uncertain. Inspect commit checkpoint ${checkpoint} before retrying.`, { cause: error })
+    }
+  }
   // Clear the staging area, our diffs reflect the difference between the
   // working directory and the last commit (if any) so our commits should
   // do the same thing.

@@ -166,30 +166,33 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
   ): Promise<boolean> => {
     const { workingDirectory } = this.props.changes
 
-    let filesIgnoredByLFS: ReadonlyArray<string>
-    try {
-      const overSizedFiles = await getLargeFilePaths(
-        this.props.repository,
-        workingDirectory
-      )
-      filesIgnoredByLFS = await filesNotTrackedByLFS(
-        this.props.repository,
-        overSizedFiles
-      )
-    } catch (error) {
-      await this.props.dispatcher.postError(error)
-      return false
-    }
+    // Rust reviews the selected blobs and asks for consent against that exact
+    // review. The legacy worktree-size check is retained for Electron.
+    if (typeof window === 'undefined' || backend().transportKind === 'none') {
+      let filesIgnoredByLFS: ReadonlyArray<string>
+      try {
+        const overSizedFiles = await getLargeFilePaths(
+          this.props.repository,
+          workingDirectory
+        )
+        filesIgnoredByLFS = await filesNotTrackedByLFS(
+          this.props.repository,
+          overSizedFiles
+        )
+      } catch (error) {
+        await this.props.dispatcher.postError(error)
+        return false
+      }
 
-    if (filesIgnoredByLFS.length !== 0) {
-      this.props.dispatcher.showPopup({
-        type: PopupType.OversizedFiles,
-        oversizedFiles: filesIgnoredByLFS,
-        context: context,
-        repository: this.props.repository,
-      })
-
-      return false
+      if (filesIgnoredByLFS.length !== 0) {
+        this.props.dispatcher.showPopup({
+          type: PopupType.OversizedFiles,
+          oversizedFiles: filesIgnoredByLFS,
+          context: context,
+          repository: this.props.repository,
+        })
+        return false
+      }
     }
 
     // are any conflicted files left?

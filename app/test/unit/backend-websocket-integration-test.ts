@@ -119,6 +119,36 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('discovers and launches a named editor with a confined repository file', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-editor-bridge-'))
+      const bin = path.join(directory, 'bin')
+      const capture = path.join(directory, 'editor-args')
+      await mkdir(bin)
+      await writeFile(path.join(bin, 'code'), '#!/bin/sh\nprintf "%s\\n" "$@" > "$EDITOR_CAPTURE"\n')
+      await chmod(path.join(bin, 'code'), 0o755)
+      const globalConfig = path.join(directory, 'git config')
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}`, EDITOR_CAPTURE: capture }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+      await expect(client.openGlobalGitConfigEditor('/bin/sh')).rejects.toThrow()
+      await expect(readFile(globalConfig)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(client.request('open_global_git_config_editor', { editor_name: 'Visual Studio Code', path: '/etc/passwd' })).rejects.toThrow()
+      await client.openGlobalGitConfigEditor('Visual Studio Code')
+      expect(await readFile(capture, 'utf8')).toBe(`--\n${globalConfig}\n`)
+      const repository = path.join(directory, 'repository')
+      await client.initializeDesktopRepository(repository, 'main')
+      await writeFile(path.join(repository, 'file with spaces.txt'), 'test')
+      await client.selectBrowserRepository(repository)
+      expect(await client.availableRustEditors()).toContainEqual({ editor: 'Visual Studio Code', path: path.join(bin, 'code') })
+      await client.openNamedRepositoryEditor(repository, 'file with spaces.txt', 'Visual Studio Code')
+      expect(await readFile(capture, 'utf8')).toBe(`--\n${path.join(repository, 'file with spaces.txt')}\n`)
+      await expect(client.openNamedRepositoryEditor(repository, '../editor-args', 'Visual Studio Code')).rejects.toThrow()
+      await expect(client.openNamedRepositoryEditor(repository, 'file with spaces.txt', '/bin/sh')).rejects.toThrow()
+    }, 90_000)
+
     it('reads last fetch time from the selected repository', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-last-fetch-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })

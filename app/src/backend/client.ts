@@ -494,13 +494,14 @@ class WryTransport {
         params.operation.type === 'commit_checkpoint' && isRecord(params.operation.operation) &&
         typeof params.operation.operation.method === 'string' &&
         ['prepare_selected_commit', 'publish_selected_commit', 'recover_published_commit_checkpoint', 'close_unchanged_commit_checkpoint', 'forget_commit_checkpoint'].includes(params.operation.operation.method)
-      const mutating = cloneMutation || identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite || recoveryWrite
+      const editorLaunch = method === 'git_info' && isRecord(params) && isRecord(params.operation) && (params.operation.type === 'open_named_editor' || params.operation.type === 'open_global_git_config_editor')
+      const mutating = editorLaunch || cloneMutation || identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite || recoveryWrite
       const nativeError = (error: unknown): BackendError => {
         const result = toBackendError(error)
         if (!mutating || !result.retryable) return result
         return new BackendError({
           code: result.code,
-          message: result.message,
+          message: editorLaunch ? `${result.message}. The editor may have launched; check before retrying.` : result.message,
           retryable: false,
           jobId: result.jobId,
           recoveryId: result.recoveryId,
@@ -541,6 +542,8 @@ class WryTransport {
             'cancelled',
             cloneMutation
               ? 'Clone cancelled; inspect the destination and recovery history before retrying'
+              : editorLaunch
+              ? 'Editor launch cancelled; the editor may already be open'
               : identityWrite
               ? 'Git identity update cancelled; inspect Git settings before retrying'
               : settingsWrite
@@ -570,6 +573,8 @@ class WryTransport {
               'ETIMEDOUT',
               cloneMutation
                 ? 'Clone timed out; inspect the destination and recovery history before retrying'
+                : editorLaunch
+                ? 'Editor launch timed out; the editor may already be open'
                 : identityWrite
                 ? 'Git identity update timed out; inspect Git settings before retrying'
                 : settingsWrite
@@ -1321,6 +1326,54 @@ export class BackendClient {
         message: 'repository-scoped reads require a backend transport',
         retryable: false,
       })
+    }
+  }
+
+  /** Find graphical editors using the Rust host's fixed discovery list. */
+  async availableRustEditors(): Promise<ReadonlyArray<{ editor: string; path: string }>> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'available_editors' } })
+      : await this.request('available_editors', {})
+    if (!isRecord(value) || !Array.isArray(value.editors) || value.editors.length > 128) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid editor discovery response', retryable: false })
+    }
+    return value.editors.map(editor => {
+      if (!isRecord(editor) || typeof editor.name !== 'string' || !editor.name || editor.name.length > 256 || typeof editor.program !== 'string' || !editor.program || editor.program.length > 65536 || typeof editor.terminal !== 'boolean' || typeof editor.directories !== 'boolean') {
+        throw new BackendError({ code: 'invalid_response', message: 'Invalid editor discovery response', retryable: false })
+      }
+      return editor
+    }).filter(editor => !editor.terminal).map(editor => ({ editor: editor.name === 'Visual Studio Code Insiders' ? 'Visual Studio Code (Insiders)' : editor.name as string, path: editor.program as string }))
+  }
+
+  /** Launch an explicitly selected discovered editor on a repository path. */
+  async openNamedRepositoryEditor(repositoryPath: string, path: string | null, name: string): Promise<void> {
+    const nativeName = name === 'Visual Studio Code (Insiders)' ? 'Visual Studio Code Insiders' : name
+    try {
+      if (this.transport === 'wry') {
+        await this.request('git_info', { operation: { type: 'open_named_editor', repository_path: repositoryPath, path, name: nativeName } })
+      } else {
+        await this.repositoryRead(repositoryPath, 'open_editor', { path, editor_name: nativeName })
+      }
+    } catch (error) {
+      const result = toBackendError(error)
+      if (!result.retryable && !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(result.code)) throw error
+      throw new BackendError({ code: result.code, message: `${result.message}. The editor may have launched; check before retrying.`, retryable: false })
+    }
+  }
+
+  /** Open the host-selected global Git configuration, without accepting a path. */
+  async openGlobalGitConfigEditor(name: string): Promise<void> {
+    const nativeName = name === 'Visual Studio Code (Insiders)' ? 'Visual Studio Code Insiders' : name
+    try {
+      if (this.transport === 'wry') {
+        await this.request('git_info', { operation: { type: 'open_global_git_config_editor', name: nativeName } })
+      } else {
+        await this.request('open_global_git_config_editor', { editor_name: nativeName })
+      }
+    } catch (error) {
+      const result = toBackendError(error)
+      if (!result.retryable && !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(result.code)) throw error
+      throw new BackendError({ code: result.code, message: `${result.message}. The editor may have launched; check before retrying.`, retryable: false })
     }
   }
 

@@ -1032,6 +1032,10 @@ export class Dispatcher {
     return this.appStore._closeUnchangedCommitCheckpoint(repository, id)
   }
 
+  public forgetPreparedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+    return this.appStore._forgetPreparedCommitCheckpoint(repository, id)
+  }
+
   public forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
     return this.appStore._forgetRepositoryDiscard(repository, undoId)
   }

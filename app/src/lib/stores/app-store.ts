@@ -4046,12 +4046,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
           const oversized = review.review.large_files
             .filter(file => !file.tracked_by_lfs)
             .map(file => file.display_path)
-          if (oversized.length > 0) {
+          if (oversized.length > 0 && context.allowedLargeFileReviewBasis !== review.basis) {
             await this._showPopup({
               type: PopupType.OversizedFiles,
               oversizedFiles: oversized,
               context,
               repository,
+              reviewBasis: review.basis,
             })
             return undefined
           }
@@ -4088,6 +4089,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
             noVerify: state.skipCommitHooks,
             signOff: state.signOffCommits,
             allowEmpty: state.allowEmptyCommit,
+            allowLargeFiles: selectedReview !== undefined && context.allowedLargeFileReviewBasis === selectedReview.basis,
           }).catch(err => (aborted ? undefined : Promise.reject(err)))
         },
         { gitContext: { kind: 'commit' }, repository }
@@ -6943,6 +6945,16 @@ export class AppStore extends TypedBaseStore<IAppState> {
     )
   }
 
+  public async _forgetPreparedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+    this.assistedCommits.state.assertAvailable(repository)
+    await this.assistedCommits.state.withDestruction(repository.path, () =>
+      withRepositoryGitOperation(repository.path, 'mutation', async () => {
+        this.assistedCommits.state.assertAvailable(repository)
+        await backend().forgetCommitCheckpoint(repository.path, id)
+      })
+    )
+  }
+
   public async _forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
     this.assistedCommits.state.assertAvailable(repository)
     await this.assistedCommits.state.withDestruction(repository.path, () =>
@@ -9418,6 +9430,22 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   public async _editGlobalGitConfig() {
+    if (backend().transportKind !== 'none') {
+      try {
+        const { selectedExternalEditor, useCustomEditor, customEditor } = this.getState()
+        if (useCustomEditor && customEditor) {
+          throw new ExternalEditorError('Custom editors are not yet supported by the native backend.', { openPreferences: true })
+        }
+        const match = await findEditorOrDefault(selectedExternalEditor)
+        if (match === null) {
+          throw new ExternalEditorError('No suitable editors are installed for GitHub Desktop to launch.', { suggestDefaultEditor: true })
+        }
+        await backend().openGlobalGitConfigEditor(match.editor)
+      } catch (error) {
+        this.emitError(error)
+      }
+      return
+    }
     await getGlobalConfigPath()
       .then(p => this._openInExternalEditor(p))
       .catch(e => log.error('Could not open global Git config for editing', e))
@@ -9430,6 +9458,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     try {
       if (useCustomEditor && customEditor) {
+        if (backend().transportKind !== 'none') {
+          throw new ExternalEditorError('Custom editors are not yet supported by the native backend.', { openPreferences: true })
+        }
         await launchCustomExternalEditor(fullPath, customEditor)
       } else {
         const match = await findEditorOrDefault(selectedExternalEditor)
@@ -9443,7 +9474,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
           return
         }
 
-        await launchExternalEditor(fullPath, match)
+        if (backend().transportKind !== 'none') {
+          await this.openInNativeEditor(fullPath, match.editor)
+        } else {
+          await launchExternalEditor(fullPath, match)
+        }
       }
     } catch (error) {
       this.emitError(error)
@@ -9501,6 +9536,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
   ): Promise<void> {
     try {
       if (customEditor && customEditor.path) {
+        if (backend().transportKind !== 'none') {
+          throw new ExternalEditorError('Custom editors are not yet supported by the native backend.', { openPreferences: true })
+        }
         await launchCustomExternalEditor(fullPath, customEditor)
         return
       }
@@ -9520,10 +9558,26 @@ export class AppStore extends TypedBaseStore<IAppState> {
         return
       }
 
-      await launchExternalEditor(fullPath, match)
+      if (backend().transportKind !== 'none') {
+        await this.openInNativeEditor(fullPath, match.editor)
+      } else {
+        await launchExternalEditor(fullPath, match)
+      }
     } catch (error) {
       this.emitError(error)
     }
+  }
+
+  private async openInNativeEditor(fullPath: string, name: string): Promise<void> {
+    const repository = this.selectedRepository
+    if (!(repository instanceof Repository) || !Path.isAbsolute(fullPath) || !Path.isAbsolute(repository.path)) {
+      throw new Error('Select a repository before opening a file in an editor.')
+    }
+    const relative = Path.relative(repository.path, fullPath)
+    if (Path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${Path.sep}`)) {
+      throw new Error('The native editor can only open files within the selected repository.')
+    }
+    await backend().openNamedRepositoryEditor(repository.path, relative || null, name)
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */

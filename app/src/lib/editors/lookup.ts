@@ -3,6 +3,7 @@ import type { IFoundEditor } from './found-editor'
 import { getAvailableEditors as getAvailableEditorsDarwin } from './darwin'
 import { getAvailableEditors as getAvailableEditorsWindows } from './win32'
 import { getAvailableEditors as getAvailableEditorsLinux } from './linux'
+import { backend } from '../../backend/client'
 
 let editorCache: ReadonlyArray<IFoundEditor<string>> | null = null
 
@@ -13,6 +14,9 @@ let editorCache: ReadonlyArray<IFoundEditor<string>> | null = null
 export async function getAvailableEditors(): Promise<
   ReadonlyArray<IFoundEditor<string>>
 > {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().availableRustEditors()
+  }
   if (editorCache && editorCache.length > 0) {
     return editorCache
   }

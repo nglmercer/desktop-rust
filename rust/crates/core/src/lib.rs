@@ -32,7 +32,7 @@ mod commit_ref_guard;
 pub use commit_ref_guard::CommitReferenceGuard;
 mod diff;
 mod editors;
-pub use editors::{EditorLaunch, ExternalEditor, available_editors};
+pub use editors::{EditorLaunch, ExternalEditor, available_editors, open_global_git_config_editor};
 mod discard;
 mod discard_fs;
 mod fetch_error;

@@ -19,6 +19,32 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('discovers graphical editors and launches the selected name through Wry', async () => {
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({ editors: [
+        { name: 'Visual Studio Code', program: '/usr/bin/code', terminal: false, directories: true },
+        { name: 'Visual Studio Code Insiders', program: '/usr/bin/code-insiders', terminal: false, directories: true },
+        { name: 'Vim', program: '/usr/bin/vim', terminal: true, directories: true },
+      ] })
+      .mockResolvedValue({ code: 0, stdout: '', stderr: '' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.availableRustEditors()).resolves.toEqual([{ editor: 'Visual Studio Code', path: '/usr/bin/code' }, { editor: 'Visual Studio Code (Insiders)', path: '/usr/bin/code-insiders' }])
+    await client.openNamedRepositoryEditor('/repo', 'file.txt', 'Visual Studio Code')
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'open_named_editor', repository_path: '/repo', path: 'file.txt', name: 'Visual Studio Code' } }))
+    await client.openNamedRepositoryEditor('/repo', null, 'Visual Studio Code (Insiders)')
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'open_named_editor', repository_path: '/repo', path: null, name: 'Visual Studio Code Insiders' } }))
+    await client.openGlobalGitConfigEditor('Visual Studio Code')
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'open_global_git_config_editor', name: 'Visual Studio Code' } }))
+  })
+
+  it('does not mark interrupted editor launches retryable', async () => {
+    const invoke = vi.fn().mockRejectedValue({ code: 'cancelled', message: 'interrupted', retryable: true })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    await expect(new BackendClient().openNamedRepositoryEditor('/repo', null, 'Visual Studio Code')).rejects.toMatchObject({ code: 'cancelled', retryable: false })
+    await expect(new BackendClient().openGlobalGitConfigEditor('Visual Studio Code')).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('may have launched') })
+  })
+
   it('treats interrupted Wry clone and recovery mutations as non-retryable', async () => {
     const invoke = vi.fn().mockRejectedValue({ code: 'cancelled', message: 'interrupted', retryable: true })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

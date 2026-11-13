@@ -14,6 +14,8 @@ use std::{
 pub enum ExternalEditor {
     #[default]
     Automatic,
+    /// An editor selected from the host's fixed discovery list.
+    Named { name: String },
     Command {
         program: String,
         #[serde(default)]
@@ -24,6 +26,12 @@ pub enum ExternalEditor {
 }
 impl ExternalEditor {
     pub(crate) fn validate(&self) -> Result<()> {
+        if let Self::Named { name } = self {
+            anyhow::ensure!(
+                !name.is_empty() && name.len() <= 256 && !name.chars().any(char::is_control),
+                "invalid editor name"
+            );
+        }
         if let Self::Command { program, args, .. } = self {
             anyhow::ensure!(
                 !program.is_empty() && !program.contains('\0') && program.len() <= 4096,
@@ -148,6 +156,29 @@ pub struct EditorLaunch {
     pub directory: PathBuf,
     pub terminal: bool,
 }
+
+/// Open only the global Git configuration selected by the host's Git settings.
+pub async fn open_global_git_config_editor(name: String) -> Result<Value> {
+    ExternalEditor::Named { name: name.clone() }.validate()?;
+    let editor = cancellation::blocking(move || {
+        let editor = discover().into_iter().find(|editor| editor.name == name)
+            .context("Selected editor was not found")?;
+        anyhow::ensure!(!editor.terminal, "This editor needs an interactive terminal");
+        Ok(editor)
+    }).await?;
+    let path = crate::git_global_config_path().await?;
+    let plan = cancellation::blocking(move || {
+        let target = PathBuf::from(path).canonicalize().context("global Git configuration does not exist")?;
+        anyhow::ensure!(target.is_file(), "global Git configuration must be a file");
+        let mut args = Vec::new();
+        #[cfg(target_os = "macos")]
+        if editor.name == "TextEdit" { args.extend([OsString::from("-a"), OsString::from("TextEdit")]); }
+        if editor.name != "Notepad" && editor.name != "Notepad++" && editor.name != "TextEdit" { args.push(OsString::from("--")); }
+        args.push(target.as_os_str().to_owned());
+        Ok(EditorLaunch { program: editor.program, args, directory: target.parent().context("global Git configuration has no parent")?.to_owned(), terminal: editor.terminal })
+    }).await?;
+    launch_editor(plan).await
+}
 fn substitute(template: &str, target: &Path, repository: &Path) -> OsString {
     let mut output = OsString::new();
     let mut remaining = template;
@@ -190,8 +221,12 @@ impl Repository {
                 canonical
             } else {repository.clone()};
             let (program, templates, terminal) = match configuration {
-                ExternalEditor::Automatic => {
-                    let editor = discover().into_iter().find(|editor| target.is_file() || editor.directories)
+                ExternalEditor::Automatic | ExternalEditor::Named { .. } => {
+                    let name = match &configuration {
+                        ExternalEditor::Named { name } => Some(name.as_str()),
+                        _ => None,
+                    };
+                    let editor = discover().into_iter().find(|editor| (target.is_file() || editor.directories) && name.is_none_or(|name| editor.name == name))
                         .context("No suitable editor found. Configure an editor in Settings or use the CLI preferences command.")?;
                     let mut templates = Vec::<String>::new();
                     #[cfg(target_os = "macos")]
@@ -217,6 +252,11 @@ impl Repository {
         configuration: ExternalEditor,
     ) -> Result<Value> {
         let plan = self.editor_launch(path, configuration).await?;
+        launch_editor(plan).await
+    }
+}
+
+async fn launch_editor(plan: EditorLaunch) -> Result<Value> {
         if plan.terminal {
             bail!(
                 "This editor needs an interactive terminal. Run desktop-rs -C <repository> editor <file> in Termux or a terminal, then refresh and stage the edited resolution."
@@ -256,5 +296,22 @@ impl Repository {
         Ok(
             json!({"code":0,"stdout":"Editor launched. Save your changes, then refresh the conflict preview.","stderr":""}),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn named_editor_requires_a_known_editor_and_confined_file() {
+        let root = std::env::temp_dir().join(format!("desktop-editor-{}", uuid::Uuid::new_v4()));
+        assert!(std::process::Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
+        let repo = Repository::open(&root).await.unwrap();
+        std::fs::write(root.join("file.txt"), "test").unwrap();
+        let named = ExternalEditor::Named { name: "not-an-allowlisted-editor".into() };
+        assert!(repo.editor_launch(Some(GitPath::Text("file.txt".into())), named.clone()).await.is_err());
+        assert!(repo.editor_launch(Some(GitPath::Text("../outside".into())), named).await.is_err());
+        assert!(ExternalEditor::Named { name: "invalid\nname".into() }.validate().is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -307,10 +307,13 @@ enum ControlOperation {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum ManagementOperation {
     AvailableEditors,
+    OpenGlobalGitConfigEditor { editor_name: String },
     GitVersion,
     GitGlobalConfigPath,
     OpenEditor {
         path: Option<desktop_core::GitPath>,
+        #[serde(default)]
+        editor_name: Option<String>,
     },
     GetPreferences,
     UpdatePreferences {
@@ -577,6 +580,9 @@ async fn execute(
             let preferences = cancellation::blocking(move || registry.preferences().read()).await?;
             desktop_core::available_editors(preferences.external_editor).await
         }
+        ApplicationOperation::Management(OpenGlobalGitConfigEditor { editor_name }) => {
+            desktop_core::open_global_git_config_editor(editor_name).await
+        }
         ApplicationOperation::Management(GitVersion) => {
             Ok(json!(desktop_core::git_version().await?))
         }
@@ -611,7 +617,7 @@ async fn execute(
         ApplicationOperation::Management(TrustRepository { path }) => {
             desktop_core::trust_repository(&desktop_core::directory_path(path)?).await
         }
-        ApplicationOperation::Management(OpenEditor { path }) => {
+        ApplicationOperation::Management(OpenEditor { path, editor_name }) => {
             let current = cancellation::wait(state.repo.lock()).await?;
             let repository = current
                 .as_ref()
@@ -622,9 +628,13 @@ async fn execute(
                     "Repository selection changed; refresh before opening an editor"
                 );
             }
-            let preferences = cancellation::blocking(move || registry.preferences().read()).await?;
+            let editor = if let Some(name) = editor_name {
+                desktop_core::ExternalEditor::Named { name }
+            } else {
+                cancellation::blocking(move || registry.preferences().read()).await?.external_editor
+            };
             repository
-                .open_editor(path, preferences.external_editor)
+                .open_editor(path, editor)
                 .await
         }
         ApplicationOperation::Management(GetPreferences) => {

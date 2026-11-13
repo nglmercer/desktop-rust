@@ -34,6 +34,7 @@ export enum PopupType {
   DeleteBranch = 'DeleteBranch',
   DeleteRemoteBranch = 'DeleteRemoteBranch',
   ConfirmDiscardChanges = 'ConfirmDiscardChanges',
+  RecoveryHistory = 'RecoveryHistory',
   Preferences = 'Preferences',
   RepositorySettings = 'RepositorySettings',
   RepositoryAccount = 'RepositoryAccount',
@@ -175,6 +176,7 @@ export type PopupDetail =
       diff: ITextDiff
       selection: DiffSelection
     }
+  | { type: PopupType.RecoveryHistory; repository: Repository }
   | { type: PopupType.Preferences; initialSelectedTab?: PreferencesTab }
   | {
       type: PopupType.EditCopilotBYOKProvider
@@ -269,6 +271,7 @@ export type PopupDetail =
       oversizedFiles: ReadonlyArray<string>
       context: ICommitContext
       repository: Repository
+      reviewBasis?: string
     }
   | {
       type: PopupType.CommitConflictsWarning

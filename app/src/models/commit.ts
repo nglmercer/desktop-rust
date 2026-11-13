@@ -26,6 +26,8 @@ export interface ICommitContext {
    * Whether or not it should amend the last commit (optional, default: false)
    */
   readonly amend?: boolean
+  /** Consent to commit oversized blobs, scoped to the exact Rust review. */
+  readonly allowedLargeFileReviewBasis?: string
   /**
    * An optional array of commit trailers (for example Co-Authored-By trailers) which will be appended to the commit message in accordance with the Git trailer configuration.
    */

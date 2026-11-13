@@ -17,6 +17,7 @@ interface IOversizedFilesProps {
   readonly dispatcher: Dispatcher
   readonly context: ICommitContext
   readonly repository: Repository
+  readonly reviewBasis?: string
 }
 
 /** A dialog to display a list of files that are too large to commit. */
@@ -77,14 +78,19 @@ export class OversizedFiles extends React.Component<IOversizedFilesProps> {
   private onSubmit = async () => {
     this.props.onDismissed()
 
-    await this.props.dispatcher.commitIncludedChanges(
+    const committed = await this.props.dispatcher.commitIncludedChanges(
       this.props.repository,
-      this.props.context
+      {
+        ...this.props.context,
+        allowedLargeFileReviewBasis: this.props.reviewBasis,
+      }
     )
 
-    this.props.dispatcher.setCommitMessage(
-      this.props.repository,
-      DefaultCommitMessage
-    )
+    if (committed) {
+      this.props.dispatcher.setCommitMessage(
+        this.props.repository,
+        DefaultCommitMessage
+      )
+    }
   }
 }

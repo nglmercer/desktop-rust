@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
@@ -80,7 +80,7 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         'merge source',
       ])
       execFileSync('git', ['-C', repository, 'switch', '-q', '-'])
-      await writeFile(path.join(repository, 'changed.txt'), 'modified\n')
+      await writeFile(path.join(repository, 'changed.txt'), 'modified\nextra\n')
       const config = path.join(directory, 'gitconfig')
       await writeFile(
         config,
@@ -220,7 +220,7 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         { timeout: 20_000 }
       )
       expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
-        'modified\n'
+        'modified\nextra\n'
       )
       await page.locator('.branch-button').click()
       await page
@@ -245,7 +245,7 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         { timeout: 20_000 }
       )
       expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
-        'modified\n'
+        'modified\nextra\n'
       )
       const mergeCalls = await page.evaluate(
         () => Reflect.get(window, '__browserAudit') as string[]
@@ -367,7 +367,7 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           async () => {
             expect(
               await readFile(path.join(repository, 'changed.txt'), 'utf8')
-            ).toBe('modified\n')
+            ).toBe('modified\nextra\n')
           },
           { timeout: 20_000 }
         )
@@ -400,15 +400,14 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           `Discard/undo journey failed: ${String(error)}; body: ${((await page.locator('body').textContent()) ?? '').slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls.filter(call => !call.includes('"method":"path_exists"')).join(' ')}`
         )
       }
-      const indexBeforeCommit = await readFile(
-        path.join(repository, '.git', 'index')
-      )
       const headBeforeCommit = execFileSync(
         'git',
         ['-C', repository, 'rev-parse', 'HEAD'],
         { encoding: 'utf8' }
       )
       await page.getByLabel('Commit summary').fill('Review selected changes')
+      // Keep the added second line out of the commit while retaining the first.
+      await page.locator('label[for="2-after"]').click()
       await page
         .getByRole('group', { name: 'Create commit' })
         .getByRole('button', { name: /^Commit(?:\s|$)/ })
@@ -430,37 +429,49 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           `Commit review did not run: ${((await page.locator('body').textContent()) ?? '').slice(-3000)}; calls: ${audit.filter(call => !call.includes('"method":"path_exists"')).join(' ')}; errors: ${errors.join('; ')}`
         )
       }
-      expect(await readFile(path.join(repository, '.git', 'index'))).toEqual(
-        indexBeforeCommit
-      )
-      expect(
-        execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+      await vi.waitFor(() => {
+        expect(execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
           encoding: 'utf8',
-        })
-      ).toBe(headBeforeCommit)
-      await page.waitForFunction(
-        () =>
-          (Reflect.get(window, '__browserAudit') as string[]).some(
-            call => JSON.parse(call).method === 'repository_protected_resources'
-          ),
-        undefined,
-        { timeout: 5000 }
+        })).not.toBe(headBeforeCommit)
+      }, { timeout: 20000 })
+      expect(execFileSync('git', ['-C', repository, 'show', 'HEAD:changed.txt'], {
+        encoding: 'utf8',
+      })).toBe('modified\n')
+      await vi.waitFor(() => {
+        expect(execFileSync('git', ['-C', repository, 'show', ':changed.txt'], {
+          encoding: 'utf8',
+        })).toBe('modified\n')
+      }, { timeout: 20000 })
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe('modified\nextra\n')
+      const audit = await page.evaluate(() =>
+        (Reflect.get(window, '__browserAudit') as string[]).map(call => JSON.parse(call))
       )
-      await page.waitForFunction(
-        () =>
-          (Reflect.get(window, '__browserAudit') as string[]).some(
-            call => JSON.parse(call).method === 'desktop.io.git-exec'
-          ),
-        undefined,
-        { timeout: 5000 }
-      )
+      expect(audit.some(call => call.method === 'prepare_selected_commit')).toBe(true)
+      expect(audit.some(call => call.method === 'publish_selected_commit')).toBe(true)
       const legacyCalls = await page.evaluate(() =>
         (Reflect.get(window, '__browserAudit') as string[])
           .map(call => JSON.parse(call))
           .filter(call => call.method === 'desktop.io.git-exec')
       )
-      // The still-legacy commit flow can stop at hook discovery or index reset.
-      expect(legacyCalls.length).toBeGreaterThan(0)
+      expect(legacyCalls).toEqual([])
+
+      const committedHead = execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' })
+      const hook = path.join(repository, '.git', 'hooks', 'pre-commit')
+      await writeFile(hook, '#!/bin/sh\necho "intentional failure" >&2\nexit 1\n')
+      await chmod(hook, 0o755)
+      await page.locator('.changes-list-check-all label').click()
+      await page.getByLabel('Commit summary').fill('Failing hook')
+      await page.getByRole('group', { name: 'Create commit' }).getByRole('button', { name: /^Commit(?:\s|$)/ }).click()
+      await page.getByText(/Ignoring an individual failed hook is not supported/).waitFor({ timeout: 20000 })
+      expect(execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' })).toBe(committedHead)
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe('modified\nextra\n')
+      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: 'Recovery history' }).click()
+      await page.getByText('Commit needs inspection').waitFor({ timeout: 10000 })
+      await page.getByRole('button', { name: 'Close unchanged attempt' }).click()
+      await page.getByText('Commit needs inspection').waitFor({ state: 'hidden', timeout: 10000 })
+      expect(execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' })).toBe(committedHead)
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe('modified\nextra\n')
     }, 90_000)
   }
 )

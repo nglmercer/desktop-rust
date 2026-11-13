@@ -2,10 +2,12 @@ import * as React from 'react'
 import {
   backend,
   type CommitCheckpoint,
+  type CommitCheckpointInspection,
   type IDiscardRecoveryRecord,
 } from '../../backend/client'
 import type { Repository } from '../../models/repository'
 import type { Dispatcher } from '../dispatcher'
+import { PopupType } from '../../models/popup'
 import { DefaultDialogFooter, Dialog, DialogContent } from '../dialog'
 import { Button } from '../lib/button'
 
@@ -15,8 +17,23 @@ interface IProps {
   readonly disabled: boolean
 }
 
+interface IDialogProps {
+  readonly repository: Repository
+  readonly dispatcher: Dispatcher
+  readonly onDismissed: () => void
+}
+
+export function DiscardRecovery({ repository, dispatcher, disabled }: IProps) {
+  return (
+    <Button type="button" size="small" disabled={disabled} onClick={() => {
+      void dispatcher.showPopup({ type: PopupType.RecoveryHistory, repository })
+    }}>
+      Recovery history
+    </Button>
+  )
+}
+
 interface IState {
-  readonly open: boolean
   readonly loading: boolean
   readonly busy: boolean
   readonly records: ReadonlyArray<IDiscardRecoveryRecord>
@@ -24,15 +41,15 @@ interface IState {
   readonly error: string | null
   readonly commitError: string | null
   readonly confirming: string | null
+  readonly inspection: CommitCheckpointInspection | null
 }
 
 /** Durable recovery remains available after the immediate Undo banner closes. */
-export class DiscardRecovery extends React.Component<IProps, IState> {
+export class DiscardRecoveryDialog extends React.Component<IDialogProps, IState> {
   private generation = 0
   private mounted = false
   private operationInFlight = false
   public state: IState = {
-    open: false,
     loading: false,
     busy: false,
     records: [],
@@ -40,32 +57,22 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
     error: null,
     commitError: null,
     confirming: null,
+    inspection: null,
   }
 
   public componentDidMount() {
     this.mounted = true
+    void this.load()
   }
   public componentWillUnmount() {
     this.mounted = false
     this.generation++
   }
 
-  private open = () => {
-    this.setState({ open: true }, () => {
-      void this.load()
-    })
-  }
-
   private close = () => {
     if (this.operationInFlight) return
     this.generation++
-    this.setState({
-      open: false,
-      loading: false,
-      error: null,
-      commitError: null,
-      confirming: null,
-    })
+    this.props.onDismissed()
   }
 
   private async load() {
@@ -174,6 +181,50 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
     }
   }
 
+  private forgetPreparedCommit = async (id: string) => {
+    if (
+      this.operationInFlight ||
+      this.state.confirming !== `commit:${id}` ||
+      !this.state.commits.some(commit => commit.id === id && commit.state === 'prepared')
+    ) return
+    this.operationInFlight = true
+    this.setState({ busy: true, commitError: null })
+    try {
+      await this.props.dispatcher.forgetPreparedCommitCheckpoint(this.props.repository, id)
+      if (this.mounted) {
+        this.setState({ busy: false, confirming: null, inspection: null })
+        await this.load()
+      }
+    } catch (error) {
+      if (this.mounted) this.setState({
+        busy: false,
+        commitError: error instanceof Error ? error.message : 'Could not discard this prepared attempt.',
+      })
+    } finally {
+      this.operationInFlight = false
+    }
+  }
+
+  private inspectCommit = async (id: string) => {
+    if (this.operationInFlight) return
+    this.operationInFlight = true
+    this.setState({ busy: true, commitError: null, inspection: null })
+    try {
+      const inspection = await backend().inspectCommitCheckpoint(this.props.repository.path, id)
+      if (this.mounted) {
+        this.setState({ busy: false, inspection })
+        if (inspection.state !== 'prepared') await this.load()
+      }
+    } catch (error) {
+      if (this.mounted) this.setState({
+        busy: false,
+        commitError: error instanceof Error ? error.message : 'Could not inspect this commit attempt.',
+      })
+    } finally {
+      this.operationInFlight = false
+    }
+  }
+
   private restore = async (id: string) => {
     if (this.operationInFlight) return
     this.operationInFlight = true
@@ -237,7 +288,6 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
 
   public render() {
     const {
-      open,
       loading,
       busy,
       records,
@@ -245,24 +295,16 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
       error,
       commitError,
       confirming,
+      inspection,
     } = this.state
     const interruptedCommits = commits.filter(
       record =>
+        record.state === 'prepared' ||
         record.state === 'publishing' ||
         record.state === 'published' ||
         record.state === 'invalid'
     )
     return (
-      <>
-        <Button
-          type="button"
-          size="small"
-          disabled={this.props.disabled}
-          onClick={this.open}
-        >
-          Recovery history
-        </Button>
-        {open && (
           <Dialog
             id="discard-recovery"
             title="Recovery history"
@@ -385,12 +427,14 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
                     {interruptedCommits.map(record => (
                       <li key={record.id}>
                         <p>
-                          {record.state === 'invalid'
+                          {record.state === 'prepared'
+                            ? 'Prepared commit was not published'
+                            : record.state === 'invalid'
                             ? 'Unreadable commit checkpoint'
                             : 'Commit needs inspection'}
                         </p>
                         <code>{record.id}</code>
-                        {record.state !== 'invalid' && (
+                        {record.state !== 'invalid' && record.state !== 'prepared' && (
                           <Button
                             type="button"
                             size="small"
@@ -401,6 +445,36 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
                           >
                             Recover commit
                           </Button>
+                        )}
+                        {record.state === 'prepared' && (
+                          <>
+                          <Button type="button" size="small" disabled={busy || loading || confirming !== null} onClick={() => { void this.inspectCommit(record.id) }}>
+                            Inspect prepared attempt
+                          </Button>
+                          {inspection?.id === record.id && (
+                            <p>
+                              Current state: {inspection.state}. Branch {inspection.branch_matches ? 'matches' : 'changed'};
+                              HEAD {inspection.head_matches ? 'matches' : 'changed'};
+                              index {inspection.index_matches ? 'matches' : 'changed'};
+                              repository operation {inspection.operation_matches ? 'matches' : 'changed'}.
+                            </p>
+                          )}
+                          {confirming === `commit:${record.id}` ? (
+                            <div>
+                              <p>Discard this prepared attempt and its backup? No commit was published by this attempt.</p>
+                              <Button type="button" size="small" disabled={busy || loading} onClick={() => { void this.forgetPreparedCommit(record.id) }}>
+                                Discard prepared attempt
+                              </Button>
+                              <Button type="button" size="small" disabled={busy || loading} onClick={() => this.setState({ confirming: null, commitError: null })}>
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button type="button" size="small" disabled={busy || loading || confirming !== null} onClick={() => this.setState({ confirming: `commit:${record.id}`, commitError: null })}>
+                              Remove prepared attempt
+                            </Button>
+                          )}
+                          </>
                         )}
                         {record.state === 'publishing' && (
                           <>
@@ -429,8 +503,6 @@ export class DiscardRecovery extends React.Component<IProps, IState> {
             </DialogContent>
             <DefaultDialogFooter disabled={busy} />
           </Dialog>
-        )}
-      </>
     )
   }
 }

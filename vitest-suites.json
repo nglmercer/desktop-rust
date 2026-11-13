@@ -52,6 +52,7 @@
   "app/test/unit/rust-renderer-commit-test.ts",
   "app/test/unit/rust-first-undo-routing-test.ts",
   "app/test/unit/rust-commit-review-guard-test.ts",
+  "app/test/unit/rust-native-commit-routing-test.ts",
   "app/test/unit/copilot-backend-selection-test.ts",
   "app/test/unit/copilot-commit-selection-test.ts",
   "app/test/unit/copilot-selection-basis-test.ts",
