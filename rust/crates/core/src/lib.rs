@@ -93,7 +93,10 @@ pub use protected_resources::{ProtectedResources, protected_resources};
 mod settings;
 mod shared_index_backup;
 mod storage;
-pub use paths::{canonical_mutation_path, directory_exists, directory_path, path_exists};
+pub use paths::{
+    canonical_mutation_path, clone_destination_status, directory_exists, directory_path,
+    path_exists,
+};
 mod submodules;
 mod worktrees;
 pub use preferences::{Preferences, PreferencesPatch, PreferencesStore, Theme};

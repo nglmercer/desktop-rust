@@ -1814,6 +1814,28 @@ export class BackendClient {
     return value
   }
 
+  /** Describe a clone destination without selecting a repository. */
+  async cloneDestinationStatus(
+    path: string
+  ): Promise<'missing' | 'empty' | 'not_empty' | 'not_directory' | 'dangling_symlink' | 'unreadable'> {
+    if (this.transport !== 'ws') {
+      throw new BackendError({
+        code: 'unsupported',
+        message: 'Clone destination checks are unavailable on this transport',
+        retryable: false,
+      })
+    }
+    const value = await this.request('clone_destination_status', { path })
+    if (value !== 'missing' && value !== 'empty' && value !== 'not_empty' && value !== 'not_directory' && value !== 'dangling_symlink' && value !== 'unreadable') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid clone destination response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
   /** Resolve an existing path or a prospective destination through Rust. */
   async canonicalMutationPath(path: string): Promise<string> {
     const value =

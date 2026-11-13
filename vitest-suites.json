@@ -1,4 +1,6 @@
 [
+  "app/test/unit/clone-destination-browser-integration-test.tsx",
+  "app/test/unit/clone-destination-websocket-test.tsx",
   "app/test/unit/ahead-behind-store-test.ts",
   "app/test/unit/copilot-assisted-commit-test.ts",
   "app/test/unit/ui/copilot-commit-panel-test.tsx",

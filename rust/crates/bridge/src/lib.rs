@@ -420,6 +420,9 @@ enum ManagementOperation {
     PathExists {
         path: desktop_core::GitPath,
     },
+    CloneDestinationStatus {
+        path: desktop_core::GitPath,
+    },
     CanonicalMutationPath {
         path: desktop_core::GitPath,
     },
@@ -625,6 +628,9 @@ async fn execute(
         )),
         ApplicationOperation::Management(PathExists { path }) => Ok(serde_json::json!(
             desktop_core::path_exists(&desktop_core::directory_path(path)?).await?
+        )),
+        ApplicationOperation::Management(CloneDestinationStatus { path }) => Ok(serde_json::json!(
+            desktop_core::clone_destination_status(&desktop_core::directory_path(path)?).await?
         )),
         ApplicationOperation::Management(CanonicalMutationPath { path }) => Ok(serde_json::json!(
             desktop_core::canonical_mutation_path(&desktop_core::directory_path(path)?).await?

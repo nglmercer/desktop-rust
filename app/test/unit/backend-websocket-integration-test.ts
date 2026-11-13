@@ -120,6 +120,40 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('classifies clone destinations without selecting a repository', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-clone-status-'))
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'global-config') }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+      const empty = path.join(directory, 'empty directory')
+      const file = path.join(directory, 'file')
+      await mkdir(empty)
+      await writeFile(file, 'original')
+      await symlink(empty, path.join(directory, 'linked-empty'))
+      await symlink(path.join(directory, 'absent'), path.join(directory, 'dangling'))
+      expect(await client.cloneDestinationStatus(path.join(directory, 'absent'))).toBe('missing')
+      expect(await client.cloneDestinationStatus(path.join(directory, 'dangling'))).toBe('dangling_symlink')
+      expect(await client.cloneDestinationStatus(path.join(directory, 'dangling/child'))).toBe('dangling_symlink')
+      expect(await client.cloneDestinationStatus(empty)).toBe('empty')
+      expect(await client.cloneDestinationStatus(path.join(directory, 'linked-empty'))).toBe('empty')
+      expect(await client.cloneDestinationStatus(file)).toBe('not_directory')
+      expect(await client.cloneDestinationStatus(path.join(file, 'child'))).toBe('not_directory')
+      expect(await client.cloneDestinationStatus(directory)).toBe('not_empty')
+      const unreadable = path.join(directory, 'unreadable')
+      await mkdir(unreadable)
+      await chmod(unreadable, 0)
+      try {
+        const denied = await readdir(unreadable).then(() => false, () => true)
+        if (denied) expect(await client.cloneDestinationStatus(unreadable)).toBe('unreadable')
+      } finally { await chmod(unreadable, 0o700) }
+      await expect(client.cloneDestinationStatus('relative')).rejects.toThrow()
+      expect(await readFile(file, 'utf8')).toBe('original')
+    }, 60_000)
+
     it.skipIf(process.platform !== 'linux' || !existsSync('/usr/bin/konsole'))('opens a saved contextual repository with the terminal bridge', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-terminal-bridge-'))
       const fixture = path.join(directory, 'konsole-fixture')

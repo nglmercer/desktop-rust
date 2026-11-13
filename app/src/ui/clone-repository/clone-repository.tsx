@@ -749,6 +749,7 @@ export class CloneRepository extends React.Component<
     const tabState = this.getSelectedTabState()
     const { path, url, error } = tabState
     const { initialPath } = this.state
+    const nativeSelectedClone = this.state.nativeSelectedClone
     const isDefaultPath = initialPath === path
     const isURLNotEntered = url === ''
 
@@ -762,7 +763,7 @@ export class CloneRepository extends React.Component<
       // We only care about the result if the path hasn't
       // changed since we went async
       const newTabState = this.getSelectedTabState()
-      if (generation === this.pathValidationGeneration && this.props.selectedTab === tab && newTabState.path === path) {
+      if (generation === this.pathValidationGeneration && this.props.selectedTab === tab && newTabState.path === path && this.state.nativeSelectedClone === nativeSelectedClone) {
         this.setSelectedTabState({ error: pathValidation, path })
       }
     }
@@ -862,7 +863,12 @@ export class CloneRepository extends React.Component<
   }
 
   /** Validate the destination before cloning can create files in it. */
-  private async validateClonePath(path: string | null): Promise<null | Error> {
+  private async validateClonePath(
+    path: string | null,
+    requireAbsent = backend().transportKind !== 'none' &&
+      this.props.selectedTab === CloneRepositoryTab.GitHub &&
+      this.state.nativeSelectedClone
+  ): Promise<null | Error> {
     if (path === null) {
       return new Error(
         'Unable to read path on disk. Please check the path and try again.'
@@ -879,8 +885,39 @@ export class CloneRepository extends React.Component<
     }
 
     try {
+      const generation = this.pathValidationGeneration
+      const tab = this.props.selectedTab
+      const nativeSelectedClone = this.state.nativeSelectedClone
+      if (backend().transportKind === 'ws') {
+        // This is a UI hint only; Git still checks the destination when it
+        // starts, as files or links can change after this request completes.
+        const status = await backend().cloneDestinationStatus(Path.resolve(path))
+        if (status === 'dangling_symlink') {
+          return new Error(
+            'A broken symbolic link already exists at this path. Choose a different folder.'
+          )
+        }
+        if (requireAbsent && status !== 'missing' && status !== 'unreadable') {
+          return new Error('This mode requires a destination that does not yet exist.')
+        }
+        if (status === 'not_directory') {
+          return new Error(
+            'There is already a file with this name. Git can only clone to a folder.'
+          )
+        }
+        if (status === 'not_empty') {
+          return new Error(
+            'This folder contains files. Git can only clone to empty folders.'
+          )
+        }
+        if (status === 'unreadable') {
+          return new Error(
+            'Unable to read path on disk. Please check the path and try again.'
+          )
+        }
+      }
       const canonical = await canonicalMutationPath(path)
-      if (this.getSelectedTabState().path === path) {
+      if (generation === this.pathValidationGeneration && this.props.selectedTab === tab && this.state.nativeSelectedClone === nativeSelectedClone && this.getSelectedTabState().path === path) {
         this.validatedClonePath = { path, canonical }
       }
       if (isRepositoryAffectedByAssistedCommit(canonical)) {
@@ -888,16 +925,15 @@ export class CloneRepository extends React.Component<
           'Finish or cancel the assisted commit run before cloning into this directory.'
         )
       }
-      if (
-        backend().transportKind !== 'none' &&
-        this.props.selectedTab === CloneRepositoryTab.GitHub &&
-        this.state.nativeSelectedClone
-      ) {
+      if (requireAbsent && backend().transportKind !== 'ws') {
         // This is only an early UI check. The native clone operation itself
         // validates and reserves the destination before contacting a remote.
         return await backend().pathExists(Path.resolve(path))
           ? new Error('This mode requires a destination that does not yet exist.')
           : null
+      }
+      if (backend().transportKind === 'ws') {
+        return null
       }
       const directoryFiles = await readdir(path)
 
@@ -988,7 +1024,7 @@ export class CloneRepository extends React.Component<
       return
     }
 
-    const pathError = await this.validateClonePath(path)
+    const pathError = await this.validateClonePath(path, nativeOperation)
     if (!this.mounted) return
     if (pathError !== null) {
       this.setState({ loading: false, nativeOperation: false })
@@ -1009,7 +1045,7 @@ export class CloneRepository extends React.Component<
 
     const { url, defaultBranch } = cloneInfo
 
-    const currentPathError = await this.validateClonePath(path)
+    const currentPathError = await this.validateClonePath(path, nativeOperation)
     if (!this.mounted) return
     if (currentPathError !== null) {
       this.setState({ loading: false, nativeOperation: false })

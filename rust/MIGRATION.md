@@ -2763,6 +2763,15 @@ yet use this route; recursive submodule account scopes and full clone error
 detail remain open. A real Wry WebKit integration test exercises HTTPS clone
 progress, preservation of an obstructing destination, and recovery.
 
+The browser clone dialog validates ordinary destinations through a typed Rust
+WebSocket read rather than the unavailable renderer filesystem shim. It
+distinguishes empty or absent directories, files, nonempty directories,
+unreadable paths, and dangling links at the destination or an ancestor. Links
+to real empty directories remain supported. The UI ignores stale responses
+when the path, tab or selected-account mode changes, and a disconnected bridge
+is an error. This validation is advisory: Git or the selected-account clone
+operation must still check the destination because it can change afterward.
+
 The WebSocket clone endpoint can optionally report request-owned Git progress.
 It forwards only fixed phase labels and numeric percentages, discarding raw
 remote output and rewritten URLs; notifications are bounded and best effort.
