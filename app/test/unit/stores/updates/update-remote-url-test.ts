@@ -1,6 +1,10 @@
-import { afterEach, describe, it, TestContext } from 'node:test'
+import 'fake-indexeddb/auto'
+import { afterEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import { join } from 'path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { GitStore, RepositoriesStore } from '../../../../src/lib/stores'
 import { TestRepositoriesDatabase } from '../../../helpers/databases'
 import {
@@ -9,9 +13,11 @@ import {
 } from '../../../../src/lib/api'
 import { updateRemoteUrl } from '../../../../src/lib/stores/updates/update-remote-url'
 import { shell } from '../../../helpers/test-app-shell'
-import { setupFixtureRepository } from '../../../helpers/repositories'
 import { addRemote } from '../../../../src/lib/git'
 import { TestStatsStore } from '../../../helpers/test-stats-store'
+
+vi.mock('../../../../src/lib/custom-integration', () => ({}))
+vi.mock('keytar', () => ({ default: {} }))
 
 describe('Update remote url', () => {
   const apiRepository: IAPIFullRepository = {
@@ -38,9 +44,9 @@ describe('Update remote url', () => {
 
   let gitStore: GitStore
   let db: TestRepositoriesDatabase
+  let repoPath: string | undefined
 
   const createRepository = async (
-    t: TestContext,
     apiRepo: IAPIFullRepository,
     remoteUrl: string | null = null
   ) => {
@@ -48,7 +54,8 @@ describe('Update remote url', () => {
     await db.reset()
     const repositoriesStore = new RepositoriesStore(db)
 
-    const repoPath = await setupFixtureRepository(t, 'test-repo')
+    repoPath = await mkdtemp(join(tmpdir(), 'desktop-remote-url-'))
+    execFileSync('git', ['init', '-q', repoPath])
     const repository = await repositoriesStore.setGitHubRepository(
       await repositoriesStore.addRepository(repoPath, join(repoPath, '.git')),
       await repositoriesStore.upsertGitHubRepository(endpoint, apiRepo)
@@ -62,13 +69,14 @@ describe('Update remote url', () => {
     return { gitHubRepository, gitStore }
   }
 
-  afterEach(() => {
-    db.close()
+  afterEach(async () => {
+    db?.close()
+    if (repoPath !== undefined) await rm(repoPath, { recursive: true, force: true })
+    repoPath = undefined
   })
 
-  it("updates the repository's remote url when the github url changes", async t => {
+  it("updates the repository's remote url when the github url changes", async () => {
     const { gitHubRepository, gitStore } = await createRepository(
-      t,
       apiRepository
     )
     assert(gitStore.currentRemote !== null)
@@ -79,11 +87,11 @@ describe('Update remote url', () => {
     await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
     assert.notEqual(originalUrl, updatedUrl)
     assert.equal(gitStore.currentRemote.url, updatedUrl)
+    assert.equal(execFileSync('git', ['-C', repoPath!, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8' }).trim(), updatedUrl)
   })
 
-  it("doesn't update the repository's remote url when the github url is the same", async t => {
+  it("doesn't update the repository's remote url when the github url is the same", async () => {
     const { gitHubRepository, gitStore } = await createRepository(
-      t,
       apiRepository
     )
     assert(gitStore.currentRemote !== null)
@@ -94,14 +102,13 @@ describe('Update remote url', () => {
     assert.equal(gitStore.currentRemote.url, originalUrl)
   })
 
-  it("doesn't update repository's remote url if protocols don't match", async t => {
+  it("doesn't update repository's remote url if protocols don't match", async () => {
     const originalUrl = 'git@github.com:desktop/desktop.git'
     const sshApiRepository = {
       ...apiRepository,
       clone_url: originalUrl,
     }
     const { gitHubRepository, gitStore } = await createRepository(
-      t,
       sshApiRepository
     )
     const updatedUrl = 'https://github.com/my-user/my-updated-repo'
@@ -112,10 +119,9 @@ describe('Update remote url', () => {
     assert.equal(gitStore.currentRemote.url, originalUrl)
   })
 
-  it("doesn't update the repository's remote url if it differs from the default from the github API", async t => {
+  it("doesn't update the repository's remote url if it differs from the default from the github API", async () => {
     const originalUrl = 'https://github.com/my-user/something-different'
     const { gitHubRepository, gitStore } = await createRepository(
-      t,
       apiRepository,
       originalUrl
     )
@@ -128,10 +134,9 @@ describe('Update remote url', () => {
     assert.equal(gitStore.currentRemote.url, originalUrl)
   })
 
-  it('preserves credentials when the API clone URL changes', async t => {
+  it('preserves credentials when the API clone URL changes', async () => {
     const originalUrl = 'https://user:secret@github.com/my-user/my-repo'
     const { gitHubRepository, gitStore } = await createRepository(
-      t,
       apiRepository,
       originalUrl
     )
@@ -142,13 +147,13 @@ describe('Update remote url', () => {
 
     await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
     assert.equal(gitStore.currentRemote?.url, originalUrl)
+    assert.equal(execFileSync('git', ['-C', repoPath!, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8' }).trim(), originalUrl)
   })
 
   for (const suffix of ['?access=secret', '#custom']) {
-    it(`preserves a remote URL with ${suffix.startsWith('?') ? 'query' : 'fragment'} data`, async t => {
+    it(`preserves a remote URL with ${suffix.startsWith('?') ? 'query' : 'fragment'} data`, async () => {
       const originalUrl = `https://github.com/my-user/my-repo${suffix}`
       const { gitHubRepository, gitStore } = await createRepository(
-        t,
         apiRepository,
         originalUrl
       )
@@ -159,6 +164,7 @@ describe('Update remote url', () => {
 
       await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
       assert.equal(gitStore.currentRemote?.url, originalUrl)
+      assert.equal(execFileSync('git', ['-C', repoPath!, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8' }).trim(), originalUrl)
     })
   }
 })
