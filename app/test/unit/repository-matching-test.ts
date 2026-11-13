@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { afterEach, describe, it, vi } from 'vitest'
 import { parseRemote } from '../../src/lib/remote-parsing'
 import assert from 'node:assert'
 import {
@@ -17,6 +17,8 @@ import { gitHubRepoFixture } from '../helpers/github-repo-builder'
 import { API } from '../../src/lib/api'
 import { createMockAPI, createMockAPIRepository } from '../helpers/mock-api'
 
+afterEach(() => vi.restoreAllMocks())
+
 describe('choosing an account for a newly added or cloned remote', () => {
   const endpoint = 'https://api.github.com'
   const alice = new Account('alice', endpoint, 'alice-token', [], '', 1, '')
@@ -33,9 +35,9 @@ describe('choosing an account for a newly added or cloned remote', () => {
   const remote = 'https://github.com/owner/repo.git'
   const apiRepository = { ...createMockAPIRepository(), parent: undefined }
 
-  it('exposes metadata for every accessible account without selecting an identity', async t => {
+  it('exposes metadata for every accessible account without selecting an identity', async () => {
     const tokens: string[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           tokens.push(account.token)
@@ -61,9 +63,9 @@ describe('choosing an account for a newly added or cloned remote', () => {
     assert.deepStrictEqual(tokens, ['alice-token', 'bob-token'])
   })
 
-  it('probes all matching accounts and automatically selects the only account with access', async t => {
+  it('probes all matching accounts and automatically selects the only account with access', async () => {
     const requests: string[][] = []
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async (owner, name) => {
           requests.push([account.token, owner, name])
@@ -86,8 +88,8 @@ describe('choosing an account for a newly added or cloned remote', () => {
     ])
   })
 
-  it('prompts with only accessible accounts using an unpersisted repository', async t => {
-    t.mock.method(API, 'fromAccount', () =>
+  it('prompts with only accessible accounts using an unpersisted repository', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation(() =>
       createMockAPI({ fetchRepositoryIfAccessible: async () => apiRepository })
     )
     let choices = 0
@@ -109,8 +111,8 @@ describe('choosing an account for a newly added or cloned remote', () => {
     assert.strictEqual(result?.account, bob)
   })
 
-  it('leaves the assignment null when no signed-in account can access the remote', async t => {
-    t.mock.method(API, 'fromAccount', () =>
+  it('leaves the assignment null when no signed-in account can access the remote', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation(() =>
       createMockAPI({ fetchRepositoryIfAccessible: async () => null })
     )
     for (const accounts of [[], [alice, bob]]) {
@@ -126,8 +128,8 @@ describe('choosing an account for a newly added or cloned remote', () => {
     }
   })
 
-  it('distinguishes canceling the chooser from having no accessible account', async t => {
-    t.mock.method(API, 'fromAccount', () =>
+  it('distinguishes canceling the chooser from having no accessible account', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation(() =>
       createMockAPI({ fetchRepositoryIfAccessible: async () => apiRepository })
     )
     assert.strictEqual(
@@ -141,10 +143,10 @@ describe('choosing an account for a newly added or cloned remote', () => {
     )
   })
 
-  it('checks an account signed in from the chooser before using it', async t => {
+  it('checks an account signed in from the chooser before using it', async () => {
     const carol = new Account('carol', endpoint, 'carol-token', [], '', 4, '')
     const tokens: string[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           tokens.push(account.token)
@@ -162,8 +164,8 @@ describe('choosing an account for a newly added or cloned remote', () => {
     assert.deepStrictEqual(tokens, ['alice-token', 'bob-token', 'carol-token'])
   })
 
-  it('rejects a chosen account that cannot access the remote instead of falling back', async t => {
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+  it('rejects a chosen account that cannot access the remote instead of falling back', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () =>
           account === enterprise ? null : apiRepository,
@@ -180,9 +182,9 @@ describe('choosing an account for a newly added or cloned remote', () => {
     )
   })
 
-  it('checks access to a wiki through its repository', async t => {
+  it('checks access to a wiki through its repository', async () => {
     const requests: string[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async (owner, name) => {
           requests.push(`${account.login}:${owner}/${name}`)
@@ -207,8 +209,8 @@ describe('choosing an account for a newly added or cloned remote', () => {
     })
   })
 
-  it('leaves out accounts whose access check fails and uses the rest', async t => {
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+  it('leaves out accounts whose access check fails and uses the rest', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           if (account === alice) {
@@ -227,8 +229,8 @@ describe('choosing an account for a newly added or cloned remote', () => {
     assert.strictEqual(result?.account, bob)
   })
 
-  it('treats a failed access check as unassigned rather than failing', async t => {
-    t.mock.method(API, 'fromAccount', () =>
+  it('treats a failed access check as unassigned rather than failing', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation(() =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           throw new Error('Probe failed')
@@ -246,8 +248,8 @@ describe('choosing an account for a newly added or cloned remote', () => {
     )
   })
 
-  it('surfaces unexpected probe errors from the low-level probe', async t => {
-    t.mock.method(API, 'fromAccount', () =>
+  it('surfaces unexpected probe errors from the low-level probe', async () => {
+    vi.spyOn(API, 'fromAccount').mockImplementation(() =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           throw new Error('Probe failed')
@@ -260,15 +262,15 @@ describe('choosing an account for a newly added or cloned remote', () => {
     )
   })
 
-  it('treats server errors from the real API as failures rather than no access', async t => {
-    t.mock.method(globalThis, 'fetch', async () =>
+  it('treats server errors from the real API as failures rather than no access', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       Response.json({ message: 'Server Error' }, { status: 500 })
     )
     await assert.rejects(probeRemoteRepositoryAccounts([alice], remote))
   })
 
-  it('treats a 404 from the real API as no access', async t => {
-    t.mock.method(globalThis, 'fetch', async () =>
+  it('treats a 404 from the real API as no access', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       Response.json({ message: 'Not Found' }, { status: 404 })
     )
     assert.deepStrictEqual(
