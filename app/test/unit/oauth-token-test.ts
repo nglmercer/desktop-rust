@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { afterEach, describe, it, vi } from 'vitest'
 import { getUserAgent } from '../../src/lib/http'
 import {
   exchangeOAuthToken,
@@ -18,6 +18,11 @@ const tokenResponse = {
   token_type: 'bearer',
   scope: 'repo,user,workflow',
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 
 describe('parseOAuthToken', () => {
   it('parses rotating credentials and absolute expiration times', () => {
@@ -123,70 +128,72 @@ describe('OAuth token requests', () => {
     'https://github.com',
     'https://enterprise.example/',
   ]) {
-    it(`exchanges a code at the HTML endpoint ${endpoint}`, async t => {
-      t.mock.timers.enable({ apis: ['Date'], now: issuedAt })
-      const fetchMock = t.mock.method(
-        globalThis,
-        'fetch',
-        async (input: RequestInfo | URL, init?: RequestInit) => {
-          assert.strictEqual(
-            input,
-            `${endpoint.replace(/\/$/, '')}/login/oauth/access_token`
-          )
-          assert.ok(init)
-          assert.strictEqual(init.method, 'POST')
-          assert.deepStrictEqual(init.headers, {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': getUserAgent(),
-          })
-          assert.strictEqual(init.redirect, 'error')
-          assert.strictEqual(init.cache, 'no-store')
-          assert.ok(init.signal)
-          assert.strictEqual(init.signal.aborted, false)
-          assert.ok(typeof init.body === 'string')
-          assert.deepStrictEqual(JSON.parse(init.body), {
-            client_id: '',
-            client_secret: '',
-            code: 'browser-code',
-          })
-          return Response.json(tokenResponse)
-        }
-      )
+    it(`exchanges a code at the HTML endpoint ${endpoint}`, async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(issuedAt)
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(
+          async (input: RequestInfo | URL, init?: RequestInit) => {
+            assert.strictEqual(
+              input,
+              `${endpoint.replace(/\/$/, '')}/login/oauth/access_token`
+            )
+            assert.ok(init)
+            assert.strictEqual(init.method, 'POST')
+            assert.deepStrictEqual(init.headers, {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              'User-Agent': getUserAgent(),
+            })
+            assert.strictEqual(init.redirect, 'error')
+            assert.strictEqual(init.cache, 'no-store')
+            assert.ok(init.signal)
+            assert.strictEqual(init.signal.aborted, false)
+            assert.ok(typeof init.body === 'string')
+            assert.deepStrictEqual(JSON.parse(init.body), {
+              client_id: '',
+              client_secret: '',
+              code: 'browser-code',
+            })
+            return Response.json(tokenResponse)
+          }
+        )
       assert.deepStrictEqual(
         await exchangeOAuthToken(endpoint, 'browser-code'),
         parseOAuthToken(tokenResponse, issuedAt)
       )
-      assert.strictEqual(fetchMock.mock.callCount(), 1)
+      assert.strictEqual(fetchMock.mock.calls.length, 1)
     })
   }
 
-  it('uses the refresh grant and returns both replacement tokens', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: issuedAt })
-    const fetchMock = t.mock.method(
-      globalThis,
-      'fetch',
-      async (_input: RequestInfo | URL, init?: RequestInit) => {
-        assert.ok(init)
-        assert.ok(typeof init.body === 'string')
-        assert.deepStrictEqual(JSON.parse(init.body), {
-          client_id: '',
-          client_secret: '',
-          grant_type: 'refresh_token',
-          refresh_token: 'old-refresh-token',
-        })
-        return Response.json(tokenResponse)
-      }
-    )
+  it('uses the refresh grant and returns both replacement tokens', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(issuedAt)
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(
+        async (_input: RequestInfo | URL, init?: RequestInit) => {
+          assert.ok(init)
+          assert.ok(typeof init.body === 'string')
+          assert.deepStrictEqual(JSON.parse(init.body), {
+            client_id: '',
+            client_secret: '',
+            grant_type: 'refresh_token',
+            refresh_token: 'old-refresh-token',
+          })
+          return Response.json(tokenResponse)
+        }
+      )
     assert.deepStrictEqual(
       await refreshOAuthToken('https://github.com', 'old-refresh-token'),
       parseOAuthToken(tokenResponse, issuedAt)
     )
-    assert.strictEqual(fetchMock.mock.callCount(), 1)
+    assert.strictEqual(fetchMock.mock.calls.length, 1)
   })
 
-  it('supports legacy exchange responses', async t => {
-    t.mock.method(globalThis, 'fetch', async () =>
+  it('supports legacy exchange responses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       Response.json({ access_token: 'legacy' })
     )
     assert.deepStrictEqual(
@@ -200,8 +207,10 @@ describe('OAuth token requests', () => {
     { refresh_token: 'refresh' },
     { access_token: 'access', refresh_token: '' },
   ]) {
-    it('requires both credentials in refresh responses', async t => {
-      t.mock.method(globalThis, 'fetch', async () => Response.json(value))
+    it('requires both credentials in refresh responses', async () => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+        Response.json(value)
+      )
       await assert.rejects(
         refreshOAuthToken('https://github.com', 'refresh'),
         OAuthTokenResponseError
@@ -211,13 +220,15 @@ describe('OAuth token requests', () => {
 
   for (const error of ['bad_refresh_token', 'invalid_grant']) {
     for (const status of [200, 400, 401]) {
-      it(`classifies ${error} on refresh with HTTP ${status}`, async t => {
-        const fetchMock = t.mock.method(globalThis, 'fetch', async () =>
-          Response.json(
-            { error, error_description: 'secret-description' },
-            { status }
+      it(`classifies ${error} on refresh with HTTP ${status}`, async () => {
+        const fetchMock = vi
+          .spyOn(globalThis, 'fetch')
+          .mockImplementation(async () =>
+            Response.json(
+              { error, error_description: 'secret-description' },
+              { status }
+            )
           )
-        )
         await assert.rejects(
           refreshOAuthToken('https://github.com', 'secret-token'),
           {
@@ -225,12 +236,12 @@ describe('OAuth token requests', () => {
             message: 'The OAuth refresh token was rejected.',
           }
         )
-        assert.strictEqual(fetchMock.mock.callCount(), 1)
+        assert.strictEqual(fetchMock.mock.calls.length, 1)
       })
     }
 
-    it(`does not classify ${error} as refresh rejection during exchange`, async t => {
-      t.mock.method(globalThis, 'fetch', async () =>
+    it(`does not classify ${error} as refresh rejection during exchange`, async () => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
         Response.json({ error, error_description: 'secret-description' })
       )
       await assert.rejects(exchangeOAuthToken('https://github.com', 'code'), {
@@ -240,8 +251,8 @@ describe('OAuth token requests', () => {
     })
   }
 
-  it('rejects other OAuth errors even with HTTP 200 and valid token fields', async t => {
-    t.mock.method(globalThis, 'fetch', async () =>
+  it('rejects other OAuth errors even with HTTP 200 and valid token fields', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       Response.json({
         ...tokenResponse,
         error: 'secret-error',
@@ -254,8 +265,8 @@ describe('OAuth token requests', () => {
     })
   })
 
-  it('rejects non-success HTTP statuses without trusting token fields', async t => {
-    t.mock.method(globalThis, 'fetch', async () =>
+  it('rejects non-success HTTP statuses without trusting token fields', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       Response.json(tokenResponse, { status: 500 })
     )
     await assert.rejects(refreshOAuthToken('https://github.com', 'refresh'), {
@@ -269,13 +280,13 @@ describe('OAuth token requests', () => {
     ['refresh token', refreshOAuthToken],
   ] as const) {
     for (const status of [400, 401, 429, 500, 502, 503]) {
-      it(`treats non-JSON HTTP ${status} as a request failure during ${grant} exchange`, async t => {
-        const fetchMock = t.mock.method(
-          globalThis,
-          'fetch',
-          async () =>
-            new Response('<html>secret-gateway-response</html>', { status })
-        )
+      it(`treats non-JSON HTTP ${status} as a request failure during ${grant} exchange`, async () => {
+        const fetchMock = vi
+          .spyOn(globalThis, 'fetch')
+          .mockImplementation(
+            async () =>
+              new Response('<html>secret-gateway-response</html>', { status })
+          )
         await assert.rejects(
           requestToken('https://github.com', 'secret-credential'),
           {
@@ -283,19 +294,21 @@ describe('OAuth token requests', () => {
             message: 'The OAuth token request failed.',
           }
         )
-        assert.strictEqual(fetchMock.mock.callCount(), 1)
+        assert.strictEqual(fetchMock.mock.calls.length, 1)
       })
     }
 
     for (const status of [500, 502, 503]) {
       for (const error of ['bad_refresh_token', 'invalid_grant']) {
-        it(`does not trust ${error} in HTTP ${status} during ${grant} exchange`, async t => {
-          const fetchMock = t.mock.method(globalThis, 'fetch', async () =>
-            Response.json(
-              { error, error_description: 'secret-error-description' },
-              { status }
+        it(`does not trust ${error} in HTTP ${status} during ${grant} exchange`, async () => {
+          const fetchMock = vi
+            .spyOn(globalThis, 'fetch')
+            .mockImplementation(async () =>
+              Response.json(
+                { error, error_description: 'secret-error-description' },
+                { status }
+              )
             )
-          )
           await assert.rejects(
             requestToken('https://github.com', 'secret-credential'),
             {
@@ -303,16 +316,14 @@ describe('OAuth token requests', () => {
               message: 'The OAuth token request failed.',
             }
           )
-          assert.strictEqual(fetchMock.mock.callCount(), 1)
+          assert.strictEqual(fetchMock.mock.calls.length, 1)
         })
       }
     }
   }
 
-  it('sanitizes malformed JSON responses', async t => {
-    t.mock.method(
-      globalThis,
-      'fetch',
+  it('sanitizes malformed JSON responses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
       async () => new Response('secret-response-body')
     )
     await assert.rejects(exchangeOAuthToken('https://github.com', 'code'), {
@@ -321,10 +332,8 @@ describe('OAuth token requests', () => {
     })
   })
 
-  it('treats an HTML gateway failure as temporary rather than a malformed replacement pair', async t => {
-    t.mock.method(
-      globalThis,
-      'fetch',
+  it('treats an HTML gateway failure as temporary rather than a malformed replacement pair', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
       async () => new Response('<html>Unavailable</html>', { status: 502 })
     )
     await assert.rejects(refreshOAuthToken('https://github.com', 'refresh'), {
@@ -333,43 +342,43 @@ describe('OAuth token requests', () => {
     })
   })
 
-  it('sanitizes network failures without retrying', async t => {
-    const fetchMock = t.mock.method(globalThis, 'fetch', async () => {
-      throw new Error('secret-request-body')
-    })
+  it('sanitizes network failures without retrying', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => {
+        throw new Error('secret-request-body')
+      })
     await assert.rejects(refreshOAuthToken('https://github.com', 'refresh'), {
       name: 'Error',
       message: 'The OAuth token request failed.',
     })
-    assert.strictEqual(fetchMock.mock.callCount(), 1)
+    assert.strictEqual(fetchMock.mock.calls.length, 1)
   })
 
-  it('bounds even a fetch that ignores cancellation', async t => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+  it('bounds even a fetch that ignores cancellation', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     let signal: AbortSignal | null | undefined
-    const fetchMock = t.mock.method(
-      globalThis,
-      'fetch',
-      (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
         signal = init?.signal
         return new Promise<Response>(() => {})
-      }
-    )
+      })
     const result = refreshOAuthToken('https://github.com', 'refresh')
     const assertion = assert.rejects(result, {
       name: 'Error',
       message: 'The OAuth token request timed out.',
     })
-    t.mock.timers.tick(29_999)
+    vi.advanceTimersByTime(29_999)
     assert.strictEqual(signal?.aborted, false)
-    t.mock.timers.tick(1)
+    vi.advanceTimersByTime(1)
     await assertion
     assert.strictEqual(signal?.aborted, true)
-    assert.strictEqual(fetchMock.mock.callCount(), 1)
+    assert.strictEqual(fetchMock.mock.calls.length, 1)
   })
 
-  it('keeps the deadline active while reading the response body', async t => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+  it('keeps the deadline active while reading the response body', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     let signal: AbortSignal | null | undefined
     const stream = new ReadableStream({
       start(controller) {
@@ -377,9 +386,7 @@ describe('OAuth token requests', () => {
       },
     })
     const response = new Response(stream)
-    t.mock.method(
-      globalThis,
-      'fetch',
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
       async (_input: RequestInfo | URL, init?: RequestInit) => {
         signal = init?.signal
         return response
@@ -392,24 +399,22 @@ describe('OAuth token requests', () => {
     })
     await Promise.resolve()
     assert.strictEqual(response.bodyUsed, true)
-    t.mock.timers.tick(30_000)
+    vi.advanceTimersByTime(30_000)
     await assertion
     assert.strictEqual(signal?.aborted, true)
   })
 
-  it('clears the deadline after a completed request', async t => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+  it('clears the deadline after a completed request', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     let signal: AbortSignal | null | undefined
-    t.mock.method(
-      globalThis,
-      'fetch',
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
       async (_input: RequestInfo | URL, init?: RequestInit) => {
         signal = init?.signal
         return Response.json(tokenResponse)
       }
     )
     await refreshOAuthToken('https://github.com', 'refresh')
-    t.mock.timers.tick(30_000)
+    vi.advanceTimersByTime(30_000)
     assert.strictEqual(signal?.aborted, false)
   })
 

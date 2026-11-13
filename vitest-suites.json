@@ -235,5 +235,6 @@
   "app/test/unit/git-store-cache-test.ts",
   "app/test/unit/app-store-test-harness-test.ts",
   "app/test/unit/open-file-test.ts",
-  "app/test/unit/main-process-proxy-test.ts"
+  "app/test/unit/main-process-proxy-test.ts",
+  "app/test/unit/oauth-token-test.ts"
 ]
