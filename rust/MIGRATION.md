@@ -2508,8 +2508,10 @@ test SSH wrapper that explicitly invokes LFS; ordinary Git fetch does not do so.
 Nested-submodule
 credential parity remains open. A `FETCH_HEAD` larger than 8 MiB cannot be
 reviewed. Explicit refspec fetches also use the reviewed operation over
-WebSocket, preserving Git's original argument shape and exit-128 handling;
-Wry and Electron retain their existing refspec path.
+WebSocket and Wry, preserving Git's original argument shape and exit-128
+handling. Wry falls back before mutation for unsupported URLs or proxy
+settings that require the legacy environment; Electron retains its existing
+refspec path.
 
 The existing native clone endpoint now returns fixed diagnostic categories
 instead of raw Git output, which can contain credentials introduced by URL
