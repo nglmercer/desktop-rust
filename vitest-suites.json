@@ -209,5 +209,12 @@
   "app/test/unit/mock-api-test.ts",
   "app/test/unit/welcome-test.ts",
   "app/test/unit/ui/copilot-custom-providers-dialog-test.tsx",
-  "app/test/unit/ui/delete-worktree-dialogs-test.tsx"
+  "app/test/unit/ui/delete-worktree-dialogs-test.tsx",
+  "app/test/unit/api-error-handling-test.ts",
+  "app/test/unit/http-test.ts",
+  "app/test/unit/ssh-test.ts",
+  "app/test/unit/desktop-console-transport-test.ts",
+  "app/test/unit/ui/dropdown-select-button-test.tsx",
+  "app/test/unit/database-migration-test.ts",
+  "app/test/unit/ui/small-action-and-dialog-surfaces-test.tsx"
 ]

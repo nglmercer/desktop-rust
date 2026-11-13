@@ -1,4 +1,5 @@
-import { describe, it } from 'node:test'
+import 'fake-indexeddb/auto'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { BaseDatabase } from '../../src/lib/databases/base-database'
 

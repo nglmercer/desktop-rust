@@ -1,9 +1,20 @@
 import assert from 'node:assert'
-import { afterEach, describe, it, mock } from 'node:test'
+import { afterEach, describe, it, vi } from 'vitest'
 import * as React from 'react'
 
 import { CICheckRunNoStepItem } from '../../../src/ui/check-runs/ci-check-run-no-steps'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
+
+vi.mock('fs-admin', () => ({
+  unlink: () => {},
+  makeTree: () => {},
+  symlink: () => {},
+}))
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 let restoreIpcSend: (() => void) | null = null
 
@@ -46,14 +57,6 @@ describe('small action and dialog surfaces', () => {
     function onDismissed() {
       dismissedCount++
     }
-
-    mock.module('fs-admin', {
-      namedExports: {
-        unlink: () => {},
-        makeTree: () => {},
-        symlink: () => {},
-      },
-    })
 
     const electron = await import('electron')
     const previousSend = electron.ipcRenderer.send

@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { installBrokenPipeErrorHandler } from '../../src/main-process/desktop-console-transport'

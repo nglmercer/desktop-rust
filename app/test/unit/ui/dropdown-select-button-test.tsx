@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '../../helpers/ui/render'
+import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
 import assert from 'node:assert'
-import { it } from 'node:test'
+import { it, vi } from 'vitest'
 import * as React from 'react'
 import { DropdownSelectButton } from '../../../src/ui/dropdown-select-button'
 import { MergeCallToActionWithConflicts } from '../../../src/ui/history/merge-call-to-action-with-conflicts'
@@ -8,6 +8,15 @@ import { Branch, BranchType } from '../../../src/models/branch'
 import { Repository } from '../../../src/models/repository'
 import { ComputedAction } from '../../../src/models/computed-action'
 import { createMockDispatcher } from '../../helpers/mock-dispatcher'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('fs-admin', () => ({}))
+vi.mock('react-confetti', () => ({ default: () => null }))
+vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
+vi.mock('../../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 function getOptions() {
   return [
