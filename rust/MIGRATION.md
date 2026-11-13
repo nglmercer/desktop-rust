@@ -2507,6 +2507,11 @@ reviewed. Explicit refspec fetches also use the reviewed operation over
 WebSocket, preserving Git's original argument shape and exit-128 handling;
 Wry and Electron retain their existing refspec path.
 
+The existing native clone endpoint now returns fixed diagnostic categories
+instead of raw Git output, which can contain credentials introduced by URL
+rewrites. Full clone error detail and the destination-scoped credential lease
+remain open.
+
 Browser WebSocket remote-HEAD refresh uses a reviewed Rust operation. It binds
 the raw loose HEAD file, including dangling symbolic refs, and checks path
 components for links. It currently accepts only Git's files ref backend and

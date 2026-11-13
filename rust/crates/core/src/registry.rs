@@ -851,9 +851,45 @@ pub async fn clone_repository(url: &str, path: &Path) -> Result<Repository> {
     command.push(destination.as_os_str().to_owned());
     let output = process::run_clone(parent, &command).await?;
     if output.code != 0 {
-        bail!("{}", output.text().stderr);
+        bail!("{}", clone_failure_message(&output));
     }
-    Repository::open(&destination).await
+    Repository::open(&destination).await.map_err(|_| {
+        anyhow::anyhow!("Clone completed, but its repository could not be opened; inspect the destination before retrying")
+    })
+}
+
+/// Clone output may contain raw URLs (including credentials added by a Git
+/// rewrite) or remote-controlled text. Only fixed descriptions cross the API.
+fn clone_failure_message(output: &process::RawOutput) -> &'static str {
+    match crate::fetch_error::classify(&output.stderr, &output.stdout, None) {
+        Some(
+            "https_authentication_failed"
+            | "ssh_authentication_failed"
+            | "ssh_permission_denied"
+            | "ssh_key_unverified",
+        ) => "Clone authentication failed. Check your credentials and access to the repository.",
+        Some("host_resolution_failed" | "host_down") => {
+            "The remote host could not be reached. Check your connection and remote URL."
+        }
+        Some("remote_disconnection") => {
+            "The remote disconnected during clone. Check your connection and try again."
+        }
+        Some(
+            "https_repository_not_found"
+            | "ssh_repository_not_found"
+            | "remote_repository_unavailable",
+        ) => {
+            "The remote repository could not be accessed. Check that it exists and that you have access."
+        }
+        Some("bad_config_value") => "Clone failed because a Git configuration value is invalid.",
+        _ if String::from_utf8_lossy(&output.stderr).lines().any(|line| {
+            line.starts_with("fatal: repository '") && line.ends_with("' does not exist")
+        }) =>
+        {
+            "The remote repository could not be accessed. Check that it exists and that you have access."
+        }
+        _ => "Clone failed. Check the remote and destination before retrying.",
+    }
 }
 
 fn prepare_destination(path: &Path) -> Result<PathBuf> {
@@ -913,6 +949,175 @@ fn config_directory(mut env: impl FnMut(&str) -> Option<std::ffi::OsString>) -> 
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clone_and_initialize_report_open_failures_in_their_own_context() {
+        use std::{os::unix::fs::PermissionsExt, process::Command};
+        const CHILD: &str = "DESKTOP_TEST_REPOSITORY_OPEN_ERROR_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let fixture = RegistryFixture::new();
+            let root = fixture.directory.clone();
+            let bin = root.join("bin");
+            fs::create_dir(&bin).unwrap();
+            let git = bin.join("git");
+            fs::write(&git, "#!/bin/sh\ncase \" $* \" in\n  *\" config --get init.defaultbranch \"*) exit 1;;\n  *\" rev-parse --show-toplevel \"*) echo synthetic-open-secret >&2; exit 128;;\n  *) exit 0;;\nesac\n").unwrap();
+            fs::set_permissions(&git, fs::Permissions::from_mode(0o700)).unwrap();
+            let mut path = std::ffi::OsString::from(bin);
+            path.push(":");
+            path.push(std::env::var_os("PATH").unwrap_or_default());
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "registry::tests::clone_and_initialize_report_open_failures_in_their_own_context", "--nocapture"])
+                .env(CHILD, &root)
+                .env("PATH", path)
+                .env("HOME", &root)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env_remove("GIT_CONFIG_COUNT")
+                .env_remove("GIT_CONFIG_PARAMETERS")
+                .output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let root = PathBuf::from(std::env::var_os(CHILD).unwrap());
+        let initial = root.join("initial");
+        let cloned = root.join("cloned");
+        fs::create_dir(&initial).unwrap();
+        fs::create_dir(&cloned).unwrap();
+        let error = initialize(&initial)
+            .await
+            .err()
+            .expect("initialize open must fail");
+        assert!(error.to_string().contains("not a working tree"));
+        assert!(!error.to_string().contains("Clone completed"));
+        let error = clone_repository("https://example.invalid/repo", &cloned)
+            .await
+            .err()
+            .expect("clone open must fail");
+        assert!(error.to_string().contains("Clone completed"));
+        assert!(!format!("{error:?}").contains("synthetic-open-secret"));
+    }
+
+    #[test]
+    fn clone_error_messages_are_fixed_and_useful() {
+        let classify = |stderr: &str| {
+            clone_failure_message(&process::RawOutput {
+                code: 128,
+                stdout: Vec::new(),
+                stderr: stderr.as_bytes().to_vec(),
+            })
+        };
+        for (diagnostic, expected) in [
+            (
+                "fatal: Authentication failed for 'https://user:secret@example.invalid/repo'",
+                "Clone authentication failed",
+            ),
+            (
+                "fatal: unable to access 'https://secret.example/repo': Could not resolve host: secret.example",
+                "remote host could not be reached",
+            ),
+            (
+                "fatal: repository '/private/secret' does not exist",
+                "remote repository could not be accessed",
+            ),
+            ("fatal: unexpected secret diagnostics", "Clone failed"),
+        ] {
+            let message = classify(diagnostic);
+            assert!(message.contains(expected), "{message}");
+            assert!(!message.contains("secret"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clone_errors_do_not_expose_direct_or_rewritten_secrets() {
+        use std::{net::TcpListener, process::Command, time::Duration};
+        const CHILD: &str = "DESKTOP_TEST_CLONE_ERROR_CHILD";
+        const SECRET: &str = "synthetic-clone-secret";
+        if std::env::var_os(CHILD).is_none() {
+            let fixture = RegistryFixture::new();
+            let root = fixture.directory.clone();
+            let config = root.join("gitconfig");
+            // Git's real diagnostic includes the rewritten path. The sentinel
+            // stands in for sensitive material introduced by user config.
+            let rewritten = format!("file://{}", root.join(SECRET).display());
+            let setting = format!("url.{rewritten}.insteadOf");
+            assert!(
+                Command::new("git")
+                    .args(["config", "--file"])
+                    .arg(&config)
+                    .arg(setting)
+                    .arg("https://fixture.invalid/repo")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "registry::tests::clone_errors_do_not_expose_direct_or_rewritten_secrets",
+                    "--nocapture",
+                ])
+                .env(CHILD, &root)
+                .env("HOME", &root)
+                .env("GIT_CONFIG_GLOBAL", &config)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .env("NO_PROXY", "*")
+                .env_remove("GIT_CONFIG_COUNT")
+                .env_remove("GIT_CONFIG_PARAMETERS")
+                .env_remove("GIT_ALLOW_PROTOCOL")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let root = PathBuf::from(std::env::var_os(CHILD).unwrap());
+        let raw = Command::new("git")
+            .args(["clone", "--", "https://fixture.invalid/repo"])
+            .arg(root.join("raw-control"))
+            .output()
+            .unwrap();
+        assert!(!raw.status.success());
+        assert!(
+            String::from_utf8_lossy(&raw.stderr).contains(SECRET),
+            "control did not produce a sensitive diagnostic"
+        );
+        let error = clone_repository("https://fixture.invalid/repo", &root.join("rewritten"))
+            .await
+            .err()
+            .expect("rewritten clone must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("remote repository could not be accessed")
+        );
+        assert!(!format!("{error:?}").contains(SECRET));
+
+        // Direct URL userinfo is independently covered using a closed local
+        // port; no external network or real credential is involved.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let url = format!("http://user:{SECRET}@127.0.0.1:{port}/repo");
+        let error = tokio::time::timeout(
+            Duration::from_secs(8),
+            clone_repository(&url, &root.join("direct")),
+        )
+        .await
+        .unwrap()
+        .err()
+        .expect("unreachable clone must fail");
+        assert!(!format!("{error:?}").contains(SECRET));
+        assert!(!error.to_string().contains("user:"));
+    }
 
     #[cfg(unix)]
     #[tokio::test]

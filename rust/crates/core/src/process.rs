@@ -40,6 +40,9 @@ pub async fn run(path: &Path, args: &[OsString]) -> Result<RawOutput> {
 /// an inherited allowlist would otherwise override Git's protocol settings.
 pub(crate) async fn run_clone(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     let mut command = git_native_paths(None);
+    // Fixed diagnostics allow safe classification without forwarding Git's
+    // potentially credential-bearing error output to the caller.
+    command.env("LC_ALL", "C");
     if let Some(value) = std::env::var_os("GIT_ALLOW_PROTOCOL") {
         let value = value
             .into_string()
