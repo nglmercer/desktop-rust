@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { groupAccountsByHost } from '../../src/lib/group-accounts-by-host'
 import { Account } from '../../src/models/account'
 

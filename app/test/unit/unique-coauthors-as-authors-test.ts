@@ -1,9 +1,16 @@
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
-import { ITrailer } from '../../src/lib/git'
+import type { ITrailer } from '../../src/lib/git/interpret-trailers'
 import { getUniqueCoauthorsAsAuthors } from '../../src/lib/unique-coauthors-as-authors'
 import { Commit } from '../../src/models/commit'
 import { CommitIdentity } from '../../src/models/commit-identity'
+
+// Coauthor extraction uses the real trailer parser but never executes Git.
+vi.mock('../../src/lib/git/core', () => ({ git: vi.fn() }))
+vi.mock('../../src/lib/git/config', () => ({ getConfigValue: vi.fn() }))
+vi.mock('../../src/lib/git/repository-operation', () => ({
+  withRepositoryGitOperation: vi.fn(),
+}))
 
 describe('getUniqueCoauthorsAsAuthors', () => {
   it('can returns empty array for no coauthors', async () => {

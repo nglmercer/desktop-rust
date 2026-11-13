@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { Account } from '../../src/models/account'
 import { findAccountForRemoteURL } from '../../src/lib/find-account'

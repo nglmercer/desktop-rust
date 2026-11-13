@@ -104,5 +104,17 @@
   "app/test/unit/rust-cherry-pick-routing-test.ts",
   "app/test/unit/rust-rebase-state-routing-test.ts",
   "app/test/unit/rust-abort-operation-routing-test.ts",
-  "app/test/unit/rust-finish-merge-routing-test.ts"
+  "app/test/unit/rust-finish-merge-routing-test.ts",
+  "app/test/unit/text-token-parser-test.ts",
+  "app/test/unit/unique-coauthors-as-authors-test.ts",
+  "app/test/unit/wrap-rich-text-commit-message-test.ts",
+  "app/test/unit/copilot-commit-message-test.ts",
+  "app/test/unit/copilot-conflict-resolution-error-test.ts",
+  "app/test/unit/copilot-resolution-helpers-test.ts",
+  "app/test/unit/parse-app-url-test.ts",
+  "app/test/unit/enterprise-validate-url-test.ts",
+  "app/test/unit/email-test.ts",
+  "app/test/unit/group-accounts-by-host-test.ts",
+  "app/test/unit/find-account-test.ts",
+  "app/test/unit/find-upstream-remote-test.ts"
 ]
