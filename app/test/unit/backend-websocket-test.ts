@@ -199,6 +199,16 @@ describe('WebSocket backend transport', () => {
     await expect(pending).resolves.toBeUndefined()
   })
 
+  it('does not retry unsupported remote HEAD refresh over the browser bridge', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.refreshRepositoryRemoteHead('/repo', 'origin', '/source', false)
+    socket.message({ id: 1, result: { root_id: 'repo-1' } })
+    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_remote_head_preview'))
+    socket.message({ id: 2, result: { kind: 'unsupported' } })
+    await expect(pending).rejects.toMatchObject({ code: 'unsupported', retryable: false })
+    expect(socket.sent.some(message => message.method === 'renderer_remote_head')).toBe(false)
+  })
+
   it('cancels a fetch mutation at the bounded deadline without retrying', async () => {
     const { client: value, socket } = await connected()
     const pending = value.fetchRepositoryRemote('/repo', 'origin', '/source', false)

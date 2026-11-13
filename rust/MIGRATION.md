@@ -2518,15 +2518,28 @@ and recursive-submodule settings while retaining the earlier nonrecursive
 defaults for old clients. These options are covered by real Git and WebSocket
 tests, including a rewritten external helper in a submodule. The endpoint
 still uses native Git credential configuration; it does not provide selected
-account isolation, progress or recovery, and is not yet used by the browser
+account isolation or recovery, and is not yet used by the browser
 clone workflow. Full clone error detail and a destination-scoped credential
 lease remain open.
 
-Browser WebSocket remote-HEAD refresh uses a reviewed Rust operation. It binds
+The WebSocket clone endpoint can optionally report request-owned Git progress.
+It forwards only fixed phase labels and numeric percentages, discarding raw
+remote output and rewritten URLs; notifications are bounded and best effort.
+Cancellation interrupts the Git process group on Unix and leaves the caller
+responsible for inspecting any partial destination. Windows process-tree
+cancellation, Git LFS progress, selected-account isolation, and routing the
+browser clone workflow through this endpoint remain open.
+
+Wry and browser WebSocket remote-HEAD refresh use a reviewed Rust operation. It binds
 the raw loose HEAD file, including dangling symbolic refs, and checks path
 components for links. It currently accepts only Git's files ref backend and
 also requires a reviewable `FETCH_HEAD`. Git and independent writers can still
-race the final review. Wry and Electron retain their existing refresh path.
+race the final review. Wry falls back to its existing Git path before mutation
+for unsupported remote URL forms and ref storage formats; other review errors
+and attempted mutations do not trigger a retry. Electron retains its existing
+refresh path. Wry uses the repository's assigned-account credential broker,
+and its native shell currently relies on inherited proxy environment settings;
+native Windows and macOS runtime parity remain to be verified.
 
 Commit-range and branch merge-base diffs use a typed Rust read on Wry and
 WebSocket, retaining the renderer's raw patch parser, literal path handling,
@@ -2542,3 +2555,9 @@ may temporarily duplicate a buffer during reallocation, and chunk encoding
 and the renderer's copy add further bounded overhead. Electron retains the
 existing Git path; native WebView and cross-platform parity remain to be
 verified.
+
+The corresponding comparison changed-file lists also use Rust on Wry and
+WebSocket. Git's raw and numstat records retain rename, copy, binary and path
+information, and share the bounded, transport-owned comparison snapshots. A
+changed-file listing larger than 70,000,000 bytes fails rather than returning a
+partial list. Electron retains the existing Git path.

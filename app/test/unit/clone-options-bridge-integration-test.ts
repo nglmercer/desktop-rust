@@ -2,11 +2,14 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
+import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BackendClient } from '../../src/backend/client'
+import { CloneProgressParser } from '../../src/lib/progress/clone'
 
 const JSDOM = createRequire(import.meta.url)('jsdom').JSDOM
 let directory: string | undefined
@@ -41,7 +44,7 @@ afterEach(async () => {
 describe.skipIf(process.env.DESKTOP_TEST_BRIDGE !== '1' || process.platform === 'win32')('native clone options', () => {
   it('honors branch and recursive options while preserving old request defaults', async () => {
     directory = await mkdtemp(path.join(tmpdir(), 'desktop-clone-options-'))
-    const env = { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'missing-config'), GIT_ALLOW_PROTOCOL: 'file' }
+    const env = { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'missing-config'), GIT_ALLOW_PROTOCOL: 'file:http', NO_PROXY: '127.0.0.1', HTTP_PROXY: '', HTTPS_PROXY: '', ALL_PROXY: '' }
     const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { env, encoding: 'utf8' }).trim()
     const source = path.join(directory, 'source'); const sub = path.join(directory, 'sub')
     await mkdir(source); await mkdir(sub)
@@ -69,5 +72,38 @@ describe.skipIf(process.env.DESKTOP_TEST_BRIDGE !== '1' || process.platform === 
     const ordinary = path.join(directory, 'ordinary')
     await bounded(client.request('clone_repository', { url: source, path: ordinary }), 30_000)
     await expect(readFile(path.join(ordinary, 'nested/file'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const progress: string[] = []
+    await bounded(client.request('clone_repository', { url: pathToFileURL(source).href, path: path.join(directory, 'progress'), report_progress: true }, {
+      onProgress: chunk => progress.push(Buffer.from(chunk.data, 'base64').toString('utf8')),
+    }), 30_000)
+    expect(progress.length).toBeGreaterThan(0)
+    expect(progress.every(line => /^(remote: )?(Enumerating objects|Counting objects|Compressing objects|Receiving objects|Resolving deltas|Checking out files|Updating files|Filtering content): (\d{1,3})% \(\3\/100\)\r$/.test(line))).toBe(true)
+    const parser = new CloneProgressParser()
+    expect(progress.some(line => parser.parse(line.trimEnd()).kind === 'progress')).toBe(true)
+
+    let received!: () => void
+    const receivedRequest = new Promise<void>(resolve => { received = resolve })
+    let closed!: () => void
+    const connectionClosed = new Promise<void>(resolve => { closed = resolve })
+    const remote = createServer((request, response) => {
+      request.socket.once('close', closed)
+      response.writeHead(200, { 'content-type': 'application/x-git-upload-pack-advertisement' })
+      response.write('001e# service=git-upload-pack\n')
+      received()
+    })
+    await new Promise<void>(resolve => remote.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = remote.address()
+      if (!address || typeof address === 'string') throw new Error('missing test server address')
+      const controller = new AbortController()
+      const cloning = client.request('clone_repository', { url: `http://127.0.0.1:${address.port}/repo`, path: path.join(directory, 'cancelled'), report_progress: true }, { signal: controller.signal })
+      await bounded(receivedRequest)
+      controller.abort()
+      await expect(cloning).rejects.toThrow()
+      await bounded(connectionClosed, 10_000)
+    } finally {
+      remote.closeAllConnections()
+      await new Promise<void>(resolve => remote.close(() => resolve()))
+    }
   }, 90_000)
 })

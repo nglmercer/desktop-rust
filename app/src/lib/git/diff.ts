@@ -333,14 +333,19 @@ export async function getBranchMergeBaseChangedFiles(
     return null
   }
 
-  const result = await git(
-    baseArgs,
-    repository.path,
-    'getBranchMergeBaseChangedFiles'
-  )
+  const stdout = typeof window !== 'undefined' && backend().transportKind !== 'none'
+    ? await (async () => {
+        const read = () => backend().repositoryRendererCompareChanges(repository.path, baseBranchName, comparisonBranchName, true)
+        const bytes = backend().transportKind === 'wry'
+          ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+          : await read()
+        if (bytes === null) throw new Error('Invalid merge-base comparison')
+        return Buffer.from(bytes).toString('utf8')
+      })()
+    : (await git(baseArgs, repository.path, 'getBranchMergeBaseChangedFiles')).stdout
 
   return parseRawLogWithNumstat(
-    result.stdout,
+    stdout,
     `${latestComparisonBranchCommitRef}`,
     mergeBaseCommit
   )
@@ -368,6 +373,18 @@ export async function getCommitRangeChangedFiles(
     '--numstat',
     '--',
   ]
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryRendererCompareChanges(repository.path, oldestCommitRef, latestCommitRef, false)
+    const bytes = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    if (bytes === null) {
+      if (!useNullTreeSHA) return getCommitRangeChangedFiles(repository, shas, true)
+      throw new Error('Invalid commit range comparison')
+    }
+    return parseRawLogWithNumstat(Buffer.from(bytes).toString('utf8'), latestCommitRef, oldestCommitRef)
+  }
 
   const { stdout, gitError } = await git(
     baseArgs,

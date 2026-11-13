@@ -36,6 +36,25 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       if (suite) await suite.close()
     })
 
+    it('uses the assigned account for reviewed remote HEAD refresh', () => {
+      const repo = suite.seed('assigned-remote-head')
+      suite.assign(repo)
+      assert.equal(suite.rpc(repo, 'fetch', { remote: 'origin' }).code, 0)
+      const request = {
+        remote: 'origin',
+        expected_url: `https://${suite.service.host}/fork/repo.git`,
+        recurse_submodules: false,
+        is_background_task: true,
+      }
+      const preview = suite.rpc(repo, 'renderer_remote_head_preview', { request })
+      assert.equal(typeof preview.basis, 'string')
+      suite.clearTransport()
+      assert.equal(suite.rpc(repo, 'renderer_remote_head', { request, basis: preview.basis }).code, 0)
+      suite.assertActor()
+      assert.equal(repo.git('symbolic-ref', 'refs/remotes/origin/HEAD').toString().trim(), 'refs/remotes/origin/main')
+      suite.assertPrivateStorage(repo)
+    })
+
     it('uses the assigned identity for fetch, push and pull and redacts remote errors', () => {
       const repo = suite.seed('named-git')
       suite.assign(repo)

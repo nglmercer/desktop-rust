@@ -428,6 +428,8 @@ enum ManagementOperation {
         default_branch: Option<String>,
         #[serde(default)]
         recursive: bool,
+        #[serde(default)]
+        report_progress: bool,
     },
 }
 
@@ -831,6 +833,7 @@ async fn execute(
                     branch,
                     default_branch,
                     recursive,
+                    report_progress,
                 } => {
                     desktop_core::clone_repository_with_options(
                         &url,
@@ -839,6 +842,7 @@ async fn execute(
                             branch,
                             default_branch,
                             recursive,
+                            report_progress,
                         },
                     )
                     .await?

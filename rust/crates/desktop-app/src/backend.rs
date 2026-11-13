@@ -561,6 +561,7 @@ impl Backend {
                     | Operation::RendererBlobChunk { .. }
                     | Operation::RendererCommitDiff { .. }
                     | Operation::RendererCompareDiff { .. }
+                    | Operation::RendererCompareChanges { .. }
                     | Operation::RendererCompareDiffChunk { .. }
                     | Operation::RendererCompareDiffRelease { .. }
                     | Operation::DiscardPreview {
@@ -773,7 +774,10 @@ impl Backend {
         if let GitInfoOperation::FetchRemote { operation, .. } = &request.operation
             && !matches!(
                 operation,
-                Operation::RendererFetchPreview { .. } | Operation::RendererFetch { .. }
+                Operation::RendererFetchPreview { .. }
+                    | Operation::RendererFetch { .. }
+                    | Operation::RendererRemoteHeadPreview { .. }
+                    | Operation::RendererRemoteHead { .. }
             )
         {
             return Err(AppError::BadArgs(
@@ -893,7 +897,7 @@ impl Backend {
         let is_fetch = matches!(
             &request.operation,
             GitInfoOperation::FetchRemote {
-                operation: Operation::RendererFetch { .. },
+                operation: Operation::RendererFetch { .. } | Operation::RendererRemoteHead { .. },
                 ..
             }
         );
@@ -1603,7 +1607,7 @@ impl Backend {
                         ..
                     }
                     | GitInfoOperation::FetchRemote {
-                        operation: Operation::RendererFetch { .. },
+                        operation: Operation::RendererFetch { .. } | Operation::RendererRemoteHead { .. },
                         ..
                     }
                     | GitInfoOperation::BranchCreation {
@@ -2047,8 +2051,17 @@ mod tests {
                 assert!(!chunk["data"].as_str().unwrap().is_empty());
                 offset = (offset + 524288).min(size);
             }
+            let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
+            assert_eq!(backend.read(release).unwrap()["released"], true);
+            let request = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_changes","before":first,"after":head,"merge_base":true}}})]).unwrap();
+            let changes = backend.read(request).unwrap();
+            assert_eq!(changes["kind"], "snapshot");
+            let changes_id = changes["id"].as_str().unwrap();
+            let chunk = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_diff_chunk","snapshot_id":changes_id,"offset":0,"length":524288}}})]).unwrap();
+            let chunk = backend.read(chunk).unwrap();
+            assert!(!chunk["data"].as_str().unwrap().is_empty());
             fs::remove_dir_all(&root).unwrap();
-            let request = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
+            let request = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":changes_id}})]).unwrap();
             assert_eq!(backend.read(request).unwrap()["released"], true);
         }).unwrap().join().unwrap();
     }
@@ -2159,6 +2172,36 @@ mod tests {
                 ])
                 .is_err()
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn wry_refreshes_reviewed_remote_head() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-remote-head-{}", uuid::Uuid::new_v4()));
+            let source = root.join("source"); let target = root.join("target");
+            fs::create_dir_all(&source).unwrap(); fs::create_dir(&target).unwrap();
+            let git = |dir: &Path, args: &[&str]| { let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap(); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
+            git(&source, &["init", "-q", "-b", "main"]);
+            git(&source, &["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "base"]);
+            git(&target, &["init", "-q"]); let url = source.to_str().unwrap();
+            git(&target, &["remote", "add", "--", "--test", url]);
+            git(&target, &["fetch", "--", "--test"]);
+            let request = json!({"remote":"--test", "expected_url":url, "recurse_submodules":false, "is_background_task":true});
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"fetch_remote", "repository_path":target, "operation":operation}})]);
+            let preview = backend.read(route(json!({"method":"renderer_remote_head_preview", "request":request})).unwrap()).unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_remote_head", "request":request, "basis":"bad"})).unwrap()).is_err());
+            let result = backend.read(route(json!({"method":"renderer_remote_head", "request":request, "basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(result["code"], 0);
+            assert_eq!(git(&target, &["symbolic-ref", "refs/remotes/--test/HEAD"]), "refs/remotes/--test/main");
+            let unsupported = json!({"remote":"--test", "expected_url":"https://user:password@example.invalid/repo", "recurse_submodules":false});
+            assert_eq!(backend.read(route(json!({"method":"renderer_remote_head_preview", "request":unsupported})).unwrap()).unwrap()["kind"], "unsupported");
+            assert!(route(json!({"method":"stage", "paths":["file"]})).is_err());
+            fs::write(target.join(".git/config"), "[broken\n").unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_remote_head_preview", "request":request})).unwrap()).is_err());
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
     }
 
     #[test]

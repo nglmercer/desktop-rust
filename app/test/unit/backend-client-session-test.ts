@@ -6,6 +6,23 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('reviews Wry remote HEAD before mutation and only reports unsupported during preview', async () => {
+    const invoke = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const request = { remote: 'origin', expected_url: '/source', recurse_submodules: false, is_background_task: true }
+    invoke.mockResolvedValueOnce({ remote: 'origin', basis: 'a'.repeat(64) }).mockResolvedValueOnce({ code: 0 })
+    await expect(client.refreshRepositoryRemoteHead('/repo', 'origin', '/source', true)).resolves.toBeUndefined()
+    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'fetch_remote', repository_path: '/repo', operation: { method: 'renderer_remote_head_preview', request } } }))
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ deadline_ms: 3_600_000, operation: { type: 'fetch_remote', repository_path: '/repo', operation: { method: 'renderer_remote_head', request, basis: 'a'.repeat(64) } } }))
+    invoke.mockReset().mockResolvedValueOnce({ kind: 'unsupported' })
+    await expect(client.refreshRepositoryRemoteHead('/repo', 'origin', '/source', true)).resolves.toBe('unsupported')
+    expect(invoke).toHaveBeenCalledTimes(1)
+    invoke.mockReset().mockResolvedValueOnce({ remote: 'origin', basis: 'a'.repeat(64) }).mockRejectedValueOnce(new Error('connection failed'))
+    await expect(client.refreshRepositoryRemoteHead('/repo', 'origin', '/source', true)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('outcome is uncertain') })
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('validates resolved author identities and their input order', async () => {
     const first = 'a'.repeat(40)
     const second = 'b'.repeat(64)

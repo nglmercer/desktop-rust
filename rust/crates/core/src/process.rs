@@ -38,7 +38,11 @@ pub async fn run(path: &Path, args: &[OsString]) -> Result<RawOutput> {
 
 /// Apply Desktop's clone transport policy after URL rewrites, including when
 /// an inherited allowlist would otherwise override Git's protocol settings.
-pub(crate) async fn run_clone(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+pub(crate) async fn run_clone(
+    path: &Path,
+    args: &[OsString],
+    report_progress: bool,
+) -> Result<RawOutput> {
     let mut command = git_native_paths(None);
     // Fixed diagnostics allow safe classification without forwarding Git's
     // potentially credential-bearing error output to the caller.
@@ -56,7 +60,34 @@ pub(crate) async fn run_clone(path: &Path, args: &[OsString]) -> Result<RawOutpu
             .join(":");
         command.env("GIT_ALLOW_PROTOCOL", filtered);
     }
-    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+    let sender = report_progress
+        .then(|| crate::hook_progress::sender())
+        .flatten();
+    let emit_clone_progress = sender.is_some();
+    let (sender, request_id) = sender.unwrap_or_else(|| {
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        (sender, 0)
+    });
+    // Clone always uses draining capture, even if no progress receiver exists.
+    let live = Some(LiveOutput {
+        sender,
+        request_id,
+        checkpoint: None,
+        clone_progress: true,
+        emit_clone_progress,
+    });
+    run_command_inner(
+        path,
+        command,
+        args,
+        None,
+        2 * 1024 * 1024,
+        None,
+        None,
+        None,
+        live,
+    )
+    .await
 }
 
 pub(crate) async fn repository_discovery(path: &Path, args: &[OsString]) -> Result<RawOutput> {
@@ -256,6 +287,8 @@ pub(crate) async fn run_commit_with_index(
                 sender,
                 request_id,
                 checkpoint: Some(checkpoint.to_owned()),
+                clone_progress: false,
+                emit_clone_progress: false,
             });
     let result = Box::pin(run_command_inner(
         path,
@@ -380,6 +413,8 @@ pub(crate) async fn run_bound_remote_fetch(
             sender,
             request_id,
             checkpoint: None,
+            clone_progress: false,
+            emit_clone_progress: false,
         })
     } else {
         None
@@ -745,6 +780,8 @@ struct LiveOutput {
     sender: tokio::sync::mpsc::Sender<(u64, crate::hook_progress::CommitEvent)>,
     request_id: u64,
     checkpoint: Option<String>,
+    clone_progress: bool,
+    emit_clone_progress: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -974,6 +1011,9 @@ async fn read_output(
     let Some(live) = live else {
         return read_bounded(reader, limit).await;
     };
+    if live.clone_progress {
+        return read_clone_output(reader, limit, &live, stream).await;
+    }
     let mut raw = Vec::new();
     let mut redactor = crate::stream_redaction::StreamRedactor::new();
     let mut buffer = Box::new([0; 8192]);
@@ -1020,6 +1060,127 @@ async fn read_output(
     Ok(raw)
 }
 
+/// Clone diagnostics can contain rewritten URLs and credentials unknown to
+/// Desktop. Forward only a fixed Git phase and a numeric percentage, never
+/// raw child output or remote-controlled text.
+async fn read_clone_output(
+    mut reader: impl tokio::io::AsyncRead + Unpin,
+    limit: u64,
+    live: &LiveOutput,
+    stream: &'static str,
+) -> std::io::Result<Vec<u8>> {
+    // Preserve both the beginning and end of the diagnostic stream. The
+    // final fatal error is often after a large amount of progress output.
+    // Always drain excess output so it cannot turn a successful clone into
+    // a failed command or prevent Git from exiting.
+    let maximum = limit as usize;
+    let prefix_limit = maximum / 2;
+    let tail_limit = maximum.saturating_sub(prefix_limit).saturating_sub(1);
+    let mut prefix = Vec::new();
+    let mut tail = std::collections::VecDeque::new();
+    let mut truncated = false;
+    let mut line = Vec::new();
+    let mut discarded = false;
+    // Keep at most six updates per phase, reserving a slot for 100%. This
+    // bounds a whole clone to 48 messages, below the 64-message WS queue.
+    let mut seen = [[false; 6]; 8];
+    let mut buffer = Box::new([0_u8; 8192]);
+    loop {
+        let count = reader.read(&mut buffer[..]).await?;
+        if count == 0 {
+            break;
+        }
+        let head = count.min(prefix_limit.saturating_sub(prefix.len()));
+        prefix.extend_from_slice(&buffer[..head]);
+        tail.extend(buffer[head..count].iter().copied());
+        if tail.len() > tail_limit {
+            let excess = tail.len() - tail_limit;
+            tail.drain(..excess);
+            truncated = true;
+        }
+        if stream != "stderr" || !live.emit_clone_progress {
+            continue;
+        }
+        for &byte in &buffer[..count] {
+            if byte == b'\r' || byte == b'\n' {
+                if !discarded {
+                    if let Some((phase, percent)) = clone_progress_line(&line)
+                        && !seen[phase][(percent / 20) as usize]
+                    {
+                        seen[phase][(percent / 20) as usize] = true;
+                        let prefix = if CLONE_PROGRESS_PHASES[phase] == "Compressing objects" {
+                            "remote: "
+                        } else {
+                            ""
+                        };
+                        let progress = format!(
+                            "{prefix}{}: {percent}% ({percent}/100)\r",
+                            CLONE_PROGRESS_PHASES[phase]
+                        );
+                        let event = crate::hook_progress::CommitEvent::FetchOutput {
+                            stream: "stderr",
+                            data: STANDARD.encode(progress),
+                        };
+                        let _ = live.sender.try_send((live.request_id, event));
+                    }
+                }
+                line.clear();
+                discarded = false;
+            } else if line.len() < 1024 && !discarded {
+                line.push(byte);
+            } else {
+                line.clear();
+                discarded = true;
+            }
+        }
+    }
+    if truncated && maximum > 0 {
+        // Keep unrelated head/tail fragments from forming a synthetic line.
+        prefix.push(b'\n');
+    }
+    prefix.extend(tail);
+    Ok(prefix)
+}
+
+const CLONE_PROGRESS_PHASES: [&str; 8] = [
+    "Enumerating objects",
+    "Counting objects",
+    "Compressing objects",
+    "Receiving objects",
+    "Resolving deltas",
+    "Checking out files",
+    "Updating files",
+    "Filtering content",
+];
+
+fn clone_progress_line(line: &[u8]) -> Option<(usize, u8)> {
+    let line = line.strip_prefix(b"remote: ").unwrap_or(line);
+    for (index, phase) in CLONE_PROGRESS_PHASES.iter().enumerate() {
+        let Some(rest) = line
+            .strip_prefix(phase.as_bytes())
+            .and_then(|s| s.strip_prefix(b":"))
+        else {
+            continue;
+        };
+        let rest = rest
+            .strip_prefix(b" ")
+            .map_or(rest, |_| rest.trim_ascii_start());
+        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        if !(1..=3).contains(&digits) || rest.get(digits) != Some(&b'%') {
+            return None;
+        }
+        let percent = std::str::from_utf8(&rest[..digits])
+            .ok()?
+            .parse::<u8>()
+            .ok()?;
+        if percent > 100 {
+            return None;
+        }
+        return Some((index, percent));
+    }
+    None
+}
+
 async fn read_bounded(
     reader: impl tokio::io::AsyncRead + Unpin,
     limit: u64,
@@ -1037,6 +1198,137 @@ async fn read_bounded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn clone_progress_filters_secrets_and_duplicate_bursts() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let live = LiveOutput {
+            sender,
+            request_id: 71,
+            checkpoint: None,
+            clone_progress: true,
+            emit_clone_progress: true,
+        };
+        let mut raw =
+            b"fatal: https://user:SECRET@example.invalid/\nremote: Receiving objects: 25% SECRET\r"
+                .to_vec();
+        for _ in 0..500 {
+            raw.extend_from_slice(b"Receiving objects: 25% token=SECRET\r");
+        }
+        for percent in 0..100 {
+            raw.extend_from_slice(format!("Receiving objects: {percent}% SECRET\r").as_bytes());
+        }
+        raw.extend_from_slice(b"Receiving objects: 100% SECRET\rResolving deltas: 100% SECRET\rCounting objects: 101%\r");
+        raw.extend_from_slice(&vec![b'x'; 2048]);
+        raw.extend_from_slice(b"Receiving objects: 90% secret\r");
+        let captured = read_clone_output(raw.as_slice(), 2 * 1024 * 1024, &live, "stderr")
+            .await
+            .unwrap();
+        assert_eq!(captured, raw);
+        let mut progress = Vec::new();
+        while let Ok((id, event)) = receiver.try_recv() {
+            assert_eq!(id, 71);
+            if let crate::hook_progress::CommitEvent::FetchOutput { stream, data } = event {
+                assert_eq!(stream, "stderr");
+                progress.push(String::from_utf8(STANDARD.decode(data).unwrap()).unwrap());
+            }
+        }
+        assert_eq!(
+            progress,
+            [
+                "Receiving objects: 25% (25/100)\r",
+                "Receiving objects: 0% (0/100)\r",
+                "Receiving objects: 40% (40/100)\r",
+                "Receiving objects: 60% (60/100)\r",
+                "Receiving objects: 80% (80/100)\r",
+                "Receiving objects: 100% (100/100)\r",
+                "Resolving deltas: 100% (100/100)\r"
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clone_progress_drains_excess_output_and_keeps_failure_tail() {
+        for (code, report_progress) in [(0, true), (9, true), (0, false), (9, false)] {
+            let suffix = if code == 0 {
+                "completed"
+            } else {
+                "fatal: Authentication failed for 'https://user:SECRET@example.invalid/repo'"
+            };
+            let shell = format!(
+                "alias.probe=!printf 'Receiving objects: 25%% (1/4)\\r' >&2; head -c 2200000 /dev/zero | tr '\\000' x; head -c 2200000 /dev/zero | tr '\\000' y >&2; printf '\\n%s\\n' \"{suffix}\" >&2; exit {code}"
+            );
+            let command = crate::args(&["-c", &shell, "probe"]);
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+            let result = crate::hook_progress::scope(
+                sender,
+                73,
+                run_clone(&std::env::temp_dir(), &command, report_progress),
+            )
+            .await
+            .unwrap();
+            assert_eq!(result.code, code);
+            assert!(result.stdout.len() <= 2 * 1024 * 1024);
+            assert!(result.stderr.len() <= 2 * 1024 * 1024);
+            assert!(result.stderr.ends_with(format!("{suffix}\n").as_bytes()));
+            if code != 0 {
+                assert_eq!(
+                    crate::fetch_error::classify(&result.stderr, &result.stdout, None),
+                    Some("https_authentication_failed")
+                );
+            }
+            while let Ok((_, event)) = receiver.try_recv() {
+                if let crate::hook_progress::CommitEvent::FetchOutput { data, .. } = event {
+                    assert!(!STANDARD.decode(data).unwrap().windows(6).any(|w| w == b"SECRET"));
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clone_runner_cancellation_stops_the_child_process_group() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-clone-cancel-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let started = root.join("started");
+        let after = root.join("after");
+        let quote = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+        let command = crate::args(&[
+            "-c",
+            &format!(
+                "alias.probe=!printf x > {}; sleep 3; printf x > {}",
+                quote(&started),
+                quote(&after)
+            ),
+            "probe",
+        ]);
+        let cancellation = crate::cancellation::Cancellation::default();
+        let task = tokio::spawn(
+            cancellation
+                .clone()
+                .scope(async move { run_clone(&root, &command, true).await }),
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !started.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        cancellation.cancel();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_err()
+        );
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        assert!(!after.exists());
+        std::fs::remove_dir_all(started.parent().unwrap()).unwrap();
+    }
 
     #[cfg(unix)]
     #[tokio::test]

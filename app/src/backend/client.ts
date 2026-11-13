@@ -401,7 +401,7 @@ class WryTransport {
       }
       const fetchMutation = method === 'git_info' && isRecord(params) &&
         isRecord(params.operation) && params.operation.type === 'fetch_remote' &&
-        isRecord(params.operation.operation) && params.operation.operation.method === 'renderer_fetch'
+        isRecord(params.operation.operation) && (params.operation.operation.method === 'renderer_fetch' || params.operation.operation.method === 'renderer_remote_head')
       const maximum = fetchMutation ? 3_600_000 : method === 'copilot' ? 330_000 : 60_000
       const deadline = opts.deadlineMs ?? (fetchMutation ? 3_600_000 : method === 'copilot' ? 170_000 : 60_000)
       if (!Number.isInteger(deadline) || deadline < 1 || deadline > maximum) {
@@ -1953,7 +1953,7 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_compare_diff_chunk' | 'renderer_compare_diff_release' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_compare_changes' | 'renderer_compare_diff_chunk' | 'renderer_compare_diff_release' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
@@ -2003,16 +2003,30 @@ export class BackendClient {
     }
   }
 
-  private async readComparisonSnapshot(repositoryPath: string, before: string, after: string, mergeBase: boolean, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<Uint8Array | { kind: 'unrenderable'; prefix: Uint8Array } | null> {
-    const params = { before, after, merge_base: mergeBase, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace }
+  async repositoryRendererCompareChanges(repositoryPath: string, before: string, after: string, mergeBase: boolean): Promise<Uint8Array | null> {
+    const previous = this.comparisonTurn
+    let releaseTurn!: () => void
+    this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
+    await previous
+    try {
+      const result = await this.readComparisonSnapshot(repositoryPath, before, after, mergeBase, '', undefined, false, true)
+      if (result !== null && !(result instanceof Uint8Array)) throw new BackendError({ code: 'invalid_response', message: 'Changed files output exceeds the supported size', retryable: false })
+      return result
+    } finally {
+      releaseTurn()
+    }
+  }
+
+  private async readComparisonSnapshot(repositoryPath: string, before: string, after: string, mergeBase: boolean, path: string, oldPath: string | undefined, hideWhitespace: boolean, changes = false): Promise<Uint8Array | { kind: 'unrenderable'; prefix: Uint8Array } | null> {
+    const params = changes ? { before, after, merge_base: mergeBase } : { before, after, merge_base: mergeBase, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace }
     let value: unknown
     try {
-      value = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff', { ...params, snapshot: true })
+      value = await this.repositoryRendererRequest(repositoryPath, changes ? 'renderer_compare_changes' : 'renderer_compare_diff', changes ? params : { ...params, snapshot: true })
     } catch (error) {
       // Older hosts reject unknown request fields before executing Git. The
       // read-only legacy request still has its original 2 MiB output bound.
       const message = error instanceof Error ? error.message : ''
-      if (!/invalid typed repository request|invalid Git identity request|unknown field [`'“]?snapshot/i.test(message)) throw error
+      if (changes || !/invalid typed repository request|invalid Git identity request|unknown field [`'“]?snapshot/i.test(message)) throw error
       value = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff', params)
     }
     if (isRecord(value) && !mergeBase && value.kind === 'bad_revision') return null
@@ -2726,13 +2740,19 @@ export class BackendClient {
   }
 
   /** Refresh a named remote's HEAD after reviewing its configuration and refs. */
-  async refreshRepositoryRemoteHead(repositoryPath: string, remote: string, expectedUrl: string, isBackgroundTask: boolean): Promise<void> {
-    if (this.transport !== 'ws') throw new BackendError({ code: 'unsupported', message: 'Remote HEAD refresh requires the browser bridge', retryable: false })
+  async refreshRepositoryRemoteHead(repositoryPath: string, remote: string, expectedUrl: string, isBackgroundTask: boolean): Promise<void | 'unsupported'> {
     const request = { remote, expected_url: expectedUrl, recurse_submodules: false, is_background_task: isBackgroundTask }
-    const preview = await this.repositoryRead(repositoryPath, 'renderer_remote_head_preview', { request })
+    const call = (method: 'renderer_remote_head_preview' | 'renderer_remote_head', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } }, method === 'renderer_remote_head' ? { deadlineMs: 3_600_000 } : {})
+      : this.repositoryRead(repositoryPath, method, { request, ...extra }, method === 'renderer_remote_head' ? { deadlineMs: 3_600_000 } : {})
+    const preview = await call('renderer_remote_head_preview')
+    if (isRecord(preview) && preview.kind === 'unsupported') {
+      if (this.transport === 'wry') return 'unsupported'
+      throw new BackendError({ code: 'unsupported', message: 'Remote HEAD cannot be reviewed by this backend', retryable: false })
+    }
     if (!isRecord(preview) || preview.remote !== remote || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid remote HEAD review', retryable: false })
     let result: unknown
-    try { result = await this.repositoryRead(repositoryPath, 'renderer_remote_head', { request, basis: preview.basis }) }
+    try { result = await call('renderer_remote_head', { basis: preview.basis }) }
     catch (error) {
       const cause = toBackendError(error)
       throw new BackendError({ code: cause.code, message: 'Remote HEAD outcome is uncertain; inspect the remote reference before retrying', retryable: false })

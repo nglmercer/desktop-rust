@@ -837,6 +837,7 @@ pub struct CloneOptions {
     pub branch: Option<String>,
     pub default_branch: Option<String>,
     pub recursive: bool,
+    pub report_progress: bool,
 }
 
 pub async fn clone_repository_with_options(
@@ -881,6 +882,9 @@ pub async fn clone_repository_with_options(
         ]));
     }
     command.push("clone".into());
+    if options.report_progress {
+        command.push("--progress".into());
+    }
     if options.recursive {
         command.push("--recursive".into());
     }
@@ -889,7 +893,7 @@ pub async fn clone_repository_with_options(
     }
     command.extend(args(&["--", url]));
     command.push(destination.as_os_str().to_owned());
-    let output = process::run_clone(parent, &command).await?;
+    let output = process::run_clone(parent, &command, options.report_progress).await?;
     if output.code != 0 {
         bail!("{}", clone_failure_message(&output));
     }
@@ -1069,6 +1073,7 @@ mod tests {
                 branch: Some("feature".into()),
                 default_branch: Some("fallback".into()),
                 recursive: true,
+                report_progress: false,
             },
         )
         .await

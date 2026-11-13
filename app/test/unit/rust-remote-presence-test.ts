@@ -47,13 +47,26 @@ describe('Rust remote discovery', () => {
     mocks.transport = 'ws'
   })
 
-  it('refreshes remote HEAD over WebSocket without legacy Git', async () => {
+  it.each(['ws', 'wry'])('refreshes remote HEAD over %s without legacy Git', async transport => {
+    mocks.transport = transport
     const remote = { name: '--test', url: '/remote' }
     await updateRemoteHEAD(repository, remote, true)
     expect(mocks.refreshHead).toHaveBeenCalledWith('/repo', '--test', '/remote', true)
     expect(mocks.git).not.toHaveBeenCalled()
     mocks.refreshHead.mockRejectedValueOnce(new Error('outcome uncertain'))
     await expect(updateRemoteHEAD(repository, remote, false)).rejects.toThrow('outcome uncertain')
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('uses legacy Git only after a Wry preview reports unsupported', async () => {
+    mocks.transport = 'wry'
+    mocks.refreshHead.mockResolvedValueOnce('unsupported')
+    await updateRemoteHEAD(repository, { name: 'origin', url: '/remote' }, false)
+    expect(mocks.git).toHaveBeenCalledTimes(1)
+    expect(mocks.git.mock.calls[0][0]).toEqual(['remote', 'set-head', '-a', '--', 'origin'])
+    mocks.git.mockClear()
+    mocks.refreshHead.mockRejectedValueOnce(new Error('review changed'))
+    await expect(updateRemoteHEAD(repository, { name: 'origin', url: '/remote' }, false)).rejects.toThrow('review changed')
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

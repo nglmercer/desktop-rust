@@ -8,19 +8,20 @@ import { DiffType } from '../../src/models/diff'
 import type { Repository } from '../../src/models/repository'
 
 const mocks = vi.hoisted(() => ({
-  transport: 'ws', compare: vi.fn(), git: vi.fn(),
+  transport: 'ws', compare: vi.fn(), changes: vi.fn(), mergeBase: vi.fn(), git: vi.fn(),
   scope: vi.fn(async (_path: string, _kind: string, work: () => Promise<unknown>) => work()),
 }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCompareDiff: mocks.compare, repositorySubmoduleDisplayUrl: async () => null }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCompareDiff: mocks.compare, repositoryRendererCompareChanges: mocks.changes, repositoryMergeBase: mocks.mergeBase, repositorySubmoduleDisplayUrl: async () => null }) }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: mocks.scope }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 vi.mock('keytar', () => ({ default: {} }))
 
-import { getBranchMergeBaseDiff, getCommitRangeDiff } from '../../src/lib/git/diff'
+import { getBranchMergeBaseDiff, getCommitRangeDiff, getBranchMergeBaseChangedFiles, getCommitRangeChangedFiles } from '../../src/lib/git/diff'
 
 let root: string
 let raw: Buffer
+let rawChanges: Buffer
 let first: string
 let last: string
 const repository = { path: '/repo', gitHubRepository: null } as Repository
@@ -35,11 +36,26 @@ beforeAll(() => {
   writeFileSync(path.join(root, '[a].txt'), 'second\n'); git('add', '--', '.'); git('commit', '-qm', 'second')
   last = git('rev-parse', 'HEAD').toString().trim()
   raw = git('diff', '--merge-base', '--patch-with-raw', '-z', '--no-color', '--end-of-options', first, last, '--', ':(literal)[a].txt')
+  rawChanges = git('diff', '--merge-base', '-C', '-M', '-z', '--raw', '--numstat', '--end-of-options', first, last, '--')
 })
 afterAll(() => { if (root) rmSync(root, { recursive: true, force: true }) })
 
 describe.each(['wry', 'ws'])('Rust comparison diff via %s', transport => {
   beforeEach(() => { vi.clearAllMocks(); mocks.transport = transport; mocks.compare.mockReset() })
+
+  it('loads comparison changed files through Rust and retries an initial commit', async () => {
+    mocks.mergeBase.mockResolvedValue(first)
+    mocks.changes.mockResolvedValue(rawChanges)
+    const result = await getBranchMergeBaseChangedFiles(repository, first, last, last)
+    expect(result?.files.map(file => file.path)).toEqual(['[a].txt'])
+    expect(mocks.changes).toHaveBeenCalledWith('/repo', first, last, true)
+    mocks.changes.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(rawChanges)
+    const range = await getCommitRangeChangedFiles(repository, [first])
+    expect(range.files.map(file => file.path)).toEqual(['[a].txt'])
+    expect(mocks.changes).toHaveBeenNthCalledWith(1, '/repo', `${first}^`, first, false)
+    expect(mocks.changes).toHaveBeenNthCalledWith(2, '/repo', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', first, false)
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
 
   it('routes merge-base comparisons and retains literal path/rename inputs', async () => {
     mocks.compare.mockResolvedValue(raw)

@@ -29,6 +29,56 @@ pub(crate) struct Commit {
 }
 
 impl Repository {
+    /// Return the byte-exact raw and numstat records consumed by the renderer.
+    pub(crate) async fn renderer_compare_changes(
+        &self,
+        before: &str,
+        after: &str,
+        merge_base: bool,
+    ) -> Result<Value> {
+        for revision in [before, after] {
+            anyhow::ensure!(
+                !revision.is_empty() && revision.len() <= 4096 && !revision.contains('\0'),
+                "Invalid comparison revision"
+            );
+        }
+        let mut command = args(&["diff"]);
+        if merge_base {
+            command.push("--merge-base".into());
+        }
+        command.extend(args(&[
+            "-C",
+            "-M",
+            "-z",
+            "--raw",
+            "--numstat",
+            "--end-of-options",
+            before,
+            after,
+            "--",
+        ]));
+        let permit = crate::comparison_snapshots::reserve().await?;
+        let output = process::run_comparison_snapshot(&self.path, &command).await?;
+        if !merge_base && output.bad_revision() {
+            return Ok(json!({"kind":"bad_revision"}));
+        }
+        ensure(&output)?;
+        anyhow::ensure!(
+            output.stdout.len() <= crate::comparison_snapshots::MAX_BYTES,
+            "Changed files output exceeds the supported size"
+        );
+        let cancellation = crate::cancellation::Cancellation::current();
+        cancellation.check()?;
+        let snapshot = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;
+        if let Err(error) = cancellation.check() {
+            if let Some(id) = snapshot["id"].as_str() {
+                let _ = crate::comparison_snapshots::release_owned(id);
+            }
+            return Err(error);
+        }
+        Ok(snapshot)
+    }
+
     /// Preserve Git's author format and no-walk ordering for a bounded batch.
     /// Each returned object ID lets the renderer detect duplicates across batches.
     pub(crate) async fn renderer_authors(&self, revisions: &[String]) -> Result<Value> {

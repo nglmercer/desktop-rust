@@ -575,6 +575,9 @@ impl Repository {
                     )
                     .await;
             }
+            Operation::RendererCompareChanges { before, after, merge_base } => {
+                return self.renderer_compare_changes(&before, &after, merge_base).await;
+            }
             Operation::RendererCompareDiffChunk {
                 snapshot_id,
                 offset,
@@ -1245,6 +1248,7 @@ impl Repository {
             | IndexChanges
             | RendererCommit { .. }
             | RendererAuthors { .. }
+            | RendererCompareChanges { .. }
             | RendererHistory { .. }
             | RendererRecentBranches
             | RendererBranchCheckouts { .. }

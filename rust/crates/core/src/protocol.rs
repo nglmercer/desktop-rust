@@ -447,6 +447,11 @@ pub enum Operation {
         #[serde(default)]
         snapshot: bool,
     },
+    RendererCompareChanges {
+        before: String,
+        after: String,
+        merge_base: bool,
+    },
     RendererCompareDiffChunk {
         snapshot_id: String,
         offset: u64,

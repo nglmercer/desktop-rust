@@ -125,7 +125,7 @@
       var operation = request && request.operation;
       if (channel === 'desktop.backend.git_info' && operation &&
           operation.type === 'fetch_remote' && operation.operation &&
-          operation.operation.method === 'renderer_fetch' &&
+          (operation.operation.method === 'renderer_fetch' || operation.operation.method === 'renderer_remote_head') &&
           Number.isInteger(request.deadline_ms) && request.deadline_ms >= 1 && request.deadline_ms <= 3600000) {
         timeout = Math.max(timeout, request.deadline_ms + 30000);
       }

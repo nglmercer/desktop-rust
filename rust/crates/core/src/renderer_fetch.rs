@@ -12,6 +12,16 @@ use sha2::{Digest, Sha256};
 #[cfg(any(unix, windows))]
 use std::io::Read;
 
+fn supports_remote_head_review(format: &process::RawOutput) -> Result<bool> {
+    anyhow::ensure!(format.code == 0, "Cannot inspect repository ref storage");
+    // Older Git passes an unrecognized rev-parse option through verbatim.
+    match format.stdout.as_slice() {
+        b"files\n" => Ok(true),
+        b"reftable\n" | b"--show-ref-format\n" => Ok(false),
+        _ => anyhow::bail!("Cannot inspect repository ref storage"),
+    }
+}
+
 #[cfg(windows)]
 fn windows_file_identity(file: &std::fs::File) -> Result<(u32, u64, u64, u32)> {
     use std::os::windows::io::AsRawHandle;
@@ -199,6 +209,16 @@ impl Repository {
         &self,
         request: &RendererFetchRequest,
     ) -> Result<Value> {
+        // These cases cannot be reviewed by this implementation. Report the
+        // limitation before Git can change anything so transports with a
+        // legacy implementation may choose it without retrying a mutation.
+        if !crate::remote_discovery::safe_url(&request.expected_url) {
+            return Ok(json!({"kind":"unsupported"}));
+        }
+        let format = self.run(&args(&["rev-parse", "--show-ref-format"])).await?;
+        if !supports_remote_head_review(&format)? {
+            return Ok(json!({"kind":"unsupported"}));
+        }
         Ok(json!({"remote":request.remote, "basis":self.remote_head_review(request).await?}))
     }
 
@@ -401,6 +421,20 @@ mod windows_tests {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_head_review_distinguishes_unsupported_from_git_failure() {
+        let output = |code, value: &[u8]| process::RawOutput {
+            code,
+            stdout: value.to_vec(),
+            stderr: Vec::new(),
+        };
+        assert!(supports_remote_head_review(&output(0, b"files\n")).unwrap());
+        assert!(!supports_remote_head_review(&output(0, b"reftable\n")).unwrap());
+        assert!(!supports_remote_head_review(&output(0, b"--show-ref-format\n")).unwrap());
+        assert!(supports_remote_head_review(&output(128, b"")).is_err());
+        assert!(supports_remote_head_review(&output(0, b"unexpected\n")).is_err());
+    }
     use std::{fs, path::Path, process::Command};
 
     fn git(dir: &Path, args: &[&str]) -> String {
@@ -663,7 +697,10 @@ mod tests {
         }))
         .unwrap();
         let repo = Repository::open(&path).await.unwrap();
-        assert!(repo.renderer_remote_head_preview(&request).await.is_err());
+        assert_eq!(
+            repo.renderer_remote_head_preview(&request).await.unwrap()["kind"],
+            "unsupported"
+        );
     }
 
     #[tokio::test]
