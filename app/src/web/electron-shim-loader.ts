@@ -55,6 +55,22 @@ if (typeof window !== 'undefined' && !Reflect.get(window, '__desktop')) {
             }
             return navigator.clipboard.writeText(text)
           }
+          case 'open-external': {
+            const [value] = args
+            if (typeof value !== 'string') {
+              return false
+            }
+            try {
+              const url = new URL(value)
+              if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) {
+                return false
+              }
+              window.open(url.href, '_blank', 'noopener,noreferrer')
+              return true
+            } catch {
+              return false
+            }
+          }
         }
       }
       // Only typed methods are implemented by the WebSocket bridge.

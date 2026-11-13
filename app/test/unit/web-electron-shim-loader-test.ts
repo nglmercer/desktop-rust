@@ -111,4 +111,33 @@ describe('loopback bridge event shim', () => {
       'Clipboard access is unavailable'
     )
   })
+  it('opens safe external links locally and rejects unsupported URLs', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    await import('../../src/web/electron-shim-loader')
+    const shim = Reflect.get(window, '__desktop') as IShim
+    await expect(
+      shim.invoke('open-external', 'https://github.com/')
+    ).resolves.toBe(true)
+    expect(open).toHaveBeenCalledWith(
+      'https://github.com/',
+      '_blank',
+      'noopener,noreferrer'
+    )
+    await expect(
+      shim.invoke('open-external', 'mailto:test@example.com')
+    ).resolves.toBe(true)
+    await expect(
+      shim.invoke('open-external', 'javascript:alert(1)')
+    ).resolves.toBe(false)
+    await expect(shim.invoke('open-external', '/relative')).resolves.toBe(false)
+    await expect(shim.invoke('open-external', 1)).resolves.toBe(false)
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(request).not.toHaveBeenCalled()
+    open.mockImplementationOnce(() => {
+      throw new Error('blocked')
+    })
+    await expect(
+      shim.invoke('open-external', 'https://github.com/')
+    ).resolves.toBe(false)
+  })
 })
