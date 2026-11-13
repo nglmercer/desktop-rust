@@ -1053,6 +1053,13 @@ legacy Prettier; physical browser/native rendering remains unverified here.
 
 ## Reviewed branch rename evidence
 
+The upstream renderer now routes local branch renames through this reviewed
+Rust operation on Wry and WebSocket, checks the previously observed branch tip,
+and lets Rust transfer all associated saved entries. It skips the old single
+stash move after a Rust rename. The renderer still needs a native interface for
+inspecting rename receipts, and case-insensitive platform behavior remains
+unverified.
+
 Audit of `AppStore.renameBranchCore` found that native `branch -m` alone left
 Desktop saved-change associations behind. The Rust rename service now reviews
 source refs/tips, symbolic HEAD, branches/worktrees, effective configuration and

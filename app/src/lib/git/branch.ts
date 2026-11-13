@@ -65,6 +65,15 @@ export async function renameBranch(
   newName: string,
   force?: boolean
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    if (branch.ref !== `refs/heads/${branch.name}`) throw new Error('Only local branches can be renamed')
+    return withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().renameRepositoryBranch(repository.path, branch.name, newName, branch.tip.sha),
+      true
+    )
+  }
   try {
     await git(
       ['branch', force ? '-M' : '-m', branch.nameWithoutRemote, newName],

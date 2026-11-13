@@ -5783,6 +5783,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
     await gitStore.performFailableOperation(async () => {
       await renameBranch(repository, branch, newName)
 
+      // The Rust rename already transfers every Desktop-associated stash.
+      if (typeof window !== 'undefined' && backend().transportKind !== 'none') return
       const stashEntry = gitStore.desktopStashEntries.get(branch.name)
 
       if (stashEntry) {

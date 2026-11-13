@@ -117,6 +117,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    BranchRename {
+        repository_path: String,
+        operation: Operation,
+    },
     AbortGitOperation {
         repository_path: String,
         operation: Operation,
@@ -394,6 +398,9 @@ impl Backend {
         | GitInfoOperation::BranchDeletion {
             repository_path, ..
         }
+        | GitInfoOperation::BranchRename {
+            repository_path, ..
+        }
         | GitInfoOperation::AbortGitOperation {
             repository_path, ..
         }
@@ -538,6 +545,17 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported branch deletion operation".into(),
+            ));
+        }
+        if let GitInfoOperation::BranchRename { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RenameBranchPreview { .. }
+                    | Operation::RenameBranch { basis: Some(_), .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported branch rename operation".into(),
             ));
         }
         if let GitInfoOperation::FinishMergeCommit { operation, .. } = &request.operation
@@ -1321,6 +1339,10 @@ impl Backend {
                         operation: Operation::DeleteBranch { .. },
                         ..
                     }
+                    | GitInfoOperation::BranchRename {
+                        operation: Operation::RenameBranch { .. },
+                        ..
+                    }
             )
         );
         let checkpoint_write = matches!(
@@ -1411,6 +1433,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchDeletion { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::BranchRename { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2766,6 +2795,31 @@ esac
         );
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":{"method":"create_branch","name":"unsafe","checkout":true,"basis":plan["basis"]}}})]).is_err());
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":{"method":"create_branch","name":"unsafe","checkout":false}}})]).is_err());
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["branch", "rename-source"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let rename = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"branch_rename","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        let rename_plan = rename(json!({"method":"rename_branch_preview","name":"refs/heads/rename-source","new_name":"renamed"})).unwrap();
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_rename","repository_path":root,"operation":{"method":"rename_branch","name":"rename-source","new_name":"renamed"}}})]).is_err());
+        let renamed = rename(json!({"method":"rename_branch","name":"refs/heads/rename-source","new_name":"renamed","basis":rename_plan["basis"]})).unwrap();
+        assert_eq!(renamed["receipt"]["phase"], "complete");
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["show-ref", "--verify", "--quiet", "refs/heads/renamed"])
+                .status()
+                .unwrap()
+                .success()
+        );
         let delete = |operation: Value| {
             backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"branch_deletion","repository_path":root,"operation":operation}})]).unwrap())
         };
