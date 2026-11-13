@@ -469,6 +469,19 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.repositoryBlobChunk('/repo', 'HEAD', 'file', 1, 1, oid)).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('reviews a ref-only branch creation and does not retry an uncertain write', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ basis: 'a'.repeat(64) }))
+    invoke.mockResolvedValueOnce({ basis: 'a'.repeat(64) }).mockResolvedValueOnce({ code: 0, created: true, checked_out: false, receipt_id: '12345678-1234-4234-8234-123456789abc' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.createRepositoryBranch('/repo', 'feature', 'origin/main', true)
+    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'branch_creation', repository_path: '/repo', operation: { method: 'create_branch_preview', name: 'feature', start_point: 'origin/main', no_track: true, checkout: false } } }))
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'branch_creation', repository_path: '/repo', operation: { method: 'create_branch', name: 'feature', start_point: 'origin/main', no_track: true, checkout: false, basis: 'a'.repeat(64) } } }))
+    invoke.mockResolvedValueOnce({ basis: 'a'.repeat(64) }).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.createRepositoryBranch('/repo', 'other', null, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('inspect the branch') })
+    expect(invoke).toHaveBeenCalledTimes(4)
+  })
+
   it('reads complete blobs through the Rust transport', async () => {
     const oid = 'a'.repeat(40)
     const contents = Buffer.alloc(1024 * 1024 + 3, 0xab)
@@ -486,6 +499,21 @@ describe('backend Copilot session cleanup', () => {
     expect((await getBlobContents(new Repository('/tmp', 1, null, false), 'HEAD', 'file')).equals(contents)).toBe(true)
     expect(invoke).toHaveBeenCalledTimes(2)
   }, 30_000)
+
+  it('routes the application branch creation call through Rust', async () => {
+    vi.resetModules()
+    const invoke = vi.fn().mockResolvedValueOnce({ basis: 'a'.repeat(64) }).mockResolvedValueOnce({ code: 0, created: true, checked_out: false, receipt_id: '12345678-1234-4234-8234-123456789abc' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const legacyGit = vi.fn()
+    vi.doMock('../../src/lib/git/core', () => ({ git: legacyGit, isGitError: vi.fn() }))
+    vi.doMock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: (_path: string, _kind: string, run: () => unknown) => run() }))
+    vi.doMock('../../src/lib/git/environment', () => ({ envForRemoteOperation: vi.fn() }))
+    vi.doMock('../../src/lib/git/update-ref', () => ({ deleteRef: vi.fn() }))
+    const { createBranch } = await import('../../src/lib/git/branch')
+    await createBranch({ path: '/repo' } as any, 'feature', 'origin/main', true)
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(legacyGit).not.toHaveBeenCalled()
+  })
 
   it('validates selected-file size review responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => [false, true])

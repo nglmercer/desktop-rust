@@ -1118,6 +1118,12 @@ damaged index or stash ref. Unborn checkout uses native create-and-switch
 behavior from either no commit or an existing start commit, including its
 current symbolic branch name.
 
+The upstream renderer's ref-only `createBranch` call now uses the reviewed
+Rust operation on Wry and WebSocket. It retains the separate existing checkout
+flow and reports interrupted creation as uncertain. The host accepts only
+ref-only requests with a review basis; checkout migration remains a separate
+workflow. Leading-dash start refs are resolved with Git's end-of-options fence.
+
 The browser's existing strategy review now also shows creation/start/tracking
 choices. Even a clean creation is reviewed before execution; ref-only creation
 describes its effect on the current checkout. Refresh reconstructs only allowed

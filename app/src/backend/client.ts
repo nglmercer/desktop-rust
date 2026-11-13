@@ -2213,6 +2213,24 @@ export class BackendClient {
     if (value.code !== 0) throw new BackendError({ code: 'git_error', message: value.stderr || 'Git tag operation failed', retryable: false })
   }
 
+  async createRepositoryBranch(repositoryPath: string, name: string, startPoint: string | null, noTrack: boolean): Promise<void> {
+    const params = { name, start_point: startPoint, no_track: noTrack, checkout: false }
+    const call = (method: 'create_branch_preview' | 'create_branch', extra: Record<string, unknown> = {}) =>
+      this.transport === 'wry'
+        ? this.request('git_info', { operation: { type: 'branch_creation', repository_path: repositoryPath, operation: { method, ...params, ...extra } } })
+        : this.repositoryRead(repositoryPath, method, { ...params, ...extra })
+    const preview = await call('create_branch_preview')
+    if (!isRecord(preview) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid branch creation review', retryable: false })
+    let result: unknown
+    try {
+      result = await call('create_branch', { basis: preview.basis })
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the branch and checkout recovery history before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || result.code !== 0 || result.created !== true || result.checked_out !== false || typeof result.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.receipt_id)) throw new BackendError({ code: 'invalid_response', message: 'Branch creation outcome is uncertain; inspect the branch and checkout recovery history', retryable: false })
+  }
+
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
     if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })

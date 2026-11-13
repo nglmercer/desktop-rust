@@ -26,6 +26,14 @@ export async function createBranch(
   startPoint: string | null,
   noTrack?: boolean
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().createRepositoryBranch(repository.path, name, startPoint, noTrack ?? false),
+      true
+    )
+  }
   const args = ['branch']
 
   // if we're branching directly from a remote branch, we don't want to track it

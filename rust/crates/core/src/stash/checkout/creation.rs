@@ -51,9 +51,7 @@ impl Repository {
         } else {
             let revision = request.start_point.as_deref().unwrap_or("HEAD");
             anyhow::ensure!(
-                !revision.is_empty()
-                    && !revision.starts_with('-')
-                    && !revision.contains(['\0', '\n', '\r']),
+                !revision.is_empty() && !revision.contains(['\0', '\n', '\r']),
                 "invalid branch start point"
             );
             // Canonical refs are exact even if a local branch is literally named

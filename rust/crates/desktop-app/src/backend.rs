@@ -109,6 +109,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    BranchCreation {
+        repository_path: String,
+        operation: Operation,
+    },
     AbortGitOperation {
         repository_path: String,
         operation: Operation,
@@ -380,6 +384,9 @@ impl Backend {
         | GitInfoOperation::ReviewedDiscard {
             repository_path, ..
         }
+        | GitInfoOperation::BranchCreation {
+            repository_path, ..
+        }
         | GitInfoOperation::AbortGitOperation {
             repository_path, ..
         }
@@ -484,6 +491,25 @@ impl Backend {
             )
         {
             return Err(AppError::BadArgs("unsupported Git abort operation".into()));
+        }
+        if let GitInfoOperation::BranchCreation { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::CreateBranchPreview {
+                    checkout: false,
+                    ..
+                } | Operation::CreateBranch {
+                    checkout: false,
+                    basis: Some(_),
+                    replace_stash: false,
+                    restore_index: false,
+                    ..
+                }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported branch creation operation".into(),
+            ));
         }
         if let GitInfoOperation::FinishMergeCommit { operation, .. } = &request.operation
             && !matches!(operation, Operation::RendererFinishMergeCommit)
@@ -1258,6 +1284,10 @@ impl Backend {
             BackendOperation::GitInfo(
                 GitInfoOperation::AbortGitOperation { .. }
                     | GitInfoOperation::FinishMergeCommit { .. }
+                    | GitInfoOperation::BranchCreation {
+                        operation: Operation::CreateBranch { .. },
+                        ..
+                    }
             )
         );
         let checkpoint_write = matches!(
@@ -1338,6 +1368,13 @@ impl Backend {
                                 if matches!(operation, Operation::ConflictDetail { .. } | Operation::StageConflict { .. } | Operation::ResolveConflict { .. }) {
                                     if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::BranchCreation { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::AbortGitOperation { repository_path, operation } => {
@@ -2666,6 +2703,51 @@ esac
                 .success()
         );
         let backend = Backend::new(16).unwrap();
+        let branch = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        let plan = branch(json!({"method":"create_branch_preview","name":"native-created","start_point":"HEAD","checkout":false})).unwrap();
+        let created = branch(json!({"method":"create_branch","name":"native-created","start_point":"HEAD","checkout":false,"basis":plan["basis"]})).unwrap();
+        assert_eq!(created["created"], true);
+        assert_eq!(created["checked_out"], false);
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args([
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    "refs/heads/native-created"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":{"method":"create_branch","name":"unsafe","checkout":true,"basis":plan["basis"]}}})]).is_err());
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":{"method":"create_branch","name":"unsafe","checkout":false}}})]).is_err());
+        let stale =
+            branch(json!({"method":"create_branch_preview","name":"stale","checkout":false}))
+                .unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["branch", "other"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(branch(json!({"method":"create_branch","name":"stale","checkout":false,"basis":stale["basis"]})).is_err());
+        assert!(
+            !Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["show-ref", "--verify", "--quiet", "refs/heads/stale"])
+                .status()
+                .unwrap()
+                .success()
+        );
         fs::write(root.join("file"), b"changed").unwrap();
         assert!(
             Command::new("git")
