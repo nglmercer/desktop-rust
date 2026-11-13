@@ -1,6 +1,6 @@
 import type { FetchProgressChunk } from '../../backend/client'
 import { FetchProgressParser } from './fetch'
-import type { IGitOutput, IGitProgress } from './git'
+import type { GitProgressParser, IGitOutput, IGitProgress } from './git'
 import { GitLFSProgressParser } from './lfs'
 
 type Stream = 'stderr' | 'lfs'
@@ -18,7 +18,7 @@ const maximumLineLength = 1024 * 1024
 
 /** Parse the request-owned bytes from one native fetch operation. */
 export class FetchStreamProgressParser {
-  private readonly git = new FetchProgressParser()
+  private readonly git: GitProgressParser
   private readonly lfs = new GitLFSProgressParser()
   private readonly streams: Record<Stream, StreamState> = {
     stderr: this.newState(),
@@ -28,8 +28,11 @@ export class FetchStreamProgressParser {
   private closed = false
 
   public constructor(
-    private readonly onProgress: (progress: IGitProgress | IGitOutput) => void
-  ) {}
+    private readonly onProgress: (progress: IGitProgress | IGitOutput) => void,
+    parser: GitProgressParser = new FetchProgressParser()
+  ) {
+    this.git = parser
+  }
 
   private newState(): StreamState {
     return {

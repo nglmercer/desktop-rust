@@ -55,6 +55,7 @@ mod refs;
 mod renderer_cherry_pick;
 mod renderer_fast_forward;
 mod renderer_fetch;
+mod renderer_push;
 mod renderer_merge;
 mod renderer_rebase;
 mod renderer_reset;
@@ -95,6 +96,7 @@ pub use stash::remote_deletion::{RemoteBranchDeletion, UpstreamDeletion};
 mod state;
 pub use state::OperationState;
 mod process;
+mod push_error;
 mod stream_redaction;
 pub use github::{GitHubAction, GitHubRequest, execute_github};
 mod protocol;
@@ -790,6 +792,12 @@ impl Repository {
             Operation::RendererFetch { request, basis } => {
                 return self.renderer_fetch(&request, &basis).await;
             }
+            Operation::RendererPushPreview { request } => {
+                return self.renderer_push_preview(&request).await;
+            }
+            Operation::RendererPush { request, basis } => {
+                return self.renderer_push(&request, &basis).await;
+            }
             Operation::RendererRemoteHeadPreview { request } => {
                 return self.renderer_remote_head_preview(&request).await;
             }
@@ -1470,6 +1478,8 @@ impl Repository {
             | RendererFastForwardPreview { .. }
             | RendererFetchPreview { .. }
             | RendererFetch { .. }
+            | RendererPushPreview { .. }
+            | RendererPush { .. }
             | RendererRemoteHeadPreview { .. }
             | RendererRemoteHead { .. }
             | RendererFastForward { .. }

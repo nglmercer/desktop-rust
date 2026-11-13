@@ -2558,6 +2558,26 @@ content that differs from the working file is no longer in the index after the
 operation. Independent Git writers can race review and Git taking locks; hard
 and soft reset, first-commit undo and cross-platform parity remain open.
 
+## Reviewed branch and tag push
+
+Wry and WebSocket can publish a local branch and selected tags through Rust,
+including initial upstream setup and explicit force-with-lease. The review
+binds the selected remote, its effective push destinations, refs and Git
+configuration. Wry checks each reviewed destination for proxy requirements;
+unsupported selected fetch URLs and proxy cases retain the pre-mutation legacy
+route where available. Unsupported push destination URLs fail closed. A failed
+or interrupted push may have updated some destinations or
+tags: the UI keeps the inspection warning visible and suppresses blind retry.
+
+Interactive pre-push hooks and full Git LFS push parity remain open. If the
+UI requests hook callbacks and a pre-push hook or configured hook is present,
+the native path refuses before mutation; it also checks again immediately
+before starting Git. `--no-verify` is used only when explicitly requested.
+Independent writers can still change hooks or configuration between the final
+check and Git starting. Secret-scanning failures currently provide a fixed
+warning rather than the legacy detailed bypass flow. Assisted publication,
+native Windows/macOS behavior and proxy parity remain to be validated.
+
 ## Local tracking-branch fast-forward
 
 Wry and WebSocket use Rust to review and fast-forward local tracking branches

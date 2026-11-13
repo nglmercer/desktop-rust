@@ -8,6 +8,7 @@ import {
 } from '../../lib/error-with-metadata'
 import { GitError, isAuthFailureError } from '../../lib/git/core'
 import { isNativeFetchSamlReauthError } from '../../lib/git/fetch-error'
+import { isNativePushOutcomeUncertain } from '../../lib/git/push'
 import { ShellError } from '../../lib/shells'
 import { UpstreamAlreadyExistsError } from '../../lib/stores/upstream-already-exists-error'
 
@@ -56,6 +57,9 @@ function asErrorWithCode(error: Error): IErrorWithCode | null {
  */
 function asErrorWithMetadata(error: Error): ErrorWithMetadata | null {
   if (error instanceof ErrorWithMetadata) {
+    // Specialized handlers may hide the inspection warning or offer another
+    // mutation; keep uncertain push outcomes in the generic error view.
+    if (isNativePushOutcomeUncertain(error.underlyingError)) return null
     return error
   } else {
     return null

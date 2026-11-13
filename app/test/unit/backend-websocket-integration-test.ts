@@ -398,6 +398,31 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await expect(client.request('release_comparison_snapshot', { snapshot_id: snapshot.id })).resolves.toEqual({ released: true })
     }, 90_000)
 
+    it('pushes a reviewed branch and tag over WebSocket', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-push-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
+      const repository = path.join(directory, 'repository'); const remote = path.join(directory, 'remote.git')
+      execFileSync('git', ['init', '-q', '-b', 'main', repository]); execFileSync('git', ['init', '--bare', '-q', remote])
+      const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args], { encoding: 'utf8' }).trim()
+      git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'base')
+      git('tag', 'v1'); git('remote', 'add', 'origin', remote)
+      await client.selectBrowserRepository(repository)
+      const { push } = await import('../../src/lib/git/push')
+      const progress = vi.fn()
+      const terminal = vi.fn()
+      await push({ path: repository } as Repository, { name: 'origin', url: remote }, 'main', null, ['v1'], { onHookFailure: async () => 'abort', onTerminalOutputAvailable: subscribe => { subscribe(terminal) } }, progress)
+      const target = (...args: string[]) => execFileSync('git', ['-C', remote, ...args], { encoding: 'utf8' }).trim()
+      expect(target('rev-parse', 'refs/heads/main')).toBe(git('rev-parse', 'HEAD'))
+      expect(target('rev-parse', 'refs/tags/v1')).toBe(git('rev-parse', 'HEAD'))
+      expect(progress).toHaveBeenCalledWith(expect.objectContaining({ kind: 'push', remote: 'origin', value: 0 }))
+      expect(terminal).toHaveBeenCalled()
+    }, 90_000)
+
     it('fetches a reviewed local remote over WebSocket', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-fetch-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })

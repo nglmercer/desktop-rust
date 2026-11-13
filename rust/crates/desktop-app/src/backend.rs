@@ -874,6 +874,8 @@ impl Backend {
                 operation,
                 Operation::RendererFetchPreview { .. }
                     | Operation::RendererFetch { .. }
+                    | Operation::RendererPushPreview { .. }
+                    | Operation::RendererPush { .. }
                     | Operation::RendererRemoteHeadPreview { .. }
                     | Operation::RendererRemoteHead { .. }
             )
@@ -1006,7 +1008,7 @@ impl Backend {
         let is_fetch = matches!(
             &request.operation,
             GitInfoOperation::FetchRemote {
-                operation: Operation::RendererFetch { .. } | Operation::RendererRemoteHead { .. },
+                operation: Operation::RendererFetch { .. } | Operation::RendererPush { .. } | Operation::RendererRemoteHead { .. },
                 ..
             } | GitInfoOperation::CloneSelected { .. } | GitInfoOperation::RecoverClone { .. }
         );
@@ -1626,7 +1628,7 @@ impl Backend {
                 operation: Operation::PublishSelectedCommit { .. },
                 ..
             }) | BackendOperation::GitInfo(GitInfoOperation::FetchRemote {
-                operation: Operation::RendererFetch { .. },
+                operation: Operation::RendererFetch { .. } | Operation::RendererPush { .. },
                 ..
             }) | BackendOperation::GitInfo(GitInfoOperation::CloneSelected { .. })
         ) {
@@ -1724,7 +1726,7 @@ impl Backend {
                         ..
                     }
                     | GitInfoOperation::FetchRemote {
-                        operation: Operation::RendererFetch { .. } | Operation::RendererRemoteHead { .. },
+                        operation: Operation::RendererFetch { .. } | Operation::RendererPush { .. } | Operation::RendererRemoteHead { .. },
                         ..
                     }
                     | GitInfoOperation::WorktreeMutation { operation: Operation::RendererWorktreeApply { .. }, .. }
@@ -2570,6 +2572,35 @@ mod tests {
             assert_eq!(result["code"], 0);
             assert!(receiver.try_iter().any(|event| matches!(event, desktop_backend::hook_progress::CommitEvent::FetchOutput { stream: "stderr", .. })));
             assert_eq!(git(&target, &["rev-parse", "refs/remotes/--test/main"]), git(&source, &["rev-parse", "HEAD"]));
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn wry_pushes_reviewed_branch_and_tag() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-push-{}", uuid::Uuid::new_v4()));
+            let source = root.join("source"); let target = root.join("remote.git");
+            fs::create_dir_all(&source).unwrap(); fs::create_dir(&target).unwrap();
+            let git = |dir: &Path, args: &[&str]| { let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap(); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
+            git(&source, &["init", "-q", "-b", "main"]); git(&source, &["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "base"]); git(&source, &["tag", "v1"]);
+            git(&target, &["init", "--bare", "-q"]); let url = target.to_str().unwrap(); git(&source, &["remote", "add", "origin", url]);
+            let request = json!({"remote":"origin", "expected_url":url, "local_branch":"main", "remote_branch":null, "tags":["v1"], "force_with_lease":false, "no_verify":false, "report_progress":true, "require_hook_callbacks":true});
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"fetch_remote", "repository_path":source, "operation":operation}})]);
+            let preview = backend.read(route(json!({"method":"renderer_push_preview", "request":request})).unwrap()).unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_push", "request":request, "basis":"bad"})).unwrap()).is_err());
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let progress = Arc::new(move |event| { let _ = sender.send(event); });
+            let result = backend.read_with_progress(route(json!({"method":"renderer_push", "request":request, "basis":preview["basis"]})).unwrap(), Some(progress)).unwrap();
+            assert_eq!(result["code"], 0);
+            assert!(receiver.try_iter().any(|event| matches!(event, desktop_backend::hook_progress::CommitEvent::FetchOutput { stream: "stderr", .. })));
+            assert_eq!(git(&target, &["rev-parse", "refs/heads/main"]), git(&source, &["rev-parse", "HEAD"]));
+            assert_eq!(git(&target, &["rev-parse", "refs/tags/v1"]), git(&source, &["rev-parse", "HEAD"]));
+            fs::write(source.join(".git/hooks/pre-push"), "#!/bin/sh\nexit 1\n").unwrap();
+            let blocked = backend.read(route(json!({"method":"renderer_push_preview", "request":request})).unwrap()).unwrap();
+            assert_eq!(blocked["kind"], "unsupported_hooks");
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

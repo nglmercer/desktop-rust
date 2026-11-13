@@ -335,6 +335,13 @@ pub enum Operation {
         request: RendererFetchRequest,
         basis: String,
     },
+    RendererPushPreview {
+        request: RendererPushRequest,
+    },
+    RendererPush {
+        request: RendererPushRequest,
+        basis: String,
+    },
     RendererRemoteHeadPreview {
         request: RendererFetchRequest,
     },
@@ -1115,6 +1122,37 @@ pub struct RendererFetchRequest {
     pub expected_saml_owner: Option<String>,
     #[serde(default)]
     pub refspec: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererPushRequest {
+    pub remote: String,
+    pub expected_url: String,
+    pub local_branch: String,
+    pub remote_branch: Option<String>,
+    pub tags: Vec<String>,
+    pub force_with_lease: bool,
+    pub no_verify: bool,
+    pub report_progress: bool,
+    pub require_hook_callbacks: bool,
+}
+
+impl std::fmt::Debug for RendererPushRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RendererPushRequest")
+            .field("remote", &self.remote)
+            .field("expected_url", &"<redacted>")
+            .field("local_branch", &self.local_branch)
+            .field("remote_branch", &self.remote_branch)
+            .field("tags", &self.tags)
+            .field("force_with_lease", &self.force_with_lease)
+            .field("no_verify", &self.no_verify)
+            .field("report_progress", &self.report_progress)
+            .field("require_hook_callbacks", &self.require_hook_callbacks)
+            .finish()
+    }
 }
 
 impl std::fmt::Debug for RendererFetchRequest {

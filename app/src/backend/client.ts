@@ -5,7 +5,7 @@
  *
  * Transport selection is automatic:
  * - When `window.__desktop.invoke` exists (Tao/Wry shell with injected
- *   `web/ipc-shim.js`), use Wry IPC. The shim already implements
+ *   `web/ipc-shim.ts`), use Wry IPC. The shim already implements
  *   correlated `{__rpc,id,channel,args}` / `%RpcResult` and
  *   profile-dependent `PENDING_LIMIT`.
  * - Otherwise, when the page was served by the loopback bridge (Termux /
@@ -271,6 +271,7 @@ export class BackendError extends Error implements IBackendError {
 
 /** Fetch review refused the URL before any network or ref mutation occurred. */
 export class FetchPreviewUnsupported extends Error {}
+export class NativePushHooksUnsupported extends Error {}
 
 const fetchErrorKinds = [
   'ssh_key_unverified', 'ssh_authentication_failed', 'ssh_permission_denied',
@@ -283,6 +284,12 @@ export type FetchErrorKind = typeof fetchErrorKinds[number]
 export interface FetchFailure {
   readonly exitCode: number
   readonly errorKind: FetchErrorKind | null
+}
+const pushErrorKinds = ['push_non_fast_forward', 'push_file_too_large', 'push_private_email', 'push_review_required', 'push_protected_force', 'push_required_status', 'push_force_rejected', 'push_protection'] as const
+export type PushErrorKind = typeof pushErrorKinds[number]
+export interface PushFailure {
+  readonly exitCode: number
+  readonly errorKind: FetchErrorKind | PushErrorKind | null
 }
 
 function toBackendError(value: unknown): BackendError {
@@ -418,7 +425,7 @@ class WryTransport {
       }
       const fetchMutation = method === 'git_info' && isRecord(params) &&
         isRecord(params.operation) && params.operation.type === 'fetch_remote' &&
-        isRecord(params.operation.operation) && (params.operation.operation.method === 'renderer_fetch' || params.operation.operation.method === 'renderer_remote_head')
+        isRecord(params.operation.operation) && (params.operation.operation.method === 'renderer_fetch' || params.operation.operation.method === 'renderer_remote_head' || params.operation.operation.method === 'renderer_push')
       const cloneMutation = method === 'git_info' && isRecord(params) &&
         isRecord(params.operation) && (params.operation.type === 'clone_selected' || params.operation.type === 'recover_clone')
       const maximum = fetchMutation || cloneMutation ? 3_600_000 : method === 'copilot' ? 330_000 : 60_000
@@ -3048,6 +3055,51 @@ export class BackendClient {
       return
     }
     return { exitCode: result.code as number, errorKind: result.error_kind as FetchErrorKind | null }
+  }
+
+  /** Push a reviewed branch and selected tags using the repository's assigned account. */
+  async pushRepositoryRemote(repositoryPath: string, request: {
+    readonly remote: string
+    readonly expected_url: string
+    readonly local_branch: string
+    readonly remote_branch: string | null
+    readonly tags: ReadonlyArray<string>
+    readonly force_with_lease: boolean
+    readonly no_verify: boolean
+    readonly report_progress: boolean
+    readonly require_hook_callbacks: boolean
+  }, onProgress?: (chunk: FetchProgressChunk) => void, checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>): Promise<PushFailure | undefined> {
+    if (onProgress && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
+      throw new BackendError({ code: 'unsupported', message: 'Native push progress is unavailable', retryable: false })
+    }
+    const call = (method: 'renderer_push_preview' | 'renderer_push', extra: Record<string, unknown> = {}) => {
+      const options = method === 'renderer_push' ? { onProgress, deadlineMs: 3_600_000 } : {}
+      return this.transport === 'wry'
+        ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } }, options)
+        : this.repositoryRead(repositoryPath, method, { request, ...extra }, options)
+    }
+    const preview = await call('renderer_push_preview')
+    if (isRecord(preview) && preview.kind === 'unsupported') throw new FetchPreviewUnsupported('Push URL cannot be safely reviewed')
+    if (isRecord(preview) && preview.kind === 'unsupported_hooks') throw new NativePushHooksUnsupported('This push requires pre-push hook interaction, which is not yet supported in the Rust shell')
+    if (!isRecord(preview) || !isRecord(preview.request) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis) || !Array.isArray(preview.destinations) || preview.destinations.length === 0 || preview.destinations.length > 32 || preview.destinations.some(value => typeof value !== 'string')) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid push review', retryable: false })
+    }
+    const reviewedRequest = preview.request
+    if (Object.entries(request).some(([key, value]) => key === 'tags' ? !Array.isArray(reviewedRequest.tags) || JSON.stringify(reviewedRequest.tags) !== JSON.stringify(value) : reviewedRequest[key] !== value)) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid push review', retryable: false })
+    }
+    await checkDestinations?.(preview.destinations)
+    let result: unknown
+    try { result = await call('renderer_push', { basis: preview.basis }) }
+    catch {
+      throw new BackendError({ code: 'push_outcome_uncertain', message: 'Push outcome is uncertain; inspect the remote before retrying', retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || (result.error_kind !== null && !(typeof result.error_kind === 'string' && (fetchErrorKinds.includes(result.error_kind as FetchErrorKind) || pushErrorKinds.includes(result.error_kind as PushErrorKind))))) throw new BackendError({ code: 'push_outcome_uncertain', message: 'Push outcome is uncertain; inspect the remote', retryable: false })
+    if (result.code === 0) {
+      if (result.error_kind !== null) throw new BackendError({ code: 'push_outcome_uncertain', message: 'Invalid push result; inspect the remote', retryable: false })
+      return
+    }
+    return { exitCode: result.code as number, errorKind: result.error_kind as FetchErrorKind | PushErrorKind | null }
   }
 
   /** Fast-forward reviewed local tracking branches without rewriting FETCH_HEAD. */

@@ -1,10 +1,66 @@
-import { git, HookCallbackOptions, IGitStringExecutionOptions } from './core'
+import {
+  git,
+  GitError,
+  HookCallbackOptions,
+  IGitStringExecutionOptions,
+  TerminalOutput,
+} from './core'
 import { Repository } from '../../models/repository'
 import { IPushProgress } from '../../models/progress'
 import { PushProgressParser, executionOptionsWithProgress } from '../progress'
 import { IRemote } from '../../models/remote'
-import { envForRemoteOperation } from './environment'
+import { envForProxy, envForRemoteOperation } from './environment'
 import { Branch } from '../../models/branch'
+import {
+  backend,
+  BackendError,
+  FetchErrorKind,
+  FetchPreviewUnsupported,
+  PushErrorKind,
+} from '../../backend/client'
+import {
+  withRepositoryGitOperation,
+  withoutRepositoryGitAccess,
+} from './repository-operation'
+import { FetchStreamProgressParser } from '../progress/fetch-stream'
+import { fetchFailureToGitError } from './fetch-error'
+import { pushTerminalChunk } from './push-terminal-chunk'
+import { GitError as DugiteError } from 'dugite'
+
+const uncertainPushes = new WeakSet<Error>()
+
+function isPushErrorKind(
+  kind: FetchErrorKind | PushErrorKind | null
+): kind is PushErrorKind {
+  return kind !== null && kind.startsWith('push_')
+}
+
+/** A native push may have changed a destination; do not offer a blind retry. */
+export function isNativePushOutcomeUncertain(error: unknown): boolean {
+  return error instanceof Error && uncertainPushes.has(error)
+}
+
+/** Remove the retry action once a push may have reached the remote. */
+export function suppressUnsafePushRetry(
+  metadata: { retryAction?: unknown },
+  error: unknown,
+  pushed: boolean
+): void {
+  if (pushed || isNativePushOutcomeUncertain(error)) delete metadata.retryAction
+}
+
+const pushErrors: Record<
+  Exclude<PushErrorKind, 'push_protection'>,
+  DugiteError
+> = {
+  push_non_fast_forward: DugiteError.PushNotFastForward,
+  push_file_too_large: DugiteError.PushWithFileSizeExceedingLimit,
+  push_private_email: DugiteError.PushWithPrivateEmail,
+  push_review_required: DugiteError.ProtectedBranchRequiresReview,
+  push_protected_force: DugiteError.ProtectedBranchForcePush,
+  push_required_status: DugiteError.ProtectedBranchRequiredStatus,
+  push_force_rejected: DugiteError.ForcePushRejected,
+}
 
 /** Preserve native pushInsteadOf behavior when push falls back to the fetch URL. */
 export type AssistedCommitPushURLSource = 'push-url' | 'fetch-url'
@@ -84,7 +140,6 @@ export async function push(
   options?: PushOptions,
   progressCallback?: (progress: IPushProgress) => void
 ): Promise<void> {
-  const args = ['push']
   const assisted = options?.assistedCommit
   if (
     assisted !== undefined &&
@@ -97,6 +152,197 @@ export async function push(
       'Assisted push requires a full commit ID and a normal branch push'
     )
   }
+
+  if (
+    assisted === undefined &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    const wry = backend().transportKind === 'wry'
+    const hasProgress =
+      typeof (window as any).__desktop?.invokeWithProgress === 'function'
+    const needsStreaming =
+      progressCallback !== undefined ||
+      options?.onTerminalOutputAvailable !== undefined
+    const inheritedProxy = [
+      'http_proxy',
+      'https_proxy',
+      'HTTPS_PROXY',
+      'all_proxy',
+      'ALL_PROXY',
+    ].some(key => key in process.env)
+    if (!wry || ((!needsStreaming || hasProgress) && !inheritedProxy)) {
+      const listeners = new Set<(chunk: TerminalOutput) => void>()
+      const terminalChunks: string[] = []
+      const notifyTerminal = (text: string) => {
+        if (!text) return
+        pushTerminalChunk(terminalChunks, 256 * 1024, text)
+        for (const listener of listeners) {
+          try {
+            withoutRepositoryGitAccess(() => listener(text))
+          } catch {
+            /* Observers cannot terminate a push. */
+          }
+        }
+      }
+      const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() }
+      const parser =
+        progressCallback === undefined
+          ? undefined
+          : new FetchStreamProgressParser(progress => {
+              const description =
+                progress.kind === 'progress'
+                  ? progress.details.text
+                  : progress.text
+              withoutRepositoryGitAccess(() =>
+                progressCallback({
+                  kind: 'push',
+                  title: `Pushing to ${remote.name}`,
+                  description,
+                  value: progress.percent,
+                  remote: remote.name,
+                  branch: localBranch,
+                })
+              )
+            }, new PushProgressParser())
+      progressCallback?.({
+        kind: 'push',
+        title: `Pushing to ${remote.name}`,
+        value: 0,
+        remote: remote.name,
+        branch: localBranch,
+      })
+      try {
+        const failure = await withRepositoryGitOperation(
+          repository.path,
+          'mutation',
+          () =>
+            backend().pushRepositoryRemote(
+              repository.path,
+              {
+                remote: remote.name,
+                expected_url: remote.url,
+                local_branch: localBranch,
+                remote_branch: remoteBranch,
+                tags: tagsToPush ?? [],
+                force_with_lease: options?.forceWithLease ?? false,
+                no_verify: options?.noVerify ?? false,
+                report_progress: needsStreaming,
+                require_hook_callbacks:
+                  options?.onHookProgress !== undefined ||
+                  options?.onHookFailure !== undefined ||
+                  options?.onTerminalOutputAvailable !== undefined,
+              },
+              !needsStreaming
+                ? undefined
+                : chunk => {
+                    try {
+                      parser?.push(chunk)
+                    } catch {
+                      /* Progress observers cannot terminate a push. */
+                    }
+                    if (chunk.stream === 'lfs') return
+                    const bytes = Uint8Array.from(atob(chunk.data), character =>
+                      character.charCodeAt(0)
+                    )
+                    const text = decoders[chunk.stream].decode(bytes, {
+                      stream: true,
+                    })
+                    notifyTerminal(text)
+                  },
+              wry || options?.onTerminalOutputAvailable !== undefined
+                ? async destinations => {
+                    if (wry) {
+                      for (const destination of destinations) {
+                        if ((await envForProxy(destination)) !== undefined)
+                          throw new FetchPreviewUnsupported(
+                            'Push destination requires a proxy'
+                          )
+                      }
+                    }
+                    try {
+                      withoutRepositoryGitAccess(() =>
+                        options?.onTerminalOutputAvailable?.(listener => {
+                          for (const chunk of terminalChunks) {
+                            try {
+                              withoutRepositoryGitAccess(() => listener(chunk))
+                            } catch {
+                              /* Observers cannot terminate a push. */
+                            }
+                          }
+                          listeners.add(listener)
+                          return {
+                            unsubscribe: () => listeners.delete(listener),
+                          }
+                        })
+                      )
+                    } catch {
+                      /* Observer setup must not trigger fallback or terminate a push. */
+                    }
+                  }
+                : undefined
+            ),
+          true
+        )
+        if (failure !== undefined) {
+          const notice =
+            'Push failed or was rejected. Some destinations or tags may have been updated; inspect the remote before retrying.'
+          let error: GitError
+          if (isPushErrorKind(failure.errorKind)) {
+            const kind = failure.errorKind
+            const gitError =
+              kind === 'push_protection' ? null : pushErrors[kind]
+            const description =
+              kind === 'push_protection'
+                ? ' Push protection rejected the update; inspect the remote for details.'
+                : ''
+            error = new GitError(
+              {
+                exitCode: failure.exitCode,
+                stdout: '',
+                stderr: '',
+                path: repository.path,
+                gitError,
+                gitErrorDescription: `${notice}${description}`,
+              },
+              ['push', '--', remote.name],
+              ''
+            )
+          } else {
+            error = fetchFailureToGitError(
+              { exitCode: failure.exitCode, errorKind: failure.errorKind },
+              repository.path,
+              remote.name
+            )
+            error.message = `${notice} ${error.message}`
+          }
+          uncertainPushes.add(error)
+          throw error
+        }
+        return
+      } catch (error) {
+        if (
+          error instanceof BackendError &&
+          error.code === 'push_outcome_uncertain'
+        )
+          uncertainPushes.add(error)
+        if (!wry || !(error instanceof FetchPreviewUnsupported)) throw error
+      } finally {
+        try {
+          parser?.finish()
+        } catch {
+          /* Progress observers cannot invalidate a completed push. */
+        }
+        for (const decoder of Object.values(decoders)) {
+          const text = decoder.decode()
+          notifyTerminal(text)
+        }
+        listeners.clear()
+      }
+    }
+  }
+
+  const args = ['push']
 
   if (assisted !== undefined) {
     args.push(

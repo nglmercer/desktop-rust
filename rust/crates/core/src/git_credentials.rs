@@ -403,6 +403,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::RendererMergeStart { .. }
             | Operation::RendererFastForward { .. }
             | Operation::RendererFetch { .. }
+            | Operation::RendererPush { .. }
             | Operation::RendererRemoteHead { .. }
             | Operation::Revert { .. }
             | Operation::RendererRevertPreview { .. }

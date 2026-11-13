@@ -291,6 +291,7 @@ import {
   isUsingLFS,
 } from '../git/lfs'
 import { inferLastPushForRepository } from '../infer-last-push-for-repository'
+import { suppressUnsafePushRetry } from '../git/push'
 import { updateMenuState } from '../menu-update'
 import { merge } from '../merge'
 import {
@@ -6076,6 +6077,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
         type: RetryActionType.Push,
         repository,
       }
+      const pushErrorMetadata: { retryAction?: RetryAction } = { retryAction }
 
       // This is most likely not necessary and is only here out of
       // an abundance of caution. We're introducing support for
@@ -6125,13 +6127,15 @@ export class AppStore extends TypedBaseStore<IAppState> {
             options
           )
           if (outcome.kind === 'error') {
+            suppressUnsafePushRetry(pushErrorMetadata, outcome.error, false)
             throw outcome.error
           }
           if (outcome.kind === 'pushed' && outcome.refreshError !== undefined) {
+            suppressUnsafePushRetry(pushErrorMetadata, outcome.refreshError, true)
             throw outcome.refreshError
           }
         },
-        { retryAction }
+        pushErrorMetadata
       )
 
       this.updatePushPullFetchProgress(repository, null)
