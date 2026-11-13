@@ -120,6 +120,19 @@ describe('backend Copilot session cleanup', () => {
     ).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('uses a restricted native abort and does not retry uncertain results', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await client.abortRepositoryGitOperation('/repo', 'merge')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'abort_git_operation', repository_path: '/repo', operation: { method: 'recover', kind: 'merge', action: 'abort' } } }))
+    invoke.mockRejectedValueOnce({ code: 'cancelled', message: 'interrupted', retryable: true })
+    await expect(client.abortRepositoryGitOperation('/repo', 'rebase')).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect the repository') })
+    invoke.mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'abort failed' })
+    await expect(client.abortRepositoryGitOperation('/repo', 'cherry_pick')).rejects.toMatchObject({ code: 'git_error', retryable: false, message: expect.stringContaining('abort failed') })
+    expect(invoke).toHaveBeenCalledTimes(3)
+  })
+
   it('reads and validates a scoped native rebase snapshot', async () => {
     const head = 'a'.repeat(40)
     const invoke = vi.fn(async (): Promise<unknown> => ({ head, progress: { original: head, branch: 'refs/heads/main', onto: head, current: '1', total: '2' } }))

@@ -425,6 +425,7 @@ class WryTransport {
         params.operation.type === 'reviewed_discard' &&
         isRecord(params.operation.operation) &&
         (params.operation.operation.method === 'discard' || params.operation.operation.method === 'discard_batch' || params.operation.operation.method === 'undo_discard' || params.operation.operation.method === 'forget_discard' || params.operation.operation.method === 'stage_conflict' || params.operation.operation.method === 'resolve_conflict')
+      const recoveryWrite = method === 'git_info' && isRecord(params) && isRecord(params.operation) && params.operation.type === 'abort_git_operation'
       const initialization =
         method === 'git_info' &&
         isRecord(params) &&
@@ -435,7 +436,7 @@ class WryTransport {
         params.operation.type === 'commit_checkpoint' && isRecord(params.operation.operation) &&
         typeof params.operation.operation.method === 'string' &&
         ['prepare_selected_commit', 'publish_selected_commit', 'recover_published_commit_checkpoint', 'close_unchanged_commit_checkpoint', 'forget_commit_checkpoint'].includes(params.operation.operation.method)
-      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite
+      const mutating = identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite || recoveryWrite
       const nativeError = (error: unknown): BackendError => {
         const result = toBackendError(error)
         if (!mutating || !result.retryable) return result
@@ -2340,6 +2341,22 @@ export class BackendClient {
     if (!isRecord(result) || result.code !== 0) {
       throw new BackendError({ code: 'invalid_response', message: 'Backup deletion outcome is uncertain; inspect recovery history', retryable: false })
     }
+  }
+
+  /** Abort only the named in-progress Git operation; never replay an uncertain result. */
+  async abortRepositoryGitOperation(repositoryPath: string, kind: 'merge' | 'rebase' | 'cherry_pick'): Promise<void> {
+    const operation = { method: 'recover', kind, action: 'abort' }
+    let result: unknown
+    try {
+      result = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'abort_git_operation', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the repository before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Abort outcome is uncertain; inspect the repository', retryable: false })
+    if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the Git operation'}; inspect the repository`, retryable: false })
   }
 
   /** Read the active rebase and its fixed progress files from the Rust host. */

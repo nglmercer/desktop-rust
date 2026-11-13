@@ -102,5 +102,6 @@
   "app/test/unit/progress/clone-test.ts",
   "app/test/unit/rust-conflict-resolution-routing-test.ts",
   "app/test/unit/rust-cherry-pick-routing-test.ts",
-  "app/test/unit/rust-rebase-state-routing-test.ts"
+  "app/test/unit/rust-rebase-state-routing-test.ts",
+  "app/test/unit/rust-abort-operation-routing-test.ts"
 ]

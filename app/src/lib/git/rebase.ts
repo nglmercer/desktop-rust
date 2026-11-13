@@ -424,6 +424,11 @@ export async function rebase(
 
 /** Abandon the current rebase operation */
 export async function abortRebase(repository: Repository) {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().abortRepositoryGitOperation(repository.path, 'rebase'), true)
+    return
+  }
   await git(['rebase', '--abort'], repository.path, 'abortRebase')
 }
 

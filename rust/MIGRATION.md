@@ -2295,3 +2295,12 @@ repository-scoped Rust operation. Fixed, bounded state files are read without
 following symlinks and rechecked for changes. The renderer uses this state for
 progress, internal-state display, and the continuation guard; execution, hook
 handling, apply-backend parity, and the remaining legacy callers are still open.
+
+## Git operation aborts
+
+Merge, rebase, and cherry-pick aborts now use the repository-scoped Rust
+recovery operation in the Wry and WebSocket renderers. The native shell only
+admits these three abort actions, and a mismatched in-progress operation is
+rejected. Interrupted outcomes require repository inspection rather than retry.
+Starting and continuing these workflows, including hook and progress parity,
+remain separate legacy-removal gates.

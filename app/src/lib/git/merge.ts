@@ -136,6 +136,11 @@ export async function getMergeBase(
  * @param repository where to abort the merge
  */
 export async function abortMerge(repository: Repository): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().abortRepositoryGitOperation(repository.path, 'merge'), true)
+    return
+  }
   await git(['merge', '--abort'], repository.path, 'abortMerge')
 }
 

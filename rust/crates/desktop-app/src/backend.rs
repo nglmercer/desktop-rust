@@ -109,6 +109,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    AbortGitOperation {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -372,6 +376,9 @@ impl Backend {
         | GitInfoOperation::ReviewedDiscard {
             repository_path, ..
         }
+        | GitInfoOperation::AbortGitOperation {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -456,6 +463,19 @@ impl Backend {
             return Err(AppError::BadArgs(
                 "unsupported reviewed discard operation".into(),
             ));
+        }
+        if let GitInfoOperation::AbortGitOperation { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::Recover {
+                    kind: desktop_backend::RecoveryKind::Merge
+                        | desktop_backend::RecoveryKind::Rebase
+                        | desktop_backend::RecoveryKind::CherryPick,
+                    action: desktop_backend::RecoveryAction::Abort,
+                }
+            )
+        {
+            return Err(AppError::BadArgs("unsupported Git abort operation".into()));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
             && !matches!(
@@ -1218,6 +1238,10 @@ impl Backend {
                 ..
             })
         );
+        let recovery_write = matches!(
+            job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::AbortGitOperation { .. })
+        );
         let checkpoint_write = matches!(
             job.operation,
             BackendOperation::GitInfo(GitInfoOperation::CommitCheckpoint {
@@ -1296,6 +1320,13 @@ impl Backend {
                                 if matches!(operation, Operation::ConflictDetail { .. } | Operation::StageConflict { .. } | Operation::ResolveConflict { .. }) {
                                     if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::AbortGitOperation { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::SelectedCommitPreview { repository_path, operation } => {
@@ -1445,11 +1476,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if recovery_write { "Git operation abort cancelled; inspect the repository before retrying" } else if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if recovery_write { "Git operation abort timed out; inspect the repository before retrying" } else if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         });
@@ -1512,6 +1543,13 @@ mod tests {
             assert!(result["undo_id"].is_string());
             assert_eq!(fs::read(root.join("file")).unwrap(), b"main\n");
             assert!(git(&["ls-files", "--unmerged", "--", "file"]).is_empty());
+            let abort = |kind: &str, action: &str| backend.admit_git_info(vec![json!({"operation":{"type":"abort_git_operation","repository_path":root,"operation":{"method":"recover","kind":kind,"action":action}}})]);
+            assert!(abort("merge", "continue").is_err());
+            assert!(abort("revert", "abort").is_err());
+            assert!(backend.read(abort("rebase", "abort").unwrap()).is_err());
+            assert_eq!(backend.read(abort("merge", "abort").unwrap()).unwrap()["code"], 0);
+            assert!(!root.join(".git/MERGE_HEAD").exists());
+            assert_eq!(fs::read(root.join("file")).unwrap(), b"main\n");
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

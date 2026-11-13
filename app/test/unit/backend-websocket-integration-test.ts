@@ -987,6 +987,10 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await client.repositoryResolveManualConflict(firstRepository, 'conflict.txt', 'ours', { ours: true, theirs: true })
       expect(await readFile(path.join(firstRepository, 'conflict.txt'), 'utf8')).toBe('main\n')
       expect(execFileSync('git', ['-C', firstRepository, 'ls-files', '--unmerged', '--', 'conflict.txt'], { encoding: 'utf8' })).toBe('')
+      await expect(client.abortRepositoryGitOperation(firstRepository, 'rebase')).rejects.toMatchObject({ retryable: false })
+      await client.abortRepositoryGitOperation(firstRepository, 'merge')
+      expect(await readFile(path.join(firstRepository, '.git', 'MERGE_HEAD'), 'utf8').catch(() => null)).toBeNull()
+      expect(await readFile(path.join(firstRepository, 'conflict.txt'), 'utf8')).toBe('main\n')
       await bounded(
         client.request('init_repository', { path: secondRepository })
       )

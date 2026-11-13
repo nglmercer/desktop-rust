@@ -475,6 +475,11 @@ export async function continueCherryPick(
 
 /** Abandon the current cherry pick operation */
 export async function abortCherryPick(repository: Repository) {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().abortRepositoryGitOperation(repository.path, 'cherry_pick'), true)
+    return
+  }
   await git(['cherry-pick', '--abort'], repository.path, 'abortCherryPick')
 }
 
