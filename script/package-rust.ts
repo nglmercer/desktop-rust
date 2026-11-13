@@ -66,6 +66,10 @@ export function packageRust(
 ): string {
   const platform = hostPlatform(process.platform)
   const arch = hostArchitecture(process.arch)
+  const profile = process.env.DESKTOP_RUST_PACKAGE_PROFILE ?? 'debug'
+  if (profile !== 'debug' && profile !== 'release') {
+    throw new Error('DESKTOP_RUST_PACKAGE_PROFILE must be debug or release')
+  }
   if (process.env.CARGO_BUILD_TARGET) {
     throw new Error(
       'Explicit Cargo targets are not supported by the host package'
@@ -161,7 +165,7 @@ export function packageRust(
         message.target?.name === name &&
         message.executable
     )?.executable
-    const expected = path.join(target, 'release', `${name}${suffix}`)
+    const expected = path.join(target, profile, `${name}${suffix}`)
     if (!artifact || path.resolve(artifact) !== path.resolve(expected)) {
       throw new Error(
         `Cargo did not produce the expected host binary ${expected}`
@@ -175,7 +179,7 @@ export function packageRust(
   const cli = runCargo(
     [
       'build',
-      '--release',
+      ...(profile === 'release' ? ['--release'] : []),
       '--locked',
       '-p',
       'desktop-cli',
@@ -187,7 +191,7 @@ export function packageRust(
   const gui = runCargo(
     [
       'build',
-      '--release',
+      ...(profile === 'release' ? ['--release'] : []),
       '--locked',
       '-p',
       'desktop-app',
@@ -287,6 +291,7 @@ export function packageRust(
           channel,
           platform,
           arch,
+          profile,
           executable: `bin/desktop-rs${suffix}`,
         },
         null,
@@ -330,6 +335,9 @@ if (require.main === module) {
     )
     console.log(
       'Builds and stages the Rust desktop and embedded browser UI for this host.'
+    )
+    console.log(
+      'Set DESKTOP_RUST_PACKAGE_PROFILE=release for an optimized package.'
     )
   } else if (args.length > 1) {
     console.error('Expected at most one platform argument')

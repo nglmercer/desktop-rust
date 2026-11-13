@@ -57,6 +57,8 @@ function fixture(): string {
   )
   for (const file of [
     'node_modules/vite/bin/vite.js',
+    `rust/target/debug/desktop-rs${suffix}`,
+    `rust/target/debug/github-desktop-rs${suffix}`,
     `rust/target/release/desktop-rs${suffix}`,
     `rust/target/release/github-desktop-rs${suffix}`,
     'out/vite-dist/index.html',
@@ -76,6 +78,7 @@ function fixture(): string {
 }
 
 beforeEach(() => {
+  vi.stubEnv('DESKTOP_RUST_PACKAGE_PROFILE', 'debug')
   spawn.mockImplementation((...args: unknown[]) => {
     const [command, values, options] = args as [
       string,
@@ -98,9 +101,14 @@ beforeEach(() => {
       const name = values.includes('desktop-cli')
         ? 'desktop-rs'
         : 'github-desktop-rs'
-      const directory = process.env.FAKE_BAD_ARTIFACT
-        ? 'rust/target/debug'
-        : 'rust/target/release'
+      const profile = values.includes('--release') ? 'release' : 'debug'
+      const directory = `rust/target/${
+        process.env.FAKE_BAD_ARTIFACT
+          ? profile === 'debug'
+            ? 'release'
+            : 'debug'
+          : profile
+      }`
       const executable = path.join(options.cwd, directory, `${name}${suffix}`)
       return {
         status: 0,
@@ -156,7 +164,11 @@ describe('Rust packaging', () => {
     ).toBe('runtime')
     expect(
       JSON.parse(readFileSync(path.join(output, 'meta/package.json'), 'utf8'))
-    ).toMatchObject({ platform: host, executable: `bin/desktop-rs${suffix}` })
+    ).toMatchObject({
+      platform: host,
+      profile: 'debug',
+      executable: `bin/desktop-rs${suffix}`,
+    })
     expect(spawn.mock.calls.map(call => call[1])).toEqual([
       ['-vV'],
       [path.join(root, 'node_modules/vite/bin/vite.js'), 'build'],
@@ -174,7 +186,6 @@ describe('Rust packaging', () => {
       ],
       [
         'build',
-        '--release',
         '--locked',
         '-p',
         'desktop-cli',
@@ -184,7 +195,6 @@ describe('Rust packaging', () => {
       ],
       [
         'build',
-        '--release',
         '--locked',
         '-p',
         'desktop-app',
@@ -210,10 +220,34 @@ describe('Rust packaging', () => {
     expect(copilotPlatform('linux', true)).toBe('linuxmusl')
   })
 
-  it('rejects a debug Cargo artifact instead of packaging a development shell', () => {
+  it('rejects a Cargo artifact for a different profile', () => {
     vi.stubEnv('CARGO_TARGET_DIR', '')
     vi.stubEnv('FAKE_BAD_ARTIFACT', '1')
     expect(() => packageRust(fixture())).toThrow('expected host binary')
+  })
+
+  it('supports an explicit release profile and rejects debug artifacts', () => {
+    vi.stubEnv('DESKTOP_RUST_PACKAGE_PROFILE', 'release')
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    const root = fixture()
+    const output = packageRust(root)
+    expect(
+      JSON.parse(readFileSync(path.join(output, 'meta/package.json'), 'utf8'))
+        .profile
+    ).toBe('release')
+    expect(
+      spawn.mock.calls
+        .filter(call => call[0] === 'cargo')
+        .every(call => (call[1] as string[]).includes('--release'))
+    ).toBe(true)
+    vi.stubEnv('FAKE_BAD_ARTIFACT', '1')
+    expect(() => packageRust(root)).toThrow('expected host binary')
+  })
+
+  it('rejects unknown package profiles before running build commands', () => {
+    vi.stubEnv('DESKTOP_RUST_PACKAGE_PROFILE', 'custom')
+    expect(() => packageRust(fixture())).toThrow('must be debug or release')
+    expect(spawn).not.toHaveBeenCalled()
   })
 
   it('rejects a mismatched installed SDK version', () => {
@@ -282,6 +316,7 @@ describe('Rust packaging', () => {
 
   it('preserves an existing package when the release build fails', () => {
     vi.stubEnv('RELEASE_CHANNEL', 'development')
+    vi.stubEnv('DESKTOP_RUST_PACKAGE_PROFILE', 'release')
     vi.stubEnv('CARGO_TARGET_DIR', '')
     const root = fixture()
     const previous = `dist/Test Desktop-dev-${host}-${process.arch}/previous`

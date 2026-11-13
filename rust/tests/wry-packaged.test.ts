@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'vitest'
 
-// Requires a packaged release, Linux user/mount namespaces, WebKitGTK and Xvfb.
+// Requires a Rust package, Linux user/mount namespaces, WebKitGTK and Xvfb.
 describe.skipIf(
   process.platform !== 'linux' || process.env.DESKTOP_WRY_PACKAGE_TEST !== '1'
 )('relocated Rust package', () => {
