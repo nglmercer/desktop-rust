@@ -4,8 +4,8 @@ import { IFetchProgress } from '../../models/progress'
 import { FetchProgressParser, executionOptionsWithProgress } from '../progress'
 import { IRemote } from '../../models/remote'
 import { ITrackingBranch } from '../../models/branch'
-import { envForRemoteOperation } from './environment'
-import { backend } from '../../backend/client'
+import { envForProxy, envForRemoteOperation } from './environment'
+import { backend, FetchPreviewUnsupported } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 import { FetchStreamProgressParser } from '../progress/fetch-stream'
 import { fetchFailureToGitError } from './fetch-error'
@@ -144,13 +144,22 @@ export async function fetchRefspec(
   remote: IRemote,
   refspec: string
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
-    const failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().fetchRepositoryRemote(repository.path, remote.name, remote.url, true, false, repository.gitHubRepository?.owner.login, undefined, refspec), true)
-    if (failure !== undefined && failure.exitCode !== 128) {
-      throw fetchFailureToGitError(failure, repository.path, remote.name)
+  // The legacy Git path injects an OS/PAC proxy that the native transport
+  // cannot yet receive. Choose it before starting a native mutation.
+  const isWry = typeof window !== 'undefined' && backend().transportKind === 'wry'
+  const inheritedProxy = isWry && ['http_proxy', 'https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY'].some(key => key in process.env)
+  const wryProxy = isWry && !inheritedProxy ? await envForProxy(remote.url) : undefined
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none' && !inheritedProxy && wryProxy === undefined) {
+    try {
+      const failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+        backend().fetchRepositoryRemote(repository.path, remote.name, remote.url, true, false, repository.gitHubRepository?.owner.login, undefined, refspec), true)
+      if (failure !== undefined && failure.exitCode !== 128) {
+        throw fetchFailureToGitError(failure, repository.path, remote.name)
+      }
+      return
+    } catch (error) {
+      if (backend().transportKind !== 'wry' || !(error instanceof FetchPreviewUnsupported)) throw error
     }
-    return
   }
   await git(
     ['fetch', '--', remote.name, refspec],

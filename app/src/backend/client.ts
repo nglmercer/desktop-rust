@@ -255,6 +255,9 @@ export class BackendError extends Error implements IBackendError {
   }
 }
 
+/** Fetch review refused the URL before any network or ref mutation occurred. */
+export class FetchPreviewUnsupported extends Error {}
+
 const fetchErrorKinds = [
   'ssh_key_unverified', 'ssh_authentication_failed', 'ssh_permission_denied',
   'https_authentication_failed', 'https_saml_reauth_required', 'ssh_saml_reauth_required', 'remote_disconnection', 'host_down',
@@ -2828,6 +2831,7 @@ export class BackendClient {
         : this.repositoryRead(repositoryPath, method, { request, ...extra }, options)
     }
     const preview = await call('renderer_fetch_preview')
+    if (isRecord(preview) && preview.kind === 'unsupported') throw new FetchPreviewUnsupported('Fetch URL cannot be safely reviewed')
     if (!isRecord(preview) || preview.remote !== remote || preview.recurse_submodules !== recurseSubmodules || (refspec !== undefined && preview.refspec !== refspec) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid fetch review', retryable: false })
     let result: unknown
     try { result = await call('renderer_fetch', { basis: preview.basis }) }

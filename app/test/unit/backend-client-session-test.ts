@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BackendClient } from '../../src/backend/client'
+import { BackendClient, FetchPreviewUnsupported } from '../../src/backend/client'
 
 describe('backend Copilot session cleanup', () => {
   afterEach(() => {
@@ -719,6 +719,14 @@ describe('backend Copilot session cleanup', () => {
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
     const client = new BackendClient()
     await expect(client.fetchRepositoryRemote('/repo', 'origin', '/source', true, false, undefined, undefined, 'refs/heads/main')).rejects.toMatchObject({ code: 'invalid_response' })
+    expect(invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports an unsupported fetch review before issuing the mutation', async () => {
+    const invoke = vi.fn().mockResolvedValue({ kind: 'unsupported' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.fetchRepositoryRemote('/repo', 'origin', 'https://user:secret@example.invalid/repo', true, false, undefined, undefined, 'refs/heads/main')).rejects.toBeInstanceOf(FetchPreviewUnsupported)
     expect(invoke).toHaveBeenCalledTimes(1)
   })
 

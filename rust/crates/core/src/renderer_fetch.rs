@@ -331,6 +331,9 @@ impl Repository {
         &self,
         request: &RendererFetchRequest,
     ) -> Result<Value> {
+        if !crate::remote_discovery::safe_url(&request.expected_url) {
+            return Ok(json!({"kind":"unsupported"}));
+        }
         Ok(
             json!({"remote":request.remote,"recurse_submodules":request.recurse_submodules,"refspec":request.refspec,"basis":self.renderer_fetch_review(request).await?}),
         )
@@ -513,6 +516,19 @@ mod tests {
             );
             assert!(f.0.join("target/.git/FETCH_HEAD").is_file());
         }
+    }
+
+    #[tokio::test]
+    async fn unsafe_fetch_url_is_refused_before_mutation() {
+        let f = Fixture::new();
+        let target = f.0.join("target");
+        let source = f.0.join("source");
+        let mut request = f.remote("origin", &source.to_string_lossy());
+        request.expected_url = "https://user:secret@example.invalid/owner/repo".into();
+        request.refspec = Some("refs/heads/main".into());
+        let repo = Repository::open(&target).await.unwrap();
+        assert_eq!(repo.renderer_fetch_preview(&request).await.unwrap()["kind"], "unsupported");
+        assert!(!target.join(".git/FETCH_HEAD").exists());
     }
 
     #[tokio::test]
