@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { TestContext } from 'node:test'
+import type { TestContext as NodeTestContext } from 'node:test'
+import type { TestContext as VitestTestContext } from 'vitest'
 import { sleep } from '../../src/lib/promise'
 import { isErrnoException } from '../../src/lib/errno-exception'
 
@@ -16,8 +17,17 @@ const clean = async (path: string, n = 1): Promise<void> =>
       : Promise.reject(e)
   )
 
-export const createTempDirectory = (t: TestContext) =>
+/** The cleanup lifecycle used by both the legacy and Vitest runners. */
+export type TestCleanupContext =
+  | Pick<NodeTestContext, 'after'>
+  | Pick<VitestTestContext, 'onTestFinished'>
+
+export const createTempDirectory = (t: TestCleanupContext) =>
   mkdtemp(join(tmpdir(), 'desktop-test-')).then(path => {
-    t.after(() => clean(path))
+    if ('after' in t) {
+      t.after(() => clean(path))
+    } else {
+      t.onTestFinished(() => clean(path))
+    }
     return path
   })

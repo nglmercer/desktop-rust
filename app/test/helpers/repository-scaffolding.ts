@@ -1,7 +1,7 @@
 import { exec } from 'dugite'
 import { writeFile } from 'fs/promises'
 import * as Path from 'path'
-import { TestContext } from 'node:test'
+import type { TestCleanupContext as TestContext } from './temp'
 
 import { Repository } from '../../src/models/repository'
 import { createTempDirectory } from './temp'

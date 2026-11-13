@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { readFile, symlink, writeFile } from 'fs/promises'
 import { pathExists } from '../../../src/lib/path-exists'

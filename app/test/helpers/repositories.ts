@@ -1,10 +1,12 @@
-import { createTempDirectory } from './temp'
+import {
+  createTempDirectory,
+  type TestCleanupContext as TestContext,
+} from './temp'
 import { Repository } from '../../src/models/repository'
 import { exec } from 'dugite'
 import { makeCommit, switchTo } from './repository-scaffolding'
 import { glob, writeFile, cp, mkdir, rename, rm } from 'fs/promises'
 import { DefaultGitDescription, git } from '../../src/lib/git'
-import { TestContext } from 'node:test'
 import { dirname, join } from 'path'
 
 /**

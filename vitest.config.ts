@@ -26,6 +26,17 @@ export default defineConfig({
           )
         ),
       },
+      // On Windows the installed package resolves its compiled native addon
+      // relative to build/index.js. Other platforms can load the TypeScript
+      // source directly even when install scripts were disabled.
+      ...(process.platform === 'win32'
+        ? []
+        : [{
+            find: /^windows-argv-parser$/,
+            replacement: fileURLToPath(
+              new URL('./vendor/windows-argv-parser/index.ts', import.meta.url)
+            ),
+          }]),
     ],
   },
   test: {

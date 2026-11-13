@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import * as path from 'path'
 import { readFile, writeFile } from 'fs/promises'
@@ -61,9 +61,8 @@ describe('git/submodule', () => {
 
   describe('resetSubmodulePaths', () => {
     for (const selectedPath of [':(glob)*-module', '*-module']) {
-      it(
+      it.skipIf(process.platform === 'win32')(
         `discards only the literal submodule ${selectedPath}`,
-        { skip: process.platform === 'win32' },
         async t => {
           const source = await setupEmptyRepository(t)
           const repository = await setupEmptyRepository(t)

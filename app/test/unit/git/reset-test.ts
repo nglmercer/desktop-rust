@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import * as path from 'path'
 
@@ -79,9 +79,8 @@ describe('git/reset', () => {
       }
     })
 
-    it(
+    it.skipIf(process.platform === 'win32')(
       'resets only the requested path when its name contains pathspec magic',
-      { skip: process.platform === 'win32' },
       async t => {
         const repository = await setupRepositoryWithPathspecMagicFile(t)
         const specialFilePath = path.join(
