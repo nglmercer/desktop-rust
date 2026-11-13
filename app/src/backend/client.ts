@@ -1869,7 +1869,7 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
@@ -2219,6 +2219,16 @@ export class BackendClient {
     if (value !== null && (typeof value !== 'string' || value.length > Math.ceil(length / 3) * 4 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))) throw new BackendError({ code: 'invalid_response', message: 'Invalid blob preview response', retryable: false })
     if (typeof value === 'string' && value.length / 4 * 3 - (value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0) > length) throw new BackendError({ code: 'invalid_response', message: 'Oversized blob preview response', retryable: false })
     return value as string | null
+  }
+
+  async repositoryBlobChunk(repositoryPath: string, revision: string, path: string, offset: number, length: number, expectedOid: string | null): Promise<{ oid: string; size: number; data: string } | null> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > 1024 * 1024 || (expectedOid !== null && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedOid))) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob chunk request', retryable: false })
+    const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_chunk', { revision, path, offset, length, expected_oid: expectedOid })
+    if (value === null && expectedOid === null && offset === 0) return null
+    if (!isRecord(value) || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid) || (expectedOid !== null && value.oid !== expectedOid) || !Number.isSafeInteger(value.size) || (value.size as number) < offset || typeof value.data !== 'string' || value.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value.data)) throw new BackendError({ code: 'invalid_response', message: 'Invalid blob chunk response', retryable: false })
+    const bytes = value.data.length / 4 * 3 - (value.data.endsWith('==') ? 2 : value.data.endsWith('=') ? 1 : 0)
+    if (bytes !== Math.min(length, (value.size as number) - offset)) throw new BackendError({ code: 'invalid_response', message: 'Incomplete blob chunk response', retryable: false })
+    return { oid: value.oid, size: value.size as number, data: value.data }
   }
 
   async repositoryRendererWorkingDiff(repositoryPath: string, path: string, base: 'head' | 'index' | 'empty', hideWhitespace: boolean, noTextconv: boolean): Promise<{ stdout: string; stderr: string }> {

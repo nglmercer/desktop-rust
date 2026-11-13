@@ -455,6 +455,38 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.repositoryBlobPrefix('/repo', 'HEAD', 'file', -1)).rejects.toMatchObject({ code: 'invalid_request' })
   })
 
+  it('validates blob chunks and pins object identity', async () => {
+    const oid = 'a'.repeat(40)
+    const invoke = vi.fn(async (): Promise<unknown> => ({ oid, size: 2, data: 'AAE=' }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryBlobChunk('/repo', 'HEAD', 'file', 0, 2, null)).resolves.toEqual({ oid, size: 2, data: 'AAE=' })
+    invoke.mockResolvedValueOnce({ oid, size: 2, data: 'AA==' })
+    await expect(client.repositoryBlobChunk('/repo', 'HEAD', 'file', 0, 2, oid)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce({ oid: 'b'.repeat(40), size: 2, data: 'AAE=' })
+    await expect(client.repositoryBlobChunk('/repo', 'HEAD', 'file', 0, 2, oid)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce(null)
+    await expect(client.repositoryBlobChunk('/repo', 'HEAD', 'file', 1, 1, oid)).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('reads complete blobs through the Rust transport', async () => {
+    const oid = 'a'.repeat(40)
+    const contents = Buffer.alloc(1024 * 1024 + 3, 0xab)
+    const invoke = vi.fn(async (_method: string, request: any): Promise<unknown> => {
+      const operation = request.operation.operation
+      expect(operation.method).toBe('renderer_blob_chunk')
+      expect(operation.expected_oid).toBe(operation.offset === 0 ? null : oid)
+      return { oid, size: contents.length, data: contents.subarray(operation.offset, operation.offset + operation.length).toString('base64') }
+    })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    vi.doMock('../../src/lib/git/core', () => ({ git: vi.fn(), isMaxBufferExceededError: vi.fn() }))
+    vi.doMock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: (_path: string, _kind: string, run: () => unknown) => run() }))
+    const { getBlobContents } = await import('../../src/lib/git/show')
+    const { Repository } = await import('../../src/models/repository')
+    expect((await getBlobContents(new Repository('/tmp', 1, null, false), 'HEAD', 'file')).equals(contents)).toBe(true)
+    expect(invoke).toHaveBeenCalledTimes(2)
+  }, 30_000)
+
   it('validates selected-file size review responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => [false, true])
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

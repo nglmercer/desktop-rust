@@ -106,7 +106,12 @@ pub(crate) async fn inspect_saved_index(
 /// Capture at most `limit` bytes from a known blob. Closing stdout after the
 /// prefix can make Git exit with SIGPIPE, so the caller must verify the blob
 /// beforehand and interpret the exit status together with the expected size.
-pub(crate) async fn blob_prefix(path: &Path, oid: &str, limit: u64) -> Result<RawOutput> {
+pub(crate) async fn blob_range(
+    path: &Path,
+    oid: &str,
+    offset: u64,
+    limit: u64,
+) -> Result<RawOutput> {
     run_command_inner(
         path,
         git_command(None),
@@ -114,7 +119,7 @@ pub(crate) async fn blob_prefix(path: &Path, oid: &str, limit: u64) -> Result<Ra
         None,
         limit,
         None,
-        true,
+        Some(offset),
         None,
         None,
     )
@@ -217,7 +222,7 @@ pub(crate) async fn run_commit_with_index(
         Some(input),
         2 * 1024 * 1024,
         None,
-        false,
+        None,
         None,
         live,
     ))
@@ -458,7 +463,7 @@ pub(crate) async fn git_from_file(
         None,
         2 * 1024 * 1024,
         None,
-        false,
+        None,
         Some(input),
         None,
     )
@@ -578,7 +583,7 @@ async fn run_command(
         input,
         output_limit,
         output_file,
-        false,
+        None,
         None,
         None,
     ))
@@ -599,7 +604,7 @@ async fn run_command_inner(
     input: Option<Vec<u8>>,
     output_limit: u64,
     output_file: Option<tokio::fs::File>,
-    prefix_only: bool,
+    prefix_offset: Option<u64>,
     input_file: Option<std::fs::File>,
     live: Option<LiveOutput>,
 ) -> Result<RawOutput> {
@@ -657,7 +662,17 @@ async fn run_command_inner(
                     tokio::io::copy(&mut stdout, &mut file).await?;
                     file.sync_all().await?;
                     Ok(Vec::new())
-                } else if prefix_only {
+                } else if let Some(offset) = prefix_offset {
+                    let mut stdout = stdout;
+                    let skipped =
+                        tokio::io::copy(&mut (&mut stdout).take(offset), &mut tokio::io::sink())
+                            .await?;
+                    if skipped != offset {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "blob ended before requested offset",
+                        ));
+                    }
                     let mut bytes = Vec::new();
                     stdout.take(output_limit).read_to_end(&mut bytes).await?;
                     Ok(bytes)
@@ -708,7 +723,16 @@ async fn run_command_inner(
         // Private gh token capture must reach its bounded credential parser
         // unchanged. Session.run redacts published gh output itself; typed API
         // readers sanitize/whitelist private results. Git owns inherited hooks.
-        Ok(output) if executable != "gh" => Ok(crate::git_credentials::redact(output).await),
+        Ok(mut output) if executable != "gh" => {
+            // Blob bytes are repository data, not command diagnostics. Redacting
+            // them would silently corrupt files that happen to contain a secret.
+            let blob = prefix_offset.map(|_| std::mem::take(&mut output.stdout));
+            let mut output = crate::git_credentials::redact(output).await;
+            if let Some(blob) = blob {
+                output.stdout = blob;
+            }
+            Ok(output)
+        }
         Ok(output) => Ok(output),
         Err(error) => Err(error),
     }

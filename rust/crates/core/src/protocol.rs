@@ -376,6 +376,13 @@ pub enum Operation {
         path: GitPath,
         length: u32,
     },
+    RendererBlobChunk {
+        revision: String,
+        path: GitPath,
+        offset: u64,
+        length: u32,
+        expected_oid: Option<String>,
+    },
     SafeFetchRemotes,
     ManageRemote {
         action: crate::ManagedRemoteAction,

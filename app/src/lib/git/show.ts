@@ -44,6 +44,28 @@ export const getBlobContents = async (
   commitish: string,
   path: string
 ) => {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = async () => {
+      const chunks: Buffer[] = []
+      let offset = 0
+      let oid: string | null = null
+      let size: number | null = null
+      do {
+        const chunk = await backend().repositoryBlobChunk(repository.path, commitish, path, offset, 1024 * 1024, oid)
+        if (chunk === null) throw new Error('Blob path does not exist in the requested revision')
+        if (size !== null && chunk.size !== size) throw new Error('Blob size changed during read')
+        oid = chunk.oid
+        size = chunk.size
+        const bytes = Buffer.from(chunk.data, 'base64')
+        chunks.push(bytes)
+        offset += bytes.length
+      } while (size !== null && offset < size)
+      return Buffer.concat(chunks)
+    }
+    return backend().transportKind === 'wry'
+      ? withRepositoryGitOperation(repository.path, 'read', read, true)
+      : read()
+  }
   const revision = await resolveBlobRevision(repository, commitish)
   return git(
     ['show', `${revision}:${path}`],

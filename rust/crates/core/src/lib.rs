@@ -546,6 +546,17 @@ impl Repository {
             } => {
                 return self.renderer_blob_prefix(&revision, path, length).await;
             }
+            Operation::RendererBlobChunk {
+                revision,
+                path,
+                offset,
+                length,
+                expected_oid,
+            } => {
+                return self
+                    .renderer_blob_chunk(&revision, path, offset, length, expected_oid.as_deref())
+                    .await;
+            }
             Operation::SafeFetchRemotes => return self.safe_fetch_remotes().await,
             Operation::ManageRemote { action } => return self.manage_remote(action).await,
             Operation::SetGitDescription { description } => {
@@ -1052,6 +1063,7 @@ impl Repository {
             | RendererCommitDiff { .. }
             | RendererWorkingDiff { .. }
             | RendererBlobPrefix { .. }
+            | RendererBlobChunk { .. }
             | SafeFetchRemotes
             | ManageRemote { .. }
             | SetGitDescription { .. }

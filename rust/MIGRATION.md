@@ -251,8 +251,10 @@ Syntax highlighting's partial committed-file reads now use a typed Rust blob
 prefix operation on both transports. It resolves trees and index stages,
 preserves binary bytes and bounds the returned prefix to 1 MiB, including when
 the underlying blob is larger. Missing paths return null and invalid revisions
-remain errors. Full blob reads and other legacy background reads still need
-migration.
+remain errors. Full blob reads now use bounded chunks on both Rust transports,
+pinning the object ID across the read and rejecting changes to a branch or
+index stage. The Git process re-reads preceding bytes for each chunk, so very
+large files can be slow; other legacy background reads still need migration.
 Worktree listing from a repository path uses Rust for Wry and WebSocket,
 including unselected, nested and bare repositories. Linked, detached, locked
 and prunable records retain their renderer state, while paths that cannot be

@@ -607,6 +607,24 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await expect(client.repositoryRendererCommit(firstRepository, 'missing')).resolves.toBeNull()
       const blob = await client.repositoryBlobPrefix(firstRepository, 'HEAD', '-binary file', 1024)
       expect(Buffer.from(blob!, 'base64')).toEqual(binary.subarray(0, 1024))
+      const chunks: Buffer[] = []
+      let blobOid: string | null = null
+      for (let offset = 0; offset < binary.length; offset += 1024 * 1024) {
+        const chunk = await client.repositoryBlobChunk(firstRepository, 'HEAD', '-binary file', offset, 1024 * 1024, blobOid)
+        expect(chunk).not.toBeNull()
+        expect(chunk!.size).toBe(binary.length)
+        blobOid = chunk!.oid
+        chunks.push(Buffer.from(chunk!.data, 'base64'))
+      }
+      expect(Buffer.concat(chunks)).toEqual(binary)
+      await expect(client.repositoryBlobChunk(firstRepository, 'HEAD', '-binary file', 0, 1024, '0'.repeat(40))).rejects.toThrow()
+      expect(await client.repositoryBlobChunk(firstRepository, 'HEAD', 'missing', 0, 1024, null)).toBeNull()
+      const indexBlob = await client.repositoryBlobChunk(firstRepository, ':0', '-binary file', 0, 1024, null)
+      await writeFile(path.join(firstRepository, '-binary file'), 'new index content')
+      execFileSync('git', ['-C', firstRepository, 'add', '--', '-binary file'])
+      await expect(client.repositoryBlobChunk(firstRepository, ':0', '-binary file', 1024, 1024, indexBlob!.oid)).rejects.toThrow()
+      await writeFile(path.join(firstRepository, '-binary file'), binary)
+      execFileSync('git', ['-C', firstRepository, 'add', '--', '-binary file'])
       expect(await client.repositoryBlobPrefix(firstRepository, 'HEAD', '-binary file', 0)).toBe('')
       expect(await client.repositoryBlobPrefix(firstRepository, 'HEAD', 'missing', 1024)).toBeNull()
       expect(Buffer.from((await client.repositoryBlobPrefix(firstRepository, '', '-binary file', 4))!, 'base64')).toEqual(binary.subarray(0, 4))

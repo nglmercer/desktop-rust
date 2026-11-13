@@ -446,6 +446,7 @@ impl Backend {
                     | Operation::SelectRenamedDiff { .. }
                     | Operation::RendererWorkingDiff { .. }
                     | Operation::RendererBlobPrefix { .. }
+                    | Operation::RendererBlobChunk { .. }
                     | Operation::RendererCommitDiff { .. }
                     | Operation::DiscardPreview {
                         scope: desktop_backend::DiscardScope::WorkingTree,
@@ -2795,6 +2796,15 @@ esac
         assert_eq!(blob("HEAD", "file").unwrap(), json!("aGVsbG8="));
         assert_eq!(blob("HEAD", "missing").unwrap(), Value::Null);
         assert!(blob("missing", "file").is_err());
+        let chunk = |offset: u64, expected: Option<&str>| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_blob_chunk","revision":"HEAD","path":"file","offset":offset,"length":5,"expected_oid":expected}}})]).unwrap())
+        };
+        let first = chunk(0, None).unwrap();
+        assert_eq!(first["data"], "aGVsbG8=");
+        assert_eq!(first["size"], 11);
+        let oid = first["oid"].as_str().unwrap();
+        assert_eq!(chunk(5, Some(oid)).unwrap()["data"], "AHdvcmw=");
+        assert!(chunk(5, Some(&"0".repeat(40))).is_err());
         let recent = backend
             .read_args(vec![
                 json!({"repository_path":root,"method":"renderer_recent_branches"}),

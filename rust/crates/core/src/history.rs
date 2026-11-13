@@ -217,6 +217,37 @@ impl Repository {
         path: GitPath,
         length: u32,
     ) -> Result<Value> {
+        let result = self
+            .read_renderer_blob(revision, path, 0, length, None)
+            .await?;
+        Ok(result.map_or(Value::Null, |(_, _, data)| json!(data)))
+    }
+
+    pub(crate) async fn renderer_blob_chunk(
+        &self,
+        revision: &str,
+        path: GitPath,
+        offset: u64,
+        length: u32,
+        expected_oid: Option<&str>,
+    ) -> Result<Value> {
+        let result = self
+            .read_renderer_blob(revision, path, offset, length, expected_oid)
+            .await?;
+        Ok(result.map_or(
+            Value::Null,
+            |(oid, size, data)| json!({"oid": oid, "size": size, "data": data}),
+        ))
+    }
+
+    async fn read_renderer_blob(
+        &self,
+        revision: &str,
+        path: GitPath,
+        offset: u64,
+        length: u32,
+        expected_oid: Option<&str>,
+    ) -> Result<Option<(String, u64, String)>> {
         anyhow::ensure!(
             length <= 1024 * 1024,
             "blob prefix exceeds the preview limit"
@@ -280,12 +311,17 @@ impl Repository {
             found = Some(oid.to_owned());
         }
         let Some(oid) = found else {
-            return Ok(Value::Null);
+            anyhow::ensure!(expected_oid.is_none(), "blob changed during read");
+            return Ok(None);
         };
         anyhow::ensure!(
             (oid.len() == 40 || oid.len() == 64)
                 && oid.bytes().all(|byte| byte.is_ascii_hexdigit()),
             "invalid blob object id"
+        );
+        anyhow::ensure!(
+            expected_oid.is_none_or(|expected| expected == oid),
+            "blob changed during read"
         );
         let kind = self.run(&args(&["cat-file", "-t", &oid])).await?;
         ensure(&kind)?;
@@ -293,16 +329,17 @@ impl Repository {
         let size = self.run(&args(&["cat-file", "-s", &oid])).await?;
         ensure(&size)?;
         let size: u64 = std::str::from_utf8(&size.stdout)?.trim().parse()?;
-        let output = process::blob_prefix(&self.path, &oid, u64::from(length)).await?;
-        let expected = size.min(u64::from(length)) as usize;
+        anyhow::ensure!(offset <= size, "blob offset exceeds size");
+        let output = process::blob_range(&self.path, &oid, offset, u64::from(length)).await?;
+        let expected = (size - offset).min(u64::from(length)) as usize;
         anyhow::ensure!(
             output.stdout.len() == expected,
             "could not read blob prefix"
         );
-        if size <= u64::from(length) {
+        if size - offset <= u64::from(length) {
             ensure(&output)?;
         }
-        Ok(json!(STANDARD.encode(output.stdout)))
+        Ok(Some((oid, size, STANDARD.encode(output.stdout))))
     }
 
     /// Return the renderer's exact one-commit Git log format without exposing
