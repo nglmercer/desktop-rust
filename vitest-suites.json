@@ -325,5 +325,7 @@
   "app/test/unit/git/config-test.ts",
   "app/test/unit/file-system-test.ts",
   "app/test/unit/assisted-commit-selection-test.ts",
-  "app/test/unit/copilot-conflict-context-native-test.ts"
+  "app/test/unit/copilot-conflict-context-native-test.ts",
+  "app/test/unit/git/assisted-commit-completion-test.ts",
+  "app/test/unit/branch-pruner-test.ts"
 ]

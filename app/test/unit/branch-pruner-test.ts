@@ -1,4 +1,5 @@
-import { describe, it, beforeEach, afterEach } from 'node:test'
+import 'fake-indexeddb/auto'
+import { describe, it, beforeEach, afterEach } from 'vitest'
 import assert from 'node:assert'
 import { BranchPruner } from '../../src/lib/stores/helpers/branch-pruner'
 import { Repository } from '../../src/models/repository'

@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { TestContext } from 'node:test'
+import type { TestCleanupContext } from './temp'
 import { exec, IGitExecutionOptions } from 'dugite'
 import { chmod, mkdir, readFile, realpath, writeFile } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
@@ -125,7 +125,7 @@ export async function commitBytes(
 }
 
 export async function seed(
-  t: TestContext,
+  t: TestCleanupContext,
   entries: Readonly<Record<string, string | Buffer>>
 ): Promise<Repository> {
   const repository = await setupEmptyRepository(t)

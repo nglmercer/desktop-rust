@@ -1,6 +1,6 @@
 /* eslint-disable no-sync */
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { existsSync } from 'fs'
 import { readFile, rename, stat, symlink, utimes, writeFile } from 'fs/promises'
 import { join } from 'path'
