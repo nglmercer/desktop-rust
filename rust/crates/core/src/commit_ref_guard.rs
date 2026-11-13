@@ -404,6 +404,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_configured_hook_keeps_arguments_stdin_and_runs_once_per_event() {
+        let f = Fixture::new();
+        f.git(&["config", "--add", "hook.shared.event", "pre-commit"]);
+        f.git(&[
+            "config",
+            "--add",
+            "hook.shared.event",
+            "reference-transaction",
+        ]);
+        fs::write(
+            f.root.join(".git/shared-hook"),
+            "#!/bin/sh\nprintf '%s:%s\\n' \"$#\" \"${1-}\" >> .git/shared-events\ncat >> .git/shared-stdin\n",
+        ).unwrap();
+        f.git(&["config", "hook.shared.command", "sh .git/shared-hook"]);
+        let repo = Repository::open(&f.root).await.unwrap();
+        let branch = f.git(&["symbolic-ref", "HEAD"]);
+        let head = f.git(&["rev-parse", "HEAD"]);
+        let tree = f.git(&["write-tree"]);
+        let guard = match repo
+            .commit_reference_guard(Some(&branch), Some(&head), &[&head], &tree, head.len())
+            .await
+        {
+            Ok(guard) => guard,
+            Err(error) if error.to_string().contains("does not support") => return,
+            Err(error) => panic!("{error:#}"),
+        };
+        let result = f.commit(&guard, &[]).await;
+        assert_eq!(
+            result.code,
+            0,
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let events = fs::read_to_string(f.root.join(".git/shared-events")).unwrap();
+        assert_eq!(events.lines().filter(|line| *line == "0:").count(), 1);
+        let refs = fs::read_to_string(f.root.join(".git/ref-events")).unwrap();
+        for phase in refs.lines() {
+            assert_eq!(
+                events
+                    .lines()
+                    .filter(|line| *line == format!("1:{phase}"))
+                    .count(),
+                refs.lines().filter(|line| *line == phase).count()
+            );
+        }
+        let stdin = fs::read_to_string(f.root.join(".git/shared-stdin")).unwrap();
+        assert!(stdin.lines().any(|line| line.ends_with(&branch)));
+        assert_eq!(
+            fs::read_to_string(f.root.join(".git/pre-events")).unwrap(),
+            "pre"
+        );
+    }
+
+    #[tokio::test]
+    async fn failing_configured_hook_does_not_replay_or_publish() {
+        let f = Fixture::new();
+        f.git(&["config", "hook.failing.event", "pre-commit"]);
+        fs::write(
+            f.root.join(".git/failing-hook"),
+            "#!/bin/sh\nprintf 'once\\n' >> .git/failure-count\nexit 1\n",
+        )
+        .unwrap();
+        f.git(&["config", "hook.failing.command", "sh .git/failing-hook"]);
+        let repo = Repository::open(&f.root).await.unwrap();
+        let branch = f.git(&["symbolic-ref", "HEAD"]);
+        let head = f.git(&["rev-parse", "HEAD"]);
+        let tree = f.git(&["write-tree"]);
+        let guard = match repo
+            .commit_reference_guard(Some(&branch), Some(&head), &[&head], &tree, head.len())
+            .await
+        {
+            Ok(guard) => guard,
+            Err(error) if error.to_string().contains("does not support") => return,
+            Err(error) => panic!("{error:#}"),
+        };
+        let result = f.commit(&guard, &[]).await;
+        assert_ne!(result.code, 0);
+        assert_eq!(
+            fs::read_to_string(f.root.join(".git/failure-count")).unwrap(),
+            "once\n"
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), head);
+        assert!(guard.prepared_oid().unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn guarded_private_index_commit_preserves_live_index_and_runs_hooks() {
         let f = Fixture::new();
         let repo = Repository::open(&f.root).await.unwrap();
