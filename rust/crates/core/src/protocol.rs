@@ -433,6 +433,15 @@ pub enum Operation {
         #[serde(default)]
         hide_whitespace: bool,
     },
+    RendererCompareDiff {
+        before: String,
+        after: String,
+        merge_base: bool,
+        path: GitPath,
+        old_path: Option<GitPath>,
+        #[serde(default)]
+        hide_whitespace: bool,
+    },
     RendererWorkingDiff {
         path: GitPath,
         base: RendererDiffBase,

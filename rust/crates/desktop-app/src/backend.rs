@@ -546,6 +546,7 @@ impl Backend {
                     | Operation::RendererBlobPrefix { .. }
                     | Operation::RendererBlobChunk { .. }
                     | Operation::RendererCommitDiff { .. }
+                    | Operation::RendererCompareDiff { .. }
                     | Operation::DiscardPreview {
                         scope: desktop_backend::DiscardScope::WorkingTree,
                         selection: Some(_),
@@ -1974,6 +1975,32 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn wry_comparison_diff_returns_large_raw_response() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            use std::{fs, process::Command};
+            let root = std::env::temp_dir().join(format!("desktop-wry-compare-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let git = |args: &[&str]| {
+                let output = Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                output.stdout
+            };
+            git(&["init", "-q", "-b", "main"]);
+            git(&["config", "user.name", "Test"]); git(&["config", "user.email", "test@example.invalid"]); git(&["config", "commit.gpgsign", "false"]);
+            fs::write(root.join("[a].txt"), "first\n").unwrap(); git(&["add", "--", "."]); git(&["commit", "-qm", "first"]);
+            let first = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
+            fs::write(root.join("[a].txt"), format!("{}\n", "a".repeat(120)).repeat(1200)).unwrap(); git(&["add", "--", "."]); git(&["commit", "-qm", "second"]);
+            let head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
+            let backend = Backend::new(16).unwrap();
+            let request = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_diff","before":first,"after":head,"merge_base":true,"path":"[a].txt","old_path":null,"hide_whitespace":false}}})]).unwrap();
+            let response = backend.read(request).unwrap();
+            assert_eq!(response["kind"], "diff");
+            assert!(response["data"].as_str().unwrap().len() > 65_536);
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
 
     #[test]
     fn wry_reverts_a_reviewed_commit() {

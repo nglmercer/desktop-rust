@@ -1933,7 +1933,7 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
@@ -1967,6 +1967,13 @@ export class BackendClient {
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_commit_diff', { revision, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace })
     if (typeof value !== 'string' || value.length > 3_000_000 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit diff response', retryable: false })
     return value
+  }
+
+  async repositoryRendererCompareDiff(repositoryPath: string, before: string, after: string, mergeBase: boolean, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<string | null> {
+    const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_compare_diff', { before, after, merge_base: mergeBase, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace })
+    if (isRecord(value) && !mergeBase && value.kind === 'bad_revision') return null
+    if (!isRecord(value) || value.kind !== 'diff' || typeof value.data !== 'string' || value.data.length > 3_000_000 || value.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value.data)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison diff response', retryable: false })
+    return value.data
   }
 
   /** Capture a review basis without publishing the selected index or committing. */

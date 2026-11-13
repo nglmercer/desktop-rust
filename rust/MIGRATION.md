@@ -2517,3 +2517,10 @@ the raw loose HEAD file, including dangling symbolic refs, and checks path
 components for links. It currently accepts only Git's files ref backend and
 also requires a reviewable `FETCH_HEAD`. Git and independent writers can still
 race the final review. Wry and Electron retain their existing refresh path.
+
+Commit-range and branch merge-base diffs use a typed Rust read on Wry and
+WebSocket, retaining the renderer's raw patch parser, literal path handling,
+rename inputs, whitespace option and initial-commit empty-tree retry. Git output
+is bounded to 2 MiB per stream; larger diffs fail instead of being fully shown.
+Electron retains the existing Git path, and native WebView response-size and
+cross-platform parity remain to be verified.

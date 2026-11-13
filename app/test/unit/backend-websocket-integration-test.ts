@@ -34,6 +34,7 @@ import {
 } from '../../src/models/diff'
 import {
   AppFileStatusKind,
+  FileChange,
   WorkingDirectoryFileChange,
 } from '../../src/models/status'
 
@@ -118,6 +119,42 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('renders comparison diffs through the Rust bridge', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-compare-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      const sessionUrl = line.startsWith('Open ') ? line.slice(5) : ''
+      expect(sessionUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#token=/)
+      dom = new JSDOM('', { url: sessionUrl })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
+      const repository = path.join(directory, 'repository')
+      await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
+      const git = (...args: string[]) => execFileSync('git', ['-C', repository, ...args])
+      git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false')
+      await writeFile(path.join(repository, '[a].txt'), 'first\n'); await writeFile(path.join(repository, 'a.txt'), 'unrelated\n')
+      git('add', '--', '.'); git('commit', '-qm', 'first')
+      const first = git('rev-parse', 'HEAD').toString().trim()
+      await writeFile(path.join(repository, '[a].txt'), `${'a'.repeat(120)}\n`.repeat(1200)); await writeFile(path.join(repository, 'a.txt'), 'must not appear\n')
+      git('add', '--', '.'); git('commit', '-qm', 'second')
+      const last = git('rev-parse', 'HEAD').toString().trim()
+      const raw = await client.repositoryRendererCompareDiff(repository, first, last, true, '[a].txt', undefined, false)
+      expect(raw).not.toBeNull()
+      const expected = git('diff', '--merge-base', '--patch-with-raw', '-z', '--no-color', '--end-of-options', first, last, '--', ':(literal)[a].txt')
+      expect(expected.length).toBeGreaterThan(65_536)
+      expect(Buffer.from(raw!, 'base64')).toEqual(expected)
+      const { getCommitRangeDiff } = await import('../../src/lib/git/diff')
+      const diff = await getCommitRangeDiff({ path: repository, gitHubRepository: null } as Repository, new FileChange('[a].txt', { kind: AppFileStatusKind.Modified }), [first])
+      expect(diff.kind).toBe(DiffType.Text)
+      if (diff.kind === DiffType.Text) expect(diff.text).toContain('+first')
+      await expect(client.repositoryRendererCompareDiff(repository, 'missing-branch', last, true, '[a].txt', undefined, false)).rejects.toThrow()
+      await writeFile(path.join(repository, '[a].txt'), `${'x'.repeat(120)}\n`.repeat(20_000))
+      git('add', '--', '.'); git('commit', '-qm', 'large diff')
+      const large = git('rev-parse', 'HEAD').toString().trim()
+      await expect(client.repositoryRendererCompareDiff(repository, last, large, false, '[a].txt', undefined, false)).rejects.toThrow()
+    }, 90_000)
+
     it('fetches a reviewed local remote over WebSocket', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-fetch-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })

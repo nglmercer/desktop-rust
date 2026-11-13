@@ -29,6 +29,47 @@ pub(crate) struct Commit {
 }
 
 impl Repository {
+    /// Render the same raw patch format used by the comparison and history UI.
+    /// Only fixed Git options are accepted, and paths are always literal.
+    pub(crate) async fn renderer_compare_diff(
+        &self,
+        before: &str,
+        after: &str,
+        merge_base: bool,
+        path: GitPath,
+        old_path: Option<GitPath>,
+        hide_whitespace: bool,
+    ) -> Result<Value> {
+        for revision in [before, after] {
+            anyhow::ensure!(
+                !revision.is_empty() && revision.len() <= 4096 && !revision.contains('\0'),
+                "Invalid comparison revision"
+            );
+        }
+        let mut command = args(&["--literal-pathspecs", "diff"]);
+        if merge_base {
+            command.push("--merge-base".into());
+        }
+        if hide_whitespace {
+            command.push("-w".into());
+        }
+        command.extend(args(&["--patch-with-raw", "-z", "--no-color"]));
+        if !merge_base {
+            command.push("--format=".into());
+        }
+        command.extend(args(&["--end-of-options", before, after, "--"]));
+        command.push(crate::validate_path(path)?);
+        if let Some(old_path) = old_path {
+            command.push(crate::validate_path(old_path)?);
+        }
+        let output = self.run(&command).await?;
+        if !merge_base && output.bad_revision() {
+            return Ok(json!({"kind":"bad_revision"}));
+        }
+        ensure(&output)?;
+        Ok(json!({"kind":"diff", "data":STANDARD.encode(output.stdout)}))
+    }
+
     pub(crate) async fn renderer_commit_diff(
         &self,
         revision: &str,
@@ -707,6 +748,259 @@ fn parse_identity(value: &str) -> Result<Identity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn renderer_comparison_diffs_match_git_and_keep_paths_literal() {
+        use std::{fs, path::Path, process::Command};
+        let root =
+            std::env::temp_dir().join(format!("desktop-compare-diff-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("[a].txt"), "first\n").unwrap();
+        fs::write(root.join("a.txt"), "other\n").unwrap();
+        git(&["add", "--", "."]);
+        git(&["commit", "-qm", "first"]);
+        let first = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        fs::write(root.join("[a].txt"), "second\n").unwrap();
+        fs::write(root.join("a.txt"), "changed\n").unwrap();
+        git(&["add", "--", "."]);
+        git(&["commit", "-qm", "second"]);
+        let head = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        let repo = Repository::open(Path::new(&root)).await.unwrap();
+        for merge_base in [true, false] {
+            let actual = repo
+                .renderer_compare_diff(
+                    &first,
+                    &head,
+                    merge_base,
+                    GitPath::Text("[a].txt".into()),
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+            let mut args = vec!["--literal-pathspecs", "diff"];
+            if merge_base {
+                args.push("--merge-base");
+            }
+            args.extend(["--patch-with-raw", "-z", "--no-color"]);
+            if !merge_base {
+                args.push("--format=");
+            }
+            args.extend(["--end-of-options", &first, &head, "--", "[a].txt"]);
+            assert_eq!(
+                STANDARD.decode(actual["data"].as_str().unwrap()).unwrap(),
+                git(&args)
+            );
+        }
+        let missing_parent = format!("{first}^");
+        assert_eq!(
+            repo.renderer_compare_diff(
+                &missing_parent,
+                &head,
+                false,
+                GitPath::Text("[a].txt".into()),
+                None,
+                false
+            )
+            .await
+            .unwrap()["kind"],
+            "bad_revision"
+        );
+        let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let initial = repo
+            .renderer_compare_diff(
+                empty_tree,
+                &first,
+                false,
+                GitPath::Text("[a].txt".into()),
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            STANDARD.decode(initial["data"].as_str().unwrap()).unwrap(),
+            git(&[
+                "--literal-pathspecs",
+                "diff",
+                "--patch-with-raw",
+                "-z",
+                "--no-color",
+                "--format=",
+                "--end-of-options",
+                empty_tree,
+                &first,
+                "--",
+                "[a].txt"
+            ])
+        );
+        git(&["mv", "--", "[a].txt", "[b].txt"]);
+        git(&["commit", "-qm", "rename"]);
+        let renamed = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        let actual = repo
+            .renderer_compare_diff(
+                &head,
+                &renamed,
+                false,
+                GitPath::Text("[b].txt".into()),
+                Some(GitPath::Text("[a].txt".into())),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            STANDARD.decode(actual["data"].as_str().unwrap()).unwrap(),
+            git(&[
+                "--literal-pathspecs",
+                "diff",
+                "--patch-with-raw",
+                "-z",
+                "--no-color",
+                "--format=",
+                "--end-of-options",
+                &head,
+                &renamed,
+                "--",
+                "[b].txt",
+                "[a].txt"
+            ])
+        );
+        fs::write(root.join("[b].txt"), b"binary\0payload\n").unwrap();
+        git(&["add", "--", "."]);
+        git(&["commit", "-qm", "binary"]);
+        let binary_head = String::from_utf8(git(&["rev-parse", "HEAD"]))
+            .unwrap()
+            .trim()
+            .to_owned();
+        let binary = repo
+            .renderer_compare_diff(
+                &renamed,
+                &binary_head,
+                false,
+                GitPath::Text("[b].txt".into()),
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            STANDARD.decode(binary["data"].as_str().unwrap()).unwrap(),
+            git(&[
+                "--literal-pathspecs",
+                "diff",
+                "--patch-with-raw",
+                "-z",
+                "--no-color",
+                "--format=",
+                "--end-of-options",
+                &renamed,
+                &binary_head,
+                "--",
+                "[b].txt"
+            ])
+        );
+        assert!(
+            repo.renderer_compare_diff(
+                "missing-branch",
+                &head,
+                true,
+                GitPath::Text("[a].txt".into()),
+                None,
+                false
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            repo.renderer_compare_diff(
+                &first,
+                &head,
+                false,
+                GitPath::Text("../outside".into()),
+                None,
+                false
+            )
+            .await
+            .is_err()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let raw_path = b"byte-\xff.txt".to_vec();
+            fs::write(
+                root.join(std::ffi::OsString::from_vec(raw_path.clone())),
+                b"raw\n",
+            )
+            .unwrap();
+            git(&["add", "--", "."]);
+            git(&["commit", "-qm", "raw path"]);
+            let raw_head = String::from_utf8(git(&["rev-parse", "HEAD"]))
+                .unwrap()
+                .trim()
+                .to_owned();
+            let actual = repo
+                .renderer_compare_diff(
+                    &binary_head,
+                    &raw_head,
+                    false,
+                    GitPath::Bytes {
+                        bytes: raw_path.clone(),
+                    },
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+            let output = Command::new("git")
+                .current_dir(&root)
+                .args([
+                    "--literal-pathspecs",
+                    "diff",
+                    "--patch-with-raw",
+                    "-z",
+                    "--no-color",
+                    "--format=",
+                    "--end-of-options",
+                    &binary_head,
+                    &raw_head,
+                    "--",
+                ])
+                .arg(std::ffi::OsString::from_vec(raw_path))
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                STANDARD.decode(actual["data"].as_str().unwrap()).unwrap(),
+                output.stdout
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn checkout_date_must_be_a_real_iso_timestamp() {
         assert!(valid_checkout_date("2024-02-29T23:59:59.999Z"));

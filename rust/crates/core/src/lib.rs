@@ -539,6 +539,25 @@ impl Repository {
                     .renderer_commit_diff(&revision, path, old_path, hide_whitespace)
                     .await;
             }
+            Operation::RendererCompareDiff {
+                before,
+                after,
+                merge_base,
+                path,
+                old_path,
+                hide_whitespace,
+            } => {
+                return self
+                    .renderer_compare_diff(
+                        &before,
+                        &after,
+                        merge_base,
+                        path,
+                        old_path,
+                        hide_whitespace,
+                    )
+                    .await;
+            }
             Operation::RendererWorkingDiff {
                 path,
                 base,
@@ -1201,6 +1220,7 @@ impl Repository {
             | MergeTreePreview { .. }
             | InterpretTrailers { .. }
             | RendererCommitDiff { .. }
+            | RendererCompareDiff { .. }
             | RendererWorkingDiff { .. }
             | RendererBlobPrefix { .. }
             | RendererBlobChunk { .. }
