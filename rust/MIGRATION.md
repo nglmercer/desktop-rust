@@ -348,9 +348,11 @@ actual commit, receipt, backups and private index; and installs the index only
 if the live index is still the original or already the published one. It can
 recover a publishing checkpoint with a retained receipt that matches the actual
 ref and reviewed commit; missing receipts, concurrent changes and invalid
-backups are refused. A hard interruption may leave a checkpoint use lock that
-requires manual investigation. The recovery history UI now exposes interrupted
-commit recovery through both Rust transports.
+backups are refused. Checkpoint use is protected by an OS lock released when
+the owner exits; legacy lock files without the new marker remain blocked for
+manual investigation. Git's own index and reference lock files can still need
+investigation after a hard interruption. The recovery history UI now exposes
+interrupted commit recovery through both Rust transports.
 Split-index backup and restore is now shared infrastructure for commit recovery
 and the existing discard journal. Restoring a missing shared index uses an
 atomic hard link and refuses to overwrite a concurrently created conflicting
@@ -379,8 +381,7 @@ the stored selection under the index lock and compares the review basis. This
 can run Git clean filters and write Git objects; it is an observation and cannot
 authorize later publication without a transaction and reference guard. Older
 checkpoints without a stored selection can be inspected but must be prepared
-again for revalidation. A process interruption can leave a checkpoint use lock
-that requires manual investigation before removal. Preparation rejects sparse-index
+again for revalidation. Preparation rejects sparse-index
 tree entries until their dependencies can be retained and verified.
 Commit-message trailer parsing and merging now use Git through typed Rust
 operations on both transports, retaining repository trailer configuration and

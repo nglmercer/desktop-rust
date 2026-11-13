@@ -21,7 +21,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -72,13 +72,86 @@ struct Checkpoint {
     request: Option<SelectedRequest>,
 }
 struct CheckpointUse {
-    path: PathBuf,
-    file: Option<fs::File>,
+    _file: fs::File,
 }
 impl Drop for CheckpointUse {
     fn drop(&mut self) {
-        drop(self.file.take());
-        let _ = fs::remove_file(&self.path);
+        let _ = self._file.unlock();
+    }
+}
+impl CheckpointUse {
+    fn acquire(base: &Path, id: &str) -> Result<Self> {
+        const MARKER: &[u8] = b"desktop-commit-checkpoint-os-lock-v1\n";
+        anyhow::ensure!(valid_id(id), "invalid commit checkpoint ID");
+        let base_dir = Dir::open_ambient_dir(base, ambient_authority())?;
+        let directory = base_dir.open_dir_nofollow(id)?;
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.mode(0o600).custom_flags(libc::O_NONBLOCK);
+        }
+        let (mut file, created) = match directory.open_with(".use.lock", &options) {
+            Ok(file) => (file.into_std(), true),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let mut existing = OpenOptions::new();
+                existing.read(true).write(true).follow(FollowSymlinks::No);
+                #[cfg(unix)]
+                {
+                    use cap_std::fs::OpenOptionsExt;
+                    existing.custom_flags(libc::O_NONBLOCK);
+                }
+                (
+                    directory.open_with(".use.lock", &existing)?.into_std(),
+                    false,
+                )
+            }
+            Err(error) => return Err(error.into()),
+        };
+        anyhow::ensure!(
+            file.metadata()?.is_file(),
+            "invalid commit checkpoint use lock"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            let descriptor = file.as_raw_fd();
+            // The descriptor is owned by `file` and stays open for both calls.
+            let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFD) };
+            if flags < 0
+                || unsafe { libc::fcntl(descriptor, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0
+            {
+                return Err(std::io::Error::last_os_error())
+                    .context("protect checkpoint lock from child processes");
+            }
+        }
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!("commit checkpoint is in use"),
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(error).context("lock commit checkpoint");
+            }
+        }
+        if created {
+            file.write_all(MARKER)?;
+            file.sync_all()?;
+            sync_directory(&base.join(id))?;
+        } else {
+            let mut marker = Vec::new();
+            (&mut file)
+                .take((MARKER.len() + 1) as u64)
+                .read_to_end(&mut marker)?;
+            anyhow::ensure!(
+                marker == MARKER,
+                "legacy or invalid commit checkpoint use lock requires investigation"
+            );
+        }
+        Ok(Self { _file: file })
     }
 }
 struct Preparing {
@@ -771,11 +844,7 @@ impl Repository {
         );
         let base = self.checkpoint_directory().await?;
         read_checkpoint(&base, id, &self.id())?;
-        let lock_path = base.join(id).join(".use.lock");
-        let _use_lock = CheckpointUse {
-            file: Some(work::private_file(&lock_path).context("commit checkpoint is in use")?),
-            path: lock_path,
-        };
+        let _use_lock = CheckpointUse::acquire(&base, id)?;
         let mut record = read_checkpoint(&base, id, &self.id())?;
         anyhow::ensure!(
             record.state == "prepared",
@@ -977,11 +1046,7 @@ impl Repository {
     pub(crate) async fn recover_published_commit_checkpoint(&self, id: &str) -> Result<Value> {
         let base = self.checkpoint_directory().await?;
         read_checkpoint(&base, id, &self.id())?;
-        let lock_path = base.join(id).join(".use.lock");
-        let _use_lock = CheckpointUse {
-            file: Some(work::private_file(&lock_path).context("commit checkpoint is in use")?),
-            path: lock_path,
-        };
+        let _use_lock = CheckpointUse::acquire(&base, id)?;
         let mut record = read_checkpoint(&base, id, &self.id())?;
         anyhow::ensure!(
             matches!(record.state.as_str(), "publishing" | "published"),
@@ -1168,11 +1233,7 @@ impl Repository {
     pub(crate) async fn revalidate_commit_checkpoint(&self, id: &str) -> Result<Value> {
         let base = self.checkpoint_directory().await?;
         read_checkpoint(&base, id, &self.id())?;
-        let path = base.join(id).join(".use.lock");
-        let _use_lock = CheckpointUse {
-            file: Some(work::private_file(&path).context("commit checkpoint is in use")?),
-            path,
-        };
+        let _use_lock = CheckpointUse::acquire(&base, id)?;
         let record = read_checkpoint(&base, id, &self.id())?;
         anyhow::ensure!(
             record.state == "prepared",
@@ -1316,8 +1377,7 @@ impl Repository {
             "commit checkpoint requires recovery"
         );
         let directory = base.join(id);
-        let lock_path = directory.join(".use.lock");
-        let _lock = work::private_file(&lock_path).context("commit checkpoint is in use")?;
+        let _lock = CheckpointUse::acquire(&base, id)?;
         let record = read_checkpoint(&base, id, &self.id())?;
         anyhow::ensure!(
             record.state == "prepared",
@@ -1332,6 +1392,57 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checkpoint_use_lock_releases_after_process_exit() {
+        const CHILD: &str = "DESKTOP_TEST_CHECKPOINT_LOCK_CHILD";
+        const ID: &str = "12345678-1234-4234-8234-123456789abc";
+        if let Some(base) = std::env::var_os(CHILD) {
+            let _lock = CheckpointUse::acquire(Path::new(&base), ID).unwrap();
+            #[cfg(unix)]
+            std::process::Command::new("sh")
+                .args(["-c", "sleep 3"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            // Bypass Rust destructors to simulate an interrupted owner.
+            std::process::exit(0);
+        }
+        let base =
+            std::env::temp_dir().join(format!("desktop-checkpoint-lock-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&base).unwrap();
+        fs::create_dir(base.join(ID)).unwrap();
+        let held = CheckpointUse::acquire(&base, ID).unwrap();
+        assert!(CheckpointUse::acquire(&base, ID).is_err());
+        drop(held);
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "commit_checkpoint::tests::checkpoint_use_lock_releases_after_process_exit",
+            ])
+            .env(CHILD, &base)
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        drop(CheckpointUse::acquire(&base, ID).unwrap());
+        let lock = base.join(ID).join(".use.lock");
+        fs::write(&lock, b"legacy lock").unwrap();
+        assert!(CheckpointUse::acquire(&base, ID).is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(&lock).unwrap();
+            std::os::unix::fs::symlink(base.join("outside"), &lock).unwrap();
+            assert!(CheckpointUse::acquire(&base, ID).is_err());
+            assert!(!base.join("outside").exists());
+        }
+        fs::remove_dir_all(base).unwrap();
+    }
+
     #[test]
     fn commit_output_keeps_a_bounded_utf8_safe_tail() {
         let mut output = vec![b'a'; COMMIT_OUTPUT_TAIL + 4];
@@ -1891,12 +2002,12 @@ mod tests {
         fs::write(&manifest_path, serde_json::to_vec(&old_manifest).unwrap()).unwrap();
         assert!(repo.inspect_commit_checkpoint(id).await.is_ok());
         assert!(repo.revalidate_commit_checkpoint(id).await.is_err());
-        assert!(!base.join(id).join(".use.lock").exists());
+        drop(CheckpointUse::acquire(&base, id).unwrap());
         fs::write(&manifest_path, current_manifest).unwrap();
         let live_lock = root.join(".git/index.lock");
         fs::write(&live_lock, b"other git operation").unwrap();
         assert!(repo.revalidate_commit_checkpoint(id).await.is_err());
-        assert!(!base.join(id).join(".use.lock").exists());
+        drop(CheckpointUse::acquire(&base, id).unwrap());
         fs::remove_file(live_lock).unwrap();
         #[cfg(unix)]
         {
