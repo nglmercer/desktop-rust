@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { GitHubRepository } from '../../../src/models/github-repository'
@@ -11,7 +11,7 @@ import type { Dispatcher } from '../../../src/ui/dispatcher'
 import { TutorialDone } from '../../../src/ui/tutorial/done'
 import { TutorialStepInstructions } from '../../../src/ui/tutorial/tutorial-step-instruction'
 import { TutorialWelcome } from '../../../src/ui/tutorial/welcome'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 class TestDispatcher {
   public exploreRepositories = new Array<Repository>()

@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import {
@@ -12,7 +12,7 @@ import {
   DiffRowType,
   type IDiffRowData,
 } from '../../../src/ui/diff/diff-helpers'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 type SideBySideDiffRowProps = React.ComponentProps<typeof SideBySideDiffRow>
 

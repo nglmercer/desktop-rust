@@ -1,12 +1,12 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { GitHubRepository } from '../../../src/models/github-repository'
 import { Owner } from '../../../src/models/owner'
 import { NoRemote } from '../../../src/ui/repository-settings/no-remote'
 import { RepoRulesetsForBranchLink } from '../../../src/ui/repository-rules/repo-rulesets-for-branch-link'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 function createGitHubRepository() {
   return new GitHubRepository(

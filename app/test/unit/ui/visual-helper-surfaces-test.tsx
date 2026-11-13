@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it, onTestFinished } from 'vitest'
 import * as React from 'react'
 
 import { Branch, BranchType } from '../../../src/models/branch'
@@ -11,12 +11,12 @@ import {
 import * as octicons from '../../../src/ui/octicons/octicons.generated'
 import { Octicon } from '../../../src/ui/octicons/octicon'
 import { createOcticonElement } from '../../../src/ui/octicons/octicon'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
+} from '../../helpers/ui/vitest-timers'
 
 function createBranch(
   name: string,
@@ -28,9 +28,9 @@ function createBranch(
 }
 
 describe('visual helper surfaces', () => {
-  it('shows an octicon tooltip without duplicating its accessible label', t => {
+  it('shows an octicon tooltip without duplicating its accessible label', () => {
     enableTestTimers(['setTimeout'])
-    t.after(resetTestTimers)
+    onTestFinished(resetTestTimers)
 
     const view = render(
       <Octicon symbol={octicons.check} title="Checks: Successful" />

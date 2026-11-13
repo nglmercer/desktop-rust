@@ -1,13 +1,13 @@
-import { describe, it, beforeEach, afterEach, mock } from 'node:test'
+import { describe, it, beforeEach, afterEach, vi } from 'vitest'
 import assert from 'node:assert'
 import { promiseWithMinimumTimeout } from '../../src/lib/promise'
 
 describe('promiseWithMinimumTimeout', () => {
-  beforeEach(() => mock.timers.enable())
-  afterEach(() => mock.timers.reset())
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
 
   it('handles promise finishing before timeout', async () => {
-    const resolveMock = mock.fn((resolve: (n: any) => void) => resolve(42))
+    const resolveMock = vi.fn((resolve: (n: any) => void) => resolve(42))
 
     const fastPromise = new Promise<number>(resolve => {
       window.setTimeout(() => resolveMock(resolve), 100)
@@ -16,11 +16,11 @@ describe('promiseWithMinimumTimeout', () => {
     const promise = promiseWithMinimumTimeout(() => fastPromise, 500)
 
     // promise completes
-    mock.timers.tick(250)
+    vi.advanceTimersByTime(250)
     assert.equal(resolveMock.mock.calls.length, 1)
 
     // timeout completes
-    mock.timers.tick(250)
+    vi.advanceTimersByTime(250)
 
     const result = await promise
 
@@ -37,7 +37,7 @@ describe('promiseWithMinimumTimeout', () => {
     const promise = promiseWithMinimumTimeout(() => mediumPromise, 500)
 
     // both complete
-    mock.timers.tick(500)
+    vi.advanceTimersByTime(500)
 
     const result = await promise
 
@@ -45,7 +45,7 @@ describe('promiseWithMinimumTimeout', () => {
   })
 
   it('handles promise finishing after timeout', async () => {
-    const resolveMock = mock.fn((resolve: (n: any) => void) => resolve(42))
+    const resolveMock = vi.fn((resolve: (n: any) => void) => resolve(42))
 
     const slowPromise = new Promise<number>(resolve => {
       window.setTimeout(() => resolveMock(resolve), 1000)
@@ -54,11 +54,11 @@ describe('promiseWithMinimumTimeout', () => {
     const promise = promiseWithMinimumTimeout(() => slowPromise, 500)
 
     // timeout completes
-    mock.timers.tick(500)
+    vi.advanceTimersByTime(500)
     assert.equal(resolveMock.mock.calls.length, 0)
 
     // promise completes
-    mock.timers.tick(500)
+    vi.advanceTimersByTime(500)
     assert.equal(resolveMock.mock.calls.length, 1)
 
     const result = await promise
@@ -68,7 +68,7 @@ describe('promiseWithMinimumTimeout', () => {
 
   it('handles actions returning null', async () => {
     const promise = promiseWithMinimumTimeout(() => Promise.resolve(null), 500)
-    mock.timers.tick(500)
+    vi.advanceTimersByTime(500)
     assert.equal(await promise, null)
   })
 })

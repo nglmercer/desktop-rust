@@ -1,7 +1,7 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import * as React from 'react'
-import { render, screen, fireEvent } from '../../helpers/ui/render'
+import { render, screen, fireEvent } from '../../helpers/ui/vitest-render'
 import { Appearance } from '../../../src/ui/preferences/appearance'
 import { ApplicationTheme } from '../../../src/ui/lib/application-theme'
 import {
@@ -9,6 +9,9 @@ import {
   getTimeFormatPreference,
   getNumberFormatPreference,
 } from '../../../src/models/formatting-preferences'
+
+// The preferences surface only reads this constant from the application store.
+vi.mock('../../../src/lib/stores/app-store', () => ({ tabSizeDefault: 4 }))
 
 function renderAppearance(alwaysShowWorktreeList = false) {
   const changes: boolean[] = []

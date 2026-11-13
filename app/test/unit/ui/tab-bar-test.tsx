@@ -1,15 +1,15 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { dragAndDropManager } from '../../../src/lib/drag-and-drop-manager'
 import { TabBar, TabBarType } from '../../../src/ui/tab-bar'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import {
   advanceTimersBy,
   enableTestTimers,
   resetTestTimers,
-} from '../../helpers/ui/timers'
+} from '../../helpers/ui/vitest-timers'
 
 interface IRenderedTabBar {
   readonly clicks: ReadonlyArray<number>

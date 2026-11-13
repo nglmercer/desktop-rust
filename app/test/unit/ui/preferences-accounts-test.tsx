@@ -1,9 +1,9 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 import { Account } from '../../../src/models/account'
 import { Accounts } from '../../../src/ui/preferences/accounts'
-import { fireEvent, render, screen, within } from '../../helpers/ui/render'
+import { fireEvent, render, screen, within } from '../../helpers/ui/vitest-render'
 
 describe('Accounts preferences', () => {
   it('shows all accounts on each endpoint and supports adding and signing out individually', () => {

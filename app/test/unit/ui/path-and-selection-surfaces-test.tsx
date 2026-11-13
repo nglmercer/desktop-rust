@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import {
@@ -8,7 +8,7 @@ import {
 } from '../../../src/models/status'
 import { MultipleSelection } from '../../../src/ui/changes/multiple-selection'
 import { PathLabel } from '../../../src/ui/lib/path-label'
-import { render } from '../../helpers/ui/render'
+import { render } from '../../helpers/ui/vitest-render'
 
 describe('path and selection surfaces', () => {
   it('renders a simple path label for non-rename statuses', () => {
