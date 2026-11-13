@@ -27,8 +27,6 @@ struct Options {
     selected: bool,
     #[arg(long)]
     config: Option<PathBuf>,
-    #[arg(long, hide = true)]
-    smoke_test: bool,
 }
 
 fn main() -> anyhow::Result<()> {

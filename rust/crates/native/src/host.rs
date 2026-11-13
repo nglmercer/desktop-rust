@@ -15,8 +15,6 @@ use wry::WebViewBuilder;
 #[derive(Clone, Copy)]
 enum HostEvent {
     Quit,
-    SmokeOk,
-    SmokeFailed,
 }
 
 pub(super) fn run(options: Options) -> Result<()> {
@@ -47,18 +45,14 @@ pub(super) fn run(options: Options) -> Result<()> {
         };
         desktop_bridge::start(repo, registry, 0).await
     })?;
-    let result = window_loop(&runtime, &server, options.smoke_test);
+    let result = window_loop(&runtime, &server);
     // Close every session and the listener before the async runtime is destroyed.
     let shutdown = runtime.block_on(server.shutdown());
     result?;
     shutdown
 }
 
-fn window_loop(
-    runtime: &tokio::runtime::Runtime,
-    server: &ServerHandle,
-    smoke_test: bool,
-) -> Result<()> {
+fn window_loop(runtime: &tokio::runtime::Runtime, server: &ServerHandle) -> Result<()> {
     let mut signal =
         runtime.block_on(async { desktop_core::cancellation::ShutdownSignal::new() })?;
     let policy = NavigationPolicy::new(server.session_url())?;
@@ -70,7 +64,7 @@ fn window_loop(
         .build(&event_loop)?;
     let navigation = policy.clone();
     let new_window = policy.clone();
-    let mut builder = WebViewBuilder::new()
+    let builder = WebViewBuilder::new()
         .with_url(server.session_url())
         .with_incognito(true)
         .with_devtools(false)
@@ -90,22 +84,6 @@ fn window_loop(
             wry::NewWindowResponse::Deny
         })
         .with_download_started_handler(|_, _| false);
-    if smoke_test {
-        let proxy = event_loop.create_proxy();
-        builder = builder
-            .with_initialization_script(include_str!("smoke.js"))
-            .with_ipc_handler(move |request| {
-                if !policy.internal(&request.uri().to_string()) {
-                    return;
-                }
-                let event = match request.body().as_str() {
-                    "desktop-smoke:ok" => HostEvent::SmokeOk,
-                    "desktop-smoke:error" => HostEvent::SmokeFailed,
-                    _ => return,
-                };
-                let _ = proxy.send_event(event);
-            });
-    }
     #[cfg(target_os = "linux")]
     let _webview = {
         use tao::platform::unix::WindowExtUnix;
@@ -122,8 +100,6 @@ fn window_loop(
         let _ = signal.received().await;
         let _ = proxy.send_event(HostEvent::Quit);
     });
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let mut passed = false;
     let mut failed = false;
     let code = event_loop.run_return(|event, _, flow| {
         *flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_secs(1));
@@ -133,28 +109,16 @@ fn window_loop(
                 ..
             }
             | Event::UserEvent(HostEvent::Quit) => *flow = ControlFlow::Exit,
-            Event::UserEvent(HostEvent::SmokeOk) => {
-                passed = true;
-                *flow = ControlFlow::Exit;
-            }
-            Event::UserEvent(HostEvent::SmokeFailed) => {
-                failed = true;
-                *flow = ControlFlow::Exit;
-            }
             _ => {}
         }
-        if server.is_finished() || (smoke_test && Instant::now() >= deadline) {
+        if server.is_finished() {
             failed = true;
             *flow = ControlFlow::Exit;
         }
     });
     interrupt.abort();
     anyhow::ensure!(code == 0, "native event loop exited with code {code}");
-    anyhow::ensure!(!failed, "native bridge or webview smoke check failed");
-    if smoke_test {
-        anyhow::ensure!(passed, "native webview closed before smoke check completed");
-        eprintln!("PASS: native webview assets, authenticated WebSocket RPC, and UI mount");
-    }
+    anyhow::ensure!(!failed, "native bridge stopped unexpectedly");
     Ok(())
 }
 

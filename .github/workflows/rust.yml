@@ -236,7 +236,8 @@ jobs:
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
           mkdir -p "$(dirname "$GIT_CONFIG_GLOBAL")"
-          xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- timeout 60s rust/target/debug/desktop-native --empty --config "$RUNNER_TEMP/desktop-native-smoke/repositories.json" --smoke-test
+          mkdir -p "$RUNNER_TEMP/desktop-shell-smoke"
+          HOME="$RUNNER_TEMP/desktop-shell-smoke" XDG_DATA_HOME="$RUNNER_TEMP/desktop-shell-smoke/data" XDG_CONFIG_HOME="$RUNNER_TEMP/desktop-shell-smoke/config" XDG_CACHE_HOME="$RUNNER_TEMP/desktop-shell-smoke/cache" xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- timeout 60s rust/target/debug/github-desktop-rs --smoke-test
       - name: Start the desktop application
         if: runner.os == 'Linux'
         env:

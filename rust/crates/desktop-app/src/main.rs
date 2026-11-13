@@ -44,6 +44,32 @@ use crate::host::{AppEvent, TaoHost, WindowInfo};
 
 const APP_URL: &str = "desktop://localhost/index.html";
 
+// Only injected for --smoke-test. Wait for the real React application and
+// round-trip both shell and backend requests through the native IPC bridge.
+const SMOKE_SCRIPT: &str = r#"
+if (location.pathname === '/index.html') {
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const deadline = Date.now() + 25000;
+      while (!document.querySelector('#desktop-app-chrome')) {
+        if (Date.now() >= deadline) throw new Error('React application did not mount');
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      const info = await window.__desktop.invoke('desktop.get-app-info');
+      if (info?.runtime !== 'tao + wry') throw new Error('Unexpected shell RPC result');
+      const config = await window.__desktop.invoke('desktop.backend.git_info', {
+        operation: { type: 'global_config_path' }
+      });
+      if (typeof config !== 'string' || !config) throw new Error('Unexpected backend RPC result');
+      window.ipc.postMessage('desktop-smoke:ok');
+    } catch (error) {
+      console.error('desktop smoke failed', error);
+      window.ipc.postMessage('desktop-smoke:error');
+    }
+  }, { once: true });
+}
+"#;
+
 fn main() {
     // Git invokes the current application binary as a private credential
     // helper. Dispatch it before initializing the GUI or its event loop.
@@ -122,6 +148,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let smoke_test = args.iter().any(|a| a == "--smoke-test");
 
     if args.iter().any(|a| a == "--version" || a == "-v") {
         println!(
@@ -196,14 +223,28 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     // -- webview + bridge ---------------------------------------------------
     let bridge = Bridge::new(app.clone(), proxy.clone())?;
-    let builder = WebViewBuilder::new()
+    let mut builder = WebViewBuilder::new()
         .with_asynchronous_custom_protocol("desktop".into(), {
             let bridge = bridge.clone();
             move |_id, request, responder| bridge.handle_protocol(request, responder)
         })
         .with_ipc_handler({
             let bridge = bridge.clone();
-            move |request| bridge.handle_ipc(request.body())
+            let proxy = proxy.clone();
+            move |request| {
+                if smoke_test {
+                    let result = match request.body().as_str() {
+                        "desktop-smoke:ok" => Some(true),
+                        "desktop-smoke:error" => Some(false),
+                        _ => None,
+                    };
+                    if let Some(result) = result {
+                        let _ = proxy.send_event(AppEvent::SmokeResult(result));
+                        return;
+                    }
+                }
+                bridge.handle_ipc(request.body());
+            }
         })
         .with_initialization_script(host_env_script())
         .with_initialization_script(INIT_SCRIPT)
@@ -215,6 +256,15 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         })
         .with_devtools(true)
         .with_url(APP_URL);
+
+    if smoke_test {
+        builder = builder.with_initialization_script(SMOKE_SCRIPT);
+        let proxy = proxy.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(40));
+            let _ = proxy.send_event(AppEvent::SmokeResult(false));
+        });
+    }
 
     #[cfg(any(
         target_os = "windows",
@@ -287,6 +337,17 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         match event {
             Event::UserEvent(user) => match user {
+                AppEvent::SmokeResult(passed) => {
+                    stop_services(&app_loop, &host_loop, &bridge_loop);
+                    if passed {
+                        eprintln!(
+                            "PASS: native webview mounted React and completed shell and backend RPC"
+                        );
+                    } else {
+                        eprintln!("FAIL: native webview smoke test");
+                    }
+                    std::process::exit(if passed { 0 } else { 1 });
+                }
                 AppEvent::Flush => {
                     // Clear the scheduled flag first: anything published while
                     // this batch is delivered queues its own flush.
@@ -424,6 +485,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     // contract so a renderer can veto / persist on shutdown.
                     app_loop.emit("will-quit", vec![]);
                     stop_services(&app_loop, &host_loop, &bridge_loop);
+                    if smoke_test {
+                        eprintln!("FAIL: native webview closed before smoke test completed");
+                        std::process::exit(1);
+                    }
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Focused(focused) => {

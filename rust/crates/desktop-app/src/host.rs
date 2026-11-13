@@ -46,6 +46,8 @@ pub enum AppEvent {
     RpcProgress { id: u64, payload: Value },
     /// A native (muda) menu item was clicked.
     NativeMenu(String),
+    /// Completion of the explicit webview smoke test.
+    SmokeResult(bool),
 }
 
 /// Cached, thread-safe mirror of the parts of `tao::Window` that `desktop-core`

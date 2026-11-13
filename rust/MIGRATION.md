@@ -28,6 +28,12 @@ missing native modules. `tsx` transpiles without type-checking; the existing
 `compile:script` configuration currently fails on unrelated project-wide
 JSX/global type errors and does not yet replace that implicit check.
 
+Linux CI now exercises the active `github-desktop-rs` Wry webview: its
+isolated smoke run waits for the shared React renderer to mount and performs
+both shell and Rust backend IPC calls. The obsolete `desktop-native` smoke
+script and its references to removed browser assets have been deleted. This
+does not retire the older host or establish macOS and Windows webview parity.
+
 ## Removal gates
 
 - [ ] Inventory and replace every user-visible legacy workflow, including

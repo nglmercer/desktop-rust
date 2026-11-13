@@ -38,7 +38,7 @@ fn linux_smoke_launch_has_required_dependencies_environment_and_order() {
         "xvfb-run must wrap dbus-run-session"
     );
     assert!(!WORKFLOW.contains("dbus-run-session -- xvfb-run"));
-    assert!(WORKFLOW.contains("rust/target/debug/desktop-native"));
+    assert!(WORKFLOW.contains("rust/target/debug/github-desktop-rs"));
     assert!(WORKFLOW.contains("--smoke-test"));
     assert!(WORKFLOW.contains("dbus-run-session -- timeout 60s"));
 }
