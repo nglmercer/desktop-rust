@@ -239,6 +239,59 @@ impl Repository {
         self.stash_save_locked(text, include_untracked, desktop)
             .await
     }
+
+    /// Save the already staged selection using Desktop's branch association.
+    pub(crate) async fn renderer_stash_save(&self, branch: &str) -> Result<Value> {
+        anyhow::ensure!(
+            branch.len() <= 4096 && !branch.is_empty() && !branch.contains('\0'),
+            "invalid stash branch association"
+        );
+        // This is a label, not a branch-creation argument. A remote name may
+        // begin with '-' even though `check-ref-format --branch` rejects it.
+        let check = self
+            .run(&args(&[
+                "check-ref-format",
+                &format!("refs/heads/{branch}"),
+            ]))
+            .await?;
+        anyhow::ensure!(check.code == 0, "invalid stash branch association");
+        let _lock = self.stash_lock().await?;
+        self.stash_save_locked(message(branch), false, false).await
+    }
+
+    /// Only act on Desktop-associated entries, bound to the reviewed reflog.
+    pub(crate) async fn renderer_stash_action(
+        &self,
+        id: &str,
+        index: u32,
+        basis: &str,
+        pop: bool,
+    ) -> Result<Value> {
+        let _lock = self.stash_lock().await?;
+        let (_, entry) = self.checked_stash(id, Some(index), Some(basis)).await?;
+        anyhow::ensure!(
+            entry.branch.is_some(),
+            "Selected stash is not associated with Desktop"
+        );
+        if !pop {
+            return self.stash_drop_checked(id, index, basis).await;
+        }
+        let before = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
+        ensure(&before)?;
+        anyhow::ensure!(
+            before.stdout.is_empty(),
+            "Resolve existing conflicts before restoring a stash"
+        );
+        let mut result = self
+            .stash_apply_locked(id, Some(index), Some(basis), false, true)
+            .await?;
+        if result["code"] != 0 {
+            let unmerged = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
+            ensure(&unmerged)?;
+            result["conflicted"] = json!(result["code"] == 1 && !unmerged.stdout.is_empty());
+        }
+        Ok(result)
+    }
     async fn stash_save_locked(
         &self,
         text: String,

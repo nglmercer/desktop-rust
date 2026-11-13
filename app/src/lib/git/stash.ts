@@ -169,6 +169,9 @@ export async function createDesktopStashEntry(
   await stageFiles(repository, fullySelectedUntrackedFiles)
 
   const branchName = typeof branch === 'string' ? branch : branch.name
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().saveDesktopStash(repository.path, branchName), true)
+  }
   const message = createDesktopStashMessage(branchName)
   const args = ['stash', 'push', '-m', message]
 
@@ -234,6 +237,9 @@ export async function dropDesktopStashEntry(
   repository: Repository,
   stashSha: string
 ) {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'drop'), true)
+  }
   const entryToDelete = await getStashEntryMatchingSha(repository, stashSha)
 
   if (entryToDelete !== null) {
@@ -253,6 +259,9 @@ export async function popStashEntry(
   repository: Repository,
   stashSha: string
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'pop'), true)
+  }
   // ignoring these git errors for now, this will change when we start
   // implementing the stash conflict flow
   const expectedErrors = new Set<DugiteError>([DugiteError.MergeConflicts])

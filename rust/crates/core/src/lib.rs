@@ -623,6 +623,15 @@ impl Repository {
                     .await;
             }
             Operation::StashList => return self.stash_list().await,
+            Operation::RendererStashSave { branch } => {
+                return self.renderer_stash_save(&branch).await;
+            }
+            Operation::RendererStashPop { oid, index, basis } => {
+                return self.renderer_stash_action(&oid, index, &basis, true).await;
+            }
+            Operation::RendererStashDrop { oid, index, basis } => {
+                return self.renderer_stash_action(&oid, index, &basis, false).await;
+            }
             Operation::StashSave {
                 message,
                 include_untracked,
@@ -1260,6 +1269,9 @@ impl Repository {
             Revert { commit, mainline } => self.replay_command("revert", &commit, mainline).await?,
             StashSave { .. }
             | StashList
+            | RendererStashSave { .. }
+            | RendererStashPop { .. }
+            | RendererStashDrop { .. }
             | StashFiles { .. }
             | StashApply { .. }
             | StashDrop { .. }

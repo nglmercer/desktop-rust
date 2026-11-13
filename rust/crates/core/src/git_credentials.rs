@@ -383,6 +383,9 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::CherryPick { .. }
             | Operation::Revert { .. }
             | Operation::StashSave { .. }
+            | Operation::RendererStashSave { .. }
+            | Operation::RendererStashPop { .. }
+            | Operation::RendererStashDrop { .. }
             | Operation::StashApply { .. }
             | Operation::StashMove { .. }
             | Operation::WorktreeAdd { .. }

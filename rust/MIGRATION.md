@@ -1060,6 +1060,14 @@ stash move after a Rust rename. The renderer still needs a native interface for
 inspecting rename receipts, and case-insensitive platform behavior remains
 unverified.
 
+The upstream Desktop stash save, pop and drop calls also use typed Rust
+operations on both transports. Save retains the renderer's existing staging of
+selected untracked files and associates the stash with the requested branch.
+Pop and drop bind the selected object and index to a reviewed reflog, and the
+core rejects entries without a Desktop association. A conflicting pop leaves
+the stash in place. External Git writers are not locked across the final
+reflog check and native drop, and very large stash lists still need work.
+
 Audit of `AppStore.renameBranchCore` found that native `branch -m` alone left
 Desktop saved-change associations behind. The Rust rename service now reviews
 source refs/tips, symbolic HEAD, branches/worktrees, effective configuration and

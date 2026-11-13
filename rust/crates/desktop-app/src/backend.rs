@@ -121,6 +121,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    StashWorkflow {
+        repository_path: String,
+        operation: Operation,
+    },
     AbortGitOperation {
         repository_path: String,
         operation: Operation,
@@ -401,6 +405,9 @@ impl Backend {
         | GitInfoOperation::BranchRename {
             repository_path, ..
         }
+        | GitInfoOperation::StashWorkflow {
+            repository_path, ..
+        }
         | GitInfoOperation::AbortGitOperation {
             repository_path, ..
         }
@@ -556,6 +563,19 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported branch rename operation".into(),
+            ));
+        }
+        if let GitInfoOperation::StashWorkflow { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::StashList
+                    | Operation::RendererStashSave { .. }
+                    | Operation::RendererStashPop { .. }
+                    | Operation::RendererStashDrop { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported Desktop stash operation".into(),
             ));
         }
         if let GitInfoOperation::FinishMergeCommit { operation, .. } = &request.operation
@@ -1343,6 +1363,12 @@ impl Backend {
                         operation: Operation::RenameBranch { .. },
                         ..
                     }
+                    | GitInfoOperation::StashWorkflow {
+                        operation: Operation::RendererStashSave { .. }
+                            | Operation::RendererStashPop { .. }
+                            | Operation::RendererStashDrop { .. },
+                        ..
+                    }
             )
         );
         let checkpoint_write = matches!(
@@ -1440,6 +1466,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchRename { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::StashWorkflow { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2772,6 +2805,55 @@ esac
                 .success()
         );
         let backend = Backend::new(16).unwrap();
+        for (key, value) in [
+            ("user.name", "Stash Test"),
+            ("user.email", "stash@example.invalid"),
+        ] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args(["config", key, value])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let stash = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"stash_workflow","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        fs::write(root.join("file"), b"stashed changes").unwrap();
+        assert_eq!(
+            stash(json!({"method":"renderer_stash_save","branch":"target"})).unwrap()["created"],
+            true
+        );
+        let saved = stash(json!({"method":"stash_list"})).unwrap();
+        assert_eq!(saved["entries"][0]["branch"], "target");
+        let popped = stash(json!({"method":"renderer_stash_pop","oid":saved["entries"][0]["oid"],"index":0,"basis":saved["basis"]})).unwrap();
+        assert_eq!(popped["code"], 0);
+        assert_eq!(popped["retained"], false);
+        assert_eq!(fs::read(root.join("file")).unwrap(), b"stashed changes");
+        fs::write(root.join("file"), b"ordinary stash").unwrap();
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["stash", "push", "-qm", "ordinary"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let ordinary = stash(json!({"method":"stash_list"})).unwrap();
+        assert!(stash(json!({"method":"renderer_stash_drop","oid":ordinary["entries"][0]["oid"],"index":0,"basis":ordinary["basis"]})).is_err());
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["stash", "drop", "-q"])
+                .status()
+                .unwrap()
+                .success()
+        );
         let branch = |operation: Value| {
             backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"branch_creation","repository_path":root,"operation":operation}})]).unwrap())
         };

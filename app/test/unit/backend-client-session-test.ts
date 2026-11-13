@@ -520,6 +520,25 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenCalledTimes(7)
   })
 
+  it('saves, restores and drops only reviewed Desktop stashes', async () => {
+    const oid = 'b'.repeat(40)
+    const listing = { basis: 'a'.repeat(64), has_more: false, entries: [{ index: 0, oid, branch: 'feature' }] }
+    const invoke = vi.fn(async (): Promise<unknown> => listing)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    invoke.mockResolvedValueOnce({ code: 0, created: true, stderr: '' })
+    await expect(client.saveDesktopStash('/repo', 'feature')).resolves.toBe(true)
+    invoke.mockResolvedValueOnce(listing).mockResolvedValueOnce({ code: 1, conflicted: true, retained: true, stderr: '' })
+    await expect(client.mutateDesktopStash('/repo', oid, 'pop')).resolves.toBeUndefined()
+    invoke.mockResolvedValueOnce(listing).mockResolvedValueOnce({ code: 0, retained: true, stderr: '' })
+    await expect(client.mutateDesktopStash('/repo', oid, 'pop')).rejects.toMatchObject({ code: 'stash_retained', retryable: false })
+    invoke.mockResolvedValueOnce({ ...listing, entries: [{ index: 0, oid, branch: null }] })
+    await client.mutateDesktopStash('/repo', oid, 'drop')
+    expect(invoke).toHaveBeenCalledTimes(6)
+    invoke.mockResolvedValueOnce(listing).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.mutateDesktopStash('/repo', oid, 'drop')).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('saved changes') })
+  })
+
   it('reads complete blobs through the Rust transport', async () => {
     const oid = 'a'.repeat(40)
     const contents = Buffer.alloc(1024 * 1024 + 3, 0xab)

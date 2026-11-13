@@ -2271,6 +2271,52 @@ export class BackendClient {
     if (!isRecord(result) || result.code !== 0 || !isRecord(result.receipt) || typeof result.receipt.id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.receipt.id) || result.receipt.phase !== 'complete' || result.receipt.name !== name || result.receipt.new_name !== newName || result.receipt.oid !== expectedTip) throw new BackendError({ code: 'invalid_response', message: 'Branch rename outcome is uncertain; inspect branches, saved changes and rename history', retryable: false })
   }
 
+  private async desktopStashRequest(repositoryPath: string, method: 'stash_list' | 'renderer_stash_save' | 'renderer_stash_pop' | 'renderer_stash_drop', params: Record<string, unknown>): Promise<unknown> {
+    return this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'stash_workflow', repository_path: repositoryPath, operation: { method, ...params } } })
+      : this.repositoryRead(repositoryPath, method, params)
+  }
+
+  async saveDesktopStash(repositoryPath: string, branch: string): Promise<boolean> {
+    let value: unknown
+    try { value = await this.desktopStashRequest(repositoryPath, 'renderer_stash_save', { branch }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect saved changes and the index before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.created !== 'boolean' || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Stash save outcome is uncertain; inspect saved changes and the index', retryable: false })
+    if (value.code !== 0) throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Stash save failed'}; inspect saved changes and the index`, retryable: false })
+    return value.created
+  }
+
+  async mutateDesktopStash(repositoryPath: string, oid: string, action: 'pop' | 'drop'): Promise<void> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid)) throw new BackendError({ code: 'invalid_request', message: 'Invalid stash object ID', retryable: false })
+    const listing = await this.desktopStashRequest(repositoryPath, 'stash_list', {})
+    if (!isRecord(listing) || typeof listing.basis !== 'string' || !/^[a-f0-9]{64}$/.test(listing.basis) || typeof listing.has_more !== 'boolean' || !Array.isArray(listing.entries) || listing.entries.length > 1000) throw new BackendError({ code: 'invalid_response', message: 'Invalid stash list', retryable: false })
+    let selected: number | undefined
+    for (const [position, entry] of listing.entries.entries()) {
+      if (!isRecord(entry) || entry.index !== position || typeof entry.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(entry.oid) || !(entry.branch === null || typeof entry.branch === 'string')) throw new BackendError({ code: 'invalid_response', message: 'Invalid stash entry', retryable: false })
+      if (selected === undefined && entry.oid === oid && typeof entry.branch === 'string' && entry.branch.length > 0) selected = position
+    }
+    if (selected === undefined) {
+      if (listing.has_more) throw new BackendError({ code: 'unsupported', message: 'The selected stash is outside the supported list; refresh saved changes', retryable: false })
+      return
+    }
+    let value: unknown
+    try { value = await this.desktopStashRequest(repositoryPath, action === 'pop' ? 'renderer_stash_pop' : 'renderer_stash_drop', { oid, index: selected, basis: listing.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the working tree and saved changes before retrying`, retryable: false })
+    }
+    if (!isRecord(value) || !Number.isSafeInteger(value.code) || typeof value.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Stash outcome is uncertain; inspect the working tree and saved changes', retryable: false })
+    if (action === 'pop') {
+      if (value.code === 1 && value.conflicted === true && value.retained === true) return
+      if (value.code === 0 && value.retained === false) return
+      if (value.code === 0 && value.retained === true) throw new BackendError({ code: 'stash_retained', message: 'Changes were restored, but the saved stash was retained; inspect it before retrying', retryable: false })
+    } else if (value.code === 0) return
+    throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Stash operation failed'}; inspect the working tree and saved changes`, retryable: false })
+  }
+
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
     if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })

@@ -730,6 +730,19 @@ pub enum Operation {
         desktop: bool,
     },
     StashList,
+    RendererStashSave {
+        branch: String,
+    },
+    RendererStashPop {
+        oid: String,
+        index: u32,
+        basis: String,
+    },
+    RendererStashDrop {
+        oid: String,
+        index: u32,
+        basis: String,
+    },
     StashFiles {
         oid: String,
     },
