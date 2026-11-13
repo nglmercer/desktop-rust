@@ -36,3 +36,6 @@ app/src/lib/progress/**
 app/src/lib/markdown-filters/**
 # Action log parsers are checked and formatted by Biome.
 app/src/lib/actions-log-parser/**
+vite.cli.config.ts
+script/cli-build.test.ts
+script/test-discovery.mts

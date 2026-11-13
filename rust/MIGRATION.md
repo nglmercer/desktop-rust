@@ -44,7 +44,10 @@ No gate is satisfied by CLI passthrough alone, source counts, or the existence
 of a replacement file. Legacy removal requires runtime evidence of replacement.
 
 The Electron highlighter now uses the same Vite worker build as the Rust UI;
-the other Electron entries still use Webpack. A Vitest check executes the
+its standalone CLI entry also builds with Vite as CommonJS. The Electron main,
+renderer and crash entries still use Webpack. CLI build tests cover output
+preservation, argument handling and simulated macOS/Windows launcher paths;
+packaged execution on those platforms remains unverified. A Vitest check executes the
 generated worker and verifies that its output does not remove adjacent bundles.
 The local full Electron development compile exhausted the Node heap in the
 remaining Webpack stage, so the complete Electron build remains unverified.

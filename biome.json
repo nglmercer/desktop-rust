@@ -3,8 +3,11 @@
   "files": {
     "includes": [
       "script/test.mts",
+      "script/test-discovery.mts",
       "script/generate-example-usage-data.mts",
       "script/highlighter-build.test.ts",
+      "script/cli-build.test.ts",
+      "vite.cli.config.ts",
       "vitest.config.ts",
       "app/test/vitest-setup.ts",
       "app/test/unit/usage-data-test.ts",

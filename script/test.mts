@@ -1,30 +1,11 @@
 import { spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { parseEnv } from 'node:util'
+import { findTestFilesIn } from './test-discovery.mjs'
 
 function reporter(r: string): string[] {
   return ['--test-reporter', r, '--test-reporter-destination', 'stdout']
-}
-
-async function findTestFilesIn(paths: readonly string[]): Promise<string[]> {
-  const files: string[] = []
-  for (const path of paths) {
-    const entry = await stat(path)
-    if (entry.isFile()) {
-      files.push(path)
-      continue
-    }
-
-    for (const file of await readdir(path, { recursive: true }).then(x =>
-      x
-        .filter(f => /-test\.(ts|tsx|js|jsx|mts|mjs)$/.test(f))
-        .map(f => join(path, f))
-    )) {
-      files.push(file)
-    }
-  }
-  return files
 }
 
 const fileArgs = process.argv.slice(2).filter(a => !a.startsWith('--'))
