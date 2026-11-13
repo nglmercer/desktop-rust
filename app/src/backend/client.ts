@@ -2601,6 +2601,27 @@ export class BackendClient {
     throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to continue rebase'}; inspect the repository`, retryable: false })
   }
 
+  /** Start a reviewed cherry-pick without replaying an uncertain result. */
+  async startRepositoryCherryPick(repositoryPath: string, commits: readonly string[], expected: { readonly head: string; readonly branch: string | null }): Promise<'complete' | 'conflict'> {
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
+    if (!oid.test(expected.head) || commits.length === 0 || commits.length > 4096 || commits.some(id => !oid.test(id) || id.length !== expected.head.length) || (expected.branch !== null && !expected.branch.startsWith('refs/heads/'))) throw new BackendError({ code: 'invalid_request', message: 'Reviewed commit IDs and current branch are required', retryable: false })
+    const call = (method: 'renderer_cherry_pick_start_preview' | 'renderer_cherry_pick_start', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'start_cherry_pick', repository_path: repositoryPath, operation: { method, commits, expected_head: expected.head, expected_branch: expected.branch, ...extra } } })
+      : this.repositoryRead(repositoryPath, method, { commits, expected_head: expected.head, expected_branch: expected.branch, ...extra })
+    const preview = await call('renderer_cherry_pick_start_preview')
+    if (!isRecord(preview) || preview.head !== expected.head || preview.branch !== expected.branch || !Array.isArray(preview.commits) || preview.commits.length !== commits.length || preview.commits.some((id, i) => id !== commits[i]) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid cherry-pick review', retryable: false })
+    let result: unknown
+    try { result = await call('renderer_cherry_pick_start', { basis: preview.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect cherry-pick state and history before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Cherry-pick outcome is uncertain; inspect the repository', retryable: false })
+    if (result.code === 0 && result.outcome === 'complete') return 'complete'
+    if (result.code !== 0 && result.outcome === 'conflict') return 'conflict'
+    throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to start cherry-pick'}; inspect the repository`, retryable: false })
+  }
+
   /** Continue a reviewed cherry-pick without replaying an uncertain result. */
   async continueRepositoryCherryPick(repositoryPath: string, expected: string, empty: boolean): Promise<'complete' | 'conflict'> {
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expected)) throw new BackendError({ code: 'invalid_request', message: 'A reviewed cherry-pick is required', retryable: false })

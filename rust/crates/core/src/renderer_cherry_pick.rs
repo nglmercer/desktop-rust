@@ -8,6 +8,159 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 impl Repository {
+    async fn renderer_cherry_pick_start_review(
+        &self,
+        commits: &[String],
+        head: &str,
+        branch: Option<&str>,
+    ) -> Result<String> {
+        for variable in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_NAMESPACE",
+            "GIT_SHALLOW_FILE",
+        ] {
+            anyhow::ensure!(
+                std::env::var_os(variable).is_none(),
+                "Cannot review cherry-pick with {variable} set"
+            );
+        }
+        let oid = |value: &str| {
+            matches!(value.len(), 40 | 64)
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        anyhow::ensure!(
+            oid(head)
+                && !commits.is_empty()
+                && commits.len() <= 4096
+                && commits.iter().all(|id| oid(id) && id.len() == head.len()),
+            "Complete selected commit IDs are required"
+        );
+        anyhow::ensure!(
+            branch.is_none_or(
+                |name| name.starts_with("refs/heads/") && !name.contains(['\0', '\n', '\r'])
+            ),
+            "Invalid current branch"
+        );
+        anyhow::ensure!(
+            self.operation_state().await?.is_none(),
+            "Finish or abort the current Git operation first"
+        );
+        match std::fs::symlink_metadata(self.git_directory().await?.join("SQUASH_MSG")) {
+            Ok(_) => anyhow::bail!("Finish or abort the pending squash before cherry-picking"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let current = self
+            .run(&args(&[
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                "HEAD^{commit}",
+            ]))
+            .await?;
+        anyhow::ensure!(
+            current.code == 0 && String::from_utf8_lossy(&current.stdout).trim() == head,
+            "Current HEAD changed; refresh before cherry-picking"
+        );
+        let current_branch = self
+            .run(&args(&["symbolic-ref", "--quiet", "HEAD"]))
+            .await?;
+        anyhow::ensure!(
+            matches!(current_branch.code, 0 | 1),
+            "Cannot inspect current branch"
+        );
+        let actual = if current_branch.code == 0 {
+            Some(
+                String::from_utf8(current_branch.stdout)?
+                    .trim_end_matches('\n')
+                    .to_owned(),
+            )
+        } else {
+            None
+        };
+        anyhow::ensure!(
+            actual.as_deref() == branch,
+            "Current branch changed; refresh before cherry-picking"
+        );
+        for commit in commits {
+            anyhow::ensure!(
+                self.resolve_commit(commit).await? == *commit,
+                "Selected commit no longer resolves to that object"
+            );
+        }
+        let capture = self.checkout_capture(0).await?;
+        anyhow::ensure!(
+            capture["snapshot"]["head"].as_str() == Some(head)
+                && capture["snapshot"]["branch"].as_str()
+                    == branch.and_then(|value| value.strip_prefix("refs/heads/"))
+                && capture["snapshot"]["operation"].is_null()
+                && self.operation_state().await?.is_none(),
+            "Repository changed during review"
+        );
+        let mut hash = Sha256::new();
+        for part in [
+            self.id().as_bytes(),
+            head.as_bytes(),
+            &serde_json::to_vec(&branch)?,
+            &serde_json::to_vec(commits)?,
+            &serde_json::to_vec(&capture)?,
+        ] {
+            hash.update((part.len() as u64).to_le_bytes());
+            hash.update(part);
+        }
+        Ok(format!("{:x}", hash.finalize()))
+    }
+
+    pub(crate) async fn renderer_cherry_pick_start_preview(
+        &self,
+        commits: &[String],
+        head: &str,
+        branch: Option<&str>,
+    ) -> Result<Value> {
+        Ok(
+            json!({"basis":self.renderer_cherry_pick_start_review(commits, head, branch).await?,"head":head,"branch":branch,"commits":commits}),
+        )
+    }
+
+    pub(crate) async fn renderer_cherry_pick_start(
+        &self,
+        commits: &[String],
+        head: &str,
+        branch: Option<&str>,
+        basis: &str,
+    ) -> Result<Value> {
+        let _lock = self.stash_lock().await?;
+        anyhow::ensure!(
+            self.renderer_cherry_pick_start_review(commits, head, branch)
+                .await?
+                == basis,
+            "Cherry-pick context changed; refresh before starting"
+        );
+        let mut command = args(&["cherry-pick", "--empty=keep", "-m", "1", "--"]);
+        command.extend(commits.iter().map(std::ffi::OsString::from));
+        let output = process::run_bound_noninteractive(&self.path, &command).await?;
+        let unmerged = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
+        anyhow::ensure!(unmerged.code == 0, "Cannot inspect cherry-pick outcome");
+        let state = self.renderer_cherry_pick_state().await?;
+        let outcome = if output.code == 0 {
+            "complete"
+        } else if !unmerged.stdout.is_empty() && !state.is_null() {
+            "conflict"
+        } else {
+            "failed"
+        };
+        Ok(
+            json!({"outcome":outcome,"code":output.code,"stdout":String::from_utf8_lossy(&output.stdout),"stderr":String::from_utf8_lossy(&output.stderr)}),
+        )
+    }
+
     async fn renderer_cherry_pick_review(&self, expected: &str) -> Result<String> {
         for variable in [
             "GIT_DIR",
@@ -167,6 +320,133 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn start_binds_destination_commits_and_worktree_and_preserves_conflicts() {
+        let (f, target) = Fixture::new();
+        f.ok(&["cherry-pick", "--abort"]);
+        let head = f.ok(&["rev-parse", "HEAD"]);
+        let repo = Repository::open(&f.0).await.unwrap();
+        let commits = vec![target.clone()];
+        assert!(
+            repo.renderer_cherry_pick_start_preview(&commits, &head, Some("refs/heads/wrong"))
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.renderer_cherry_pick_start_preview(
+                &["--help".into()],
+                &head,
+                Some("refs/heads/main")
+            )
+            .await
+            .is_err()
+        );
+        let review = repo
+            .renderer_cherry_pick_start_preview(&commits, &head, Some("refs/heads/main"))
+            .await
+            .unwrap();
+        fs::write(f.0.join("file"), "local\n").unwrap();
+        assert!(
+            repo.renderer_cherry_pick_start(
+                &commits,
+                &head,
+                Some("refs/heads/main"),
+                review["basis"].as_str().unwrap()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(f.ok(&["rev-parse", "HEAD"]), head);
+        f.ok(&["reset", "--hard", "-q", "HEAD"]);
+        let review = repo
+            .renderer_cherry_pick_start_preview(&commits, &head, Some("refs/heads/main"))
+            .await
+            .unwrap();
+        let result = repo
+            .renderer_cherry_pick_start(
+                &commits,
+                &head,
+                Some("refs/heads/main"),
+                review["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["outcome"], "conflict");
+        assert_eq!(f.ok(&["rev-parse", "CHERRY_PICK_HEAD"]), target);
+        assert!(!f.ok(&["ls-files", "--unmerged"]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn start_applies_selected_commits_in_order() {
+        let (f, target) = Fixture::new();
+        f.ok(&["cherry-pick", "--abort"]);
+        f.ok(&["switch", "-q", "source"]);
+        fs::write(f.0.join("second"), "next\n").unwrap();
+        f.ok(&["add", "second"]);
+        f.ok(&["commit", "-qm", "second"]);
+        let second = f.ok(&["rev-parse", "HEAD"]);
+        f.ok(&["switch", "-qc", "clean", &format!("{target}^")]);
+        let head = f.ok(&["rev-parse", "HEAD"]);
+        let repo = Repository::open(&f.0).await.unwrap();
+        let commits = vec![target, second];
+        let review = repo
+            .renderer_cherry_pick_start_preview(&commits, &head, Some("refs/heads/clean"))
+            .await
+            .unwrap();
+        let result = repo
+            .renderer_cherry_pick_start(
+                &commits,
+                &head,
+                Some("refs/heads/clean"),
+                review["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["outcome"], "complete");
+        assert_eq!(f.ok(&["show", "HEAD:file"]), "source");
+        assert_eq!(f.ok(&["show", "HEAD:second"]), "next");
+        assert_eq!(f.ok(&["log", "-2", "--format=%s"]), "second\nsource");
+    }
+
+    #[tokio::test]
+    async fn start_preserves_empty_commits_and_merge_first_parent() {
+        let (f, source) = Fixture::new();
+        f.ok(&["cherry-pick", "--abort"]);
+        f.ok(&["switch", "-q", "source"]);
+        f.ok(&["commit", "--allow-empty", "-qm", "empty"]);
+        let empty = f.ok(&["rev-parse", "HEAD"]);
+        f.ok(&["switch", "-qc", "side"]);
+        fs::write(f.0.join("side"), "side\n").unwrap();
+        f.ok(&["add", "side"]);
+        f.ok(&["commit", "-qm", "side"]);
+        f.ok(&["switch", "-q", "source"]);
+        fs::write(f.0.join("main-only"), "main\n").unwrap();
+        f.ok(&["add", "main-only"]);
+        f.ok(&["commit", "-qm", "main-only"]);
+        f.ok(&["merge", "--no-ff", "-qm", "merge", "side"]);
+        let merge = f.ok(&["rev-parse", "HEAD"]);
+        f.ok(&["switch", "-qc", "clean", &source]);
+        let repo = Repository::open(&f.0).await.unwrap();
+        let commits = vec![empty, merge];
+        let review = repo
+            .renderer_cherry_pick_start_preview(&commits, &source, Some("refs/heads/clean"))
+            .await
+            .unwrap();
+        let result = repo
+            .renderer_cherry_pick_start(
+                &commits,
+                &source,
+                Some("refs/heads/clean"),
+                review["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["outcome"], "complete");
+        assert_eq!(f.ok(&["log", "-2", "--format=%s"]), "merge\nempty");
+        assert_eq!(f.ok(&["show", "HEAD:side"]), "side");
+        assert!(!f.0.join("main-only").exists());
     }
 
     #[tokio::test]

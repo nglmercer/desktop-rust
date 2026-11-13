@@ -143,10 +143,18 @@ function configureOptionsWithCallBack<T extends IGitExecutionOptions>(
 export async function cherryPick(
   repository: Repository,
   commits: ReadonlyArray<CommitOneLine>,
-  progressCallback?: (progress: IMultiCommitOperationProgress) => void
+  progressCallback?: (progress: IMultiCommitOperationProgress) => void,
+  expected?: { readonly head: string; readonly branch: string | null }
 ): Promise<CherryPickResult> {
   if (commits.length === 0) {
     return CherryPickResult.UnableToStart
+  }
+
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    if (expected === undefined) throw new Error('Refresh the current branch before cherry-picking')
+    const result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().startRepositoryCherryPick(repository.path, commits.map(commit => commit.sha), expected), true)
+    return result === 'complete' ? CherryPickResult.CompletedWithoutError : CherryPickResult.ConflictsEncountered
   }
 
   let baseOptions: IGitStringExecutionOptions = {

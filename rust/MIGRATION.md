@@ -63,6 +63,9 @@ An opt-in `desktop-cli` feature, `embedded-ui`, now embeds the output of
 `cargo build -p desktop-cli --features embedded-ui --locked` after building the
 renderer. The default build retains the 503 until browser workflow parity is
 verified; the feature is an integration path, not a completed browser product.
+The loopback renderer now uses browser APIs for clipboard and external links;
+these were exercised in Chromium against the embedded UI and real bridge.
+Browser popup blocking remains controlled by the browser.
 In an isolated browser probe, the Vite renderer mounted through a temporary
 asset proxy and an authenticated real bridge. Browser window state, focus,
 theme and app-resource path queries are now answered locally, and the welcome
@@ -2399,7 +2402,15 @@ worktree and sequencer state, invokes Git with its editor disabled, and reports
 subsequent conflicts without retrying uncertain outcomes. Empty resolutions
 retain the previous empty-commit behavior. External Git writers can race the
 review and Git's own locks; streaming progress, interactive hook failures,
-the start operation, Electron fallback and cross-platform parity remain open.
+Electron fallback and cross-platform parity remain open.
+
+The Wry and WebSocket renderers also start reviewed cherry-picks through Rust.
+The review binds the ordered selected commits, destination branch and head,
+index, working files and operation state before native Git is invoked. Conflicts
+remain in Git's sequencer for resolution or abort; interrupted outcomes require
+inspection before retry. External Git writers can race the review and Git's
+locks, and live progress, interactive hook failures, Electron fallback and
+cross-platform parity remain open.
 
 ## Rebase continuation
 

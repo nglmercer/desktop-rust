@@ -11470,8 +11470,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const progressCallback =
       this.getMultiCommitOperationProgressCallBack(repository)
     const gitStore = this.gitStoreCache.get(repository)
+    const tip = gitStore.tip
+    const expected = tip.kind === TipState.Valid
+      ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
+      : tip.kind === TipState.Detached
+      ? { head: tip.currentSha, branch: null }
+      : undefined
     const result = await gitStore.performFailableOperation(() =>
-      cherryPick(repository, orderedCommits, progressCallback)
+      cherryPick(repository, orderedCommits, progressCallback, expected)
     )
 
     return result || CherryPickResult.Error

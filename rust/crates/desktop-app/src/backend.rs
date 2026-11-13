@@ -145,6 +145,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    StartCherryPick {
+        repository_path: String,
+        operation: Operation,
+    },
     ContinueRebase {
         repository_path: String,
         operation: Operation,
@@ -439,6 +443,9 @@ impl Backend {
         | GitInfoOperation::ContinueCherryPick {
             repository_path, ..
         }
+        | GitInfoOperation::StartCherryPick {
+            repository_path, ..
+        }
         | GitInfoOperation::ContinueRebase {
             repository_path, ..
         }
@@ -645,6 +652,17 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported cherry-pick continuation operation".into(),
+            ));
+        }
+        if let GitInfoOperation::StartCherryPick { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererCherryPickStartPreview { .. }
+                    | Operation::RendererCherryPickStart { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported cherry-pick start operation".into(),
             ));
         }
         if let GitInfoOperation::ContinueRebase { operation, .. } = &request.operation
@@ -1428,6 +1446,10 @@ impl Backend {
                         operation: Operation::RendererCherryPickContinue { .. },
                         ..
                     }
+                    | GitInfoOperation::StartCherryPick {
+                        operation: Operation::RendererCherryPickStart { .. },
+                        ..
+                    }
                     | GitInfoOperation::ContinueRebase {
                         operation: Operation::RendererRebaseContinue { .. },
                         ..
@@ -1599,6 +1621,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::ContinueCherryPick { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::StartCherryPick { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1920,9 +1949,15 @@ mod tests {
             let target = git(&["rev-parse", "HEAD"]);
             git(&["switch", "-q", "main"]);
             fs::write(root.join("file"), "destination\n").unwrap(); git(&["commit", "-qam", "destination"]);
-            assert!(!run(&["cherry-pick", &target]).status.success());
-            fs::write(root.join("file"), "resolution\n").unwrap(); git(&["add", "file"]);
+            let head = git(&["rev-parse", "HEAD"]);
             let backend = Backend::new(16).unwrap();
+            let start = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"start_cherry_pick","repository_path":root,"operation":operation}})]);
+            assert!(start(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(start(json!({"method":"renderer_cherry_pick_start_preview","commits":[target],"expected_head":head,"expected_branch":"refs/heads/main"})).unwrap()).unwrap();
+            assert!(backend.read(start(json!({"method":"renderer_cherry_pick_start","commits":[target],"expected_head":head,"expected_branch":"refs/heads/main","basis":"bad"})).unwrap()).is_err());
+            let pick = backend.read(start(json!({"method":"renderer_cherry_pick_start","commits":[target],"expected_head":head,"expected_branch":"refs/heads/main","basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(pick["outcome"], "conflict");
+            fs::write(root.join("file"), "resolution\n").unwrap(); git(&["add", "file"]);
             let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"continue_cherry_pick","repository_path":root,"operation":operation}})]);
             assert!(route(json!({"method":"stage","paths":["file"]})).is_err());
             let preview = backend.read(route(json!({"method":"renderer_cherry_pick_continue_preview","expected":target})).unwrap()).unwrap();

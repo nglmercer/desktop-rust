@@ -284,6 +284,17 @@ pub enum Operation {
     RendererCherryPickContinuePreview {
         expected: String,
     },
+    RendererCherryPickStartPreview {
+        commits: Vec<String>,
+        expected_head: String,
+        expected_branch: Option<String>,
+    },
+    RendererCherryPickStart {
+        commits: Vec<String>,
+        expected_head: String,
+        expected_branch: Option<String>,
+        basis: String,
+    },
     RendererCherryPickContinue {
         expected: String,
         basis: String,

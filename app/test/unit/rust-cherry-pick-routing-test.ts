@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  transport: 'wry', state: vi.fn(), context: vi.fn(), git: vi.fn(), commit: vi.fn(), status: vi.fn(), stage: vi.fn(), continuePick: vi.fn(),
+  transport: 'wry', state: vi.fn(), context: vi.fn(), git: vi.fn(), commit: vi.fn(), status: vi.fn(), stage: vi.fn(), continuePick: vi.fn(), startPick: vi.fn(),
   scope: vi.fn(async (_path: string, _kind: string, work: () => Promise<unknown>) => work()),
 }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryCherryPickState: mocks.state, repositoryStatusContext: mocks.context, continueRepositoryCherryPick: mocks.continuePick }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryCherryPickState: mocks.state, repositoryStatusContext: mocks.context, continueRepositoryCherryPick: mocks.continuePick, startRepositoryCherryPick: mocks.startPick }) }))
 vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOperation: mocks.scope }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 vi.mock('../../src/lib/git/status', () => ({ getStatus: mocks.status }))
@@ -14,7 +14,7 @@ vi.mock('../../src/lib/git/stage', () => ({ stageManualConflictResolution: vi.fn
 vi.mock('../../src/lib/git', () => ({ getCommit: mocks.commit }))
 vi.mock('../../src/lib/merge', () => ({ merge: vi.fn() }))
 
-import { continueCherryPick, CherryPickResult, getCherryPickSnapshot, isCherryPickHeadFound } from '../../src/lib/git/cherry-pick'
+import { cherryPick, continueCherryPick, CherryPickResult, getCherryPickSnapshot, isCherryPickHeadFound } from '../../src/lib/git/cherry-pick'
 import type { Repository } from '../../src/models/repository'
 
 const repository = { path: '/repo', resolvedGitDir: '/not-readable' } as Repository
@@ -22,6 +22,16 @@ const head = 'a'.repeat(40)
 
 describe.each(['wry', 'ws'])('Rust cherry-pick state through %s', transport => {
   beforeEach(() => { vi.clearAllMocks(); mocks.transport = transport })
+
+  it('starts the selected commits on the reviewed branch without legacy Git', async () => {
+    const expected = { head, branch: 'refs/heads/main' }
+    const commits = [{ sha: 'b'.repeat(40), summary: 'one' }, { sha: 'c'.repeat(40), summary: 'two' }]
+    mocks.startPick.mockResolvedValue('conflict')
+    await expect(cherryPick(repository, commits, undefined, expected)).resolves.toBe(CherryPickResult.ConflictsEncountered)
+    expect(mocks.startPick).toHaveBeenCalledWith('/repo', commits.map(c => c.sha), expected)
+    expect(mocks.git).not.toHaveBeenCalled()
+    await expect(cherryPick(repository, commits)).rejects.toThrow('Refresh the current branch')
+  })
 
   it('returns null when no cherry-pick is in progress', async () => {
     mocks.state.mockResolvedValue(null)

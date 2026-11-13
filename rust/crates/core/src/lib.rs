@@ -632,6 +632,34 @@ impl Repository {
             Operation::RendererCherryPickContinuePreview { expected } => {
                 return self.renderer_cherry_pick_continue_preview(&expected).await;
             }
+            Operation::RendererCherryPickStartPreview {
+                commits,
+                expected_head,
+                expected_branch,
+            } => {
+                return self
+                    .renderer_cherry_pick_start_preview(
+                        &commits,
+                        &expected_head,
+                        expected_branch.as_deref(),
+                    )
+                    .await;
+            }
+            Operation::RendererCherryPickStart {
+                commits,
+                expected_head,
+                expected_branch,
+                basis,
+            } => {
+                return self
+                    .renderer_cherry_pick_start(
+                        &commits,
+                        &expected_head,
+                        expected_branch.as_deref(),
+                        &basis,
+                    )
+                    .await;
+            }
             Operation::RendererCherryPickContinue {
                 expected,
                 basis,
@@ -1281,6 +1309,8 @@ impl Repository {
             | RendererRevertPreview { .. }
             | RendererRevert { .. }
             | RendererCherryPickContinuePreview { .. }
+            | RendererCherryPickStartPreview { .. }
+            | RendererCherryPickStart { .. }
             | RendererCherryPickContinue { .. }
             | RendererRebaseContinuePreview { .. }
             | RendererRebaseContinue { .. }
