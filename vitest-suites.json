@@ -298,5 +298,17 @@
   "app/test/unit/git/lfs-test.ts",
   "app/test/unit/git/push-test.ts",
   "app/test/unit/git/checkout-test.ts",
-  "app/test/unit/cloning-repositories-accounts-test.ts"
+  "app/test/unit/cloning-repositories-accounts-test.ts",
+  "app/test/unit/git/pull/ahead-and-behind-test.ts",
+  "app/test/unit/git/pull/only-ahead-test.ts",
+  "app/test/unit/git/pull/only-behind-test.ts",
+  "app/test/unit/git/pull/pull-test.ts",
+  "app/test/unit/git/rebase/detect-conflict-test.ts",
+  "app/test/unit/git/rebase/progress-test.ts",
+  "app/test/unit/git/rebase-full-test.ts",
+  "app/test/unit/git/remote-test.ts",
+  "app/test/unit/git/remote-management-test.ts",
+  "app/test/unit/git/diff-resolution-test.ts",
+  "app/test/unit/git/multi-operation-terminal-output-test.ts",
+  "app/test/unit/git/remote-operations-test.ts"
 ]

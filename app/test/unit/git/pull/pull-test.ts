@@ -1,4 +1,4 @@
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, type TestContext } from 'vitest'
 import assert from 'node:assert'
 import * as Path from 'path'
 import { setupEmptyRepository } from '../../../helpers/repositories'

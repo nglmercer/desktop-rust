@@ -1,4 +1,4 @@
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, type TestContext } from 'vitest'
 import assert from 'node:assert'
 import { continueRebase, getStatus } from '../../../../src/lib/git'
 import {

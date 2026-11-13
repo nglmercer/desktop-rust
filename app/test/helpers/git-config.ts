@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SuiteContext, TestContext } from 'node:test'
+import type { TestContext as VitestTestContext } from 'vitest'
 import { createTempDirectory } from './temp'
 
 /**
@@ -11,14 +12,8 @@ import { createTempDirectory } from './temp'
  * values. Since the environment is process-wide, these tests must run serially.
  */
 export async function isolateGitConfig(
-  t: TestContext | SuiteContext
+  t: TestContext | SuiteContext | VitestTestContext
 ): Promise<void> {
-  if (!('after' in t)) {
-    throw new Error(
-      'Git configuration isolation must run in a test or beforeEach hook'
-    )
-  }
-
   const config = join(await createTempDirectory(t), 'empty-config')
   await writeFile(config, '')
 
@@ -32,7 +27,7 @@ export async function isolateGitConfig(
     value: process.env[name],
   }))
 
-  t.after(() => {
+  const restore = () => {
     for (const { name, value } of previous) {
       if (value === undefined) {
         delete process.env[name]
@@ -40,7 +35,12 @@ export async function isolateGitConfig(
         process.env[name] = value
       }
     }
-  })
+  }
+  if ('after' in t) {
+    t.after(restore)
+  } else {
+    t.onTestFinished(restore)
+  }
 
   for (const [name, value] of Object.entries(environment)) {
     process.env[name] = value

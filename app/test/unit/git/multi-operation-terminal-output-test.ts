@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { createMultiOperationTerminalOutputCallback } from '../../../src/lib/git/multi-operation-terminal-output'
 import {
   git,

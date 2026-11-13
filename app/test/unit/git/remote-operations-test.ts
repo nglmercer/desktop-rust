@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, TestContext } from 'node:test'
+import { beforeEach, describe, it, vi, type TestContext } from 'vitest'
 import assert from 'node:assert'
 import { readFile, writeFile } from 'fs/promises'
 import * as Path from 'path'
@@ -224,7 +224,7 @@ describe('git/remote operations', () => {
           )
           assert(base !== undefined)
           const target = await getBranchOrError(repository, 'master')
-          const progress = t.mock.fn()
+          const progress = vi.fn()
 
           assert.strictEqual(
             await rebase(
@@ -243,7 +243,7 @@ describe('git/remote operations', () => {
             await readFile(Path.join(repository.path, 'local.txt'), 'utf8'),
             'local change'
           )
-          assert.strictEqual(progress.mock.callCount() > 0, withProgress)
+          assert.strictEqual(progress.mock.calls.length > 0, withProgress)
         })
       }
 
@@ -333,7 +333,7 @@ describe('git/remote operations', () => {
             t,
             remoteName
           )
-          const progress = t.mock.fn()
+          const progress = vi.fn()
 
           await fetch(repository, remote, withProgress ? progress : undefined)
 
@@ -343,7 +343,7 @@ describe('git/remote operations', () => {
           )
           const expected = await getTipOrError(upstream)
           assert.strictEqual(actual.sha, expected.sha)
-          assert.strictEqual(progress.mock.callCount() > 0, withProgress)
+          assert.strictEqual(progress.mock.calls.length > 0, withProgress)
         })
 
         it(`pushes a branch and tags with progress ${withProgress}`, async t => {
@@ -360,7 +360,7 @@ describe('git/remote operations', () => {
             '#!/bin/sh\nexit 1\n',
             { mode: 0o755 }
           )
-          const progress = t.mock.fn()
+          const progress = vi.fn()
 
           await push(
             repository,
@@ -377,7 +377,7 @@ describe('git/remote operations', () => {
           const tag = await getRefOrError(upstream, 'refs/tags/v1.0')
           assert.strictEqual(branch.sha, expected.sha)
           assert.strictEqual(tag.sha, expected.sha)
-          assert.strictEqual(progress.mock.callCount() > 0, withProgress)
+          assert.strictEqual(progress.mock.calls.length > 0, withProgress)
         })
       }
 
@@ -411,7 +411,7 @@ describe('git/remote operations', () => {
         'refs/remotes/origin/master'
       )
       const remote = { name: '--dry-run', url: upstream.path }
-      const progress = t.mock.fn()
+      const progress = vi.fn()
       const result = fetch(
         repository,
         remote,
@@ -450,7 +450,7 @@ describe('git/remote operations', () => {
   for (const withProgress of [false, true]) {
     it(`pulls updates with progress ${withProgress}`, async t => {
       const { repository, upstream, remote } = await setupRemote(t, 'origin')
-      const progress = t.mock.fn()
+      const progress = vi.fn()
 
       await pull(repository, remote, {
         progressCallback: withProgress ? progress : undefined,
@@ -460,7 +460,7 @@ describe('git/remote operations', () => {
       const actual = await getTipOrError(repository)
       const expected = await getTipOrError(upstream)
       assert.strictEqual(actual.sha, expected.sha)
-      assert.strictEqual(progress.mock.callCount() > 0, withProgress)
+      assert.strictEqual(progress.mock.calls.length > 0, withProgress)
     })
   }
 
@@ -468,7 +468,7 @@ describe('git/remote operations', () => {
     it(`rejects pulling from ${name} before reporting progress`, async t => {
       const { repository, remote } = await setupRemote(t, name)
       const before = await getTipOrError(repository)
-      const progress = t.mock.fn()
+      const progress = vi.fn()
       const branch = await getBranchOrError(repository, 'master')
       assert.strictEqual(branch.upstream, `${name}/master`)
       assert(branch.upstream !== null)
@@ -488,7 +488,7 @@ describe('git/remote operations', () => {
 
       const after = await getTipOrError(repository)
       assert.strictEqual(after.sha, before.sha)
-      assert.strictEqual(progress.mock.callCount(), 0)
+      assert.strictEqual(progress.mock.calls.length, 0)
     })
   }
 })
