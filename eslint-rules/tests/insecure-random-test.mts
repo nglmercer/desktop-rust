@@ -65,7 +65,7 @@ Math[ /* member */ random /* end */ ]();
   })
 
   it('allows secure calls, non-call references and documented suppressions', () => {
-    const source = `crypto.randomBytes()\nwindow.crypto.getRandomValues(new Uint8Array(4))\nconst fn = Math.random\nMath['random']()\n// biome-ignore lint/plugin: Non-security visual jitter.\nMath.random()\n`
+    const source = `crypto.randomBytes()\nwindow.crypto.getRandomValues(new Uint8Array(4))\nconst fn = Math.random\nMath['random']()\n// biome-ignore lint/plugin/insecureRandom: Non-security visual jitter.\nMath.random()\n`
     expect(lint(source)).toEqual({ status: 0, lines: [] })
   })
 })

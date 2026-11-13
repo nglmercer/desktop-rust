@@ -90,10 +90,8 @@ The codebase uses comprehensive ESLint rules. Key custom rules:
 - `react-no-unbound-dispatcher-props`: Enforces proper dispatcher prop handling
 - `react-readonly-props-and-state`: Prevents mutation of React props and state
 - `react-proper-lifecycle-methods`: Enforces correct React lifecycle usage
-- `no-loosely-typed-webcontents-ipc`: Ensures type-safe IPC communication
-
-The `insecure-random` rule runs as a Biome TypeScript plugin through
-`npm run lint:security`.
+The `insecure-random` and `no-loosely-typed-webcontents-ipc` rules run as
+Biome TypeScript plugins through `npm run lint:security`.
 
 ## Building & Testing
 

@@ -162,7 +162,7 @@ function skewInterval(): number {
 
   // We don't need cryptographically secure random numbers for
   // the skew. Pseudo-random should be just fine.
-  // biome-ignore lint/plugin: Scheduling jitter does not need cryptographic randomness.
+  // biome-ignore lint/plugin/insecureRandom: Scheduling jitter does not need cryptographic randomness.
   const skew = Math.ceil(Math.random() * SkewUpperBound)
   _skewInterval = skew
   return skew

@@ -1,5 +1,3 @@
-/* eslint-disable no-loosely-typed-webcontents-ipc */
-
 import { WebContents } from 'electron'
 import { RequestChannels } from '../lib/ipc-shared'
 
@@ -19,6 +17,7 @@ export function send<T extends keyof RequestChannels>(
     }
     log.error(msg)
   } else {
+    // biome-ignore lint/plugin/noLooselyTypedWebContentsIpc: This is the typed IPC helper implementation.
     webContents.send(channel, ...args)
   }
 }

@@ -13,5 +13,8 @@
   },
   "formatter": { "enabled": false },
   "linter": { "rules": { "preset": "none" } },
-  "plugins": ["./biome-rules/insecure-random.ts"]
+  "plugins": [
+    "./biome-rules/insecure-random.ts",
+    "./biome-rules/no-loosely-typed-webcontents-ipc.ts"
+  ]
 }

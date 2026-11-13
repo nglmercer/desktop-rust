@@ -48,11 +48,15 @@ $ npm run test:eslint
 
 Each test suite is designed to exercise the relevant rule against code snippets that illustrate both valid and invalid code, and indicate which messages should be reported in case of failure.
 
-Name test files `*-test.mjs` so the Node.js test runner discovers them. Use
-ESLint's `RuleTester` for JavaScript rules, or the typed `TSESLint.RuleTester`
-wrapper from `@typescript-eslint/utils` for TypeScript rules. Resolve the
-TypeScript parser with
-`fileURLToPath(import.meta.resolve('@typescript-eslint/parser'))`.
+Name test files `*-test.mts` and register migrated suites in
+`vitest-suites.json`. Use ESLint's `RuleTester` for JavaScript rules, or the
+typed `TSESLint.RuleTester` wrapper from `@typescript-eslint/utils` for
+TypeScript rules. Resolve the TypeScript parser with `createRequire`.
+
+The migrated `insecure-random` and `no-loosely-typed-webcontents-ipc` checks
+live in `biome-rules/` and run through `npm run lint:security`. Their tests
+invoke the pinned Biome CLI against temporary fixtures. Suppressions must name
+the specific plugin rule so they do not hide other diagnostics.
 
 The recommended TypeScript lint preset remains enabled. When updating it,
 compare the effective configuration (`npm run eslint -- --print-config <file>`)

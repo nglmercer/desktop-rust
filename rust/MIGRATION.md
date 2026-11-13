@@ -58,6 +58,14 @@ and three non-security uses have explicit Biome suppressions. The plugin API
 is a Biome developer preview; rule tests and a dedicated CI check protect this
 migration while the remaining custom ESLint rules stay in place.
 
+The WebContents IPC check also runs as a Biome TypeScript plugin; its former
+ESLint implementation and registration have been removed. The typed IPC
+helper uses a rule-specific suppression, and randomness suppressions are
+also rule-specific so neither hides the other diagnostic. Parity tests retain
+the old rule's handling of optional calls, computed identifier members,
+parentheses, escapes and TypeScript assertions. As in the old rule, computed
+string properties are not matched.
+
 Linux CI now exercises the active `github-desktop-rs` Wry webview: its
 isolated smoke run waits for the shared React renderer to mount and performs
 both shell and Rust backend IPC calls. The obsolete `desktop-native` smoke
