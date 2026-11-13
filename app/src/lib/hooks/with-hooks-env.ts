@@ -7,6 +7,7 @@ import type { IGitExecutionOptions } from '../git/core'
 import { getRepoHooks } from './get-repo-hooks'
 import { createHooksProxy } from './hooks-proxy'
 import { getShellEnv } from './get-shell-env'
+import { quoteGitConfigParameter } from './git-config-parameters'
 import memoizeOne from 'memoize-one'
 import {
   getCacheHooksEnv,
@@ -91,9 +92,7 @@ export async function withHooksEnv<T>(
       existingGitEnvConfig.length > 0 ? `${existingGitEnvConfig} ` : ''
 
     return await fn({
-      // TODO: Do we need to escape tmpHooksDir? Could it possibly include a single quote?
-      // probably not?
-      GIT_CONFIG_PARAMETERS: `${gitEnvConfigPrefix}'core.hooksPath=${tmpHooksDir}'`,
+      GIT_CONFIG_PARAMETERS: `${gitEnvConfigPrefix}${quoteGitConfigParameter(`core.hooksPath=${tmpHooksDir}`)}`,
       PROCESS_PROXY_PORT: `${port}`,
       PROCESS_PROXY_TOKEN: token,
     })
