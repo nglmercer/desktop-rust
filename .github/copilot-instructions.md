@@ -1,6 +1,6 @@
 # GitHub Desktop - Copilot Instructions
 
-This repository contains GitHub Desktop, an open-source Electron-based GitHub application written in TypeScript and React.
+This repository contains GitHub Desktop, with a TypeScript/React application and an in-progress Rust backend and native shell migration.
 
 ## Agent workflow
 
@@ -12,10 +12,10 @@ PR-preparation skill.
 - **Language**: TypeScript (strict mode enabled)
 - **UI Framework**: React 16.x
 - **Runtime**: Electron > 38.x (see `app/.npmrc` for specific version)
-- **Build Tool**: Webpack with parallel builds
-- **Package Manager**: npm (bundled with the Node.js version in `.nvmrc`)
+- **Build Tools**: Vite for the web renderer and migrated Electron bundles; Webpack remains for the Electron main process and renderer; Cargo builds the Rust workspace
+- **Package Manager**: pnpm (see `packageManager` in `package.json`); existing scripts also use npm
 - **Node Version**: >= 22.12.0 (see `.nvmrc` for the recommended version)
-- **Testing**: Node.js built-in test runner (run using `npm test`, optionally providing one or more test files e.g `npm test -- app/test/unit/repository-list-test.ts`)
+- **Testing**: Vitest for migrated TypeScript suites, the Node.js test runner for remaining legacy suites, and Cargo for Rust tests. `npm test -- <file>` routes registered Vitest suites via `vitest-suites.json`.
 
 ## Code Style & Conventions
 
@@ -125,7 +125,7 @@ npm run test:eslint
 ```
 
 **Test Conventions**:
-- Use Node.js built-in test runner (not Jest or Mocha)
+- Use Vitest for new and migrated TypeScript unit tests; register migrated suites in `vitest-suites.json` so `npm test` routes them correctly. Existing Node.js test runner suites are being migrated.
 - Test files should be in `app/test/unit/` directory
 - Use `.ts` or `.tsx` extensions
 - Avoid synchronous tests; use async/await.
@@ -141,6 +141,9 @@ npm run lint:fix
 
 # Lint source code
 npm run lint:src
+
+# Check files migrated to Biome
+npm run lint:biome
 
 # Check Markdown files
 npm run markdownlint
