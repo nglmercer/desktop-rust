@@ -349,6 +349,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fence_preserves_configured_and_traditional_hook_chains_once() {
+        // This Unix fixture requires Git's configured-hook support; older Git
+        // versions are rejected by the fence's capability probe below.
+        let f = Fixture::new();
+        f.git(&["config", "hook.user-pre.event", "pre-commit"]);
+        f.git(&[
+            "config",
+            "hook.user-pre.command",
+            "printf 'configured\\n' >> .git/hook-order",
+        ]);
+        f.git(&["config", "hook.user-ref.event", "reference-transaction"]);
+        f.git(&[
+            "config",
+            "hook.user-ref.command",
+            "printf C >> .git/config-ref-events",
+        ]);
+        fs::write(
+            f.root.join(".git/hooks/pre-commit"),
+            "#!/bin/sh\nprintf 'traditional\\n' >> .git/hook-order\n",
+        )
+        .unwrap();
+        let repo = Repository::open(&f.root).await.unwrap();
+        let branch = f.git(&["symbolic-ref", "HEAD"]);
+        let head = f.git(&["rev-parse", "HEAD"]);
+        let tree = f.git(&["write-tree"]);
+        let guard = match repo
+            .commit_reference_guard(Some(&branch), Some(&head), &[&head], &tree, head.len())
+            .await
+        {
+            Ok(guard) => guard,
+            Err(error) if error.to_string().contains("does not support") => return,
+            Err(error) => panic!("{error:#}"),
+        };
+        let result = f.commit(&guard, &[]).await;
+        assert_eq!(
+            result.code,
+            0,
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(f.root.join(".git/hook-order")).unwrap(),
+            "configured\ntraditional\n"
+        );
+        let configured = fs::read(f.root.join(".git/config-ref-events")).unwrap();
+        let traditional = fs::read_to_string(f.root.join(".git/ref-events")).unwrap();
+        assert_eq!(configured.len(), traditional.lines().count());
+        assert!(traditional.lines().any(|event| event == "prepared"));
+        assert_eq!(
+            guard.prepared_oid().unwrap().as_deref(),
+            Some(f.git(&["rev-parse", "HEAD"]).as_str())
+        );
+    }
+
+    #[tokio::test]
     async fn guarded_private_index_commit_preserves_live_index_and_runs_hooks() {
         let f = Fixture::new();
         let repo = Repository::open(&f.root).await.unwrap();
