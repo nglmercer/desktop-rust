@@ -1,9 +1,9 @@
-import { spawn, SpawnOptions } from 'child_process'
+import { spawn, type SpawnOptions } from 'child_process'
 import { pathExists } from '../path-exists'
-import { ExternalEditorError, FoundEditor } from './shared'
+import { ExternalEditorError, type FoundEditor } from './shared'
 import {
   expandTargetPathArgument,
-  ICustomIntegration,
+  type ICustomIntegration,
   parseCustomIntegrationArguments,
 } from '../custom-integration'
 

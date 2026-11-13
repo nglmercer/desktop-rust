@@ -1,5 +1,5 @@
 import { pathExists } from '../path-exists'
-import { IFoundEditor } from './found-editor'
+import type { IFoundEditor } from './found-editor'
 import appPath from 'app-path'
 
 /** Represents an external editor on macOS */

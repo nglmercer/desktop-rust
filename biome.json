@@ -61,6 +61,8 @@
       "app/src/lib/markdown-filters/**",
       "app/src/lib/actions-log-parser/**",
       "app/src/lib/ci-checks/**",
+      "app/src/lib/editors/**",
+      "app/src/lib/shells/**",
       "app/src/lib/git/repository-operation-context.ts",
       "app/src/lib/git/rev-list.ts",
       "app/src/lib/git/gitignore.ts",

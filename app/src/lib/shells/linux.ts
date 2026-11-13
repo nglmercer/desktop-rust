@@ -1,11 +1,11 @@
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { assertNever } from '../fatal-error'
 import { parseEnumValue } from '../enum'
 import { pathExists } from '../path-exists'
-import { FoundShell } from './shared'
+import type { FoundShell } from './shared'
 import {
   expandTargetPathArgument,
-  ICustomIntegration,
+  type ICustomIntegration,
   parseCustomIntegrationArguments,
   spawnCustomIntegration,
 } from '../custom-integration'

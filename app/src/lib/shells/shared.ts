@@ -1,11 +1,11 @@
-import { ChildProcess } from 'child_process'
+import type { ChildProcess } from 'child_process'
 
 import * as Darwin from './darwin'
 import * as Win32 from './win32'
 import * as Linux from './linux'
 import { ShellError } from './error'
 import { pathExists } from '../path-exists'
-import { ICustomIntegration } from '../custom-integration'
+import type { ICustomIntegration } from '../custom-integration'
 
 export type Shell = Darwin.Shell | Win32.Shell | Linux.Shell
 
@@ -22,7 +22,7 @@ export type FoundShell<T extends Shell> = {
 type AnyFoundShell = FoundShell<Shell>
 
 /** The default shell. */
-export const Default = (function () {
+export const Default = (() => {
   if (__DARWIN__) {
     return Darwin.Default
   } else if (__WIN32__) {

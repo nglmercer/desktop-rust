@@ -4,12 +4,12 @@ import {
   enumerateKeys,
   enumerateValues,
   HKEY,
-  RegistryValue,
+  type RegistryValue,
   RegistryValueType,
 } from 'registry-js'
 import { pathExists } from '../path-exists'
 
-import { IFoundEditor } from './found-editor'
+import type { IFoundEditor } from './found-editor'
 import memoizeOne from 'memoize-one'
 
 interface IWindowsAppInformation {
@@ -95,7 +95,7 @@ const registryKeysForJetBrainsIDE = (
   const lastYear = new Date().getFullYear()
   const firstYear = lastYear - 2
 
-  const result = new Array<RegistryKey>()
+  const result: RegistryKey[] = []
 
   for (let year = firstYear; year <= lastYear; year++) {
     for (
@@ -571,7 +571,7 @@ async function findApplication(editor: WindowsExternalEditor) {
 
 const getJetBrainsToolboxEditors = memoizeOne(async () => {
   const re = /^JetBrains Toolbox \(.*\)/
-  const editors = new Array<WindowsExternalEditor>()
+  const editors: WindowsExternalEditor[] = []
 
   for (const parent of [uninstallSubKey, wow64UninstallSubKey]) {
     for (const key of enumerateKeys(HKEY.HKEY_CURRENT_USER, parent)) {

@@ -1,9 +1,9 @@
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import * as Path from 'path'
 import {
   enumerateValues,
   HKEY,
-  RegistryValue,
+  type RegistryValue,
   RegistryValueType,
 } from 'registry-js'
 import { assertNever } from '../fatal-error'
@@ -11,10 +11,10 @@ import { enableWSLDetection } from '../feature-flag'
 import { findGitOnPath } from '../is-git-on-path'
 import { parseEnumValue } from '../enum'
 import { pathExists } from '../path-exists'
-import { FoundShell } from './shared'
+import type { FoundShell } from './shared'
 import {
   expandTargetPathArgument,
-  ICustomIntegration,
+  type ICustomIntegration,
   parseCustomIntegrationArguments,
   spawnCustomIntegration,
 } from '../custom-integration'
@@ -224,8 +224,8 @@ async function findHyper(): Promise<string | null> {
     const path = commandPieces
       ? commandPieces[2]
       : localAppData != null
-      ? localAppData.concat('\\hyper\\Hyper.exe')
-      : null // fall back to the launcher in install root
+        ? localAppData.concat('\\hyper\\Hyper.exe')
+        : null // fall back to the launcher in install root
 
     if (path == null) {
       log.debug(
@@ -508,28 +508,31 @@ export function launch(
           cwd: path,
         }
       )
-    case Shell.Hyper:
+    case Shell.Hyper: {
       const hyperPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${hyperPath}`)
       return spawn(hyperPath, [`"${path}"`], {
         shell: true,
         cwd: path,
       })
-    case Shell.Alacritty:
+    }
+    case Shell.Alacritty: {
       const alacrittyPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${alacrittyPath}`)
       return spawn(alacrittyPath, [`--working-directory "${path}"`], {
         shell: true,
         cwd: path,
       })
-    case Shell.GitBash:
+    }
+    case Shell.GitBash: {
       const gitBashPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${gitBashPath}`)
       return spawn(gitBashPath, [`--cd="${path}"`], {
         shell: true,
         cwd: path,
       })
-    case Shell.Cygwin:
+    }
+    case Shell.Cygwin: {
       const cygwinPath = foundShell.path
       log.info(`launching ${shell} at path: ${cygwinPath}`)
       // Pass the path through the environment so shell metacharacters in
@@ -546,13 +549,15 @@ export function launch(
           env: { ...process.env, GITHUB_DESKTOP_CYGWIN_OPEN_PATH: path },
         }
       )
-    case Shell.Warp:
+    }
+    case Shell.Warp: {
       const warpPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${warpPath}`)
       return spawn(warpPath, [`warp://action/new_tab?path="${path}"`], {
         shell: true,
         cwd: path,
       })
+    }
     case Shell.WSL:
       return spawn('START', ['"WSL"', `"${foundShell.path}"`], {
         shell: true,
@@ -567,14 +572,16 @@ export function launch(
           cwd: path,
         }
       )
-    case Shell.WindowsTerminal:
+    case Shell.WindowsTerminal: {
       const windowsTerminalPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${windowsTerminalPath}`)
       return spawn(windowsTerminalPath, ['-d .'], { shell: true, cwd: path })
-    case Shell.FluentTerminal:
+    }
+    case Shell.FluentTerminal: {
       const fluentTerminalPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${fluentTerminalPath}`)
       return spawn(fluentTerminalPath, ['new'], { shell: true, cwd: path })
+    }
     default:
       return assertNever(shell, `Unknown shell: ${shell}`)
   }
