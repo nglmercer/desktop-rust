@@ -1,4 +1,4 @@
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from 'vitest'
 import assert from 'node:assert'
 import { exec } from 'dugite'
 import * as Path from 'path'
@@ -39,9 +39,8 @@ describe('git/config', () => {
       })
     }
 
-    it(
+    it.skipIf(__WIN32__)(
       'rejects an existing directory whose name denotes a subtree',
-      { skip: __WIN32__ },
       async t => {
         const parent = await createTempDirectory(t)
         const directory = Path.join(parent, '*')

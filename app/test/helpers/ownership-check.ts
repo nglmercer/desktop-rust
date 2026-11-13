@@ -1,10 +1,9 @@
-import { TestContext } from 'node:test'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
-import { createTempDirectory } from './temp'
+import { createTempDirectory, TestCleanupContext } from './temp'
 
 /** Isolate Git configuration and enable ownership checks for a test. */
-export async function setupOwnershipCheck(t: TestContext) {
+export async function setupOwnershipCheck(t: TestCleanupContext) {
   const home = await createTempDirectory(t)
   const globalConfigPath = join(home, '.gitconfig')
   await writeFile(globalConfigPath, '[safe]\n\tdirectory =\n')
@@ -19,13 +18,18 @@ export async function setupOwnershipCheck(t: TestContext) {
 
   for (const [name, value] of Object.entries(env)) {
     const previous = process.env[name]
-    t.after(() => {
+    const restore = () => {
       if (previous === undefined) {
         delete process.env[name]
       } else {
         process.env[name] = previous
       }
-    })
+    }
+    if ('after' in t) {
+      t.after(restore)
+    } else {
+      t.onTestFinished(restore)
+    }
     process.env[name] = value
   }
 

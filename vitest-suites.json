@@ -209,6 +209,7 @@
   "app/test/unit/ui/ci-status-test.tsx",
   "app/test/unit/ui/section-list-scroll-test.tsx",
   "app/test/unit/copilot-conflict-context-test.ts",
+  "app/test/unit/copilot-conflict-context-native-test.ts",
   "app/test/unit/copilot-conflict-resolution-test.ts",
   "app/test/unit/fuzzy-find-test.ts",
   "app/test/unit/format-test.ts",
@@ -320,5 +321,8 @@
   "app/test/unit/write-default-readme-test.ts",
   "app/test/unit/git-info-test.ts",
   "app/test/unit/git/file-version-fence-test.ts",
-  "app/test/unit/git/commit-test.ts"
+  "app/test/unit/git/commit-test.ts",
+  "app/test/unit/git/config-test.ts",
+  "app/test/unit/file-system-test.ts",
+  "app/test/unit/assisted-commit-selection-test.ts"
 ]

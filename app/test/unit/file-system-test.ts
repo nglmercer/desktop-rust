@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { getTempFilePath, readPartialFile } from '../../src/lib/file-system'
 import { writeFile } from 'fs/promises'
