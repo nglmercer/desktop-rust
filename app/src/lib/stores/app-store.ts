@@ -5143,7 +5143,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const { changesState, branchesState } = repositoryState
     const { currentBranchProtected, stashEntry } = changesState
     const { tip } = branchesState
-    const hasChanges = changesState.workingDirectory.files.length > 0
+    let hasChanges = changesState.workingDirectory.files.length > 0
 
     // No point in checking out the currently checked out branch.
     if (tip.kind === TipState.Valid && tip.branch.name === branch.name) {
@@ -5171,6 +5171,15 @@ export class AppStore extends TypedBaseStore<IAppState> {
       return this._switchWorktree(repository, wt)
     }
 
+    const review = typeof window !== 'undefined' && backend().transportKind !== 'none'
+      ? await backend().reviewBranchCheckout(repository.path, branch.ref, branch.tip.sha)
+      : null
+    if (review !== null) {
+      if (tip.kind === TipState.Valid && (review.sourceBranch !== tip.branch.name || review.sourceHead !== tip.branch.tip.sha)) {
+        throw new Error('The current branch changed; refresh the repository before switching')
+      }
+      hasChanges = review.dirty
+    }
     let strategy = explicitStrategy ?? this.uncommittedChangesStrategy
 
     // The user hasn't been presented with an explicit choice
@@ -5178,12 +5187,19 @@ export class AppStore extends TypedBaseStore<IAppState> {
       // Even if the user has chosen to "always stash on current branch" in
       // preferences we still want to let them know changes might be lost
       if (strategy === UncommittedChangesStrategy.StashOnCurrentBranch) {
-        if (hasChanges && stashEntry !== null) {
+        if (hasChanges && (review !== null ? review.sourceStash !== null : stashEntry !== null)) {
           const type = PopupType.ConfirmOverwriteStash
           this._showPopup({ type, repository, branchToCheckout: branch })
           return repository
         }
       }
+    }
+
+    // An explicit choice may have been made before a different stash appeared.
+    // Refresh and require a new choice if it was not the one the UI showed.
+    if (review !== null && explicitStrategy === UncommittedChangesStrategy.StashOnCurrentBranch && hasChanges && review.sourceStash !== null && review.sourceStash !== stashEntry?.stashSha) {
+      await this._refreshRepository(repository)
+      throw new Error('Saved changes changed; review the branch switch again')
     }
 
     // Always move changes to new branch if we're on a detached head, unborn
@@ -5204,7 +5220,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
       // We always want to end with refreshing the repository regardless of
       // whether the checkout succeeded or not in order to present the most
       // up-to-date information to the user.
-      return this.checkoutImplementation(repository, branch, strategy)
+      if (review !== null) this.updateCheckoutProgress(repository, { kind: 'checkout', title: `Checking out branch ${branch.name}`, description: 'Switching branches', value: 0, target: branch.name })
+      const checkout = review === null
+        ? this.checkoutImplementation(repository, branch, strategy)
+        : backend().checkoutReviewedBranch(repository.path, branch.ref, review.basis, strategy, strategy === UncommittedChangesStrategy.StashOnCurrentBranch && explicitStrategy !== undefined && review.sourceStash !== null)
+      return checkout
         .then(() => this.onSuccessfulCheckout(repository, branch))
         .catch(async e => {
           this.emitError(new CheckoutError(e, repository, branch))

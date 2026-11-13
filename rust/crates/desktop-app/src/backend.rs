@@ -125,6 +125,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    BranchCheckout {
+        repository_path: String,
+        operation: Operation,
+    },
     AbortGitOperation {
         repository_path: String,
         operation: Operation,
@@ -408,6 +412,9 @@ impl Backend {
         | GitInfoOperation::StashWorkflow {
             repository_path, ..
         }
+        | GitInfoOperation::BranchCheckout {
+            repository_path, ..
+        }
         | GitInfoOperation::AbortGitOperation {
             repository_path, ..
         }
@@ -576,6 +583,16 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported Desktop stash operation".into(),
+            ));
+        }
+        if let GitInfoOperation::BranchCheckout { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::CheckoutPreview { .. } | Operation::Checkout { basis: Some(_), .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported branch checkout operation".into(),
             ));
         }
         if let GitInfoOperation::FinishMergeCommit { operation, .. } = &request.operation
@@ -1369,6 +1386,10 @@ impl Backend {
                             | Operation::RendererStashDrop { .. },
                         ..
                     }
+                    | GitInfoOperation::BranchCheckout {
+                        operation: Operation::Checkout { .. },
+                        ..
+                    }
             )
         );
         let checkpoint_write = matches!(
@@ -1473,6 +1494,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::StashWorkflow { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::BranchCheckout { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -2861,6 +2889,27 @@ esac
         let created = branch(json!({"method":"create_branch","name":"native-created","start_point":"HEAD","checkout":false,"basis":plan["basis"]})).unwrap();
         assert_eq!(created["created"], true);
         assert_eq!(created["checked_out"], false);
+        let current = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["symbolic-ref", "HEAD"])
+            .output()
+            .unwrap();
+        let current = std::str::from_utf8(&current.stdout).unwrap().trim();
+        let checkout = |operation: Value| {
+            backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"branch_checkout","repository_path":root,"operation":operation}})]).unwrap())
+        };
+        let switch =
+            checkout(json!({"method":"checkout_preview","branch":"refs/heads/native-created"}))
+                .unwrap();
+        assert!(backend.admit_git_info(vec![json!({"operation":{"type":"branch_checkout","repository_path":root,"operation":{"method":"checkout","branch":"refs/heads/native-created"}}})]).is_err());
+        assert_eq!(checkout(json!({"method":"checkout","branch":"refs/heads/native-created","basis":switch["basis"]})).unwrap()["checked_out"], true);
+        let back = checkout(json!({"method":"checkout_preview","branch":current})).unwrap();
+        assert_eq!(
+            checkout(json!({"method":"checkout","branch":current,"basis":back["basis"]})).unwrap()
+                ["checked_out"],
+            true
+        );
         assert!(
             Command::new("git")
                 .arg("-C")

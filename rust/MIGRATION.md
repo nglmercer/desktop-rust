@@ -1114,6 +1114,15 @@ until those replacements and removal gates have evidence.
 
 ## Reviewed branch creation evidence
 
+The upstream application's main branch-switch flow now asks Rust for a fresh
+checkout review, checks the selected target and current branch tips, and uses
+the existing leave/bring and stash-overwrite dialogs before execution. The
+reviewed Rust operation owns checkout, stash handling and submodule updates.
+An end-to-end browser test switches branches with a modified file and confirms
+the edit survives. This path currently reports start/refresh progress rather
+than live Git/LFS progress; direct checkout callers, native platform behavior,
+proxy parity and the upstream recovery UI remain open.
+
 `AppStore.createBranchCore` creates a branch with an optional start point and
 no-track choice, then delegates switching to the normal checkout workflow. The
 Rust raw `switch -c`/`branch` path has been replaced by that orchestration. A

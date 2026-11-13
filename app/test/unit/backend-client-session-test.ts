@@ -539,6 +539,22 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.mutateDesktopStash('/repo', oid, 'drop')).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('saved changes') })
   })
 
+  it('reviews a pinned branch checkout and never retries an uncertain switch', async () => {
+    const oid = 'b'.repeat(40)
+    const preview = { basis: 'a'.repeat(64), dirty: true, target: { reference: 'refs/heads/feature', oid }, source_branch: 'main', source_head: oid, source_stash: null, occupied_worktree: null }
+    const invoke = vi.fn(async (): Promise<unknown> => preview)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.reviewBranchCheckout('/repo', 'refs/heads/feature', oid)).resolves.toEqual({ basis: 'a'.repeat(64), dirty: true, sourceBranch: 'main', sourceHead: oid, sourceStash: null })
+    invoke.mockResolvedValueOnce(preview)
+    await expect(client.reviewBranchCheckout('/repo', 'refs/heads/feature', 'c'.repeat(40))).rejects.toMatchObject({ code: 'branch_changed' })
+    invoke.mockResolvedValueOnce({ code: 0, checked_out: true, receipt_id: '12345678-1234-4234-8234-123456789abc' })
+    await client.checkoutReviewedBranch('/repo', 'refs/heads/feature', 'a'.repeat(64), 'MoveToNewBranch', false)
+    invoke.mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.checkoutReviewedBranch('/repo', 'refs/heads/feature', 'a'.repeat(64), 'MoveToNewBranch', false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
+    expect(invoke).toHaveBeenCalledTimes(4)
+  })
+
   it('reads complete blobs through the Rust transport', async () => {
     const oid = 'a'.repeat(40)
     const contents = Buffer.alloc(1024 * 1024 + 3, 0xab)

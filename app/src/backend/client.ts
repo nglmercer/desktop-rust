@@ -2317,6 +2317,34 @@ export class BackendClient {
     throw new BackendError({ code: 'git_error', message: `${value.stderr || 'Stash operation failed'}; inspect the working tree and saved changes`, retryable: false })
   }
 
+  async reviewBranchCheckout(repositoryPath: string, reference: string, expectedTip: string): Promise<{ basis: string; dirty: boolean; sourceBranch: string | null; sourceHead: string | null; sourceStash: string | null }> {
+    if (!/^(?:refs\/heads\/|refs\/remotes\/)/.test(reference) || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedTip)) throw new BackendError({ code: 'invalid_request', message: 'Invalid branch checkout target', retryable: false })
+    const params = { branch: reference }
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'branch_checkout', repository_path: repositoryPath, operation: { method: 'checkout_preview', ...params } } })
+      : await this.repositoryRead(repositoryPath, 'checkout_preview', params)
+    if (!isRecord(value) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || typeof value.dirty !== 'boolean' || !isRecord(value.target) || value.target.reference !== reference || value.target.oid !== expectedTip || !(value.source_branch === null || typeof value.source_branch === 'string') || !(value.source_head === null || (typeof value.source_head === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.source_head))) || !(value.source_stash === null || (isRecord(value.source_stash) && typeof value.source_stash.oid === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.source_stash.oid)))) throw new BackendError({ code: 'branch_changed', message: 'Branch checkout state changed; refresh and review it again', retryable: false })
+    if (value.occupied_worktree !== null) throw new BackendError({ code: 'branch_in_use', message: 'The branch is checked out in another worktree; refresh worktrees', retryable: false })
+    const sourceStash = isRecord(value.source_stash) && typeof value.source_stash.oid === 'string' ? value.source_stash.oid : null
+    return { basis: value.basis, dirty: value.dirty, sourceBranch: value.source_branch, sourceHead: value.source_head, sourceStash }
+  }
+
+  async checkoutReviewedBranch(repositoryPath: string, reference: string, basis: string, strategy: 'AskForConfirmation' | 'StashOnCurrentBranch' | 'MoveToNewBranch', replaceStash: boolean): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(basis)) throw new BackendError({ code: 'invalid_request', message: 'Invalid checkout review', retryable: false })
+    const operation = { method: 'checkout', branch: reference, strategy, basis, replace_stash: replaceStash, restore_index: false }
+    let value: unknown
+    try {
+      value = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'branch_checkout', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, 'checkout', operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the branch, working tree and checkout history before retrying`, retryable: false })
+    }
+    if (isRecord(value) && value.code === 0 && value.unchanged === true) return
+    if (!isRecord(value) || value.code !== 0 || value.checked_out !== true || typeof value.receipt_id !== 'string' || !/^[a-f0-9-]{36}$/.test(value.receipt_id)) throw new BackendError({ code: 'checkout_unconfirmed', message: 'Checkout did not complete; inspect the branch and checkout history before retrying', retryable: false })
+  }
+
   async repositoryBlobPrefix(repositoryPath: string, revision: string, path: string, length: number): Promise<string | null> {
     if (!Number.isSafeInteger(length) || length < 0 || length > 1024 * 1024) throw new BackendError({ code: 'invalid_request', message: 'Invalid blob preview length', retryable: false })
     const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_blob_prefix', { revision, path, length })
