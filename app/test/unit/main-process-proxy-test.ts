@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { afterEach, describe, it, vi } from 'vitest'
 
 import { isApplicationBundleFromMetadata } from '../../src/lib/is-application-bundle'
 import {
@@ -35,6 +35,8 @@ function createDependencies(
 
   return { calls, dependencies }
 }
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('showFolderContents', () => {
   it('opens a conclusively safe directory directly', async () => {
@@ -132,9 +134,9 @@ describe('showFolderContents', () => {
     })
   })
 
-  it('opens without confirmation when application metadata cannot be read', async t => {
+  it('opens without confirmation when application metadata cannot be read', async () => {
     const error = new Error('metadata unavailable')
-    const logError = t.mock.method(log, 'error')
+    const logError = vi.spyOn(log, 'error')
     const { calls, dependencies } = createDependencies({
       isApplicationBundle: async () => {
         throw error
@@ -148,7 +150,7 @@ describe('showFolderContents', () => {
       opens: 1,
       reveals: 0,
     })
-    assert.deepStrictEqual(logError.mock.calls[0].arguments, [
+    assert.deepStrictEqual(logError.mock.calls[0], [
       "Failed to load metadata for path '/unknown/repository'",
       error,
     ])
@@ -207,9 +209,9 @@ describe('showFolderContents', () => {
     })
   })
 
-  it('handles a failed reveal when file information is unavailable', async t => {
+  it('handles a failed reveal when file information is unavailable', async () => {
     const error = new Error('Finder unavailable')
-    const logError = t.mock.method(log, 'error')
+    const logError = vi.spyOn(log, 'error')
     const { dependencies } = createDependencies({
       stat: async () => {
         throw new Error('file information unavailable')
@@ -222,16 +224,16 @@ describe('showFolderContents', () => {
     await assert.doesNotReject(
       showFolderContents('/unknown/repository', dependencies)
     )
-    assert.deepStrictEqual(logError.mock.calls[1].arguments, [
+    assert.deepStrictEqual(logError.mock.calls[1], [
       "Unable to reveal folder '/unknown/repository'",
       error,
     ])
   })
 
   for (const isDarwin of [true, false]) {
-    it(`handles a failed non-directory reveal with isDarwin=${isDarwin}`, async t => {
+    it(`handles a failed non-directory reveal with isDarwin=${isDarwin}`, async () => {
       const error = new Error('Finder unavailable')
-      const logError = t.mock.method(log, 'error')
+      const logError = vi.spyOn(log, 'error')
       const { calls, dependencies } = createDependencies({
         isDarwin,
         stat: async () => ({ isDirectory: () => false }),
@@ -249,7 +251,7 @@ describe('showFolderContents', () => {
         opens: 0,
         reveals: 1,
       })
-      assert.deepStrictEqual(logError.mock.calls[1].arguments, [
+      assert.deepStrictEqual(logError.mock.calls[1], [
         "Unable to reveal folder '/repository/file'",
         error,
       ])
