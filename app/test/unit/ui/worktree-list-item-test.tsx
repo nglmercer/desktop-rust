@@ -1,11 +1,18 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import * as React from 'react'
 
 import { WorktreeEntry } from '../../../src/models/worktree'
 import { WorktreeListItem } from '../../../src/ui/worktrees/worktree-list-item'
 import { IMatches } from '../../../src/lib/fuzzy-find'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
+
+// Worktree labels use the real commit formatter without executing Git.
+vi.mock('../../../src/lib/git/core', () => ({ git: vi.fn() }))
+vi.mock('../../../src/lib/git/config', () => ({ getConfigValue: vi.fn() }))
+vi.mock('../../../src/lib/git/repository-operation', () => ({
+  withRepositoryGitOperation: vi.fn(),
+}))
 
 const noMatches: IMatches = { title: [], subtitle: [] }
 

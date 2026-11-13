@@ -1,10 +1,10 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { NoBranches } from '../../../src/ui/branches/no-branches'
 import { NoPullRequests } from '../../../src/ui/branches/no-pull-requests'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 interface IRenderedNoBranches {
   readonly createCalls: { count: number }

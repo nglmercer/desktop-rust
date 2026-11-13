@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { Button } from '../../../src/ui/lib/button'
@@ -7,7 +7,7 @@ import { Checkbox, CheckboxValue } from '../../../src/ui/lib/checkbox'
 import { RadioButton } from '../../../src/ui/lib/radio-button'
 import { RadioGroup } from '../../../src/ui/lib/radio-group'
 import { Select } from '../../../src/ui/lib/select'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('control primitives', () => {
   it('renders enabled buttons with forwarded refs, classes, and aria attributes', () => {

@@ -1,11 +1,11 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { DialogContent } from '../../../src/ui/dialog/content'
 import { DialogFooter } from '../../../src/ui/dialog/footer'
 import { OkCancelButtonGroup } from '../../../src/ui/dialog/ok-cancel-button-group'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('dialog action wrappers', () => {
   it('renders dialog content classes, children, and ref callbacks', () => {

@@ -1,11 +1,11 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { getDotComAPIEndpoint, type IAPIEmail } from '../../../src/lib/api'
 import { Account } from '../../../src/models/account'
 import { GitEmailNotFoundWarning } from '../../../src/ui/lib/git-email-not-found-warning'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 function createEmail(email: string): IAPIEmail {
   return {

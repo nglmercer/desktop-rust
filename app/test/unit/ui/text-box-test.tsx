@@ -1,10 +1,10 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import * as octicons from '../../../src/ui/octicons/octicons.generated'
 import { TextBox } from '../../../src/ui/lib/text-box'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('TextBox', () => {
   it('renders textbox labels, prefixed icons, and forwards focus or blur, key, change, and enter callbacks', () => {

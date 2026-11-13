@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { ComputedAction } from '../../../src/models/computed-action'
@@ -14,7 +14,7 @@ import { ActionStatusIcon } from '../../../src/ui/lib/action-status-icon'
 import { SegmentedItem } from '../../../src/ui/lib/vertical-segmented-control/segmented-item'
 import { RepoRulesetLink } from '../../../src/ui/repository-rules/repo-ruleset-link'
 import { ForkSettingsDescription } from '../../../src/ui/repository-settings/fork-contribution-target-description'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 function createForkRepository() {
   const owner = new Owner('desktop', 'https://api.github.com', 1)

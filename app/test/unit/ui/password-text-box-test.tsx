@@ -1,9 +1,9 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { PasswordTextBox } from '../../../src/ui/lib/password-text-box'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('PasswordTextBox', () => {
   it('toggles password visibility, keeps focus on the input, and forwards value changes', () => {

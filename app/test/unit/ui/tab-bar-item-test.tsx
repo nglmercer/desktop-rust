@@ -1,8 +1,8 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import { TabBarItem } from '../../../src/ui/tab-bar-item'
 import { TabBarType } from '../../../src/ui/tab-bar-type'
 

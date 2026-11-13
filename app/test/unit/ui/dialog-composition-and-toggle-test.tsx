@@ -1,12 +1,12 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { DefaultDialogFooter } from '../../../src/ui/dialog/default-dialog-footer'
 import { DialogHeader } from '../../../src/ui/dialog/header'
 import { CallToAction } from '../../../src/ui/lib/call-to-action'
 import { ToggleButton } from '../../../src/ui/lib/toggle-button'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('dialog composition and toggle components', () => {
   it('renders call-to-action content and invokes the action callback', () => {

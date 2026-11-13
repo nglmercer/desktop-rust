@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import type { IAvatarUser } from '../../../src/models/avatar'
@@ -9,7 +9,7 @@ import { CommitAttribution } from '../../../src/ui/lib/commit-attribution'
 import { Form } from '../../../src/ui/lib/form'
 import { HighlightText } from '../../../src/ui/lib/highlight-text'
 import { UiView } from '../../../src/ui/ui-view'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 function createAvatarUser(name: string): IAvatarUser {
   return {

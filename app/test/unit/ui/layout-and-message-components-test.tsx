@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import {
@@ -9,7 +9,7 @@ import {
 import { KeyboardShortcut } from '../../../src/ui/keyboard-shortcut/keyboard-shortcut'
 import { Errors } from '../../../src/ui/lib/errors'
 import { Row } from '../../../src/ui/lib/row'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 describe('layout and message components', () => {
   it('renders row and errors wrappers with expected semantics', () => {

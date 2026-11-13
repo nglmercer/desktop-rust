@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { FilesChangedBadge } from '../../../src/ui/changes/files-changed-badge'
@@ -8,7 +8,7 @@ import { HorizontalRule } from '../../../src/ui/lib/horizontal-rule'
 import { Loading } from '../../../src/ui/lib/loading'
 import { Ref } from '../../../src/ui/lib/ref'
 import { Toolbar } from '../../../src/ui/toolbar/toolbar'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 describe('component primitives', () => {
   it('renders the loading spinner octicon', () => {

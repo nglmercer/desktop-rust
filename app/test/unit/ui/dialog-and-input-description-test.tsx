@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import { DialogError } from '../../../src/ui/dialog/error'
@@ -7,7 +7,7 @@ import { DialogSuccess } from '../../../src/ui/dialog/success'
 import { Caption } from '../../../src/ui/lib/input-description/input-caption'
 import { InputError } from '../../../src/ui/lib/input-description/input-error'
 import { InputWarning } from '../../../src/ui/lib/input-description/input-warning'
-import { render, screen } from '../../helpers/ui/render'
+import { render, screen } from '../../helpers/ui/vitest-render'
 
 describe('dialog and input descriptions', () => {
   it('renders dialog error and success banners with alert semantics', () => {

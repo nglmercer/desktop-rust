@@ -130,5 +130,20 @@
   "app/test/unit/create-branch-test.ts",
   "app/test/unit/clone-path-safety-test.ts",
   "app/test/unit/worktree-dropdown-test.ts",
-  "app/test/unit/squashed-commit-description-test.ts"
+  "app/test/unit/squashed-commit-description-test.ts",
+  "app/test/unit/ui/text-box-test.tsx",
+  "app/test/unit/ui/password-text-box-test.tsx",
+  "app/test/unit/ui/input-description-and-textarea-test.tsx",
+  "app/test/unit/ui/structural-and-text-components-test.tsx",
+  "app/test/unit/ui/layout-and-message-components-test.tsx",
+  "app/test/unit/ui/static-status-and-link-components-test.tsx",
+  "app/test/unit/ui/worktree-list-item-test.tsx",
+  "app/test/unit/ui/tab-bar-item-test.tsx",
+  "app/test/unit/ui/control-primitives-test.tsx",
+  "app/test/unit/ui/component-primitives-test.tsx",
+  "app/test/unit/ui/branch-empty-states-test.tsx",
+  "app/test/unit/ui/email-attribution-warning-test.tsx",
+  "app/test/unit/ui/dialog-composition-and-toggle-test.tsx",
+  "app/test/unit/ui/dialog-and-input-description-test.tsx",
+  "app/test/unit/ui/dialog-action-wrappers-test.tsx"
 ]

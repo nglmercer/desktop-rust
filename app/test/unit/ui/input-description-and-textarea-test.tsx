@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import * as React from 'react'
 
 import {
@@ -7,7 +7,7 @@ import {
   InputDescriptionType,
 } from '../../../src/ui/lib/input-description/input-description'
 import { TextArea } from '../../../src/ui/lib/text-area'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('input description and textarea surfaces', () => {
   it('renders caption, warning, and error variants with the expected semantics', () => {
