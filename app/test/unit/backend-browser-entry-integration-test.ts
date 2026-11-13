@@ -153,6 +153,17 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         return navigator.clipboard.readText()
       })
       assert.equal(clipboard, 'browser clipboard test')
+      const selection = await page.evaluate(() => {
+        const input = document.createElement('input')
+        input.value = 'select this text'
+        document.body.appendChild(input)
+        input.focus()
+        Reflect.get(window, '__desktop').send('select-all-window-contents')
+        const result = [input.selectionStart, input.selectionEnd]
+        input.remove()
+        return result
+      })
+      assert.deepEqual(selection, [0, 'select this text'.length])
       const popupEvent = page.waitForEvent('popup')
       const opened = await page.evaluate(() =>
         Reflect.get(window, '__desktop').invoke(
