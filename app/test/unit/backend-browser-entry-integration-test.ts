@@ -98,6 +98,11 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         args: ['--no-sandbox'],
       })
       const page = await browser.newPage()
+      await page
+        .context()
+        .grantPermissions(['clipboard-read', 'clipboard-write'], {
+          origin: new URL(session).origin,
+        })
       await page.route('https://**', route => route.abort())
       await page.addInitScript(() => {
         const captured: string[] = []
@@ -140,6 +145,24 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
       await page.waitForFunction(
         () => Reflect.get(window, '__desktop')?.__backendReady === true
       )
+      const clipboard = await page.evaluate(async () => {
+        await Reflect.get(window, '__desktop').invoke(
+          'write-clipboard-text',
+          'browser clipboard test'
+        )
+        return navigator.clipboard.readText()
+      })
+      assert.equal(clipboard, 'browser clipboard test')
+      const popupEvent = page.waitForEvent('popup')
+      const opened = await page.evaluate(() =>
+        Reflect.get(window, '__desktop').invoke(
+          'open-external',
+          'https://example.invalid/'
+        )
+      )
+      const popup = await popupEvent
+      assert.equal(opened, true)
+      await popup.close()
       await page.waitForFunction(() =>
         (Reflect.get(window, '__browserAudit') as string[]).includes(
           'git_settings'
@@ -175,6 +198,8 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
         calls.filter(call => call.startsWith('desktop.io.git-exec:')).join(', ')
       )
       assert.ok(!calls.includes('get-app-path'))
+      assert.ok(!calls.includes('write-clipboard-text'))
+      assert.ok(!calls.includes('open-external'))
       assert.ok(!errors.includes('invalid typed repository request'))
     }, 60_000)
   }
