@@ -47,6 +47,22 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       suite.assertPrivateStorage(repo)
     }, 120_000)
 
+    it('scopes assigned credentials to reviewed remote HEAD discovery', () => {
+      suite.configure({ host: suite.service.host })
+      const repo = suite.seed('reviewed-remote-head-credentials')
+      suite.assign(repo)
+      const request = { remote: 'origin', expected_url: `${suite.service.url}/fork/repo.git`, recurse_submodules: false }
+      const fetch = suite.rpc(repo, 'renderer_fetch_preview', { request })
+      assert.equal(suite.rpc(repo, 'renderer_fetch', { request, basis: fetch.basis }).code, 0)
+      const preview = suite.rpc(repo, 'renderer_remote_head_preview', { request })
+      suite.clearTransport()
+      const result = suite.rpc(repo, 'renderer_remote_head', { request, basis: preview.basis })
+      assert.ok(result.code === 0 || result.code === 1)
+      suite.assertActor()
+      assert.ok(!existsSync(suite.nativeLog))
+      suite.assertPrivateStorage(repo)
+    }, 120_000)
+
     it('limits rewritten destinations and rejects multiple push destinations', () => {
       suite.configure({ host: suite.service.host })
       const repo = suite.seed('credential-destinations')
