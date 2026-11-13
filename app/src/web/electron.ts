@@ -9,11 +9,6 @@ type Listener = (event: any, ...args: any[]) => void
 
 class ShimIpcRenderer {
   private listeners = new Map<string, Set<Listener>>()
-  private nextId = 1
-  private pending = new Map<
-    number,
-    { resolve: (v: any) => void; reject: (e: any) => void; timer: any }
-  >()
 
   private bridge() {
     return (
@@ -26,8 +21,6 @@ class ShimIpcRenderer {
   invoke(channel: string, ...args: any[]) {
     const b = this.bridge()
     if (b?.invoke) return b.invoke(channel, ...args)
-    // fallback to direct fetch for /__invoke
-    const id = Date.now()
     return Promise.reject(
       new Error(`[vite-shim] no bridge for invoke(${channel})`)
     )

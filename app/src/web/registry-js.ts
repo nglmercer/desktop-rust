@@ -16,6 +16,6 @@ export function enumerateValues(_p: string) {
   return [] as any
 }
 export function enumerateKeys(_p: string) {
-  return [] as string
+  return [] as string[]
 }
 export function setValue(_p: string, _k: string, _v: any) {}

@@ -425,14 +425,18 @@ export interface ISpawnOptions {
   detached?: boolean
 }
 
+function isArgumentList(value: ReadonlyArray<string> | ISpawnOptions | undefined): value is ReadonlyArray<string> {
+  return Array.isArray(value)
+}
+
 export function spawn(
   command: string,
   argsOrOptions?: ReadonlyArray<string> | ISpawnOptions,
   maybeOptions?: ISpawnOptions
 ): ChildProcess {
-  const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : []
+  const args = isArgumentList(argsOrOptions) ? [...argsOrOptions] : []
   const options: ISpawnOptions =
-    (Array.isArray(argsOrOptions) ? maybeOptions : argsOrOptions) ?? {}
+    (isArgumentList(argsOrOptions) ? maybeOptions : argsOrOptions) ?? {}
 
   const modes: StdioMode[] = Array.isArray(options.stdio)
     ? (['pipe', 'pipe', 'pipe'].map((_, i) => options.stdio![i] ?? 'pipe') as StdioMode[])
@@ -521,13 +525,17 @@ export function execFile(
 }
 
 /** Run a command line in the platform shell, as `exec` does. */
+function isExecCallback(value: unknown): value is (...args: any[]) => void {
+  return typeof value === 'function'
+}
+
 export function exec(
   command: string,
   optionsOrCallback?: Record<string, any> | ((...a: any[]) => void),
   maybeCallback?: (...a: any[]) => void
 ): ChildProcess {
-  const options = typeof optionsOrCallback === 'function' ? undefined : optionsOrCallback
-  const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback
+  const options = isExecCallback(optionsOrCallback) ? undefined : optionsOrCallback
+  const callback = isExecCallback(optionsOrCallback) ? optionsOrCallback : maybeCallback
   const shell = navigator.userAgent.includes('Windows') ? 'cmd.exe' : '/bin/sh'
   const flags = shell === 'cmd.exe' ? ['/d', '/s', '/c'] : ['-c']
   return execFile(shell, [...flags, command], options, callback)
