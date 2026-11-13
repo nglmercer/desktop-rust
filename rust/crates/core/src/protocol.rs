@@ -571,6 +571,16 @@ pub enum Operation {
         expected_head: Option<CopilotExpectedHead>,
         basis: String,
     },
+    PublishSelectedCommit {
+        checkpoint_id: String,
+        message: String,
+        #[serde(default)]
+        no_verify: bool,
+        #[serde(default)]
+        sign_off: bool,
+        #[serde(default)]
+        allow_large_files: bool,
+    },
     ListCommitCheckpoints,
     InspectCommitCheckpoint {
         checkpoint_id: String,

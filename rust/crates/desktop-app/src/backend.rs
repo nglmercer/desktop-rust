@@ -466,6 +466,7 @@ impl Backend {
             && !matches!(
                 operation,
                 Operation::PrepareSelectedCommit { .. }
+                    | Operation::PublishSelectedCommit { .. }
                     | Operation::ListCommitCheckpoints
                     | Operation::InspectCommitCheckpoint { .. }
                     | Operation::RevalidateCommitCheckpoint { .. }
@@ -2666,6 +2667,29 @@ esac
         assert_eq!(backend.read(delete).unwrap()["code"], 0);
         assert_eq!(fs::read(root.join("file")).unwrap(), b"hello\0world");
         assert!(backend.admit_git_info(vec![json!({"operation":{"type":"delete_initial_head","repository_path":root,"operation":{"method":"stage","paths":["file"]}}})]).is_err());
+        for (key, value) in [
+            ("user.name", "Test"),
+            ("user.email", "test@example.invalid"),
+        ] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args(["config", key, value])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let selected = checkpoint(json!({"method":"prepare_selected_commit","paths":["selected"],"remove_paths":[],"partial_selections":[],"allow_empty":false,"amend_head":null,"expected_head":null,"basis":preview().unwrap()["basis"]})).unwrap();
+        let result = checkpoint(
+            json!({"method":"publish_selected_commit","checkpoint_id":selected["id"],"message":"reviewed\n","no_verify":false,"sign_off":false,"allow_large_files":false}),
+        );
+        match result {
+            Ok(result) => assert_eq!(result["state"], "complete"),
+            Err(error) if error.to_string().contains("does not support") => {}
+            Err(error) => panic!("{error:?}"),
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

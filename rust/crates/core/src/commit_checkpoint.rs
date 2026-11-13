@@ -751,15 +751,14 @@ impl Repository {
         Ok(json!({"id": id, "state":"prepared", "basis":basis}))
     }
 
-    /// Publish through a private index. This is kept internal until recovery
-    /// and renderer hook reporting are available for interrupted operations.
-    #[allow(dead_code)]
-    async fn publish_selected_checkpoint(
+    /// Publish through a private index using a previously reviewed checkpoint.
+    pub(crate) async fn publish_selected_checkpoint(
         &self,
         id: &str,
         message: String,
         no_verify: bool,
         sign_off: bool,
+        allow_large_files: bool,
     ) -> Result<Value> {
         anyhow::ensure!(
             !message.trim().is_empty() && !message.contains('\0') && message.len() <= 1024 * 1024,
@@ -821,6 +820,13 @@ impl Repository {
                     .await?
                     == parents,
             "Selected commit changed; review again"
+        );
+        let oversized = review["review"]["large_files"]
+            .as_array()
+            .context("missing reviewed large-file information")?;
+        anyhow::ensure!(
+            allow_large_files || oversized.iter().all(|file| file["tracked_by_lfs"] == true),
+            "Reviewed commit contains oversized files; explicit confirmation is required"
         );
         let parent_refs: Vec<&str> = parents.iter().map(String::as_str).collect();
         let mut guard = self
@@ -1319,6 +1325,78 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn publication_requires_explicit_consent_for_oversized_blob() {
+        let root =
+            std::env::temp_dir().join(format!("desktop-commit-large-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("base"), b"initial\n").unwrap();
+        git(&["add", "base"]);
+        git(&["commit", "-qm", "initial"]);
+        let head = git(&["rev-parse", "HEAD"]);
+        fs::File::create(root.join("large"))
+            .unwrap()
+            .set_len(100 * 1024 * 1024 + 1)
+            .unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let selection = || vec![GitPath::Text("large".into())];
+        let review = repo
+            .selected_commit_preview_with_empty(selection(), vec![], vec![], false, None, None)
+            .await
+            .unwrap();
+        assert_eq!(review["review"]["large_files"][0]["tracked_by_lfs"], false);
+        let checkpoint = repo
+            .prepare_selected_commit(
+                selection(),
+                vec![],
+                vec![],
+                false,
+                None,
+                None,
+                review["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        let id = checkpoint["id"].as_str().unwrap();
+        let error = repo
+            .publish_selected_checkpoint(id, "message\n".into(), false, false, false)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("explicit confirmation"));
+        assert_eq!(git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(
+            repo.inspect_commit_checkpoint(id).await.unwrap()["state"],
+            "prepared"
+        );
+        let result = repo
+            .publish_selected_checkpoint(id, "message\n".into(), false, false, true)
+            .await;
+        match result {
+            Ok(result) => assert_eq!(result["state"], "complete"),
+            Err(error) if error.to_string().contains("does not support") => {}
+            Err(error) => panic!("{error:#}"),
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn publication_does_not_install_index_when_head_is_locked_after_commit() {
@@ -1375,7 +1453,7 @@ mod tests {
         fs::write(&hook, "#!/bin/sh\n: > .git/HEAD.lock\n").unwrap();
         fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
         let failure = repo
-            .publish_selected_checkpoint(id, "message\n".into(), false, false)
+            .publish_selected_checkpoint(id, "message\n".into(), false, false, false)
             .await
             .unwrap_err();
         if failure.to_string().contains("does not support") {
@@ -1497,7 +1575,7 @@ mod tests {
         .unwrap();
         fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
         let failure = repo
-            .publish_selected_checkpoint(first_id, "message\n".into(), false, false)
+            .publish_selected_checkpoint(first_id, "message\n".into(), false, false, false)
             .await
             .unwrap_err();
         if failure.to_string().contains("does not support") {
@@ -1548,7 +1626,7 @@ mod tests {
             .unwrap();
         let id = second["id"].as_str().unwrap();
         let result = repo
-            .publish_selected_checkpoint(id, "message\n".into(), false, false)
+            .publish_selected_checkpoint(id, "message\n".into(), false, false, false)
             .await
             .unwrap();
         assert_eq!(result["state"], "complete");

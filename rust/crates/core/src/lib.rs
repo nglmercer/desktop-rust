@@ -347,6 +347,23 @@ impl Repository {
                     .await;
             }
             Operation::ListCommitCheckpoints => return self.list_commit_checkpoints().await,
+            Operation::PublishSelectedCommit {
+                checkpoint_id,
+                message,
+                no_verify,
+                sign_off,
+                allow_large_files,
+            } => {
+                return self
+                    .publish_selected_checkpoint(
+                        &checkpoint_id,
+                        message,
+                        no_verify,
+                        sign_off,
+                        allow_large_files,
+                    )
+                    .await;
+            }
             Operation::InspectCommitCheckpoint { checkpoint_id } => {
                 return self.inspect_commit_checkpoint(&checkpoint_id).await;
             }
@@ -1139,6 +1156,7 @@ impl Repository {
             | CommitPreview
             | SelectedCommitPreview { .. }
             | PrepareSelectedCommit { .. }
+            | PublishSelectedCommit { .. }
             | ListCommitCheckpoints
             | InspectCommitCheckpoint { .. }
             | RevalidateCommitCheckpoint { .. }

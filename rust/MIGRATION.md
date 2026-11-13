@@ -315,15 +315,15 @@ discovery and then encounters the still-legacy commit step. After staging,
 the renderer compares a tree computed from a private copy of the live index,
 plus HEAD and branch, against the review. A mismatch stops the commit and may
 leave the staged index changed. This observation does not lock the index or
-refs through Git's commit and hooks; publication and recovery must still be
-implemented and verified before selected commits migrate.
+refs through Git's commit and hooks; the renderer has not yet migrated to the
+typed publication and recovery workflow described below.
 Rust also has a commit reference fence that preserves existing Git hooks and
 checks the reviewed branch, old tip, ordered parents and tree during Git's reference
 transaction. The tree is mandatory, so a pre-commit hook that changes staged
 content cannot silently publish an unreviewed tree. It supports unborn,
 detached and amended commits, including merge amendments, and rejects Git versions that cannot run its
-configured hook. It is not yet wired into commit publication and is not a
-substitute for durable recovery; a rejected hook can leave the index changed.
+configured hook. Typed selected-commit publication uses the fence with a
+private index and retained checkpoint. It is not a substitute for recovery.
 A private-index commit runner now preserves Git's normal hook environment and
 accepts the commit message on stdin. A real Git test combines it with the
 reference fence: a hook's unreviewed index change is rejected, while a valid
@@ -333,7 +333,9 @@ and tree, records the published OID, then installs the resulting private index
 under the live index lock. A real Git test covers a hook that changes the tree
 and a successful commit with preexisting staged changes. Interrupted and
 completed checkpoints are retained and cannot be forgotten by the preparation
-cleanup operation. The prototype is not exposed to the renderer: hook reporting
+cleanup operation. Typed publication is available on Wry and WebSocket with
+explicit oversized-file consent, but the renderer's normal commit workflow
+still uses the legacy path: hook progress, interactive hook failure handling,
 and full commit integration remain required. The reference fence and its
 prepared OID receipt are retained in the checkpoint; the receipt is only a
 proposed update, is not proof of publication, and is not fsynced by the Git
@@ -361,9 +363,9 @@ commit object. Older checkpoints without that metadata remain inspectable but
 cannot supply a publication fence without being prepared again. Prepared
 checkpoints can be listed or removed on both transports;
 non-prepared or unreadable records cannot be removed by that operation. The
-checkpoint can require significant disk space, is limited to 32,768 staged
-entries and Git's 2 MiB listing bound, and is not yet used to publish commits
-or exposed in the renderer's recovery UI.
+checkpoint can require significant disk space and is limited to 32,768 staged
+entries and Git's 2 MiB listing bound. Typed publication uses it, and
+interrupted checkpoints appear in the renderer's recovery history.
 Checkpoint inspection verifies the recorded index, blob, LFS and shared-index
 files, including Git blob object IDs, and reports observed HEAD, branch, index
 and operation matches. It compares the saved indexes' complete blob sets

@@ -341,6 +341,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::TagCreateAnnotated { .. }
             | Operation::SelectedCommitPreview { .. }
             | Operation::PrepareSelectedCommit { .. }
+            | Operation::PublishSelectedCommit { .. }
             | Operation::RevalidateCommitCheckpoint { .. }
             | Operation::RecoverPublishedCommitCheckpoint { .. }
             | Operation::InterpretTrailers { .. }
