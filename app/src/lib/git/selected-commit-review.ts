@@ -2,6 +2,7 @@ import {
   backend,
   type ICopilotCommitOptions,
   type ISelectedCommitReview,
+  type SelectedCommitSelection,
 } from '../../backend/client'
 import {
   DiffSelectionType,
@@ -18,6 +19,12 @@ import {
   getWholeFileCopilotSelection,
 } from '../copilot/commit-selection'
 
+/** The certified review and the exact request needed to prepare it. */
+export interface ISelectedCommitReviewWithSelection
+  extends ISelectedCommitReview {
+  readonly selection: SelectedCommitSelection
+}
+
 /** Review the exact selected Git blobs without touching the live index. */
 export async function reviewSelectedCommit(
   repository: Repository,
@@ -28,7 +35,7 @@ export async function reviewSelectedCommit(
   amendHead?: string,
   expectedHead?: ICopilotCommitOptions['expected_head'],
   allowEmpty = false
-): Promise<ISelectedCommitReview> {
+): Promise<ISelectedCommitReviewWithSelection> {
   const partial = files.filter(
     file => file.selection.getSelectionType() === DiffSelectionType.Partial
   )
@@ -76,12 +83,17 @@ export async function reviewSelectedCommit(
       ),
     })
   }
-  return backend().repositorySelectedCommitPreview(repository.path, {
+  const selection: SelectedCommitSelection = {
     paths: whole.paths,
     remove_paths: whole.removePaths,
     partial_selections: partialSelections,
     allow_empty: allowEmpty,
     amend_head: amendHead,
     expected_head: expectedHead,
-  })
+  }
+  const review = await backend().repositorySelectedCommitPreview(
+    repository.path,
+    selection
+  )
+  return { ...review, selection }
 }

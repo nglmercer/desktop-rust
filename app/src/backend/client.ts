@@ -56,6 +56,12 @@ function isCommitCheckpointState(value: unknown): value is CommitCheckpointState
   return value === 'prepared' || value === 'publishing' || value === 'published' || value === 'complete'
 }
 export type CommitCheckpoint = { readonly id: string; readonly state: CommitCheckpointState; readonly head: string | null; readonly branch: string | null } | { readonly id: string; readonly state: 'invalid' }
+export interface IPublishedSelectedCommit {
+  readonly oid: string
+  readonly stdout: string
+  readonly stderr: string
+  readonly outputTruncated: boolean
+}
 export interface CommitCheckpointInspection {
   readonly id: string
   readonly state: CommitCheckpointState
@@ -1919,7 +1925,7 @@ export class BackendClient {
     return value.id
   }
 
-  async publishSelectedCommit(repositoryPath: string, id: string, message: string, options: { readonly noVerify?: boolean; readonly signOff?: boolean; readonly allowLargeFiles?: boolean } = {}): Promise<string> {
+  async publishSelectedCommit(repositoryPath: string, id: string, message: string, options: { readonly noVerify?: boolean; readonly signOff?: boolean; readonly allowLargeFiles?: boolean } = {}): Promise<IPublishedSelectedCommit> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || message.trim().length === 0 || message.includes('\0')) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint or message', retryable: false })
     const operation = { method: 'publish_selected_commit', checkpoint_id: id, message, no_verify: options.noVerify ?? false, sign_off: options.signOff ?? false, allow_large_files: options.allowLargeFiles ?? false }
     const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
@@ -1927,8 +1933,8 @@ export class BackendClient {
     let value: unknown
     try { value = await this.commitCheckpointRequest(repositoryPath, operation) }
     catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
-    if (!isRecord(value) || value.id !== id || value.state !== 'complete' || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid)) throw new BackendError({ code: 'invalid_response', message: 'Commit outcome is uncertain; inspect commit checkpoints', retryable: false })
-    return value.oid
+    if (!isRecord(value) || value.id !== id || value.state !== 'complete' || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid) || typeof value.stdout !== 'string' || value.stdout.length > 131_072 || typeof value.stderr !== 'string' || value.stderr.length > 131_072 || typeof value.output_truncated !== 'boolean') throw new BackendError({ code: 'invalid_response', message: 'Commit outcome is uncertain; inspect commit checkpoints', retryable: false })
+    return { oid: value.oid, stdout: value.stdout, stderr: value.stderr, outputTruncated: value.output_truncated }
   }
 
   async listCommitCheckpoints(repositoryPath: string): Promise<ReadonlyArray<CommitCheckpoint>> {

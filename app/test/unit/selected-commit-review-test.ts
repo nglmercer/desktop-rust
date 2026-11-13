@@ -98,9 +98,14 @@ describe('selected commit review', () => {
       ),
     ]
     const head = { ref: 'refs/heads/main', sha: 'abc' }
-    await expect(
-      reviewSelectedCommit(repository, files, () => displayed, 'amend', head)
-    ).resolves.toEqual({ basis: 'reviewed' })
+    const reviewed = await reviewSelectedCommit(
+      repository,
+      files,
+      () => displayed,
+      'amend',
+      head
+    )
+    expect(reviewed.basis).toBe('reviewed')
     expect(calls.diff).toHaveBeenCalledWith('/repo', 'new', {}, 'old')
     expect(calls.review).toHaveBeenCalledWith('/repo', {
       paths: ['added'],
@@ -112,6 +117,7 @@ describe('selected commit review', () => {
       amend_head: 'amend',
       expected_head: head,
     })
+    expect(reviewed.selection).toEqual(calls.review.mock.calls[0][1])
   })
 
   it('rejects missing or changed displayed lines before requesting a review', async () => {

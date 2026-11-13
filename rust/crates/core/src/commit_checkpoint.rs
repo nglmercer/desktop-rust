@@ -27,6 +27,11 @@ use std::{
 
 const DIRECTORY: &str = "desktop-commit-checkpoints";
 const MANIFEST_LIMIT: u64 = 1024 * 1024;
+const COMMIT_OUTPUT_TAIL: usize = 128 * 1024;
+
+fn output_tail(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(COMMIT_OUTPUT_TAIL)..]).into_owned()
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -962,7 +967,9 @@ impl Repository {
             .with_context(|| format!("Commit checkpoint {id} requires inspection"))?;
         record.state = "complete".into();
         write_checkpoint(&base, &record)?;
-        Ok(json!({"id": id, "state": "complete", "oid": published}))
+        Ok(json!({"id": id, "state": "complete", "oid": published,
+            "stdout": output_tail(&output.stdout), "stderr": output_tail(&output.stderr),
+            "output_truncated": output.stdout.len() > COMMIT_OUTPUT_TAIL || output.stderr.len() > COMMIT_OUTPUT_TAIL}))
     }
 
     /// Complete index installation when a recorded ref or retained prepared
@@ -1325,6 +1332,15 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn commit_output_keeps_a_bounded_utf8_safe_tail() {
+        let mut output = vec![b'a'; COMMIT_OUTPUT_TAIL + 4];
+        output.extend_from_slice("✓".as_bytes());
+        let tail = output_tail(&output);
+        assert!(tail.ends_with('✓'));
+        assert_eq!(tail.len(), COMMIT_OUTPUT_TAIL);
+        assert!(!tail.contains('\u{fffd}'));
+    }
     #[tokio::test]
     async fn publication_requires_explicit_consent_for_oversized_blob() {
         let root =

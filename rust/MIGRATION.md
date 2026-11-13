@@ -307,7 +307,9 @@ whole files and certified partial lines into this preview and warns on
 oversized, non-LFS blobs. Explicitly allowed empty commits are also reviewed,
 including on unborn branches, without staging unrelated files; the permission
 is included in the review basis. A browser test verifies that a commit attempt reaches
-the Rust preview without changing HEAD or the index. The following resource
+the Rust preview without changing HEAD or the index. The renderer retains the
+exact selection request with its review so it can be used for checkpoint
+preparation without reconstructing selected lines. The following resource
 discovery now uses Rust on both transports, including linked worktrees,
 canonical aliases, and Git's transitive alternate-object graph. Invalid paths
 and unresolved object routing fail closed. A browser test reaches this typed
@@ -336,7 +338,9 @@ completed checkpoints are retained and cannot be forgotten by the preparation
 cleanup operation. Typed publication is available on Wry and WebSocket with
 explicit oversized-file consent, but the renderer's normal commit workflow
 still uses the legacy path: hook progress, interactive hook failure handling,
-and full commit integration remain required. The reference fence and its
+and full commit integration remain required. Successful typed publication
+returns bounded stdout and stderr tails after completion, including hook output;
+it does not stream output. The reference fence and its
 prepared OID receipt are retained in the checkpoint; the receipt is only a
 proposed update, is not proof of publication, and is not fsynced by the Git
 hook. Recovery locks HEAD, the direct branch and both indexes; verifies the
