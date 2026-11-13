@@ -9410,18 +9410,29 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */
-  public async _openShell(path: string) {
+  public async _openShell(path: string, requestedRepository?: Repository) {
     this.statsStore.increment('openShellCount')
     const { useCustomShell, customShell } = this.getState()
+    const repository = requestedRepository ?? this.selectedRepository
 
     try {
       if (useCustomShell && customShell) {
+        if (__LINUX__ && backend().transportKind !== 'none') {
+          throw new Error('Custom terminals are not yet supported by the native backend. Select an available terminal in Options.')
+        }
         await launchCustomShell(customShell, path, error =>
           this._pushError(error)
         )
       } else {
         const match = await findShellOrDefault(this.selectedShell)
-        await launchShell(match, path, error => this._pushError(error))
+        if (__LINUX__ && backend().transportKind !== 'none') {
+          if (!(repository instanceof Repository) || !Path.isAbsolute(path) || !Path.isAbsolute(repository.path)) {
+            throw new Error('Select a repository before opening a terminal.')
+          }
+          await backend().openRepositoryTerminal(repository.path, match.shell, path)
+        } else {
+          await launchShell(match, path, error => this._pushError(error))
+        }
       }
     } catch (error) {
       this.emitError(error)

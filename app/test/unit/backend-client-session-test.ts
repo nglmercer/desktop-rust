@@ -19,6 +19,25 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('discovers terminals and requests a repository subdirectory through Wry', async () => {
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({ terminals: [{ name: 'Konsole', path: '/usr/bin/konsole' }] })
+      .mockResolvedValueOnce({ launched: true })
+      .mockResolvedValueOnce({ terminals: [{ name: 'Konsole', path: null }] })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.availableRustTerminals()).resolves.toEqual([{ name: 'Konsole', path: '/usr/bin/konsole' }])
+    await client.openRepositoryTerminal('/repo', 'Konsole', '/repo/nested')
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'open_terminal', repository_path: '/repo', name: 'Konsole', directory: '/repo/nested' } }))
+    await expect(client.availableRustTerminals()).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('reports an interrupted terminal launch as uncertain and non-retryable', async () => {
+    const invoke = vi.fn().mockRejectedValue({ code: 'cancelled', message: 'interrupted', retryable: true })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    await expect(new BackendClient().openRepositoryTerminal('/repo', 'Konsole', '/repo')).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('may have launched') })
+  })
+
   it('discovers graphical editors and launches the selected name through Wry', async () => {
     const invoke = vi.fn()
       .mockResolvedValueOnce({ editors: [

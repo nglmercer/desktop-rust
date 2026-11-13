@@ -1,4 +1,7 @@
 [
+  "rust/tests/wry-open-terminal.test.ts",
+  "app/test/unit/rust-terminal-dispatch-test.ts",
+  "app/test/unit/rust-terminal-discovery-test.ts",
   "rust/tests/wry-push-hook-decision.test.ts",
   "script/copilot-test.ts",
   "script/native-module-build-test.ts",

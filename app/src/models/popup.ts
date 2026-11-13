@@ -216,7 +216,7 @@ export type PopupDetail =
     }
   | { type: PopupType.SignIn }
   | { type: PopupType.About }
-  | { type: PopupType.InstallGit; path: string }
+  | { type: PopupType.InstallGit; path: string; repository?: Repository }
   | { type: PopupType.PublishRepository; repository: Repository }
   | { type: PopupType.Acknowledgements }
   | {

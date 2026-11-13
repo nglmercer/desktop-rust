@@ -20,6 +20,7 @@ import {
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -119,6 +120,42 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it.skipIf(process.platform !== 'linux' || !existsSync('/usr/bin/konsole'))('opens a saved contextual repository with the terminal bridge', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-terminal-bridge-'))
+      const fixture = path.join(directory, 'konsole-fixture')
+      const capture = path.join(directory, 'terminal-capture')
+      await writeFile(fixture, '#!/bin/sh\nprintf "%s\\n" "$PWD" "$@" > "$DESKTOP_TERMINAL_CAPTURE"\n')
+      await chmod(fixture, 0o700)
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')))
+      server = spawn('unshare', ['--user', '--map-root-user', '--mount', '--propagation', 'private', 'sh', '-c', 'mount --bind "$1" "$2" || exit; exec "$3" --config "$4" serve --empty --port 0', 'sh', fixture, '/usr/bin/konsole', path.resolve('rust/target/debug/desktop-rs'), path.join(directory, 'registry.json')], { env: { ...env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'global-config'), DESKTOP_TERMINAL_CAPTURE: capture }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+      const repo = path.join(directory, 'repository')
+      const other = path.join(directory, 'other')
+      await client.initializeDesktopRepository(repo, 'main')
+      await client.initializeDesktopRepository(other, 'main')
+      const nested = path.join(other, 'nested ; dollar $()')
+      await mkdir(nested)
+      await client.selectBrowserRepository(other)
+      await client.selectBrowserRepository(repo)
+      const terminals = await client.availableRustTerminals()
+      await expect(client.openRepositoryTerminal(repo, '/bin/sh', repo)).rejects.toThrow('Unknown terminal')
+      // A context-menu request for a different saved repository must not
+      // silently change the selected repository.
+      await expect(client.openRepositoryTerminal(other, '/bin/sh', other)).rejects.toThrow('Unknown terminal')
+      expect(await client.request('repository_binding', { path: repo })).toHaveProperty('root_id')
+      expect(await client.request('repository_binding', { path: other })).toBeNull()
+      expect(terminals).toContainEqual({ name: 'Konsole', path: '/usr/bin/konsole' })
+      await expect(client.openRepositoryTerminal(repo, 'Konsole', other)).rejects.toThrow()
+      await expect(client.openRepositoryTerminal(repo, 'Konsole', 'relative')).rejects.toThrow()
+      await client.openRepositoryTerminal(other, 'Konsole', nested)
+      expect(await readFile(capture, 'utf8')).toBe(`${nested}\n--workdir\n${nested}\n`)
+      expect(await client.request('repository_binding', { path: repo })).toHaveProperty('root_id')
+    }, 90_000)
+
     it('discovers and launches a named editor with a confined repository file', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-editor-bridge-'))
       const bin = path.join(directory, 'bin')

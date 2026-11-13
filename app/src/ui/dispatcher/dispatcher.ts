@@ -1,5 +1,6 @@
 import { Disposable } from 'event-kit'
 import type { IRemoteBranchDeletionReview, IRemoteBranchDeletionResult } from '../../backend/client'
+import { backend } from '../../backend/client'
 
 import {
   IAPIOrganization,
@@ -1785,15 +1786,27 @@ export class Dispatcher {
   /** Opens a Git-enabled terminal setting the working directory to the repository path */
   public async openShell(
     path: string,
-    ignoreWarning: boolean = false
+    ignoreWarning: boolean = false,
+    repository?: Repository
   ): Promise<void> {
-    const gitFound = await isGitOnPath()
+    let gitFound = ignoreWarning
+    if (!gitFound && __LINUX__ && backend().transportKind !== 'none') {
+      try {
+        await backend().gitVersion()
+        gitFound = true
+      } catch {
+        gitFound = false
+      }
+    } else if (!gitFound) {
+      gitFound = await isGitOnPath()
+    }
     if (gitFound || ignoreWarning) {
-      this.appStore._openShell(path)
+      await this.appStore._openShell(path, repository)
     } else {
       this.appStore._showPopup({
         type: PopupType.InstallGit,
         path,
+        repository,
       })
     }
   }

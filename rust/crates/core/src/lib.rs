@@ -20,6 +20,8 @@ pub use repository_context::{
 mod repo_rules;
 pub use repo_rules::{NameRuleFailure, NameRulesActor, NameRulesPolicy};
 mod branch_policy;
+mod terminals;
+pub use terminals::{available_terminals, open_registered_terminal};
 pub mod cancellation;
 pub mod comparison_snapshots;
 pub mod hook_decision;

@@ -82,6 +82,20 @@ and retry the action. If an old socket remains after every window has closed,
 the warning shows its path; remove it only after verifying it is a leftover from
 GitHub Desktop. Unknown sockets are never removed automatically.
 
+On Linux, the shared renderer discovers a fixed list of host terminals through
+Rust and requests opening an existing directory within the chosen repository.
+Wry accepts an explicit Git repository root, as it does for editor launches; a
+browser WebSocket request requires a root present in the Rust registry. The
+authenticated browser can add a root with its existing `open_repository`
+operation, so registry membership is not a separate authorization against that
+client. Repositories present only in the browser's old Dexie store need to be
+opened through the Rust bridge before they can be launched this way. A local
+writer can change path components between the confinement check and process
+launch. If launch is interrupted, a terminal may already be open. Custom
+terminals are not supported by the Rust transport on Linux; macOS and Windows
+still use the prior renderer paths. The complete shared-UI Wry journey remains
+to be verified.
+
 ## Saved repositories, creation, and clone
 
 ```sh

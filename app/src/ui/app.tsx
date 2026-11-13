@@ -1975,7 +1975,7 @@ export class App extends React.Component<IAppProps, IAppState> {
           <InstallGit
             key="install-git"
             onDismissed={onPopupDismissedFn}
-            onOpenShell={this.onOpenShellIgnoreWarning}
+            onOpenShell={path => this.onOpenShellIgnoreWarning(path, popup.repository)}
             path={popup.path}
           />
         )
@@ -3303,8 +3303,8 @@ export class App extends React.Component<IAppProps, IAppState> {
     }
   }
 
-  private onOpenShellIgnoreWarning = (path: string) => {
-    this.props.dispatcher.openShell(path, true)
+  private onOpenShellIgnoreWarning = (path: string, repository?: Repository) => {
+    this.props.dispatcher.openShell(path, true, repository)
   }
 
   private onCheckForNonStaggeredUpdates = () =>
@@ -3517,7 +3517,7 @@ export class App extends React.Component<IAppProps, IAppState> {
       return
     }
 
-    this.props.dispatcher.openShell(repository.path)
+    this.props.dispatcher.openShell(repository.path, false, repository)
   }
 
   private openFileInExternalEditor = (fullPath: string) => {

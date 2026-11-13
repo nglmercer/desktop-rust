@@ -6,6 +6,7 @@ import * as Linux from './linux'
 import { ShellError } from './error'
 import { pathExists } from '../path-exists'
 import type { ICustomIntegration } from '../custom-integration'
+import { backend } from '../../backend/client'
 
 export type Shell = Darwin.Shell | Win32.Shell | Linux.Shell
 
@@ -53,6 +54,13 @@ export function parse(label: string): Shell {
 export async function getAvailableShells(): Promise<
   ReadonlyArray<AnyFoundShell>
 > {
+  if (__LINUX__ && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const terminals = await backend().availableRustTerminals()
+    return terminals.flatMap(terminal => {
+      const shell = Object.values(Linux.Shell).find(value => value === terminal.name)
+      return shell === undefined ? [] : [{ shell, path: terminal.path }]
+    })
+  }
   if (shellCache) {
     return shellCache
   }
@@ -80,7 +88,11 @@ export async function findShellOrDefault(shell: Shell): Promise<AnyFoundShell> {
   if (found) {
     return found
   } else {
-    return available.find(s => s.shell === Default)!
+    const fallback = available.find(s => s.shell === Default) ?? available[0]
+    if (fallback === undefined) {
+      throw new ShellError('No supported terminal is available. Install a terminal and try again.')
+    }
+    return fallback
   }
 }
 

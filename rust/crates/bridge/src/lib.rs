@@ -314,6 +314,12 @@ enum ControlOperation {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 enum ManagementOperation {
     AvailableEditors,
+    AvailableTerminals,
+    OpenTerminal {
+        repository_path: String,
+        name: String,
+        directory: String,
+    },
     OpenGlobalGitConfigEditor {
         editor_name: String,
     },
@@ -568,6 +574,26 @@ async fn execute(
         ApplicationOperation::Management(AvailableEditors) => {
             let preferences = cancellation::blocking(move || registry.preferences().read()).await?;
             desktop_core::available_editors(preferences.external_editor).await
+        }
+        ApplicationOperation::Management(AvailableTerminals) => {
+            desktop_core::available_terminals().await
+        }
+        ApplicationOperation::Management(OpenTerminal {
+            repository_path,
+            name,
+            directory,
+        }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "explicit terminal requests cannot use a selected-repository binding"
+            );
+            desktop_core::open_registered_terminal(
+                registry,
+                repository_path.into(),
+                name,
+                directory.into(),
+            )
+            .await
         }
         ApplicationOperation::Management(OpenGlobalGitConfigEditor { editor_name }) => {
             desktop_core::open_global_git_config_editor(editor_name).await

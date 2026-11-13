@@ -87,6 +87,12 @@ enum GitInfoOperation {
     Version {},
     GlobalConfigPath {},
     AvailableEditors {},
+    AvailableTerminals {},
+    OpenTerminal {
+        repository_path: String,
+        name: String,
+        directory: String,
+    },
     OpenGlobalGitConfigEditor {
         name: String,
     },
@@ -586,6 +592,9 @@ impl Backend {
             repository_path, ..
         }
         | GitInfoOperation::OpenNamedEditor {
+            repository_path, ..
+        }
+        | GitInfoOperation::OpenTerminal {
             repository_path, ..
         }
         | GitInfoOperation::FetchRemote {
@@ -1860,6 +1869,14 @@ impl Backend {
                             GitInfoOperation::Version {} => desktop_backend::git_version().await.map(serde_json::Value::String),
                             GitInfoOperation::GlobalConfigPath {} => desktop_backend::git_global_config_path().await.map(serde_json::Value::String),
                             GitInfoOperation::AvailableEditors {} => desktop_backend::available_editors(desktop_backend::ExternalEditor::Automatic).await,
+                            GitInfoOperation::AvailableTerminals {} => desktop_backend::available_terminals().await,
+                            GitInfoOperation::OpenTerminal { repository_path, name, directory } => {
+                                let requested = PathBuf::from(repository_path);
+                                let canonical = desktop_backend::cancellation::blocking(move || Ok(requested.canonicalize()?)).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                repo.open_terminal(name, directory.into()).await
+                            }
                             GitInfoOperation::OpenGlobalGitConfigEditor { name } => desktop_backend::open_global_git_config_editor(name).await,
                             GitInfoOperation::OpenNamedEditor { repository_path, path, name } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;

@@ -503,13 +503,14 @@ class WryTransport {
         typeof params.operation.operation.method === 'string' &&
         ['prepare_selected_commit', 'publish_selected_commit', 'recover_published_commit_checkpoint', 'close_unchanged_commit_checkpoint', 'forget_commit_checkpoint'].includes(params.operation.operation.method)
       const editorLaunch = method === 'git_info' && isRecord(params) && isRecord(params.operation) && (params.operation.type === 'open_named_editor' || params.operation.type === 'open_global_git_config_editor')
-      const mutating = editorLaunch || cloneMutation || identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite || recoveryWrite
+      const terminalLaunch = method === 'git_info' && isRecord(params) && isRecord(params.operation) && params.operation.type === 'open_terminal'
+      const mutating = terminalLaunch || editorLaunch || cloneMutation || identityWrite || settingsWrite || lfsWrite || configPathWrite || descriptionWrite || creationWrite || remoteWrite || ignoreWrite || discardWrite || initialization || checkpointWrite || recoveryWrite
       const nativeError = (error: unknown): BackendError => {
         const result = toBackendError(error)
         if (!mutating || !result.retryable) return result
         return new BackendError({
           code: result.code,
-          message: editorLaunch ? `${result.message}. The editor may have launched; check before retrying.` : result.message,
+          message: editorLaunch ? `${result.message}. The editor may have launched; check before retrying.` : terminalLaunch ? `${result.message}. The terminal may have launched; check before retrying.` : result.message,
           retryable: false,
           jobId: result.jobId,
           recoveryId: result.recoveryId,
@@ -552,6 +553,8 @@ class WryTransport {
               ? 'Clone cancelled; inspect the destination and recovery history before retrying'
               : editorLaunch
               ? 'Editor launch cancelled; the editor may already be open'
+              : terminalLaunch
+              ? 'Terminal launch cancelled; the terminal may already be open'
               : identityWrite
               ? 'Git identity update cancelled; inspect Git settings before retrying'
               : settingsWrite
@@ -583,6 +586,8 @@ class WryTransport {
                 ? 'Clone timed out; inspect the destination and recovery history before retrying'
                 : editorLaunch
                 ? 'Editor launch timed out; the editor may already be open'
+                : terminalLaunch
+                ? 'Terminal launch timed out; the terminal may already be open'
                 : identityWrite
                 ? 'Git identity update timed out; inspect Git settings before retrying'
                 : settingsWrite
@@ -1353,6 +1358,38 @@ export class BackendClient {
         message: 'repository-scoped reads require a backend transport',
         retryable: false,
       })
+    }
+  }
+
+  /** Find graphical terminals using the Rust host's fixed discovery list. */
+  async availableRustTerminals(): Promise<ReadonlyArray<{ name: string; path: string }>> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'available_terminals' } })
+      : await this.request('available_terminals', {})
+    if (!isRecord(value) || !Array.isArray(value.terminals) || value.terminals.length > 64) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid terminal discovery response', retryable: false })
+    }
+    return value.terminals.map(terminal => {
+      if (!isRecord(terminal) || typeof terminal.name !== 'string' || !terminal.name || terminal.name.length > 256 || typeof terminal.path !== 'string' || !terminal.path || terminal.path.length > 65536) {
+        throw new BackendError({ code: 'invalid_response', message: 'Invalid terminal discovery response', retryable: false })
+      }
+      return { name: terminal.name, path: terminal.path }
+    })
+  }
+
+  /** Launch a fixed host terminal in a directory inside the requested repository. */
+  async openRepositoryTerminal(repositoryPath: string, name: string, directory: string): Promise<void> {
+    try {
+      if (this.transport === 'wry') {
+        await this.request('git_info', { operation: { type: 'open_terminal', repository_path: repositoryPath, name, directory } })
+      } else {
+        await this.request('open_terminal', { repository_path: repositoryPath, name, directory })
+      }
+    } catch (error) {
+      const result = toBackendError(error)
+      if (!result.retryable && result.message.includes('The terminal may have launched')) throw error
+      if (!result.retryable && !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(result.code)) throw error
+      throw new BackendError({ code: result.code, message: `${result.message}. The terminal may have launched; check before retrying.`, retryable: false })
     }
   }
 
