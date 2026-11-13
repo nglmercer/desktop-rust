@@ -171,16 +171,43 @@ pub(crate) async fn run_commit_with_index(
     args: &[OsString],
     input: Vec<u8>,
     index: &Path,
+    checkpoint: Option<&str>,
 ) -> Result<RawOutput> {
-    run_command(
-        path,
-        git_native_paths(Some(index)),
-        args,
-        Some(input),
-        2 * 1024 * 1024,
-        None,
-    )
-    .await
+    #[cfg(unix)]
+    let mut command = git_native_paths(Some(index));
+    #[cfg(not(unix))]
+    let command = git_native_paths(Some(index));
+    #[cfg(unix)]
+    let trace_target_unset = if std::env::var_os("GIT_TRACE2_EVENT").is_none()
+        && crate::hook_progress::sender().is_some()
+    {
+        matches!(run(path, &crate::args(&["config", "--get", "trace2.eventTarget"])).await, Ok(output) if output.code == 1)
+    } else {
+        false
+    };
+    #[cfg(unix)]
+    let trace = if trace_target_unset {
+        match (crate::hook_progress::sender(), checkpoint, index.parent()) {
+            (Some((sender, request_id)), Some(id), Some(directory)) => {
+                crate::hook_trace::Trace::start(directory, id, sender, request_id).ok()
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    #[cfg(unix)]
+    if let Some(trace) = &trace {
+        command.env("GIT_TRACE2_EVENT", trace.path());
+    }
+    #[cfg(not(unix))]
+    let _ = checkpoint;
+    let result = run_command(path, command, args, Some(input), 2 * 1024 * 1024, None).await;
+    #[cfg(unix)]
+    if let Some(trace) = trace {
+        trace.finish().await;
+    }
+    result
 }
 
 /// Remote management uses names, not pathspecs; do not pass a literal-path

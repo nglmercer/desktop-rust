@@ -22,7 +22,7 @@ use serde_json::json;
 use std::{collections::VecDeque, future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, Semaphore, watch},
+    sync::{Mutex, Semaphore, mpsc, watch},
 };
 
 struct Bridge {
@@ -885,12 +885,14 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
     let mut changes = state.changes.subscribe();
     let mut preferences = state.preferences.subscribe();
     let mut active: Option<Active> = None;
+    let (hook_events, mut hook_events_rx) =
+        mpsc::channel::<(u64, desktop_core::hook_progress::HookProgress)>(64);
     let mut queue = VecDeque::<Rpc>::new();
     loop {
         if active.is_none()
             && let Some(rpc) = queue.pop_front()
         {
-            active = Some(Active::new(state.clone(), rpc));
+            active = Some(Active::new(state.clone(), rpc, hook_events.clone()));
         }
         let message = tokio::select! {
             biased;
@@ -902,7 +904,14 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
                 }
             } => {
                 active.take();
+                while let Ok((request_id, event)) = hook_events_rx.try_recv() {
+                    if !send(&mut socket, json!({"event":"commit_hook_progress","request_id":request_id,"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}), &state).await { return; }
+                }
                 if !send(&mut socket, result, &state).await {break;}
+                continue;
+            },
+            Some((request_id, event)) = hook_events_rx.recv() => {
+                if !send(&mut socket, json!({"event":"commit_hook_progress","request_id":request_id,"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}), &state).await { break; }
                 continue;
             },
             message = socket.recv() => match message { Some(Ok(message)) => message, _ => break },
@@ -1002,22 +1011,35 @@ struct Active {
     future: Pin<Box<dyn Future<Output = serde_json::Value> + Send>>,
 }
 impl Active {
-    fn new(state: Arc<Bridge>, rpc: Rpc) -> Self {
+    fn new(
+        state: Arc<Bridge>,
+        rpc: Rpc,
+        events: mpsc::Sender<(u64, desktop_core::hook_progress::HookProgress)>,
+    ) -> Self {
         let cancellation = Cancellation::default();
         let request_cancellation = cancellation.clone();
-        let future = Box::pin(cancellation.clone().scope(async move {
-            let result = match request_cancellation.check() {
-                Ok(()) => execute(&state, rpc.operation, rpc.repository_id).await,
-                Err(error) => Err(error),
-            };
-            if request_cancellation.is_cancelled() {
-                return cancelled_message(rpc.id, request_cancellation.message());
-            }
-            match result {
-                Ok(result) => json!({"id":rpc.id,"result":result}),
-                Err(error) => json!({"id":rpc.id,"error":error.to_string()}),
-            }
-        }));
+        let request_id = rpc.id;
+        let future = Box::pin(
+            cancellation
+                .clone()
+                .scope(desktop_core::hook_progress::scope(
+                    events,
+                    request_id,
+                    async move {
+                        let result = match request_cancellation.check() {
+                            Ok(()) => execute(&state, rpc.operation, rpc.repository_id).await,
+                            Err(error) => Err(error),
+                        };
+                        if request_cancellation.is_cancelled() {
+                            return cancelled_message(rpc.id, request_cancellation.message());
+                        }
+                        match result {
+                            Ok(result) => json!({"id":rpc.id,"result":result}),
+                            Err(error) => json!({"id":rpc.id,"error":error.to_string()}),
+                        }
+                    },
+                )),
+        );
         Self {
             id: rpc.id,
             cancellation,

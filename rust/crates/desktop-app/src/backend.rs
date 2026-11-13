@@ -1120,7 +1120,27 @@ impl Backend {
         }
     }
 
+    #[cfg(test)]
     pub fn read(&self, job: ReadJob) -> Result<Value> {
+        self.read_with_progress(job, None)
+    }
+
+    pub fn read_with_progress(
+        &self,
+        job: ReadJob,
+        progress: Option<Arc<dyn Fn(desktop_backend::hook_progress::HookProgress) + Send + Sync>>,
+    ) -> Result<Value> {
+        let progress = if matches!(
+            &job.operation,
+            BackendOperation::GitInfo(GitInfoOperation::CommitCheckpoint {
+                operation: Operation::PublishSelectedCommit { .. },
+                ..
+            })
+        ) {
+            progress
+        } else {
+            None
+        };
         let token = job.token.clone();
         let identity_write = matches!(
             job.operation,
@@ -1196,7 +1216,7 @@ impl Backend {
                 GitInfoOperation::LfsInstall { .. } | GitInfoOperation::LfsInstallRepository { .. }
             )
         );
-        self.runtime.block_on(token.clone().scope(async {
+        let work = token.clone().scope(async {
             if token.is_cancelled() { return Err(AppError::Coded { code: "cancelled".into(), message: "backend operation cancelled before start".into() }); }
             let remaining = job.deadline.saturating_duration_since(Instant::now());
             let work = async {
@@ -1406,7 +1426,25 @@ impl Backend {
                     Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
-        }))
+        });
+        if let Some(progress) = progress {
+            let (sender, mut receiver) = tokio::sync::mpsc::channel::<(
+                u64,
+                desktop_backend::hook_progress::HookProgress,
+            )>(64);
+            let forward = self.runtime.spawn(async move {
+                while let Some((_, event)) = receiver.recv().await {
+                    progress(event);
+                }
+            });
+            let result = self
+                .runtime
+                .block_on(desktop_backend::hook_progress::scope(sender, 0, work));
+            let _ = self.runtime.block_on(forward);
+            result
+        } else {
+            self.runtime.block_on(work)
+        }
     }
 }
 
@@ -1449,8 +1487,10 @@ mod tests {
             let checkpoint = prepared["id"].as_str().unwrap();
             let request_id = uuid::Uuid::new_v4();
             let job = backend.admit_git_info(vec![json!({"request_id":request_id,"operation":{"type":"commit_checkpoint","repository_path":root,"operation":{"method":"publish_selected_commit","checkpoint_id":checkpoint,"message":"message\n","no_verify":false,"sign_off":false,"allow_large_files":false}}})]).unwrap();
+            let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+            let progress = Arc::new(move |event: desktop_backend::hook_progress::HookProgress| { let _ = progress_tx.send(event); });
             std::thread::scope(|scope| {
-                let worker = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn_scoped(scope, || backend.read(job)).unwrap();
+                let worker = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn_scoped(scope, || backend.read_with_progress(job, Some(progress))).unwrap();
                 let marker = root.join(".git/commit-hook-started");
                 let deadline = std::time::Instant::now() + Duration::from_secs(15);
                 while !marker.exists() && !worker.is_finished() && std::time::Instant::now() < deadline {
@@ -1462,6 +1502,10 @@ mod tests {
                     if result.as_ref().err().is_some_and(|error| error.to_string().contains("does not support")) { return; }
                     panic!("commit hook did not start: {result:?}");
                 }
+                let progress = progress_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert_eq!(progress.checkpoint_id, checkpoint);
+                assert_eq!(progress.hook_name, "pre-commit");
+                assert_eq!(progress.status, "started");
                 backend.cancel(&[json!({"request_id":request_id})]).unwrap();
                 let result = worker.join().unwrap();
                 assert!(matches!(result, Err(AppError::Coded { code, message, .. }) if code == "cancelled" && message.contains("inspect commit checkpoints")));

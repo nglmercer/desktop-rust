@@ -32,6 +32,26 @@ describe('backend Copilot session cleanup', () => {
     expect(send).toHaveBeenCalledWith('desktop.backend.cancel', { request_id: expect.any(String) })
   })
 
+  it('delivers only matching commit hook progress and removes the listener', async () => {
+    let finish: (value: unknown) => void = () => {}
+    const invoke = vi.fn(() => new Promise<unknown>(resolve => { finish = resolve }))
+    const on = vi.fn()
+    const off = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on, off } })
+    const id = '12345678-1234-4234-8234-123456789abc'
+    const progress = vi.fn()
+    const pending = new BackendClient().publishSelectedCommit('/repo', id, 'message', { onHookProgress: progress })
+    const listener = on.mock.calls[0][1]
+    listener({}, { checkpoint_id: 'other', hook_name: 'pre-commit', status: 'started' })
+    listener({}, { checkpoint_id: id, hook_name: 'unknown', status: 'started' })
+    listener({}, { checkpoint_id: id, hook_name: 'pre-commit', status: 'started' })
+    expect(progress).toHaveBeenCalledOnce()
+    expect(progress).toHaveBeenCalledWith({ hookName: 'pre-commit', status: 'started' })
+    finish({ id, state: 'complete', oid: 'b'.repeat(40), stdout: '', stderr: '', output_truncated: false })
+    await pending
+    expect(off).toHaveBeenCalledWith('commit_hook_progress', listener)
+  })
+
   it.each([
     { type: 'set', key: 'user.name', value: 'Alice' },
     { type: 'set', key: 'init.defaultbranch', value: 'trunk' },

@@ -494,7 +494,7 @@ fn queue_deadline(channel: &str) -> Instant {
 /// Run a request on the current (worker) thread. Host IO and state commands
 /// share this path because `DesktopApp::invoke` routes by channel.
 fn run_channel(
-    app: &DesktopApp,
+    app: &std::sync::Arc<DesktopApp>,
     backend: &crate::backend::Backend,
     channel: &str,
     args: Vec<Value>,
@@ -504,7 +504,16 @@ fn run_channel(
         channel,
         "desktop.backend.read" | "desktop.backend.copilot" | "desktop.backend.git_info"
     ) {
-        backend.read(job.expect("backend operation must be admitted"))
+        let app = app.clone();
+        let progress = std::sync::Arc::new(
+            move |event: desktop_backend::hook_progress::HookProgress| {
+                app.emit_value("commit_hook_progress", json!({"checkpoint_id":event.checkpoint_id,"hook_name":event.hook_name,"status":event.status}));
+            },
+        );
+        backend.read_with_progress(
+            job.expect("backend operation must be admitted"),
+            Some(progress),
+        )
     } else {
         app.invoke(channel, args)
     };

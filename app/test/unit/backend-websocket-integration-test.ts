@@ -9,6 +9,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   rm,
   writeFile,
   chmod,
@@ -1104,30 +1105,47 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const selection = { paths: ['file'] }
       const review = await client.repositorySelectedCommitPreview(commitRepository, selection)
       const failedCheckpoint = await client.prepareSelectedCommit(commitRepository, selection, review.basis)
-      await expect(client.publishSelectedCommit(commitRepository, failedCheckpoint, 'reviewed commit\n')).rejects.toThrow('requires inspection')
+      const failedProgress: Array<{ hookName: string; status: string }> = []
+      await expect(client.publishSelectedCommit(commitRepository, failedCheckpoint, 'reviewed commit\n', { onHookProgress: event => failedProgress.push(event) })).rejects.toThrow('requires inspection')
+      expect(failedProgress).toContainEqual({ hookName: 'pre-commit', status: 'failed' })
       expect(await readFile(path.join(commitRepository, '.git', 'index'))).toEqual(originalCommitIndex)
       await client.closeUnchangedCommitCheckpoint(commitRepository, failedCheckpoint)
       expect(await client.listCommitCheckpoints(commitRepository)).toContainEqual(expect.objectContaining({ id: failedCheckpoint, state: 'closed' }))
       await writeFile(hookPath, '#!/bin/sh\nprintf started > .git/long-hook-started\nsleep 60\nprintf finished > .git/long-hook-finished\n')
       const cancelledCheckpoint = await client.prepareSelectedCommit(commitRepository, selection, review.basis)
       const commitAbort = new AbortController()
-      const pendingCommit = client.publishSelectedCommit(commitRepository, cancelledCheckpoint, 'reviewed commit\n', { signal: commitAbort.signal })
+      const hookProgress: Array<{ hookName: string; status: string }> = []
+      const pendingCommit = client.publishSelectedCommit(commitRepository, cancelledCheckpoint, 'reviewed commit\n', { signal: commitAbort.signal, onHookProgress: event => hookProgress.push(event) })
       await waitFor(async () => (await readFile(path.join(commitRepository, '.git', 'long-hook-started'), 'utf8').catch(() => '')) === 'started')
+      await waitFor(() => hookProgress.some(event => event.hookName === 'pre-commit' && event.status === 'started'))
       commitAbort.abort()
       await expect(pendingCommit).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect commit checkpoints') })
       expect((await client.inspectCommitCheckpoint(commitRepository, cancelledCheckpoint)).state).toBe('publishing')
       expect(await readFile(path.join(commitRepository, '.git', 'index'))).toEqual(originalCommitIndex)
       await client.closeUnchangedCommitCheckpoint(commitRepository, cancelledCheckpoint)
+      expect((await readdir(path.join(commitRepository, '.git', 'desktop-commit-checkpoints', cancelledCheckpoint))).some(name => name.startsWith('hook-trace-'))).toBe(false)
       expect(await readFile(path.join(commitRepository, '.git', 'long-hook-finished'), 'utf8').catch(() => '')).toBe('')
       await writeFile(hookPath, '#!/bin/sh\nprintf invoked > .git/commit-hook-ran\nprintf "hook output\\n" >&2\n')
       const commitCheckpoint = await client.prepareSelectedCommit(commitRepository, selection, review.basis)
-      const committed = await client.publishSelectedCommit(commitRepository, commitCheckpoint, 'reviewed commit\n')
+      const completedProgress: Array<{ hookName: string; status: string }> = []
+      const committed = await client.publishSelectedCommit(commitRepository, commitCheckpoint, 'reviewed commit\n', { onHookProgress: event => completedProgress.push(event) })
+      expect(completedProgress).toContainEqual({ hookName: 'pre-commit', status: 'finished' })
       expect(execFileSync('git', ['-C', commitRepository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(committed.oid)
       expect(committed.stderr).toContain('hook output')
       expect(execFileSync('git', ['-C', commitRepository, 'show', 'HEAD:file'], { encoding: 'utf8' })).toBe('reviewed\n')
       expect(execFileSync('git', ['-C', commitRepository, 'show', ':file'], { encoding: 'utf8' })).toBe('reviewed\n')
       expect(await readFile(path.join(commitRepository, '.git', 'commit-hook-ran'), 'utf8')).toBe('invoked')
       expect(await readFile(path.join(commitRepository, '.git', 'desktop-commit-checkpoints', commitCheckpoint, 'index.before'))).toEqual(originalCommitIndex)
+      expect((await readdir(path.join(commitRepository, '.git', 'desktop-commit-checkpoints', commitCheckpoint))).some(name => name.startsWith('hook-trace-'))).toBe(false)
+      const configuredTrace = path.join(directory, 'user-trace')
+      execFileSync('git', ['-C', commitRepository, 'config', 'trace2.eventTarget', configuredTrace])
+      await writeFile(path.join(commitRepository, 'file'), 'next\n')
+      const nextReview = await client.repositorySelectedCommitPreview(commitRepository, selection)
+      const nextCheckpoint = await client.prepareSelectedCommit(commitRepository, selection, nextReview.basis)
+      const suppressedProgress: Array<unknown> = []
+      await client.publishSelectedCommit(commitRepository, nextCheckpoint, 'next commit\n', { onHookProgress: event => suppressedProgress.push(event) })
+      expect(suppressedProgress).toEqual([])
+      expect(execFileSync('git', ['-C', commitRepository, 'config', '--get', 'trace2.eventTarget'], { encoding: 'utf8' }).trim()).toBe(configuredTrace)
 
       const undoRepository = path.join(directory, 'undo-first')
       await client.request('init_repository', { path: undoRepository })

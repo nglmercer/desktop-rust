@@ -338,9 +338,15 @@ completed checkpoints are retained and cannot be forgotten by the preparation
 cleanup operation. Typed publication is available on Wry and WebSocket with
 explicit oversized-file consent, but the renderer's normal commit workflow
 still uses the legacy path: hook progress, interactive hook failure handling,
-and full commit integration remain required. Successful typed publication
-returns bounded stdout and stderr tails after completion, including hook output;
-it does not stream output. The typed preparation and publication calls accept
+and full commit integration remain required. On Unix, typed publication now
+offers request-scoped, best-effort hook start/finish/failure notifications on
+Wry and WebSocket. It reads Git Trace2 through a private bounded pipe and emits
+only recognized hook names and statuses; it preserves an existing Trace2 event
+target by leaving progress unavailable. Notification queues and per-commit
+events are bounded, so notifications can be dropped under load. Windows hook
+progress is not yet implemented. Successful typed publication returns bounded
+stdout and stderr tails after completion, including hook output; it does not
+stream output. The typed preparation and publication calls accept
 an abort signal; cancellation is an uncertain mutation and directs callers to
 inspect checkpoint history before retrying. The reference fence and its
 prepared OID receipt are retained in the checkpoint; the receipt is only a

@@ -21,6 +21,9 @@ mod repo_rules;
 pub use repo_rules::{NameRuleFailure, NameRulesActor, NameRulesPolicy};
 mod branch_policy;
 pub mod cancellation;
+pub mod hook_progress;
+#[cfg(unix)]
+mod hook_trace;
 pub use branch_policy::{BranchPermissions, BranchPolicy, DefaultBranch};
 mod commit;
 mod commit_checkpoint;

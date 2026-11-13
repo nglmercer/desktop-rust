@@ -62,6 +62,10 @@ export interface IPublishedSelectedCommit {
   readonly stderr: string
   readonly outputTruncated: boolean
 }
+export interface ICommitHookProgress {
+  readonly hookName: string
+  readonly status: 'started' | 'finished' | 'failed'
+}
 export interface CommitCheckpointInspection {
   readonly id: string
   readonly state: CommitCheckpointState
@@ -1934,14 +1938,19 @@ export class BackendClient {
     return value.id
   }
 
-  async publishSelectedCommit(repositoryPath: string, id: string, message: string, options: { readonly noVerify?: boolean; readonly signOff?: boolean; readonly allowLargeFiles?: boolean; readonly signal?: AbortSignal; readonly deadlineMs?: number } = {}): Promise<IPublishedSelectedCommit> {
+  async publishSelectedCommit(repositoryPath: string, id: string, message: string, options: { readonly noVerify?: boolean; readonly signOff?: boolean; readonly allowLargeFiles?: boolean; readonly signal?: AbortSignal; readonly deadlineMs?: number; readonly onHookProgress?: (progress: ICommitHookProgress) => void } = {}): Promise<IPublishedSelectedCommit> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || message.trim().length === 0 || message.includes('\0')) throw new BackendError({ code: 'invalid_request', message: 'Invalid commit checkpoint or message', retryable: false })
     const operation = { method: 'publish_selected_commit', checkpoint_id: id, message, no_verify: options.noVerify ?? false, sign_off: options.signOff ?? false, allow_large_files: options.allowLargeFiles ?? false }
     const size = new TextEncoder().encode(JSON.stringify({ ...operation, id: Number.MAX_SAFE_INTEGER, repository_id: 'f'.repeat(64) })).length
     if (size > (this.transport === 'ws' ? 65_536 : 1_048_576)) throw new BackendError({ code: 'invalid_request', message: 'Commit message exceeds the transport limit', retryable: false })
+    const unsubscribe = options.onHookProgress === undefined ? () => {} : this.subscribe('commit_hook_progress', value => {
+      if (!isRecord(value) || value.checkpoint_id !== id || typeof value.hook_name !== 'string' || !['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit', 'post-rewrite', 'pre-auto-gc'].includes(value.hook_name) || (value.status !== 'started' && value.status !== 'finished' && value.status !== 'failed')) return
+      options.onHookProgress?.({ hookName: value.hook_name, status: value.status })
+    })
     let value: unknown
     try { value = await this.commitCheckpointRequest(repositoryPath, operation, { signal: options.signal, deadlineMs: options.deadlineMs }) }
     catch (error) { const cause = toBackendError(error); throw new BackendError({ code: cause.code, message: `${cause.message}; inspect commit checkpoints before retrying`, retryable: false }) }
+    finally { unsubscribe() }
     if (!isRecord(value) || value.id !== id || value.state !== 'complete' || typeof value.oid !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.oid) || typeof value.stdout !== 'string' || value.stdout.length > 131_072 || typeof value.stderr !== 'string' || value.stderr.length > 131_072 || typeof value.output_truncated !== 'boolean') throw new BackendError({ code: 'invalid_response', message: 'Commit outcome is uncertain; inspect commit checkpoints', retryable: false })
     return { oid: value.oid, stdout: value.stdout, stderr: value.stderr, outputTruncated: value.output_truncated }
   }

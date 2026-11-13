@@ -956,6 +956,7 @@ impl Repository {
             &command,
             message.into_bytes(),
             &private_index,
+            Some(id),
         )
         .await
         .with_context(|| format!("Commit checkpoint {id} requires inspection"))?;

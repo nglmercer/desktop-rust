@@ -399,6 +399,7 @@ mod tests {
             &command,
             b"private commit\n".to_vec(),
             &private_index,
+            None,
         )
         .await
         .unwrap();
@@ -421,6 +422,7 @@ mod tests {
             &command,
             b"private commit\n".to_vec(),
             &private_index,
+            None,
         )
         .await
         .unwrap();
