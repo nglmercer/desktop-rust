@@ -487,6 +487,33 @@ mod tests {
         assert!(remote_names(b"remote.origin.url\nvalue").is_err());
     }
 
+    #[tokio::test]
+    async fn resolves_effective_url_after_empty_reset_and_rewrite() {
+        let root = std::env::temp_dir().join(format!("desktop-remote-reset-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8(output.stdout).unwrap().trim_end_matches('\n').to_owned()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "--add", "remote.desktop-test.url", "/original"]);
+        git(&["config", "--add", "remote.desktop-test.url", ""]);
+        git(&["config", "--add", "remote.desktop-test.url", "/replacement"]);
+        git(&["config", "url./rewritten.insteadOf", "/replacement"]);
+        let expected = git(&["ls-remote", "--get-url", "--", "desktop-test"]);
+        let version = git(&["--version"]);
+        let version = version.strip_prefix("git version ").unwrap().split('.').take(2).filter_map(|part| part.parse::<u32>().ok()).collect::<Vec<_>>();
+        if version.len() == 2 && (version[0] > 2 || (version[0] == 2 && version[1] >= 56)) {
+            assert_eq!(expected, "/rewritten");
+        }
+        let remotes = super::safe_fetch_remotes(&root).await.unwrap();
+        let actual = remotes.as_array().unwrap().iter().find(|entry| entry["name"] == "desktop-test").unwrap();
+        assert_eq!(actual["url"], expected);
+        assert_eq!(super::safe_remote_url(&root, "desktop-test").await.unwrap()["url"], expected);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn rejects_ambiguous_and_credential_bearing_urls() {
         for value in [

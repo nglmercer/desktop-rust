@@ -134,6 +134,7 @@
   "app/test/unit/stores/revert-cleanup-test.ts",
   "app/test/unit/stores/remote-branch-deletion-cleanup-test.ts",
   "app/test/unit/stores/multi-commit-undo-test.ts",
+  "app/test/unit/stores/last-fetch-test.ts",
   "app/test/unit/git/create-terminal-stream-test.ts",
   "app/test/unit/git/environment-test.ts",
   "app/test/unit/progress/git-test.ts",
@@ -310,5 +311,7 @@
   "app/test/unit/git/remote-management-test.ts",
   "app/test/unit/git/diff-resolution-test.ts",
   "app/test/unit/git/multi-operation-terminal-output-test.ts",
-  "app/test/unit/git/remote-operations-test.ts"
+  "app/test/unit/git/remote-operations-test.ts",
+  "app/test/unit/git/remote-discovery-test.ts",
+  "app/test/unit/text-diff-expansion-test.ts"
 ]

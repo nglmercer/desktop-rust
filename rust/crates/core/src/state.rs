@@ -46,6 +46,28 @@ pub struct OperationState {
     pub total: Option<u64>,
 }
 impl Repository {
+    /// Modification time of the worktree's nonempty FETCH_HEAD, in Unix milliseconds.
+    pub(crate) async fn renderer_last_fetch(&self) -> Result<Value> {
+        let path = self.git_directory().await?.join("FETCH_HEAD");
+        let metadata = match tokio::fs::metadata(path).await {
+            Ok(metadata) if metadata.len() == 0 => return Ok(json!({"kind":"empty"})),
+            Ok(metadata) => metadata,
+            Err(_) => return Ok(json!({"kind":"unavailable"})),
+        };
+        let modified = match metadata.modified() {
+            Ok(modified) => modified,
+            Err(_) => return Ok(json!({"kind":"unavailable"})),
+        };
+        let millis = match modified.duration_since(std::time::UNIX_EPOCH) {
+            Ok(duration) => i128::try_from(duration.as_millis())?,
+            Err(error) => -i128::try_from(error.duration().as_millis())?,
+        };
+        if !(-8_640_000_000_000_000..=8_640_000_000_000_000).contains(&millis) {
+            return Ok(json!({"kind":"unavailable"}));
+        }
+        Ok(json!({"kind":"fetched", "time":i64::try_from(millis)?}))
+    }
+
     pub(crate) async fn status_context(&self) -> Result<Value> {
         let directory = self.git_directory().await?;
         let state = self.renderer_rebase_state().await?;
@@ -429,6 +451,33 @@ impl Repository {
 mod cherry_pick_state_tests {
     use super::*;
     use std::process::Command;
+
+    #[tokio::test]
+    async fn reads_last_fetch_for_each_linked_worktree() {
+        let root = std::env::temp_dir().join(format!("desktop-last-fetch-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "initial"]);
+        let linked = root.join("linked");
+        git(&["worktree", "add", "-qb", "linked-branch", linked.to_str().unwrap()]);
+        let main = Repository::open(&root).await.unwrap();
+        let child = Repository::open(&linked).await.unwrap();
+        assert_eq!(main.renderer_last_fetch().await.unwrap()["kind"], "unavailable");
+        fs::write(root.join(".git/FETCH_HEAD"), "").unwrap();
+        assert_eq!(main.renderer_last_fetch().await.unwrap()["kind"], "empty");
+        fs::write(root.join(".git/FETCH_HEAD"), "data\n").unwrap();
+        let main_value = main.renderer_last_fetch().await.unwrap();
+        assert_eq!(main_value["kind"], "fetched");
+        assert!(main_value["time"].as_i64().unwrap() > 0);
+        assert_eq!(child.renderer_last_fetch().await.unwrap()["kind"], "unavailable");
+        fs::write(child.git_directory().await.unwrap().join("FETCH_HEAD"), "other\n").unwrap();
+        assert_eq!(child.renderer_last_fetch().await.unwrap()["kind"], "fetched");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn reads_rebase_state_and_rejects_unsafe_progress() {

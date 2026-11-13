@@ -119,6 +119,28 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('reads last fetch time from the selected repository', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-last-fetch-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
+      const repository = path.join(directory, 'repository'); const remote = path.join(directory, 'remote.git')
+      execFileSync('git', ['init', '--bare', '-q', remote]); await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
+      await expect(client.repositoryLastFetch(repository)).resolves.toEqual({ kind: 'unavailable' })
+      await writeFile(path.join(repository, '.git', 'FETCH_HEAD'), '')
+      await expect(client.repositoryLastFetch(repository)).resolves.toEqual({ kind: 'empty' })
+      // Git writes FETCH_HEAD only after an actual remote reference is fetched.
+      execFileSync('git', ['-C', repository, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'initial'])
+      execFileSync('git', ['-C', repository, 'push', '-q', remote, 'HEAD:refs/heads/main'])
+      execFileSync('git', ['-C', repository, 'fetch', '-q', remote, 'refs/heads/main'])
+      const fetched = await client.repositoryLastFetch(repository)
+      expect(fetched.kind).toBe('fetched')
+      if (fetched.kind === 'fetched') expect(Math.abs(Date.now() - fetched.time)).toBeLessThan(30_000)
+    }, 90_000)
+
     it('reviews and recovers remote and combined branch deletions', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-delete-bridge-'))
       server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })

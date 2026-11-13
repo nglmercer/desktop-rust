@@ -3176,6 +3176,13 @@ export class BackendClient {
     return { head: value.head, sequence: { head: value.sequence.head, abortSafety: value.sequence.abort_safety, todo: value.sequence.todo } }
   }
 
+  async repositoryLastFetch(repositoryPath: string): Promise<{ readonly kind: 'empty' | 'unavailable' } | { readonly kind: 'fetched'; readonly time: number }> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_last_fetch', {})
+    if (isRecord(value) && (value.kind === 'empty' || value.kind === 'unavailable')) return { kind: value.kind }
+    if (isRecord(value) && value.kind === 'fetched' && Number.isSafeInteger(value.time) && Math.abs(value.time as number) <= 8_640_000_000_000_000) return { kind: 'fetched', time: value.time as number }
+    throw new BackendError({ code: 'invalid_response', message: 'Invalid last fetch time', retryable: false })
+  }
+
   async repositoryStatusContext(repositoryPath: string, creation = false): Promise<{
     readonly mergeHeadFound: boolean
     readonly squashMsgFound: boolean

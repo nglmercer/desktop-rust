@@ -97,6 +97,7 @@ import { getTagsToPush, storeTagsToPush } from './helpers/tags-to-push-storage'
 import { DiffSelection, ITextDiff } from '../../models/diff'
 import { getDefaultBranch } from '../helpers/default-branch'
 import { rm, stat } from 'fs/promises'
+import { backend } from '../../backend/client'
 import { findForkedRemotesToPrune } from './helpers/find-forked-remotes-to-prune'
 import { findDefaultBranch } from '../find-default-branch'
 import {
@@ -1636,6 +1637,15 @@ export class GitStore extends BaseStore {
   }
 
   private async updateLastFetchedReadCore() {
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      try {
+        const result = await backend().repositoryLastFetch(this.repository.path)
+        if (result.kind === 'fetched') this._lastFetched = new Date(result.time)
+        else if (result.kind === 'unavailable') this._lastFetched = null
+      } catch { /* A failed read does not establish that FETCH_HEAD is absent. */ }
+      this.emitUpdate()
+      return this._lastFetched
+    }
     const fetchHeadPath = Path.join(
       this.repository.resolvedGitDir,
       'FETCH_HEAD'

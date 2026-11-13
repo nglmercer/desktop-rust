@@ -327,6 +327,7 @@ enum ReadMethod {
     WorktreesFromGitDir,
     ProtectedResources,
     StatusContext,
+    RendererLastFetch,
     RendererCherryPickState,
     RendererRebaseState,
     StatusConflictDetails,
@@ -1373,6 +1374,14 @@ impl Backend {
                         && request.commitish.is_none() =>
                 {
                     Operation::StatusContext
+                }
+                ReadMethod::RendererLastFetch
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none() =>
+                {
+                    Operation::RendererLastFetch
                 }
                 ReadMethod::RendererCherryPickState
                     if request.include_untracked.is_none()
@@ -2426,6 +2435,23 @@ mod tests {
             assert_eq!(git(&["rev-parse", "tracking"]), new);
             assert_eq!(fs::read(root.join(".git/FETCH_HEAD")).unwrap(), b"keep\n");
             fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn wry_reads_last_fetch_for_selected_repository() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+        let root = std::env::temp_dir().join(format!("desktop-wry-last-fetch-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
+        let backend = Backend::new(4).unwrap();
+        let read = || backend.read_args(vec![json!({"repository_path":root,"method":"renderer_last_fetch"})]).unwrap();
+        assert_eq!(read()["kind"], "unavailable");
+        fs::write(root.join(".git/FETCH_HEAD"), "").unwrap();
+        assert_eq!(read()["kind"], "empty");
+        fs::write(root.join(".git/FETCH_HEAD"), "fetch\n").unwrap();
+        assert_eq!(read()["kind"], "fetched");
+        fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { beforeEach, describe, it } from 'node:test'
+import { beforeEach, describe, it } from 'vitest'
 import { writeFile } from 'node:fs/promises'
 import * as Path from 'node:path'
 
@@ -230,8 +230,23 @@ describe('git/remote discovery', () => {
       'configure replacement URL'
     )
 
+    // Git versions differ in how --get-url handles an empty URL followed by
+    // another URL. Compare against the same Git executable used by Desktop.
+    const resolved = await git(
+      ['ls-remote', '--get-url', '--', 'replaced'],
+      repository.path,
+      'resolve the configured remote URL'
+    )
+    assert.ok(resolved.stdout.endsWith('\n'))
+    const resolvedUrl = resolved.stdout.slice(0, -1)
+    const version = await git(['--version'], repository.path, 'inspect Git version')
+    const parsed = /^git version (\d+)\.(\d+)/.exec(version.stdout)
+    assert.ok(parsed, `Could not parse Git version: ${version.stdout}`)
+    if (Number(parsed[1]) > 2 || (Number(parsed[1]) === 2 && Number(parsed[2]) >= 56)) {
+      assert.strictEqual(resolvedUrl, '/replacement')
+    }
     assert.deepStrictEqual(await getRemotes(repository), [
-      { name: 'replaced', url: '/replacement' },
+      { name: 'replaced', url: resolvedUrl },
     ])
   })
 

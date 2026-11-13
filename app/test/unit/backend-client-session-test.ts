@@ -6,6 +6,16 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('reads and validates a repository last-fetch timestamp through Wry', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ kind: 'fetched', time: 1_700_000_000_000 }).mockResolvedValueOnce({ kind: 'empty' }).mockResolvedValueOnce({ kind: 'fetched', time: 'wrong' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryLastFetch('/repo')).resolves.toEqual({ kind: 'fetched', time: 1_700_000_000_000 })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.read', expect.objectContaining({ repository_path: '/repo', method: 'renderer_last_fetch' }))
+    await expect(client.repositoryLastFetch('/repo')).resolves.toEqual({ kind: 'empty' })
+    await expect(client.repositoryLastFetch('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('treats post-start worktree failures as uncertain and preserves preflight refusal', async () => {
     const invoke = vi.fn()
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

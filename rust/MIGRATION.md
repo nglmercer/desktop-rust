@@ -1497,8 +1497,17 @@ remote ref. Explicit global `init.defaultBranch` (without includes) and `main`
 provide the fallback name. A remote HEAD outside its remote namespace or a
 self-looping cached HEAD also uses that fallback rather than preventing ordinary
 snapshots.
-Fetch remote enumeration honors empty URL resets, excludes push-only entries,
-and uses Desktop's UTF-16 name ordering. URL contents never enter policy output.
+Fetch remote enumeration filters empty URL entries, excludes push-only entries,
+delegates URL resolution to installed Git, and uses Desktop's UTF-16 name ordering.
+URL contents never enter policy output. Git versions differ in their treatment
+of a trailing empty URL; filtering that case needs further parity work.
+
+The renderer's last-fetch indicator reads FETCH_HEAD metadata through Rust on
+Wry and WebSocket. The lookup uses the selected worktree's Git directory and
+retains Desktop's behavior for empty or missing files; it follows symlinks as
+the existing metadata lookup does. A failed transport or invalid response
+leaves the last observed value in place. Timestamp observation is advisory and
+can race another fetch.
 
 Branch enumeration excludes symbolic refs, matching the legacy parser; local
 aliases cannot steal default protection through their own tracking settings.

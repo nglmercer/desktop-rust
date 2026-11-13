@@ -1,8 +1,8 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import * as path from 'path'
 import * as os from 'os'
-import { mkdtemp, writeFile } from 'fs/promises'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { exec } from 'dugite'
 import { DiffParser } from '../../src/lib/diff-parser'
 import {
@@ -37,40 +37,44 @@ async function prepareDiff(
   )
   const contentFolderPath = await mkdtemp(contentFolderPathPrefix)
 
-  await writeFile(path.join(contentFolderPath, 'original'), originalContents)
-  await writeFile(path.join(contentFolderPath, 'changed'), modifiedContents)
+  try {
+    await writeFile(path.join(contentFolderPath, 'original'), originalContents)
+    await writeFile(path.join(contentFolderPath, 'changed'), modifiedContents)
 
-  // Generate diff with 3 lines of context
-  const result = await exec(
-    [
-      'diff',
-      '-U3',
-      path.join(contentFolderPath, 'original'),
-      path.join(contentFolderPath, 'changed'),
-    ],
-    contentFolderPath
-  )
+    // Generate diff with 3 lines of context
+    const result = await exec(
+      [
+        'diff',
+        '-U3',
+        path.join(contentFolderPath, 'original'),
+        path.join(contentFolderPath, 'changed'),
+      ],
+      contentFolderPath
+    )
 
-  const parser = new DiffParser()
-  const diff = parser.parse(result.stdout)
-  const textDiff: ITextDiff = {
-    kind: DiffType.Text,
-    text: diff.contents,
-    hunks: diff.hunks,
-    maxLineNumber: diff.maxLineNumber,
-    hasHiddenBidiChars: diff.hasHiddenBidiChars,
-  }
+    const parser = new DiffParser()
+    const diff = parser.parse(result.stdout)
+    const textDiff: ITextDiff = {
+      kind: DiffType.Text,
+      text: diff.contents,
+      hunks: diff.hunks,
+      maxLineNumber: diff.maxLineNumber,
+      hasHiddenBidiChars: diff.hasHiddenBidiChars,
+    }
 
-  const resultDiff = getTextDiffWithBottomDummyHunk(
-    textDiff,
-    textDiff.hunks,
-    numberOfLines,
-    numberOfLines + linesChanged.length
-  )
+    const resultDiff = getTextDiffWithBottomDummyHunk(
+      textDiff,
+      textDiff.hunks,
+      numberOfLines,
+      numberOfLines + linesChanged.length
+    )
 
-  return {
-    textDiff: resultDiff ?? textDiff,
-    newContentLines: textLines,
+    return {
+      textDiff: resultDiff ?? textDiff,
+      newContentLines: textLines,
+    }
+  } finally {
+    await rm(contentFolderPath, { recursive: true, force: true })
   }
 }
 

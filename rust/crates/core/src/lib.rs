@@ -993,6 +993,7 @@ impl Repository {
             }
             Operation::BranchList => return self.branch_list_with_policy().await,
             Operation::StatusContext => return self.status_context().await,
+            Operation::RendererLastFetch => return self.renderer_last_fetch().await,
             Operation::RendererCherryPickState => return self.renderer_cherry_pick_state().await,
             Operation::RendererRebaseState => return self.renderer_rebase_state().await,
             Operation::StatusConflictDetails { kind } => {
@@ -1372,6 +1373,7 @@ impl Repository {
             | CommitDiff { .. }
             | BranchList
             | StatusContext
+            | RendererLastFetch
             | RendererCherryPickState
             | RendererRebaseState
             | StatusConflictDetails { .. }
