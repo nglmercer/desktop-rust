@@ -627,7 +627,7 @@ impl Repository {
             Operation::RendererStagedDiff { amend_head } => {
                 return self.renderer_staged_diff(amend_head.as_deref()).await;
             }
-            Operation::RendererWorkingFile { path } => return self.renderer_working_file(path).await,
+            Operation::RendererWorkingFile { path, max_bytes } => return self.renderer_working_file(path, max_bytes).await,
             Operation::RendererWorkingDiff {
                 path,
                 base,

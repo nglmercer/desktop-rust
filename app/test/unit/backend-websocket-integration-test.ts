@@ -193,6 +193,12 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const imagePath = path.join(repository, '[a].PNG')
       const bytes = Buffer.alloc(2 * 1024 * 1024 + 23, 0xab); bytes[0] = 0; bytes[1] = 255
       await writeFile(imagePath, bytes)
+      await writeFile(path.join(repository, 'conflict.txt'), '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n')
+      const { buildConflictContext } = await import('../../src/lib/copilot-conflict-context')
+      const context = await buildConflictContext('ours', 'theirs', repository, [{ path: 'conflict.txt' }, { path: '[a].PNG' }])
+      expect(context.files[0].hunks[0].oursContent).toBe('ours')
+      expect(context.files[1].skippedReason).toBe('No conflict markers found')
+      await expect(client.repositoryReadSnapshot(repository, 'renderer_working_file', { path: 'conflict.txt', max_bytes: 5 })).rejects.toThrow()
       const { getWorkingDirectoryImage } = await import('../../src/lib/git/diff')
       const model = { path: repository } as Repository
       const image = await getWorkingDirectoryImage(model, new FileChange('[a].PNG', { kind: AppFileStatusKind.Modified }))
@@ -207,6 +213,8 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await expect(getWorkingDirectoryImage(model, new FileChange('outside.png', { kind: AppFileStatusKind.Modified }))).rejects.toThrow()
       const huge = await open(path.join(repository, 'huge.png'), 'w'); await huge.truncate(70_000_001); await huge.close()
       await expect(getWorkingDirectoryImage(model, new FileChange('huge.png', { kind: AppFileStatusKind.Modified }))).rejects.toThrow()
+      const hugeContext = await buildConflictContext('ours', 'theirs', repository, [{ path: 'huge.png' }])
+      expect(hugeContext.files[0].skippedReason).toBe('File too large to resolve automatically')
     }, 90_000)
 
     it('reviews worktree lifecycle and relocates the selected saved record', async () => {

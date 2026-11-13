@@ -1,11 +1,13 @@
-//! Bounded, literal worktree file snapshots for renderer image previews.
+//! Bounded, literal worktree file snapshots for renderer consumers.
 use crate::{GitPath, Repository};
 use anyhow::{Context, Result};
 use cap_std::{ambient_authority, fs::Dir};
 use std::path::Path;
 
 impl Repository {
-    pub(crate) async fn renderer_working_file(&self, path: GitPath) -> Result<serde_json::Value> {
+    pub(crate) async fn renderer_working_file(&self, path: GitPath, max_bytes: Option<u64>) -> Result<serde_json::Value> {
+        let limit = max_bytes.unwrap_or(crate::comparison_snapshots::MAX_BYTES as u64);
+        anyhow::ensure!(limit <= crate::comparison_snapshots::MAX_BYTES as u64, "Working file limit exceeds the supported size");
         let path = crate::discard_fs::checked_path(path)?;
         let permit = crate::comparison_snapshots::reserve().await?;
         let root = self.path.clone();
@@ -31,15 +33,22 @@ impl Repository {
             }
             let file = crate::discard_fs::WorkingFile::open(&root, &resolved, false)?
                 .context("Working file does not exist")?;
-            let bytes = file.read_bounded(crate::comparison_snapshots::MAX_BYTES as u64)?;
+            let bytes = match file.read_bounded(limit) {
+                Ok(bytes) => bytes,
+                Err(error) if max_bytes.is_some() && error.is::<crate::discard_fs::WorkingFileTooLarge>() => return Ok(None),
+                Err(error) => return Err(error),
+            };
             anyhow::ensure!(
                 root.canonicalize(Path::new(&path))
                     .is_ok_and(|current| current == resolved),
                 "Working image path changed while reading"
             );
-            Ok(bytes)
+            Ok(Some(bytes))
         })
         .await?;
+        let Some(bytes) = bytes else {
+            return Ok(serde_json::json!({"kind":"too_large"}));
+        };
         let cancellation = crate::cancellation::Cancellation::current();
         cancellation.check()?;
         let snapshot = crate::comparison_snapshots::insert(&self.id(), bytes, permit)?;
@@ -89,7 +98,7 @@ mod tests {
         let owner = crate::comparison_snapshots::Owner::new();
         crate::comparison_snapshots::scope(owner.clone(), async {
             let snapshot = repo
-                .renderer_working_file(GitPath::Text("[a].png".into()))
+                .renderer_working_file(GitPath::Text("[a].png".into()), None)
                 .await
                 .unwrap();
             let id = uuid::Uuid::parse_str(snapshot["id"].as_str().unwrap()).unwrap();
@@ -99,9 +108,14 @@ mod tests {
                 image
             );
             crate::comparison_snapshots::release(&repo.id(), id).unwrap();
+            let snapshot = repo.renderer_working_file(GitPath::Text("[a].png".into()), Some(image.len() as u64)).await.unwrap();
+            let id = uuid::Uuid::parse_str(snapshot["id"].as_str().unwrap()).unwrap();
+            crate::comparison_snapshots::release(&repo.id(), id).unwrap();
+            assert_eq!(repo.renderer_working_file(GitPath::Text("[a].png".into()), Some(image.len() as u64 - 1)).await.unwrap()["kind"], "too_large");
+            assert!(repo.renderer_working_file(GitPath::Text("[a].png".into()), Some(crate::comparison_snapshots::MAX_BYTES as u64 + 1)).await.is_err());
             for path in ["missing.png", "huge.png", "../outside.png"] {
                 assert!(
-                    repo.renderer_working_file(GitPath::Text(path.into()))
+                    repo.renderer_working_file(GitPath::Text(path.into()), None)
                         .await
                         .is_err()
                 );
@@ -111,7 +125,7 @@ mod tests {
             {
                 for path in ["link.png", "linkdir/[a].png"] {
                     let snapshot = repo
-                        .renderer_working_file(GitPath::Text(path.into()))
+                        .renderer_working_file(GitPath::Text(path.into()), None)
                         .await
                         .unwrap();
                     let id = uuid::Uuid::parse_str(snapshot["id"].as_str().unwrap()).unwrap();
@@ -124,7 +138,7 @@ mod tests {
                 }
                 for path in ["outside.png", "metadata.png", "absolute.png"] {
                     assert!(
-                        repo.renderer_working_file(GitPath::Text(path.into()))
+                        repo.renderer_working_file(GitPath::Text(path.into()), None)
                             .await
                             .is_err()
                     );
@@ -135,7 +149,7 @@ mod tests {
             cancellation.cancel();
             assert!(
                 cancellation
-                    .scope(repo.renderer_working_file(GitPath::Text("[a].png".into())))
+                    .scope(repo.renderer_working_file(GitPath::Text("[a].png".into()), None))
                     .await
                     .is_err()
             );
@@ -168,7 +182,7 @@ mod tests {
         let owner = crate::comparison_snapshots::Owner::new();
         crate::comparison_snapshots::scope(owner.clone(), async {
             let snapshot = repo
-                .renderer_working_file(GitPath::Text("large.png".into()))
+                .renderer_working_file(GitPath::Text("large.png".into()), None)
                 .await
                 .unwrap();
             assert_eq!(

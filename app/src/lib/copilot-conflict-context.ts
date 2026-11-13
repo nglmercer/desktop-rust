@@ -6,6 +6,8 @@ import { Commit } from '../models/commit'
 import { getMergeBase } from './git/merge'
 import { getCommits } from './git/log'
 import { resolveWithin } from './path'
+import { backend, BackendError } from '../backend/client'
+import { withRepositoryGitOperation } from './git/repository-operation'
 
 /** A single conflict hunk extracted from a file with conflict markers */
 export interface IConflictHunk {
@@ -387,53 +389,83 @@ export async function buildConflictContext(
         }
       }
 
-      // Guard against path traversal and symlink escapes (cross-platform)
-      let absolutePath: string | null
-      try {
-        absolutePath = await resolveWithin(workingDirectory, file.path)
-      } catch {
-        return {
-          path: file.path,
-          hunks: [],
-          skippedReason: 'File path could not be resolved safely',
-        }
-      }
-      if (absolutePath === null) {
-        return {
-          path: file.path,
-          hunks: [],
-          skippedReason: 'File path is outside the repository',
-        }
-      }
-
-      // Guard against reading pathologically large files into memory. This is
-      // a memory-safety bound only — resolvability is decided from the conflict
-      // hunks below, not the whole-file size.
-      try {
-        const fileStat = await stat(absolutePath)
-        if (fileStat.size > MAX_CONFLICT_FILE_READ_SIZE) {
+      let content: string
+      if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+        // Rust confines the path to the selected repository and applies the
+        // size bound before reading, including when the file grows mid-read.
+        try {
+          const read = () =>
+            backend().repositoryReadSnapshot(
+              workingDirectory,
+              'renderer_working_file',
+              { path: file.path, max_bytes: MAX_CONFLICT_FILE_READ_SIZE }
+            )
+          const bytes =
+            backend().transportKind === 'wry'
+              ? await withRepositoryGitOperation(workingDirectory, 'read', read, true)
+              : await read()
+          if (bytes === null || bytes.byteLength > MAX_CONFLICT_FILE_READ_SIZE) {
+            throw new Error('Conflict file is unavailable')
+          }
+          content = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)
+        } catch (error) {
           return {
             path: file.path,
             hunks: [],
-            skippedReason: 'File too large to resolve automatically',
+            skippedReason:
+              error instanceof BackendError && error.code === 'file_too_large'
+                ? 'File too large to resolve automatically'
+                : 'File could not be read',
           }
         }
-      } catch {
-        return {
-          path: file.path,
-          hunks: [],
-          skippedReason: 'File could not be read',
+      } else {
+        // Guard against path traversal and symlink escapes (cross-platform)
+        let absolutePath: string | null
+        try {
+          absolutePath = await resolveWithin(workingDirectory, file.path)
+        } catch {
+          return {
+            path: file.path,
+            hunks: [],
+            skippedReason: 'File path could not be resolved safely',
+          }
         }
-      }
+        if (absolutePath === null) {
+          return {
+            path: file.path,
+            hunks: [],
+            skippedReason: 'File path is outside the repository',
+          }
+        }
 
-      let content: string
-      try {
-        content = await readFile(absolutePath, 'utf8')
-      } catch {
-        return {
-          path: file.path,
-          hunks: [],
-          skippedReason: 'File could not be read',
+        // Guard against reading pathologically large files into memory. This is
+        // a memory-safety bound only — resolvability is decided from the conflict
+        // hunks below, not the whole-file size.
+        try {
+          const fileStat = await stat(absolutePath)
+          if (fileStat.size > MAX_CONFLICT_FILE_READ_SIZE) {
+            return {
+              path: file.path,
+              hunks: [],
+              skippedReason: 'File too large to resolve automatically',
+            }
+          }
+        } catch {
+          return {
+            path: file.path,
+            hunks: [],
+            skippedReason: 'File could not be read',
+          }
+        }
+
+        try {
+          content = await readFile(absolutePath, 'utf8')
+        } catch {
+          return {
+            path: file.path,
+            hunks: [],
+            skippedReason: 'File could not be read',
+          }
         }
       }
 

@@ -487,7 +487,11 @@ pub enum Operation {
         #[serde(default)]
         no_textconv: bool,
     },
-    RendererWorkingFile { path: GitPath },
+    RendererWorkingFile {
+        path: GitPath,
+        #[serde(default)]
+        max_bytes: Option<u64>,
+    },
     RendererBlobPrefix {
         revision: String,
         path: GitPath,

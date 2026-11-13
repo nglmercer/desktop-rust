@@ -2681,3 +2681,10 @@ one bounded, byte-preserving Git read; snapshot chunks are session-owned and
 released after download. Larger objects and older hosts keep the existing
 chunked reader, which preserves support for larger files but can repeatedly
 decompress the same object. Electron retains its existing blob read path.
+
+Copilot conflict-context file reads use confined worktree snapshots on Wry and
+WebSocket, capped at 10 MiB before reading and before client allocation.
+Oversized files retain their specific skipped reason; unsafe, missing and
+unreadable paths are skipped. Relative symlinks must remain inside the worktree
+and Git metadata is excluded. Applying Copilot's generated resolutions remains
+a separate legacy Node-backed workflow and has not been migrated by this read.

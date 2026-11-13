@@ -12,6 +12,17 @@ use std::{
     path::{Component, Path},
 };
 
+#[derive(Debug)]
+pub(crate) struct WorkingFileTooLarge;
+
+impl std::fmt::Display for WorkingFileTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Working file exceeds the supported size")
+    }
+}
+
+impl std::error::Error for WorkingFileTooLarge {}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Kind {
@@ -139,10 +150,10 @@ impl WorkingFile {
         }
         let file = self.parent.open_with(&self.name, &options)?.into_std();
         let metadata = file.metadata()?;
-        anyhow::ensure!(
-            metadata.is_file() && metadata.len() <= limit,
-            "Working file is not a supported regular file"
-        );
+        anyhow::ensure!(metadata.is_file(), "Working file is not a supported regular file");
+        if metadata.len() > limit {
+            return Err(WorkingFileTooLarge.into());
+        }
         let mut input = file.take(limit + 1);
         let mut bytes = Vec::new();
         let mut chunk = [0; 64 * 1024];
@@ -154,10 +165,9 @@ impl WorkingFile {
             }
             bytes.extend_from_slice(&chunk[..count]);
         }
-        anyhow::ensure!(
-            bytes.len() as u64 <= limit,
-            "Working file exceeds the supported size"
-        );
+        if bytes.len() as u64 > limit {
+            return Err(WorkingFileTooLarge.into());
+        }
         let after = input.into_inner().metadata()?;
         anyhow::ensure!(
             bytes.len() as u64 == metadata.len()

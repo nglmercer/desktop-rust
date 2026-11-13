@@ -2219,6 +2219,11 @@ mod tests {
             assert_eq!(chunk["data"], "AP8AgCoK");
             let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
             assert_eq!(backend.read(release).unwrap()["released"], true);
+            let preview = backend.read(route(json!({"method":"renderer_working_file","path":"[a].png","max_bytes":6}))).unwrap();
+            let id = preview["id"].as_str().unwrap();
+            let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
+            assert_eq!(backend.read(release).unwrap()["released"], true);
+            assert_eq!(backend.read(route(json!({"method":"renderer_working_file","path":"[a].png","max_bytes":5}))).unwrap()["kind"], "too_large");
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

@@ -2083,12 +2083,19 @@ export class BackendClient {
   }
 
   async repositoryReadSnapshot(repositoryPath: string, method: 'renderer_staged_diff' | 'renderer_working_file', params: Record<string, unknown>): Promise<Uint8Array | null> {
+    const requestedLimit = params.max_bytes
+    if (requestedLimit !== undefined && (method !== 'renderer_working_file' || typeof requestedLimit !== 'number' || !Number.isSafeInteger(requestedLimit) || requestedLimit < 0 || requestedLimit > 70_000_000)) {
+      throw new BackendError({ code: 'invalid_request', message: 'Invalid working file size limit', retryable: false })
+    }
+    const maxBytes = typeof requestedLimit === 'number' ? requestedLimit : method === 'renderer_staged_diff' ? 10 * 1024 * 1024 : 70_000_000
     const previous = this.comparisonTurn
     let releaseTurn!: () => void
     this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
     await previous
     try {
-      const result = await this.decodeComparisonSnapshot(repositoryPath, await this.repositoryRendererRequest(repositoryPath, method, params), method === 'renderer_staged_diff', method === 'renderer_staged_diff' ? 10 * 1024 * 1024 : 70_000_000)
+      const value = await this.repositoryRendererRequest(repositoryPath, method, params)
+      if (method === 'renderer_working_file' && requestedLimit !== undefined && isRecord(value) && value.kind === 'too_large') throw new BackendError({ code: 'file_too_large', message: 'Working file exceeds the supported size', retryable: false })
+      const result = await this.decodeComparisonSnapshot(repositoryPath, value, method === 'renderer_staged_diff', maxBytes)
       if (result !== null && !(result instanceof Uint8Array)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison snapshot', retryable: false })
       return result
     } finally { releaseTurn() }
@@ -2139,7 +2146,7 @@ export class BackendClient {
     if (isRecord(value) && allowBadRevision && value.kind === 'bad_revision') return null
     if (isRecord(value) && value.kind === 'diff' && typeof value.data === 'string' && value.data.length <= 2_796_204 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.data)) {
       const decoded = atob(value.data)
-      if (decoded.length > 2 * 1024 * 1024) throw new BackendError({ code: 'invalid_response', message: 'Invalid legacy comparison size', retryable: false })
+      if (decoded.length > Math.min(2 * 1024 * 1024, maxBytes)) throw new BackendError({ code: 'invalid_response', message: 'Invalid legacy comparison size', retryable: false })
       return Uint8Array.from(decoded, character => character.charCodeAt(0))
     }
     if (isRecord(value) && value.kind === 'unrenderable' && typeof value.prefix === 'string' && value.prefix.length <= 87384 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.prefix)) {

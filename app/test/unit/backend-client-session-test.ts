@@ -6,6 +6,20 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('rejects oversized working-file snapshots before requesting chunks', async () => {
+    const client = new BackendClient()
+    const id = '12345678-1234-4234-8234-123456789abc'
+    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockResolvedValue({ kind: 'snapshot', id, size: 11 })
+    const release = vi.spyOn(client as any, 'releaseComparisonSnapshot').mockResolvedValue(undefined)
+    await expect(client.repositoryReadSnapshot('/repo', 'renderer_working_file', { path: 'file', max_bytes: 10 })).rejects.toMatchObject({ code: 'invalid_response' })
+    expect(request).toHaveBeenCalledOnce()
+    expect(release).toHaveBeenCalledWith(id)
+    request.mockResolvedValueOnce({ kind: 'too_large' })
+    await expect(client.repositoryReadSnapshot('/repo', 'renderer_working_file', { path: 'file', max_bytes: 10 })).rejects.toMatchObject({ code: 'file_too_large' })
+    expect(release).toHaveBeenCalledTimes(1)
+    await expect(client.repositoryReadSnapshot('/repo', 'renderer_working_file', { path: 'file', max_bytes: -1 })).rejects.toMatchObject({ code: 'invalid_request' })
+  })
+
   it('reads and validates a repository last-fetch timestamp through Wry', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ kind: 'fetched', time: 1_700_000_000_000 }).mockResolvedValueOnce({ kind: 'empty' }).mockResolvedValueOnce({ kind: 'fetched', time: 'wrong' })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
