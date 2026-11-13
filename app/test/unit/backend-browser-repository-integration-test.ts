@@ -184,7 +184,11 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           () => Reflect.get(window, '__browserAudit') as string[]
         )
         throw new Error(
-          `Repository journey did not render the diff: ${((await page.locator('body').textContent()) ?? '').slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls.filter(call => !call.includes('"method":"path_exists"')).join(' ')}`
+          `Repository journey did not render the diff: ${(
+            (await page.locator('body').textContent()) ?? ''
+          ).slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls
+            .filter(call => !call.includes('"method":"path_exists"'))
+            .join(' ')}`
         )
       }
       const calls = await page.evaluate(
@@ -344,6 +348,60 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           )
         })
       ).toBe(false)
+      await page.locator('.branch-button').click()
+      await page.locator('.new-branch-button').click()
+      const createBranchDialog = page.locator('#create-branch')
+      await createBranchDialog.locator('input').first().fill('browser-created')
+      await createBranchDialog
+        .getByRole('button', { name: /^Create branch$/i })
+        .click()
+      const createSwitchDialog = page.getByRole('dialog', {
+        name: /switch branch/i,
+      })
+      await createSwitchDialog
+        .getByText('Bring my changes to browser-created')
+        .click()
+      await createSwitchDialog
+        .getByRole('button', { name: /switch branch/i })
+        .click()
+      try {
+        await vi.waitFor(
+          () => {
+            expect(
+              execFileSync(
+                'git',
+                ['-C', repository, 'branch', '--show-current'],
+                {
+                  encoding: 'utf8',
+                }
+              ).trim()
+            ).toBe('browser-created')
+          },
+          { timeout: 10_000 }
+        )
+      } catch (error) {
+        const calls = await page.evaluate(
+          () => Reflect.get(window, '__browserAudit') as string[]
+        )
+        throw new Error(
+          `Create branch failed: ${String(error)}; body: ${(
+            (await page.locator('body').textContent()) ?? ''
+          ).slice(-3000)}; calls: ${calls
+            .filter(call => !call.includes('"method":"path_exists"'))
+            .join(' ')}; errors: ${errors.join('; ')}`
+        )
+      }
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
+        'modified\nextra\n'
+      )
+      const branchCalls = await page.evaluate(
+        () => Reflect.get(window, '__browserAudit') as string[]
+      )
+      for (const method of ['create_branch_preview', 'create_branch']) {
+        expect(
+          branchCalls.some(call => JSON.parse(call).method === method)
+        ).toBe(true)
+      }
       try {
         await page
           .getByText('changed.txt', { exact: true })
@@ -397,7 +455,11 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           () => Reflect.get(window, '__browserAudit') as string[]
         )
         throw new Error(
-          `Discard/undo journey failed: ${String(error)}; body: ${((await page.locator('body').textContent()) ?? '').slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls.filter(call => !call.includes('"method":"path_exists"')).join(' ')}`
+          `Discard/undo journey failed: ${String(error)}; body: ${(
+            (await page.locator('body').textContent()) ?? ''
+          ).slice(0, 2000)}; errors: ${errors.join('; ')}; calls: ${calls
+            .filter(call => !call.includes('"method":"path_exists"'))
+            .join(' ')}`
         )
       }
       const headBeforeCommit = execFileSync(
@@ -426,28 +488,52 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           () => Reflect.get(window, '__browserAudit') as string[]
         )
         throw new Error(
-          `Commit review did not run: ${((await page.locator('body').textContent()) ?? '').slice(-3000)}; calls: ${audit.filter(call => !call.includes('"method":"path_exists"')).join(' ')}; errors: ${errors.join('; ')}`
+          `Commit review did not run: ${(
+            (await page.locator('body').textContent()) ?? ''
+          ).slice(-3000)}; calls: ${audit
+            .filter(call => !call.includes('"method":"path_exists"'))
+            .join(' ')}; errors: ${errors.join('; ')}`
         )
       }
-      await vi.waitFor(() => {
-        expect(execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
-          encoding: 'utf8',
-        })).not.toBe(headBeforeCommit)
-      }, { timeout: 20000 })
-      expect(execFileSync('git', ['-C', repository, 'show', 'HEAD:changed.txt'], {
-        encoding: 'utf8',
-      })).toBe('modified\n')
-      await vi.waitFor(() => {
-        expect(execFileSync('git', ['-C', repository, 'show', ':changed.txt'], {
-          encoding: 'utf8',
-        })).toBe('modified\n')
-      }, { timeout: 20000 })
-      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe('modified\nextra\n')
-      const audit = await page.evaluate(() =>
-        (Reflect.get(window, '__browserAudit') as string[]).map(call => JSON.parse(call))
+      await vi.waitFor(
+        () => {
+          expect(
+            execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+              encoding: 'utf8',
+            })
+          ).not.toBe(headBeforeCommit)
+        },
+        { timeout: 20000 }
       )
-      expect(audit.some(call => call.method === 'prepare_selected_commit')).toBe(true)
-      expect(audit.some(call => call.method === 'publish_selected_commit')).toBe(true)
+      expect(
+        execFileSync('git', ['-C', repository, 'show', 'HEAD:changed.txt'], {
+          encoding: 'utf8',
+        })
+      ).toBe('modified\n')
+      await vi.waitFor(
+        () => {
+          expect(
+            execFileSync('git', ['-C', repository, 'show', ':changed.txt'], {
+              encoding: 'utf8',
+            })
+          ).toBe('modified\n')
+        },
+        { timeout: 20000 }
+      )
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
+        'modified\nextra\n'
+      )
+      const audit = await page.evaluate(() =>
+        (Reflect.get(window, '__browserAudit') as string[]).map(call =>
+          JSON.parse(call)
+        )
+      )
+      expect(
+        audit.some(call => call.method === 'prepare_selected_commit')
+      ).toBe(true)
+      expect(
+        audit.some(call => call.method === 'publish_selected_commit')
+      ).toBe(true)
       const legacyCalls = await page.evaluate(() =>
         (Reflect.get(window, '__browserAudit') as string[])
           .map(call => JSON.parse(call))
@@ -455,23 +541,53 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
       )
       expect(legacyCalls).toEqual([])
 
-      const committedHead = execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' })
+      const committedHead = execFileSync(
+        'git',
+        ['-C', repository, 'rev-parse', 'HEAD'],
+        { encoding: 'utf8' }
+      )
       const hook = path.join(repository, '.git', 'hooks', 'pre-commit')
-      await writeFile(hook, '#!/bin/sh\necho "intentional failure" >&2\nexit 1\n')
+      await writeFile(
+        hook,
+        '#!/bin/sh\necho "intentional failure" >&2\nexit 1\n'
+      )
       await chmod(hook, 0o755)
       await page.locator('.changes-list-check-all label').click()
       await page.getByLabel('Commit summary').fill('Failing hook')
-      await page.getByRole('group', { name: 'Create commit' }).getByRole('button', { name: /^Commit(?:\s|$)/ }).click()
-      await page.getByText(/Ignoring an individual failed hook is not supported/).waitFor({ timeout: 20000 })
-      expect(execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' })).toBe(committedHead)
-      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe('modified\nextra\n')
+      await page
+        .getByRole('group', { name: 'Create commit' })
+        .getByRole('button', { name: /^Commit(?:\s|$)/ })
+        .click()
+      await page
+        .getByText(/Ignoring an individual failed hook is not supported/)
+        .waitFor({ timeout: 20000 })
+      expect(
+        execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+        })
+      ).toBe(committedHead)
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
+        'modified\nextra\n'
+      )
       await page.keyboard.press('Escape')
       await page.getByRole('button', { name: 'Recovery history' }).click()
-      await page.getByText('Commit needs inspection').waitFor({ timeout: 10000 })
-      await page.getByRole('button', { name: 'Close unchanged attempt' }).click()
-      await page.getByText('Commit needs inspection').waitFor({ state: 'hidden', timeout: 10000 })
-      expect(execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' })).toBe(committedHead)
-      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe('modified\nextra\n')
+      await page
+        .getByText('Commit needs inspection')
+        .waitFor({ timeout: 10000 })
+      await page
+        .getByRole('button', { name: 'Close unchanged attempt' })
+        .click()
+      await page
+        .getByText('Commit needs inspection')
+        .waitFor({ state: 'hidden', timeout: 10000 })
+      expect(
+        execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+        })
+      ).toBe(committedHead)
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
+        'modified\nextra\n'
+      )
     }, 90_000)
   }
 )
