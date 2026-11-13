@@ -1,5 +1,6 @@
+// @vitest-environment node
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { resolve } from 'path'
 import ts from 'typescript'
 import notificationsPackage from '../vendor/desktop-notifications/package.json'
@@ -64,6 +65,6 @@ describe('native module TypeScript output', () => {
           ).join('\n')}`
         )
       }
-    })
+    }, 60_000)
   }
 })

@@ -1,5 +1,6 @@
+// @vitest-environment node
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'fs/promises'
 import { dirname, join, relative } from 'path'
 import { copyCopilotDependency } from './copilot'

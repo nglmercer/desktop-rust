@@ -1,4 +1,6 @@
 [
+  "script/copilot-test.ts",
+  "script/native-module-build-test.ts",
   "rust/tests/push-hook-decision.test.ts",
   "rust/tests/push-lfs.test.ts",
   "app/test/unit/rust-push-routing-test.ts",
