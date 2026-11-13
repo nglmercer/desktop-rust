@@ -2002,10 +2002,27 @@ export class BackendClient {
     if (!isRecord(result) || result.code !== 0 || typeof result.undo_id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.undo_id)) throw new BackendError({ code: 'invalid_response', message: 'Conflict resolution outcome is uncertain; inspect the conflict and recovery history', retryable: false })
   }
 
-  async repositoryRendererCommitDiff(repositoryPath: string, revision: string, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<string> {
-    const value = await this.repositoryRendererRequest(repositoryPath, 'renderer_commit_diff', { revision, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace })
-    if (typeof value !== 'string' || value.length > 3_000_000 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit diff response', retryable: false })
-    return value
+  async repositoryRendererCommitDiff(repositoryPath: string, revision: string, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<Uint8Array | { kind: 'unrenderable'; prefix: Uint8Array }> {
+    const previous = this.comparisonTurn
+    let releaseTurn!: () => void
+    this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
+    await previous
+    try {
+      const params = { revision, path, old_path: oldPath ?? null, hide_whitespace: hideWhitespace }
+      let value: unknown
+      try {
+        value = await this.repositoryRendererRequest(repositoryPath, 'renderer_commit_diff', { ...params, snapshot: true })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : ''
+        if (!/invalid typed repository request|invalid Git identity request|unknown field [`'“]?snapshot/i.test(message)) throw error
+        value = await this.repositoryRendererRequest(repositoryPath, 'renderer_commit_diff', params)
+      }
+      // Older hosts return a bare base64 string.
+      if (typeof value === 'string') value = { kind: 'diff', data: value }
+      const result = await this.decodeComparisonSnapshot(repositoryPath, value, false)
+      if (result === null) throw new BackendError({ code: 'invalid_response', message: 'Invalid commit diff response', retryable: false })
+      return result
+    } finally { releaseTurn() }
   }
 
   async repositoryRendererCompareDiff(repositoryPath: string, before: string, after: string, mergeBase: boolean, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<Uint8Array | { kind: 'unrenderable'; prefix: Uint8Array } | null> {

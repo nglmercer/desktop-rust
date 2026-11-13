@@ -79,6 +79,18 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke.mock.calls[1][1].operation.operation.snapshot).toBeUndefined()
   })
 
+  it('falls back to an older host for commit diffs without retrying Git errors', async () => {
+    const client = new BackendClient()
+    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce(btoa('legacy\0diff'))
+    const result = await client.repositoryRendererCommitDiff('/repo', 'HEAD', 'file', undefined, false)
+    expect(Array.from(result as Uint8Array)).toEqual(Array.from(new TextEncoder().encode('legacy\0diff')))
+    expect(request.mock.calls[0][2].snapshot).toBe(true)
+    expect(request.mock.calls[1][2].snapshot).toBeUndefined()
+    request.mockReset().mockRejectedValueOnce(new Error('git exited'))
+    await expect(client.repositoryRendererCommitDiff('/repo', 'HEAD', 'file', undefined, false)).rejects.toThrow('git exited')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the inline comparison when an older WS host rejects the typed request', async () => {
     const client = new BackendClient()
     const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('legacy') })

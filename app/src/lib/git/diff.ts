@@ -50,6 +50,10 @@ import { withRepositoryGitOperation } from './repository-operation'
  */
 const MaxDiffBufferSize = 70e6 // 70MB in decimal
 
+// Parsing creates objects for individual lines. Bound their count before
+// decoding and parsing, since a small patch can contain millions of lines.
+const MaxDiffLineCount = 250_000
+
 /**
  * Where `MaxDiffBufferSize` is a hard limit, this is a suggested limit. Diffs
  * bigger than this _could_ be displayed but it might cause some slowness.
@@ -69,7 +73,12 @@ const MaxCharactersPerLine = 5000
  * @param buffer A buffer of binary text from a spawned process
  */
 function isValidBuffer(buffer: Buffer) {
-  return buffer.length <= MaxDiffBufferSize
+  if (buffer.length > MaxDiffBufferSize) return false
+  let lines = 0
+  for (const byte of buffer) {
+    if (byte === 10 && ++lines > MaxDiffLineCount) return false
+  }
+  return true
 }
 
 /** Is the buffer too large for us to reasonably represent? */
@@ -138,8 +147,12 @@ export async function getCommitDiff(
       backend().transportKind === 'wry'
         ? await withRepositoryGitOperation(repository.path, 'read', read, true)
         : await read()
+    if ('kind' in encoded) {
+      if (file.status.submoduleStatus === undefined) return { kind: DiffType.Unrenderable }
+      return buildDiff(Buffer.from(encoded.prefix), repository, file, commitish, commitish)
+    }
     return buildDiff(
-      Buffer.from(encoded, 'base64'),
+      Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
       repository,
       file,
       commitish,
@@ -926,20 +939,9 @@ async function buildSubmoduleDiff(
     file.status.kind === AppFileStatusKind.Deleted
   ) {
     const diff = buffer.toString('utf-8')
-    const lines = diff.split('\n')
-    const baseRegex = 'Subproject commit ([^-]+)(-dirty)?$'
-    const oldSHARegex = new RegExp('-' + baseRegex)
-    const newSHARegex = new RegExp('\\+' + baseRegex)
-    const lineMatch = (regex: RegExp) =>
-      lines
-        .flatMap(line => {
-          const match = line.match(regex)
-          return match ? match[1] : []
-        })
-        .at(0) ?? null
-
-    oldSHA = lineMatch(oldSHARegex)
-    newSHA = lineMatch(newSHARegex)
+    const baseRegex = 'Subproject commit ([^\\n-]+)(-dirty)?$'
+    oldSHA = diff.match(new RegExp('-' + baseRegex, 'm'))?.[1] ?? null
+    newSHA = diff.match(new RegExp('\\+' + baseRegex, 'm'))?.[1] ?? null
   }
 
   return {

@@ -281,10 +281,11 @@ impl Repository {
         path: GitPath,
         old_path: Option<GitPath>,
         hide_whitespace: bool,
+        snapshot: bool,
     ) -> Result<Value> {
         let commit = self.resolve_commit(revision).await?;
         let path = crate::validate_path(path)?;
-        let mut command = args(&["log"]);
+        let mut command = args(&["--literal-pathspecs", "log"]);
         if hide_whitespace {
             command.push("-w".into());
         }
@@ -304,8 +305,32 @@ impl Repository {
         if let Some(old_path) = old_path {
             command.push(crate::validate_path(old_path)?);
         }
-        let output = self.run(&command).await?;
+        let permit = if snapshot {
+            Some(crate::comparison_snapshots::reserve().await?)
+        } else {
+            None
+        };
+        let output = if snapshot {
+            process::run_comparison_snapshot(&self.path, &command).await?
+        } else {
+            self.run(&command).await?
+        };
         ensure(&output)?;
+        if let Some(permit) = permit {
+            if output.stdout.len() > crate::comparison_snapshots::MAX_BYTES {
+                return Ok(json!({"kind":"unrenderable", "prefix":STANDARD.encode(&output.stdout[..output.stdout.len().min(64 * 1024)])}));
+            }
+            let cancellation = crate::cancellation::Cancellation::current();
+            cancellation.check()?;
+            let result = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;
+            if let Err(error) = cancellation.check() {
+                if let Some(id) = result["id"].as_str() {
+                    let _ = crate::comparison_snapshots::release_owned(id);
+                }
+                return Err(error);
+            }
+            return Ok(result);
+        }
         Ok(json!(STANDARD.encode(output.stdout)))
     }
 

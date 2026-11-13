@@ -2057,6 +2057,12 @@ mod tests {
             fs::write(root.join("[a].txt"), format!("{}\n", "a".repeat(120)).repeat(20_000)).unwrap(); git(&["add", "--", "."]); git(&["commit", "-qm", "second"]);
             let head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_owned();
             let backend = Backend::new(16).unwrap();
+            let commit = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_commit_diff","revision":head,"path":"[a].txt","old_path":null,"hide_whitespace":false,"snapshot":true}}})]).unwrap();
+            let commit = backend.read(commit).unwrap();
+            assert_eq!(commit["kind"], "snapshot");
+            assert!(commit["size"].as_u64().unwrap() > 2 * 1024 * 1024);
+            let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":commit["id"]}})]).unwrap();
+            assert_eq!(backend.read(release).unwrap()["released"], true);
             let request = backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_diff","before":first,"after":head,"merge_base":true,"path":"[a].txt","old_path":null,"hide_whitespace":false,"snapshot":true}}})]).unwrap();
             let response = backend.read(request).unwrap();
             assert_eq!(response["kind"], "snapshot");

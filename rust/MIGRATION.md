@@ -2615,3 +2615,12 @@ absolute symlinks, links escaping the root and `.git` targets are refused.
 Missing or larger-than-70,000,000-byte images report an error. The binary data
 and encoded image string can still require substantial memory at that limit.
 Electron retains its existing image read path, including its symlink semantics.
+
+Single-commit history diffs also use the comparison snapshot transport on Wry
+and WebSocket, with the bounded inline read retained for older hosts. Text
+patches with more than 250,000 lines are marked unrenderable before parsing,
+limiting per-line allocations for commit, comparison and resolution previews;
+submodule SHA extraction does not allocate per-line objects. Focused Wry and
+real WebSocket Git tests cover large snapshots, literal paths and root binary
+commits; renderer tests cover the line limit, ordinary large diffs and
+submodule SHAs. Electron retains its existing Git command path.

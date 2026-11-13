@@ -435,6 +435,8 @@ pub enum Operation {
         old_path: Option<GitPath>,
         #[serde(default)]
         hide_whitespace: bool,
+        #[serde(default)]
+        snapshot: bool,
     },
     RendererCompareDiff {
         before: String,

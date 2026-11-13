@@ -541,9 +541,10 @@ impl Repository {
                 path,
                 old_path,
                 hide_whitespace,
+                snapshot,
             } => {
                 return self
-                    .renderer_commit_diff(&revision, path, old_path, hide_whitespace)
+                    .renderer_commit_diff(&revision, path, old_path, hide_whitespace, snapshot)
                     .await;
             }
             Operation::RendererCompareDiff {

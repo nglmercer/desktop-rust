@@ -8,10 +8,10 @@ import { DiffType } from '../../src/models/diff'
 import type { Repository } from '../../src/models/repository'
 
 const mocks = vi.hoisted(() => ({
-  transport: 'ws', compare: vi.fn(), changes: vi.fn(), mergeBase: vi.fn(), git: vi.fn(), staged: vi.fn(), unstage: vi.fn(), prepare: vi.fn(), stage: vi.fn(),
+  transport: 'ws', compare: vi.fn(), commit: vi.fn(), changes: vi.fn(), mergeBase: vi.fn(), git: vi.fn(), staged: vi.fn(), unstage: vi.fn(), prepare: vi.fn(), stage: vi.fn(),
   scope: vi.fn(async (_path: string, _kind: string, work: () => Promise<unknown>) => work()),
 }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCompareDiff: mocks.compare, repositoryRendererCompareChanges: mocks.changes, repositoryMergeBase: mocks.mergeBase, repositoryReadSnapshot: mocks.staged, repositorySubmoduleDisplayUrl: async () => null }) }))
+vi.mock('../../src/backend/client', () => ({ backend: () => ({ transportKind: mocks.transport, repositoryRendererCommitDiff: mocks.commit, repositoryRendererCompareDiff: mocks.compare, repositoryRendererCompareChanges: mocks.changes, repositoryMergeBase: mocks.mergeBase, repositoryReadSnapshot: mocks.staged, repositorySubmoduleDisplayUrl: async () => null }) }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 vi.mock('../../src/lib/git/reset', () => ({ unstageAll: mocks.unstage }))
 vi.mock('../../src/lib/git/update-index', () => ({ preparePartialStagingDiffs: mocks.prepare, stageFiles: mocks.stage }))
@@ -19,7 +19,7 @@ vi.mock('../../src/lib/git/repository-operation', () => ({ withRepositoryGitOper
 vi.mock('../../src/lib/custom-integration', () => ({}))
 vi.mock('keytar', () => ({ default: {} }))
 
-import { getBranchMergeBaseDiff, getCommitRangeDiff, getBranchMergeBaseChangedFiles, getCommitRangeChangedFiles, getFilesDiffText } from '../../src/lib/git/diff'
+import { getCommitDiff, getBranchMergeBaseDiff, getCommitRangeDiff, getBranchMergeBaseChangedFiles, getCommitRangeChangedFiles, getFilesDiffText } from '../../src/lib/git/diff'
 
 let root: string
 let raw: Buffer
@@ -113,5 +113,20 @@ describe.each(['wry', 'ws'])('Rust comparison diff via %s', transport => {
       expect(result.oldSHA).toBe('oldsha')
       expect(result.newSHA).toBe('newsha')
     }
+  })
+
+  it('bounds line-heavy commit and comparison patches before parsing', async () => {
+    const lineHeavy = Buffer.concat([raw, Buffer.from('+x\n'.repeat(250_001))])
+    mocks.commit.mockResolvedValue(lineHeavy)
+    mocks.compare.mockResolvedValue(lineHeavy)
+    expect((await getCommitDiff(repository, file, last)).kind).toBe(DiffType.Unrenderable)
+    expect((await getBranchMergeBaseDiff(repository, file, first, last, false, last)).kind).toBe(DiffType.Unrenderable)
+    mocks.commit.mockResolvedValue(Buffer.from(raw.toString().replace('+second\n', `+${'x'.repeat(4_400_000)}\n`)))
+    expect((await getCommitDiff(repository, file, last)).kind).toBe(DiffType.LargeText)
+    const submodule = new FileChange('sub', { kind: AppFileStatusKind.Modified, submoduleStatus: { commitChanged: true, modifiedChanges: false, untrackedChanges: false } })
+    mocks.commit.mockResolvedValue(Buffer.concat([Buffer.from('-Subproject commit oldsha\n+Subproject commit newsha\n'), lineHeavy]))
+    const result = await getCommitDiff(repository, submodule, last)
+    expect(result.kind).toBe(DiffType.Submodule)
+    if (result.kind === DiffType.Submodule) expect([result.oldSHA, result.newSHA]).toEqual(['oldsha', 'newsha'])
   })
 })
