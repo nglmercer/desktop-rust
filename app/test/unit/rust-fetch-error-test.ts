@@ -37,6 +37,19 @@ describe('native fetch errors', () => {
   })
 
   it.each([
+    ['remote_repository_unavailable', 'remote repository could not be accessed'],
+    ['remote_ref_not_found', 'requested reference was not found'],
+    ['fetch_non_fast_forward', 'cannot be fast-forwarded'],
+    ['fetch_tag_clobber', 'overwrite an existing local tag'],
+    ['host_resolution_failed', 'remote host could not be resolved'],
+  ] as const)('shows a safe explanation for %s', (errorKind, description) => {
+    const error = fetchFailureToGitError({ exitCode: 1, errorKind }, '/repo', 'origin')
+    expect(error.result.gitError).toBeNull()
+    expect(error.message.toLowerCase()).toContain(description)
+    expect(error.result.stderr).toBe('')
+  })
+
+  it.each([
     ['bad_config_value', DugiteError.BadConfigValue, 'configuration'],
     ['no_submodule_mapping', DugiteError.NoSubmoduleMapping, 'submodule'],
     ['submodule_repository_does_not_exist', DugiteError.SubmoduleRepositoryDoesNotExist, 'submodule'],

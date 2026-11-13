@@ -2482,7 +2482,10 @@ verification remains open.
 Background requests pass the existing credential-manager interaction policy,
 and common failures, including a matching SAML owner, are classified without
 returning Git diagnostics; unclassified errors and full remote details remain
-unavailable. Native fetch mutations have a one-hour deadline; the legacy Wry
+unavailable. Fixed descriptions also cover missing remote repositories and
+refs, non-fast-forward and tag-clobber rejections, and host resolution failures;
+Git's remote-controlled diagnostic text is not returned. Native fetch mutations
+have a one-hour deadline; the legacy Wry
 Git execution path has no equivalent fixed deadline. Request-scoped Git and LFS
 progress uses bounded best-effort delivery that can drop chunks. LFS progress uses a private temporary file;
 Windows verifies its ACL and omits capture if the filesystem does not enforce

@@ -258,6 +258,7 @@ const fetchErrorKinds = [
   'https_authentication_failed', 'https_saml_reauth_required', 'ssh_saml_reauth_required', 'remote_disconnection', 'host_down',
   'https_repository_not_found', 'ssh_repository_not_found', 'lock_file_exists',
   'bad_config_value', 'no_submodule_mapping', 'submodule_repository_does_not_exist', 'invalid_submodule_sha',
+  'remote_repository_unavailable', 'remote_ref_not_found', 'fetch_non_fast_forward', 'fetch_tag_clobber', 'host_resolution_failed',
 ] as const
 export type FetchErrorKind = typeof fetchErrorKinds[number]
 export interface FetchFailure {

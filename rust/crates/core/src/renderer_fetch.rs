@@ -482,6 +482,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn classifies_real_fetch_failures_without_returning_diagnostics() {
+        let f = Fixture::new();
+        let source = f.0.join("source");
+        let target = f.0.join("target");
+        let mut request = f.remote("origin", &source.to_string_lossy());
+        let repo = Repository::open(&target).await.unwrap();
+
+        request.refspec = Some("refs/heads/nonexistent".into());
+        let preview = repo.renderer_fetch_preview(&request).await.unwrap();
+        let missing = repo
+            .renderer_fetch(&request, preview["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(missing["code"], 128);
+        assert_eq!(missing["error_kind"], "remote_ref_not_found");
+        assert!(!missing.to_string().contains("nonexistent"));
+
+        git(&source, &["-c", "tag.gpgSign=false", "tag", "v1"]);
+        git(
+            &target,
+            &["fetch", "--", "origin", "refs/tags/v1:refs/tags/v1"],
+        );
+        fs::write(source.join("file"), "changed\n").unwrap();
+        git(&source, &["add", "file"]);
+        git(&source, &["commit", "-qm", "change"]);
+        git(&source, &["-c", "tag.gpgSign=false", "tag", "-f", "v1"]);
+        request.refspec = Some("refs/tags/v1:refs/tags/v1".into());
+        let preview = repo.renderer_fetch_preview(&request).await.unwrap();
+        let rejected = repo
+            .renderer_fetch(&request, preview["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(rejected["code"], 1);
+        assert_eq!(rejected["error_kind"], "fetch_tag_clobber");
+        assert!(!rejected.to_string().contains("v1"));
+
+        let missing_path = f.0.join("private-missing-remote");
+        git(
+            &target,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                &missing_path.to_string_lossy(),
+            ],
+        );
+        request.expected_url = missing_path.to_string_lossy().into_owned();
+        request.refspec = None;
+        let preview = repo.renderer_fetch_preview(&request).await.unwrap();
+        let unavailable = repo
+            .renderer_fetch(&request, preview["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(unavailable["code"], 128);
+        assert_eq!(unavailable["error_kind"], "remote_repository_unavailable");
+        assert!(!unavailable.to_string().contains("private-missing-remote"));
+    }
+
+    #[tokio::test]
     async fn refreshes_remote_head_only_after_review() {
         use std::os::unix::fs::symlink;
         let f = Fixture::new();

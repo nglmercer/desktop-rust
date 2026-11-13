@@ -10,6 +10,28 @@ fn classify_stream(output: &[u8]) -> Option<&'static str> {
         && text.contains("' for '")
     {
         Some("bad_config_value")
+    } else if text.lines().any(|line| {
+        line.starts_with("fatal: '") && line.ends_with("' does not appear to be a git repository")
+    }) {
+        Some("remote_repository_unavailable")
+    } else if text
+        .lines()
+        .any(|line| line.starts_with("fatal: couldn't find remote ref "))
+    {
+        Some("remote_ref_not_found")
+    } else if text.lines().any(|line| {
+        line.trim_start().starts_with("! [rejected]") && line.contains("(non-fast-forward)")
+    }) {
+        Some("fetch_non_fast_forward")
+    } else if text.lines().any(|line| {
+        line.trim_start().starts_with("! [rejected]")
+            && line.contains("(would clobber existing tag)")
+    }) {
+        Some("fetch_tag_clobber")
+    } else if text.lines().any(|line| {
+        line.starts_with("fatal: unable to access '") && line.contains("Could not resolve host:")
+    }) {
+        Some("host_resolution_failed")
     } else if text.contains("[EPOLICYKEYAGE]")
         && text.contains("fatal: Could not read from remote repository.")
     {
@@ -133,6 +155,26 @@ mod tests {
                 "bad_config_value",
             ),
             (
+                "fatal: '/tmp/secret' does not appear to be a git repository\nfatal: Could not read from remote repository.",
+                "remote_repository_unavailable",
+            ),
+            (
+                "fatal: couldn't find remote ref secret",
+                "remote_ref_not_found",
+            ),
+            (
+                " ! [rejected] main -> origin/main (non-fast-forward)\nerror: failed to fetch some refs from 'secret'",
+                "fetch_non_fast_forward",
+            ),
+            (
+                " ! [rejected] v1 -> v1 (would clobber existing tag)\nerror: failed to fetch some refs from 'secret'",
+                "fetch_tag_clobber",
+            ),
+            (
+                "fatal: unable to access 'https://example.invalid/secret': Could not resolve host: example.invalid",
+                "host_resolution_failed",
+            ),
+            (
                 "No submodule mapping found in .gitmodules for path 'secret'",
                 "no_submodule_mapping",
             ),
@@ -152,6 +194,14 @@ mod tests {
             );
         }
         assert_eq!(classify(b"secret token", b"", None), None);
+        assert_eq!(
+            classify(
+                b"remote: ! [rejected] fake (would clobber existing tag)",
+                b"",
+                None
+            ),
+            None
+        );
         assert_eq!(
             classify(b"remote: The 'example' organization has enabled SAML SSO.\nremote: you must re-authorize\nfatal: Authentication failed for 'https://example.com'", b"", Some("example")),
             Some("https_saml_reauth_required")
