@@ -446,6 +446,9 @@ impl Backend {
                     | Operation::DiscardBatch { .. }
                     | Operation::UndoDiscard { .. }
                     | Operation::ForgetDiscard { .. }
+                    | Operation::ConflictDetail { .. }
+                    | Operation::StageConflict { .. }
+                    | Operation::ResolveConflict { .. }
             )
         {
             return Err(AppError::BadArgs(
@@ -1191,7 +1194,9 @@ impl Backend {
                 operation: Operation::Discard { .. }
                     | Operation::DiscardBatch { .. }
                     | Operation::UndoDiscard { .. }
-                    | Operation::ForgetDiscard { .. },
+                    | Operation::ForgetDiscard { .. }
+                    | Operation::StageConflict { .. }
+                    | Operation::ResolveConflict { .. },
                 ..
             })
         );
@@ -1268,8 +1273,11 @@ impl Backend {
                             }
                             GitInfoOperation::ReviewedDiscard { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if matches!(operation, Operation::ConflictDetail { .. } | Operation::StageConflict { .. } | Operation::ResolveConflict { .. }) {
+                                    if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                }
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::SelectedCommitPreview { repository_path, operation } => {
@@ -1452,6 +1460,43 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn wry_resolves_a_reviewed_conflict_and_retains_undo() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            use std::{fs, process::Command};
+            let root = std::env::temp_dir().join(format!("desktop-wry-conflict-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let git = |args: &[&str]| {
+                let result = Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+                assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+                result.stdout
+            };
+            git(&["init", "-q"]);
+            git(&["config", "user.name", "Test"]);
+            git(&["config", "user.email", "test@example.invalid"]);
+            fs::write(root.join("file"), "base\n").unwrap();
+            git(&["add", "file"]); git(&["commit", "-qm", "base"]);
+            git(&["checkout", "-qb", "side"]);
+            fs::write(root.join("file"), "side\n").unwrap();
+            git(&["commit", "-qam", "side"]);
+            git(&["checkout", "-q", "-"]);
+            fs::write(root.join("file"), "main\n").unwrap();
+            git(&["commit", "-qam", "main"]);
+            assert!(!Command::new("git").arg("-C").arg(&root).args(["merge", "side"]).output().unwrap().status.success());
+            let backend = Backend::new(16).unwrap();
+            let call = |operation: Value| backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":operation}})]).unwrap());
+            let detail = call(json!({"method":"conflict_detail","path":"file"})).unwrap();
+            let basis = detail["basis"].as_str().unwrap();
+            let result = call(json!({"method":"resolve_conflict","path":"file","basis":basis,"choice":"ours"})).unwrap();
+            assert_eq!(result["code"], 0);
+            assert!(result["undo_id"].is_string());
+            assert_eq!(fs::read(root.join("file")).unwrap(), b"main\n");
+            assert!(git(&["ls-files", "--unmerged", "--", "file"]).is_empty());
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
 
     #[cfg(unix)]
     #[test]

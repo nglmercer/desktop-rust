@@ -424,7 +424,7 @@ class WryTransport {
         isRecord(params.operation) &&
         params.operation.type === 'reviewed_discard' &&
         isRecord(params.operation.operation) &&
-        (params.operation.operation.method === 'discard' || params.operation.operation.method === 'discard_batch' || params.operation.operation.method === 'undo_discard' || params.operation.operation.method === 'forget_discard')
+        (params.operation.operation.method === 'discard' || params.operation.operation.method === 'discard_batch' || params.operation.operation.method === 'undo_discard' || params.operation.operation.method === 'forget_discard' || params.operation.operation.method === 'stage_conflict' || params.operation.operation.method === 'resolve_conflict')
       const initialization =
         method === 'git_info' &&
         isRecord(params) &&
@@ -1868,11 +1868,34 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_blob_prefix' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
     return this.repositoryRead(repositoryPath, method, params)
+  }
+
+  /** Recheck a conflicted path and resolve it with a journaled Rust operation. */
+  async repositoryResolveManualConflict(repositoryPath: string, path: string, choice: 'ours' | 'theirs' | 'delete' | 'edited', expected: { readonly ours: boolean; readonly theirs: boolean }): Promise<void> {
+    const detail = await this.repositoryRendererRequest(repositoryPath, 'conflict_detail', { path })
+    if (!isRecord(detail) || typeof detail.basis !== 'string' || !/^[0-9a-f]{64}$/.test(detail.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid conflict review; refresh the repository', retryable: false })
+    if (!Array.isArray(detail.stages)) throw new BackendError({ code: 'invalid_response', message: 'Invalid conflict stages', retryable: false })
+    const stages = new Set<number>()
+    for (const stage of detail.stages) {
+      if (!isRecord(stage) || (stage.stage !== 1 && stage.stage !== 2 && stage.stage !== 3) || stages.has(stage.stage)) throw new BackendError({ code: 'invalid_response', message: 'Invalid conflict stages', retryable: false })
+      stages.add(stage.stage)
+    }
+    if (stages.has(2) !== expected.ours || stages.has(3) !== expected.theirs) throw new BackendError({ code: 'conflict_changed', message: 'Conflict sides changed; refresh and review the resolution', retryable: false })
+    let result: unknown
+    try {
+      result = choice === 'edited'
+        ? await this.repositoryRendererRequest(repositoryPath, 'stage_conflict', { path, basis: detail.basis, allow_markers: true })
+        : await this.repositoryRendererRequest(repositoryPath, 'resolve_conflict', { path, basis: detail.basis, choice })
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect the conflict and recovery history before retrying`, retryable: false, recoveryId: cause.recoveryId })
+    }
+    if (!isRecord(result) || result.code !== 0 || typeof result.undo_id !== 'string' || !/^[a-f0-9-]{36}$/.test(result.undo_id)) throw new BackendError({ code: 'invalid_response', message: 'Conflict resolution outcome is uncertain; inspect the conflict and recovery history', retryable: false })
   }
 
   async repositoryRendererCommitDiff(repositoryPath: string, revision: string, path: string, oldPath: string | undefined, hideWhitespace: boolean): Promise<string> {

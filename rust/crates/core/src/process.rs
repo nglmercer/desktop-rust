@@ -538,7 +538,7 @@ async fn run_command(
     output_limit: u64,
     output_file: Option<tokio::fs::File>,
 ) -> Result<RawOutput> {
-    run_command_inner(
+    Box::pin(run_command_inner(
         path,
         command,
         args,
@@ -548,7 +548,7 @@ async fn run_command(
         false,
         None,
         None,
-    )
+    ))
     .await
 }
 
@@ -629,12 +629,12 @@ async fn run_command_inner(
                     stdout.take(output_limit).read_to_end(&mut bytes).await?;
                     Ok(bytes)
                 } else {
-                    read_output(stdout, output_limit, stdout_live, "stdout").await
+                    Box::pin(read_output(stdout, output_limit, stdout_live, "stdout")).await
                 }
             };
             let (stdout, stderr, status, ()) = tokio::try_join!(
                 output,
-                read_output(stderr, 2 * 1024 * 1024, live, "stderr"),
+                Box::pin(read_output(stderr, 2 * 1024 * 1024, live, "stderr")),
                 child.wait(),
                 input_task
             )?;

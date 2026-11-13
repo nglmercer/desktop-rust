@@ -2268,3 +2268,13 @@ non-Unix platforms pending equivalent directory identity checks.
 | Root npm/Webpack scripts, CI, packaging and releases | Root Cargo workspace and Rust/web CI implemented; legacy release/packaging removal pending                                            |
 
 The active goal remains incomplete while these rows or gates are unresolved.
+
+## Manual conflict resolution routing
+
+The shared merge, rebase and cherry-pick manual-resolution helper now uses the
+Rust reviewed conflict operations through Wry and WebSocket. It checks that the
+index still has the sides shown by the UI, and the backend binds publication to
+a fresh conflict basis and retains an undo record. Manually edited resolutions
+retain the prior allowance for conflict markers. The surrounding merge, rebase
+and cherry-pick workflows and their remaining legacy calls still require
+migration; this change does not close those removal gates.

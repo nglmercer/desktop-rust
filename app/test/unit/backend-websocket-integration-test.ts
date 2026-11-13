@@ -975,6 +975,10 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(conflict.check).toContain('leftover conflict marker')
       expect(conflict.attributes).toContain('conflict.txt\0merge\0')
       expect(conflict.attributes).toContain('binary.dat\0merge\0binary\0')
+      await expect(client.repositoryResolveManualConflict(firstRepository, 'conflict.txt', 'ours', { ours: true, theirs: false })).rejects.toMatchObject({ code: 'conflict_changed' })
+      await client.repositoryResolveManualConflict(firstRepository, 'conflict.txt', 'ours', { ours: true, theirs: true })
+      expect(await readFile(path.join(firstRepository, 'conflict.txt'), 'utf8')).toBe('main\n')
+      expect(execFileSync('git', ['-C', firstRepository, 'ls-files', '--unmerged', '--', 'conflict.txt'], { encoding: 'utf8' })).toBe('')
       await bounded(
         client.request('init_repository', { path: secondRepository })
       )

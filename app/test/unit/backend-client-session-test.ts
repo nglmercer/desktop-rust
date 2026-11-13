@@ -594,6 +594,31 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.repositoryWorktrees('/repo')).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('reviews conflict sides and uses the reviewed native resolution', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => null)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const basis = 'a'.repeat(64)
+    invoke.mockResolvedValueOnce({ basis, stages: [{ stage: 1 }, { stage: 2 }, { stage: 3 }] }).mockResolvedValueOnce({ code: 0, undo_id: '12345678-1234-1234-1234-123456789abc' })
+    await client.repositoryResolveManualConflict('/repo', 'file', 'theirs', { ours: true, theirs: true })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo', operation: { method: 'conflict_detail', path: 'file' } } }))
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo', operation: { method: 'resolve_conflict', path: 'file', basis, choice: 'theirs' } } }))
+    invoke.mockResolvedValueOnce({ basis, stages: [{ stage: 1 }, { stage: 2 }] })
+    await expect(client.repositoryResolveManualConflict('/repo', 'file', 'theirs', { ours: true, theirs: true })).rejects.toMatchObject({ code: 'conflict_changed', retryable: false })
+    expect(invoke).toHaveBeenCalledTimes(3)
+  })
+
+  it('stages reviewed edited conflicts and never retries uncertain outcomes', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => null)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const basis = 'b'.repeat(64)
+    invoke.mockResolvedValueOnce({ basis, stages: [{ stage: 1 }, { stage: 2 }] }).mockRejectedValueOnce({ code: 'cancelled', message: 'interrupted', retryable: true })
+    await expect(client.repositoryResolveManualConflict('/repo', 'file', 'edited', { ours: true, theirs: false })).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('recovery history') })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo', operation: { method: 'stage_conflict', path: 'file', basis, allow_markers: true } } }))
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('uses certified native discard and returns its undo capability', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => null)
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
