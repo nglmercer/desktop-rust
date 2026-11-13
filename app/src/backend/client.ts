@@ -2630,11 +2630,11 @@ export class BackendClient {
   }
 
   /** Fetch a named remote after reviewing its configuration and repository state. */
-  async fetchRepositoryRemote(repositoryPath: string, remote: string, expectedUrl: string, recurseSubmodules: boolean, isBackgroundTask = false, expectedSamlOwner?: string, onProgress?: (chunk: FetchProgressChunk) => void): Promise<FetchFailure | undefined> {
+  async fetchRepositoryRemote(repositoryPath: string, remote: string, expectedUrl: string, recurseSubmodules: boolean, isBackgroundTask = false, expectedSamlOwner?: string, onProgress?: (chunk: FetchProgressChunk) => void, refspec?: string): Promise<FetchFailure | undefined> {
     if (onProgress && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
       throw new BackendError({ code: 'unsupported', message: 'Native fetch progress is unavailable', retryable: false })
     }
-    const request = { remote, expected_url: expectedUrl, recurse_submodules: recurseSubmodules, is_background_task: isBackgroundTask, report_progress: onProgress !== undefined, ...(expectedSamlOwner === undefined ? {} : { expected_saml_owner: expectedSamlOwner }) }
+    const request = { remote, expected_url: expectedUrl, recurse_submodules: recurseSubmodules, is_background_task: isBackgroundTask, report_progress: onProgress !== undefined, ...(expectedSamlOwner === undefined ? {} : { expected_saml_owner: expectedSamlOwner }), ...(refspec === undefined ? {} : { refspec }) }
     const call = (method: 'renderer_fetch_preview' | 'renderer_fetch', extra: Record<string, unknown> = {}) => {
       const options = method === 'renderer_fetch' ? { onProgress } : {}
       return this.transport === 'wry'
@@ -2642,7 +2642,7 @@ export class BackendClient {
         : this.repositoryRead(repositoryPath, method, { request, ...extra }, options)
     }
     const preview = await call('renderer_fetch_preview')
-    if (!isRecord(preview) || preview.remote !== remote || preview.recurse_submodules !== recurseSubmodules || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid fetch review', retryable: false })
+    if (!isRecord(preview) || preview.remote !== remote || preview.recurse_submodules !== recurseSubmodules || (refspec !== undefined && preview.refspec !== refspec) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid fetch review', retryable: false })
     let result: unknown
     try { result = await call('renderer_fetch', { basis: preview.basis }) }
     catch (error) {

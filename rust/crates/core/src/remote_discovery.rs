@@ -213,6 +213,12 @@ pub(crate) fn safe_url(value: &str) -> bool {
     if value.is_empty() || value.len() > 16384 || value.chars().any(char::is_control) {
         return false;
     }
+    // Without a colon Git interprets the value as a local filesystem path,
+    // including names containing @, ? or #. These are not URL userinfo,
+    // queries or fragments; retain them exactly as for ./ and absolute paths.
+    if !value.contains(':') {
+        return true;
+    }
     // Git accepts an IPv6 literal in brackets in SCP-style remote syntax.
     // Permit only the credential-free or conventional `git@` forms, and parse
     // the literal rather than admitting arbitrary text between brackets.
@@ -264,9 +270,6 @@ pub(crate) fn safe_url(value: &str) -> bool {
                 return true;
             }
         }
-    }
-    if !value.contains([':', '@', '?', '#']) {
-        return true;
     }
     let Ok(parsed) = url::Url::parse(value) else {
         return false;
@@ -495,6 +498,9 @@ mod tests {
             "git@[2001:db8::1]:team/repo.git",
             "ssh://git@github.com/owner/repo",
             "/tmp/repo",
+            "git@local-repo",
+            "local?repo",
+            "local#repo",
         ] {
             assert!(safe_url(value), "{value}");
         }
@@ -516,6 +522,74 @@ mod tests {
         ] {
             assert!(!safe_url(value), "{value}");
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn discovers_and_fetches_bare_local_paths_with_url_punctuation() {
+        use std::{fs, path::Path, process::Command};
+        let root =
+            std::env::temp_dir().join(format!("desktop-local-remotes-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let git = |dir: &Path, arguments: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        git(&root, &["init", "-q", "-b", "main"]);
+        for (remote, path) in [
+            ("at", "git@local"),
+            ("query", "local?repo"),
+            ("hash", "local#repo"),
+        ] {
+            let source = root.join(path);
+            fs::create_dir(&source).unwrap();
+            git(&source, &["init", "-q", "-b", "main"]);
+            git(
+                &source,
+                &[
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "initial",
+                ],
+            );
+            git(&root, &["remote", "add", remote, path]);
+            assert_eq!(git(&root, &["ls-remote", "--get-url", "--", remote]), path);
+            git(&root, &["fetch", "--", remote]);
+            assert_eq!(
+                git(
+                    &root,
+                    &["rev-parse", &format!("refs/remotes/{remote}/main")]
+                ),
+                git(&source, &["rev-parse", "HEAD"])
+            );
+        }
+        let remotes = super::safe_fetch_remotes(&root).await.unwrap();
+        assert_eq!(
+            remotes,
+            serde_json::json!([
+                {"name":"at", "url":"git@local"},
+                {"name":"hash", "url":"local#repo"},
+                {"name":"query", "url":"local?repo"}
+            ])
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]

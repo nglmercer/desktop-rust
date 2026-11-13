@@ -628,6 +628,15 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: expect.objectContaining({ operation: expect.objectContaining({ request: expect.objectContaining({ is_background_task: true }) }) }) }))
   })
 
+  it('rejects an explicit refspec review for a different refspec', async () => {
+    const preview = { remote: 'origin', recurse_submodules: true, refspec: 'refs/heads/other', basis: 'c'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValue(preview)
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.fetchRepositoryRemote('/repo', 'origin', '/source', true, false, undefined, undefined, 'refs/heads/main')).rejects.toMatchObject({ code: 'invalid_response' })
+    expect(invoke).toHaveBeenCalledTimes(1)
+  })
+
   it('delivers only active native fetch progress and rejects unavailable streaming before preview', async () => {
     const preview = { remote: 'origin', recurse_submodules: false, basis: 'c'.repeat(64) }
     const invoke = vi.fn().mockResolvedValue(preview)

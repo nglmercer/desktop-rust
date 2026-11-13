@@ -130,7 +130,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       vi.stubGlobal('location', dom.window.location)
       const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
       route.client = client
-      const { fetch: fetchRemote } = await import('../../src/lib/git/fetch')
+      const { fetch: fetchRemote, fetchRefspec } = await import('../../src/lib/git/fetch')
       const source = path.join(directory, 'source'); const repository = path.join(directory, 'repository')
       execFileSync('git', ['init', '-q', '-b', 'main', source])
       execFileSync('git', ['-C', source, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'base'])
@@ -144,6 +144,10 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(actionProgress.mock.calls.some(([value]) => typeof value.description === 'string')).toBe(true)
       expect(git('rev-parse', 'refs/remotes/--test/main')).toBe(execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim())
       expect(await readFile(path.join(repository, '.git', 'FETCH_HEAD'), 'utf8')).toContain('branch')
+      const repositoryModel = { path: repository, gitHubRepository: null } as Repository
+      await fetchRefspec(repositoryModel, { name: '--test', url: source }, 'refs/heads/main:refs/remotes/--test/review')
+      expect(git('rev-parse', 'refs/remotes/--test/review')).toBe(git('rev-parse', 'refs/remotes/--test/main'))
+      await expect(fetchRefspec(repositoryModel, { name: '--test', url: source }, 'refs/heads/missing')).resolves.toBeUndefined()
       const missing = path.join(directory, 'missing-remote')
       git('remote', 'add', 'missing', missing)
       await expect(fetchRemote({ path: repository, gitHubRepository: null } as Repository, { name: 'missing', url: missing })).rejects.toMatchObject({ name: 'GitError', result: { exitCode: expect.any(Number) } })

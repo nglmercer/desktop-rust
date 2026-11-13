@@ -1049,6 +1049,8 @@ pub struct RendererFetchRequest {
     pub report_progress: bool,
     #[serde(default)]
     pub expected_saml_owner: Option<String>,
+    #[serde(default)]
+    pub refspec: Option<String>,
 }
 
 impl std::fmt::Debug for RendererFetchRequest {
@@ -1061,6 +1063,7 @@ impl std::fmt::Debug for RendererFetchRequest {
             .field("is_background_task", &self.is_background_task)
             .field("report_progress", &self.report_progress)
             .field("expected_saml_owner", &self.expected_saml_owner)
+            .field("refspec", &self.refspec.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }

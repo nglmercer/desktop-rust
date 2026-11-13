@@ -146,6 +146,13 @@ impl Repository {
                 && !request.remote.chars().any(char::is_control),
             "Invalid configured remote"
         );
+        anyhow::ensure!(
+            request
+                .refspec
+                .as_ref()
+                .is_none_or(|spec| spec.len() <= 4096 && !spec.contains('\0')),
+            "Invalid fetch refspec"
+        );
         let reference = format!("refs/remotes/{}/placeholder", request.remote);
         let format = self.run(&args(&["check-ref-format", &reference])).await?;
         anyhow::ensure!(format.code == 0, "Invalid configured remote");
@@ -202,7 +209,7 @@ impl Repository {
         request: &RendererFetchRequest,
     ) -> Result<Value> {
         Ok(
-            json!({"remote":request.remote,"recurse_submodules":request.recurse_submodules,"basis":self.renderer_fetch_review(request).await?}),
+            json!({"remote":request.remote,"recurse_submodules":request.recurse_submodules,"refspec":request.refspec,"basis":self.renderer_fetch_review(request).await?}),
         )
     }
 
@@ -221,11 +228,18 @@ impl Repository {
         } else {
             "--recurse-submodules=no"
         };
-        let mut command = args(&["fetch", "--prune", recurse]);
+        let mut command = if request.refspec.is_some() {
+            args(&["fetch"])
+        } else {
+            args(&["fetch", "--prune", recurse])
+        };
         if request.report_progress {
             command.push("--progress".into());
         }
         command.extend(args(&["--", &request.remote]));
+        if let Some(refspec) = &request.refspec {
+            command.push(refspec.into());
+        }
         let output = process::run_bound_remote_fetch(
             &self.path,
             &command,
@@ -323,6 +337,7 @@ mod tests {
                 is_background_task: false,
                 report_progress: false,
                 expected_saml_owner: None,
+                refspec: None,
             }
         }
     }
@@ -360,6 +375,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fetches_reviewed_refspec_without_pruning_unrelated_refs() {
+        let f = Fixture::new();
+        let target = f.0.join("target");
+        let source = f.0.join("source");
+        let mut request = f.remote("origin", &source.to_string_lossy());
+        request.refspec = Some("refs/heads/main:refs/remotes/origin/review".into());
+        // A refspec fetch should use Git's configuration, not force --prune.
+        git(&target, &["config", "fetch.prune", "true"]);
+        let oid = git(&source, &["rev-parse", "HEAD"]);
+        git(&target, &["fetch", "--", "origin", "refs/heads/main"]);
+        git(&target, &["update-ref", "refs/remotes/origin/stale", &oid]);
+        let repo = Repository::open(&target).await.unwrap();
+        let preview = repo.renderer_fetch_preview(&request).await.unwrap();
+        assert_eq!(preview["refspec"], request.refspec.as_deref().unwrap());
+        let basis = preview["basis"].as_str().unwrap();
+        let mut changed = request.clone();
+        changed.refspec = Some("refs/heads/main:refs/remotes/origin/other".into());
+        assert!(repo.renderer_fetch(&changed, basis).await.is_err());
+        assert_eq!(
+            repo.renderer_fetch(&request, basis).await.unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            git(&target, &["rev-parse", "refs/remotes/origin/review"]),
+            git(&source, &["rev-parse", "HEAD"])
+        );
+        assert_eq!(
+            git(&target, &["rev-parse", "refs/remotes/origin/stale"]),
+            oid
+        );
+        let mut missing = request.clone();
+        missing.refspec = Some("refs/heads/missing".into());
+        let preview = repo.renderer_fetch_preview(&missing).await.unwrap();
+        assert_eq!(
+            repo.renderer_fetch(&missing, preview["basis"].as_str().unwrap())
+                .await
+                .unwrap()["code"],
+            128
+        );
+        let mut option = request.clone();
+        option.refspec = Some("--upload-pack=not-a-refspec".into());
+        let preview = repo.renderer_fetch_preview(&option).await.unwrap();
+        assert_eq!(
+            repo.renderer_fetch(&option, preview["basis"].as_str().unwrap())
+                .await
+                .unwrap()["code"],
+            128
+        );
+    }
+
+    #[tokio::test]
     async fn rejects_stale_reviews_and_linked_fetch_heads() {
         use std::os::unix::fs::symlink;
         let f = Fixture::new();
@@ -393,6 +459,7 @@ mod tests {
             is_background_task: false,
             report_progress: false,
             expected_saml_owner: None,
+            refspec: None,
         };
         assert!(!format!("{request:?}").contains("synthetic-secret"));
         assert!(!crate::remote_discovery::safe_url(&request.expected_url));

@@ -144,6 +144,14 @@ export async function fetchRefspec(
   remote: IRemote,
   refspec: string
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
+    const failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().fetchRepositoryRemote(repository.path, remote.name, remote.url, true, false, repository.gitHubRepository?.owner.login, undefined, refspec), true)
+    if (failure !== undefined && failure.exitCode !== 128) {
+      throw fetchFailureToGitError(failure, repository.path, remote.name)
+    }
+    return
+  }
   await git(
     ['fetch', '--', remote.name, refspec],
     repository.path,

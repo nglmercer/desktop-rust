@@ -2483,9 +2483,12 @@ Background requests pass the existing credential-manager interaction policy,
 and common failures, including a matching SAML owner, are classified without
 returning Git diagnostics; unclassified errors and full remote details remain
 unavailable. Request-scoped Git and LFS progress uses bounded best-effort
-delivery that can drop chunks. LFS progress uses a private temporary file; Windows verifies its ACL
-and omits capture if the filesystem does not enforce it. Real Git LFS transfer
-and native Windows capture have not been verified. Nested-submodule credential
-parity remains open. A `FETCH_HEAD` larger than
-8 MiB cannot be reviewed. Arbitrary refspec fetches still use their existing
-path.
+delivery that can drop chunks. LFS progress uses a private temporary file;
+Windows verifies its ACL and omits capture if the filesystem does not enforce
+it. Native Windows capture has not been verified. A local HTTP fixture has
+verified that a real Git LFS transfer produces progress understood by the
+renderer parser; it does not exercise the Rust fetch runner. Nested-submodule
+credential parity remains open. A `FETCH_HEAD` larger than 8 MiB cannot be
+reviewed. Explicit refspec fetches also use the reviewed operation over
+WebSocket, preserving Git's original argument shape and exit-128 handling;
+Wry and Electron retain their existing refspec path.

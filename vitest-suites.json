@@ -1,4 +1,5 @@
 [
+  "rust/tests/real-lfs-progress.test.ts",
   "app/test/unit/rust-fetch-routing-test.ts",
   "app/test/unit/rust-fetch-progress-test.ts",
   "app/test/unit/wry-fetch-progress-test.ts",
