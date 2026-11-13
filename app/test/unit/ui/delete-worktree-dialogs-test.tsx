@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { after, before, describe, it } from 'node:test'
+import { afterAll, beforeAll, describe, it, vi } from 'vitest'
 import * as React from 'react'
 
 import { Branch, BranchType } from '../../../src/models/branch'
@@ -7,7 +7,16 @@ import { Repository } from '../../../src/models/repository'
 import { IDeleteWorktreeOptions } from '../../../src/models/worktree'
 import { DeleteWorktreeDialog } from '../../../src/ui/worktrees/delete-worktree-dialog'
 import { DeleteWorktreeFailedDialog } from '../../../src/ui/worktrees/delete-worktree-failed-dialog'
-import { fireEvent, render, screen, waitFor } from '../../helpers/ui/render'
+import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('fs-admin', () => ({}))
+vi.mock('react-confetti', () => ({ default: () => null }))
+vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
+vi.mock('../../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 const repository = new Repository('/repo', 1, null, false)
 const branch = new Branch(
@@ -44,7 +53,7 @@ function submit(view: ReturnType<typeof render>, label: string) {
 
 let restoreIpcSend = () => {}
 
-before(async () => {
+beforeAll(async () => {
   const electron = await import('electron')
   const previousSend = electron.ipcRenderer.send
   electron.ipcRenderer.send = () => {}
@@ -53,7 +62,7 @@ before(async () => {
   }
 })
 
-after(() => restoreIpcSend())
+afterAll(() => restoreIpcSend())
 
 describe('DeleteWorktreeDialog', () => {
   it('forwards the removal options unchanged', async () => {

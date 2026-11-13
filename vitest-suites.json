@@ -207,5 +207,7 @@
   "app/test/unit/assisted-commit-push-storage-test.ts",
   "app/test/unit/dds-converter-test.ts",
   "app/test/unit/mock-api-test.ts",
-  "app/test/unit/welcome-test.ts"
+  "app/test/unit/welcome-test.ts",
+  "app/test/unit/ui/copilot-custom-providers-dialog-test.tsx",
+  "app/test/unit/ui/delete-worktree-dialogs-test.tsx"
 ]

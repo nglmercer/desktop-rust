@@ -1,9 +1,15 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
 import * as React from 'react'
-import { fireEvent, render, screen } from '../../helpers/ui/render'
+import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import type { IBYOKProvider } from '../../../src/lib/copilot/byok'
 import { CopilotCustomProvidersDialog } from '../../../src/ui/preferences/copilot-custom-providers-dialog'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 
 const provider: IBYOKProvider = {
   id: 'ollama-id',
