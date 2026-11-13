@@ -17,11 +17,96 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'vitest'
 import { build } from 'vite'
+import { compileString } from 'sass'
 import {
   copyGitignoreTemplates,
   copyStaticResources,
   moveSourceMaps,
+  resolveCopilotJsonRpc,
+  sassLoadPaths,
 } from '../vite.config'
+
+describe('Vite dependency resolution', () => {
+  it('resolves an npm-style nested SDK dependency', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'desktop-npm-deps-'))
+    try {
+      const app = path.join(root, 'app')
+      const sdk = path.join(app, 'node_modules/@github/copilot-sdk')
+      const jsonRpc = path.join(sdk, 'node_modules/vscode-jsonrpc')
+      const primer = path.join(app, 'node_modules/primer-support')
+      mkdirSync(path.join(jsonRpc, 'lib/node'), { recursive: true })
+      mkdirSync(path.join(primer, 'lib/variables'), { recursive: true })
+      writeFileSync(path.join(app, 'package.json'), '{}')
+      writeFileSync(path.join(sdk, 'package.json'), '{"main":"index.js"}')
+      writeFileSync(path.join(sdk, 'index.js'), '')
+      writeFileSync(path.join(jsonRpc, 'lib/node/main.js'), '')
+      writeFileSync(
+        path.join(primer, 'lib/variables/color-system.scss'),
+        '$blue-500: #0366d6;'
+      )
+      assert.equal(
+        resolveCopilotJsonRpc(app),
+        path.join(jsonRpc, 'lib/node/main.js')
+      )
+      const result = compileString(
+        "@import 'primer-support/lib/variables/color-system.scss'; a { color: $blue-500; }",
+        {
+          loadPaths: sassLoadPaths(root),
+          silenceDeprecations: ['import'],
+        }
+      )
+      assert.match(result.css, /color: #0366d6/)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'resolves pnpm-style linked SDK and Sass packages',
+    () => {
+      const root = mkdtempSync(path.join(tmpdir(), 'desktop-pnpm-deps-'))
+      try {
+        const app = path.join(root, 'app')
+        const appModules = path.join(app, 'node_modules')
+        const store = path.join(root, 'node_modules/.pnpm/sdk/node_modules')
+        const sdk = path.join(store, '@github/copilot-sdk')
+        const jsonRpc = path.join(store, 'vscode-jsonrpc')
+        const primer = path.join(
+          root,
+          'node_modules/.pnpm/primer/node_modules/primer-support'
+        )
+        mkdirSync(path.join(appModules, '@github'), { recursive: true })
+        mkdirSync(sdk, { recursive: true })
+        mkdirSync(path.join(jsonRpc, 'lib/node'), { recursive: true })
+        mkdirSync(path.join(primer, 'lib/variables'), { recursive: true })
+        writeFileSync(path.join(app, 'package.json'), '{}')
+        writeFileSync(path.join(sdk, 'package.json'), '{"main":"index.js"}')
+        writeFileSync(path.join(sdk, 'index.js'), '')
+        writeFileSync(path.join(jsonRpc, 'lib/node/main.js'), '')
+        writeFileSync(
+          path.join(primer, 'lib/variables/color-system.scss'),
+          '$blue-500: #0366d6;'
+        )
+        symlinkSync(sdk, path.join(appModules, '@github/copilot-sdk'), 'dir')
+        symlinkSync(primer, path.join(appModules, 'primer-support'), 'dir')
+        assert.equal(
+          resolveCopilotJsonRpc(app),
+          path.join(jsonRpc, 'lib/node/main.js')
+        )
+        const result = compileString(
+          "@import 'primer-support/lib/variables/color-system.scss'; a { color: $blue-500; }",
+          {
+            loadPaths: sassLoadPaths(root),
+            silenceDeprecations: ['import'],
+          }
+        )
+        assert.match(result.css, /color: #0366d6/)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
+  )
+})
 
 describe('Vite gitignore template copying', () => {
   it.skipIf(process.platform === 'win32')(
@@ -114,8 +199,11 @@ describe('Vite gitignore template copying', () => {
         before === null ? null : [before.ino, before.mtimeMs, before.ctimeMs]
       )
     } finally {
-      if (previous === undefined) delete process.env.DESKTOP_VITE_SOURCEMAP
-      else process.env.DESKTOP_VITE_SOURCEMAP = previous
+      if (previous === undefined) {
+        delete process.env.DESKTOP_VITE_SOURCEMAP
+      } else {
+        process.env.DESKTOP_VITE_SOURCEMAP = previous
+      }
       rmSync(root, { recursive: true, force: true })
     }
   }, 60_000)

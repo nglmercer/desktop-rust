@@ -17,6 +17,22 @@ const appPackage = JSON.parse(
 ) as { version: string; productName: string }
 const channel = process.env.RELEASE_CHANNEL || 'development'
 
+/** Resolve the SDK's Node transport using its own dependency lookup. */
+export function resolveCopilotJsonRpc(appDirectory: string): string {
+  const appRequire = createRequire(path.join(appDirectory, 'package.json'))
+  const sdkRequire = createRequire(appRequire.resolve('@github/copilot-sdk'))
+  return sdkRequire.resolve('vscode-jsonrpc/lib/node/main.js')
+}
+
+/** Sass imports resolve from the application regardless of package manager. */
+export function sassLoadPaths(root: string): string[] {
+  return [
+    path.join(root, 'app/styles'),
+    path.join(root, 'app/node_modules'),
+    path.join(root, 'node_modules'),
+  ]
+}
+
 // The `url` npm package that vite-plugin-node-polyfills ships. app/src/web/url.ts
 // wraps it, so it needs a name the `url` alias below does not capture.
 const polyfillRequire = createRequire(
@@ -328,7 +344,10 @@ export default defineConfig({
       // The SDK speaks JSON-RPC over the Node stream classes. Vite would pick
       // the package's browser build (no stream classes) through its `browser`
       // field, so the Node entry is named directly.
-      { find: /^vscode-jsonrpc\/node(\.js)?$/, replacement: path.resolve(realpathSync(path.resolve(__dirname, 'app/node_modules/@github/copilot-sdk')), '../../vscode-jsonrpc/lib/node/main.js') },
+      {
+        find: /^vscode-jsonrpc\/node(\.js)?$/,
+        replacement: resolveCopilotJsonRpc(path.resolve(__dirname, 'app')),
+      },
       { find: /^koffi$/, replacement: path.resolve(__dirname, 'app/src/web/koffi.ts') },
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
       { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
@@ -372,11 +391,7 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
-        loadPaths: [
-          path.resolve(__dirname, 'app/styles'),
-          path.resolve(__dirname, 'node_modules/.pnpm/primer-support@4.7.2/node_modules/primer-support'),
-          path.resolve(__dirname, 'node_modules'),
-        ],
+        loadPaths: sassLoadPaths(__dirname),
       },
     },
   },
