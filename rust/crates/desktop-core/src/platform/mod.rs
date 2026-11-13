@@ -6,10 +6,223 @@
 //! Electron APIs and no Node modules.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::error::{AppError, Result};
 use crate::models::misc::DesktopNotificationPermission;
+
+// Keep asynchronous launcher reapers bounded if an application holds its
+// opener process open. A slot remains held until that process exits.
+static OPEN_PATH_LAUNCHERS: AtomicUsize = AtomicUsize::new(0);
+const MAX_OPEN_PATH_LAUNCHERS: usize = 32;
+
+struct OpenPathLease;
+
+impl OpenPathLease {
+    fn acquire() -> Option<Self> {
+        let mut current = OPEN_PATH_LAUNCHERS.load(Ordering::Acquire);
+        loop {
+            if current >= MAX_OPEN_PATH_LAUNCHERS {
+                return None;
+            }
+            match OPEN_PATH_LAUNCHERS.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(Self),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+impl Drop for OpenPathLease {
+    fn drop(&mut self) {
+        OPEN_PATH_LAUNCHERS.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// Open a local file or directory with its default application. The result
+/// follows Electron's `shell.openPath`: empty on success, an error otherwise.
+/// A long-lived opener may already have launched an application before the
+/// request returns, so callers must not retry automatically after cancellation.
+pub fn open_path(path: &str) -> String {
+    #[cfg(target_os = "windows")]
+    let program = "explorer.exe";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let program = "xdg-open";
+    open_path_with(path, program)
+}
+
+fn open_path_with(path: &str, program: &str) -> String {
+    let target = Path::new(path);
+    if path.len() > 32_768 || path.contains('\0') || !target.is_absolute() {
+        return "Expected an absolute local path.".into();
+    }
+    match std::fs::metadata(target) {
+        Ok(metadata) if metadata.is_file() || metadata.is_dir() => {}
+        _ => return "The file or folder is unavailable.".into(),
+    }
+    let Some(lease) = OpenPathLease::acquire() else {
+        return "Too many file-opening requests are still running.".into();
+    };
+    let child = Command::new(program)
+        .arg(target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return "Unable to start the default application.".into();
+    };
+    let deadline = Instant::now() + Duration::from_millis(200);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    String::new()
+                } else {
+                    "The default application could not open the path.".into()
+                };
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return "Unable to confirm that the path was opened. The application may already be open; check before retrying.".into();
+            }
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => break,
+        }
+    }
+    let child = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+    let child_for_reaper = child.clone();
+    let reaper = std::thread::Builder::new()
+        .name("desktop-open-path".into())
+        .spawn(move || {
+            let _lease = lease;
+            if let Some(mut child) = child_for_reaper
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+            {
+                let _ = child.wait();
+            }
+        });
+    if reaper.is_err() {
+        if let Some(mut child) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        // The launcher may already have opened the target; report uncertainty.
+        return "Unable to confirm that the path was opened. The application may already be open; check before retrying.".into();
+    }
+    String::new()
+}
+
+#[cfg(all(test, unix))]
+mod open_path_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    fn fixture() -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "desktop-open-path-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        directory
+    }
+
+    #[test]
+    fn opens_exact_unicode_and_option_like_paths_without_a_shell() {
+        let root = fixture();
+        let opener = root.join("opener");
+        std::fs::write(&opener, "#!/bin/sh\nprintf '%s' \"$1\" > \"$0.arg\"\n").unwrap();
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let target = root.join("-资料 '$?.txt");
+        std::fs::write(&target, b"data").unwrap();
+        assert_eq!(
+            open_path_with(target.to_str().unwrap(), opener.to_str().unwrap()),
+            ""
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("opener.arg")).unwrap(),
+            target.to_str().unwrap()
+        );
+        let folder = root.join("folder with spaces");
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(
+            open_path_with(folder.to_str().unwrap(), opener.to_str().unwrap()),
+            ""
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("opener.arg")).unwrap(),
+            folder.to_str().unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_or_missing_paths_and_reports_failed_launchers() {
+        let root = fixture();
+        let target = root.join("exists");
+        std::fs::write(&target, b"data").unwrap();
+        let opener = root.join("fail");
+        std::fs::write(&opener, "#!/bin/sh\nexit 5\n").unwrap();
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!open_path_with("-relative", opener.to_str().unwrap()).is_empty());
+        assert!(!open_path_with("/bad\0path", opener.to_str().unwrap()).is_empty());
+        assert!(
+            !open_path_with(
+                root.join("missing").to_str().unwrap(),
+                opener.to_str().unwrap()
+            )
+            .is_empty()
+        );
+        assert!(!open_path_with(target.to_str().unwrap(), opener.to_str().unwrap()).is_empty());
+        assert!(
+            !open_path_with(
+                target.to_str().unwrap(),
+                root.join("missing-opener").to_str().unwrap()
+            )
+            .is_empty()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reports_started_when_an_opener_outlives_the_observation_window() {
+        let root = fixture();
+        let target = root.join("exists");
+        std::fs::write(&target, b"data").unwrap();
+        let opener = root.join("slow-opener");
+        std::fs::write(&opener, "#!/bin/sh\nsleep 0.5\ntouch \"$0.done\"\nexit 5\n").unwrap();
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            open_path_with(target.to_str().unwrap(), opener.to_str().unwrap()),
+            ""
+        );
+        let done = root.join("slow-opener.done");
+        let until = Instant::now() + Duration::from_secs(2);
+        while !done.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(done.exists(), "opener must complete before fixture cleanup");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
 
 /// `shell.openExternal` / `UNSAFE_openDirectory`. Never invokes a shell with
 /// a concatenated string, so URLs/paths cannot inject arguments.

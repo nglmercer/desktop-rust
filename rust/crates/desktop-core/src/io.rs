@@ -67,9 +67,8 @@ pub fn lane(channel: &str) -> Lane {
         "process-write" | "process-end" | "process-kill" | "process-ack" | "cancel" => {
             Lane::Control
         }
-        "git-exec" | "http-fetch" | "process-spawn" | "fs-copy" | "fs-copy-file" | "fs-hash" => {
-            Lane::Long
-        }
+        "git-exec" | "http-fetch" | "process-spawn" | "fs-copy" | "fs-copy-file" | "fs-hash"
+        | "open-path" => Lane::Long,
         "fs-rm" => Lane::Long,
         _ => Lane::Short,
     }
@@ -103,6 +102,7 @@ pub fn invoke(app: &DesktopApp, channel: &str, args: &[Value]) -> Result<Value> 
         "http-fetch" => http_fetch(&app.resources, o),
         "fs-read-range" => read_range(o),
         "fs-hash" => file_hash(o),
+        "open-path" => Ok(json!(crate::platform::open_path(&string(o, "path")?))),
         "cancel" => cancel(o),
         "keychain-get" => Ok(app
             .secure

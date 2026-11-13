@@ -102,6 +102,17 @@ It requires Xvfb, xdotool, Linux user/mount namespaces and `/usr/bin/konsole` as
 an unmodified bind-mount target; it does not validate other terminal programs
 or platforms.
 
+The Wry renderer can open an existing local file or directory with the host's
+default application. It passes the absolute path as a single argument without
+a shell. Existence is checked before launch but another process can still
+change the path between that check and the launch. A launcher that remains
+alive for 200 ms is treated as started; a later failure does not reach the UI,
+and the operation cannot confirm that an
+application displayed the file. A disconnected request may already have
+opened it, so inspect before retrying. A browser connected via WebSocket does
+not start an application on the server; it reports that the action is
+unavailable. Native macOS and Windows launch behavior remains unverified.
+
 ## Saved repositories, creation, and clone
 
 ```sh

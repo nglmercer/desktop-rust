@@ -61,9 +61,23 @@ describe('openFile', () => {
     assert.deepEqual(postError.mock.calls[0], [
       {
         name: 'no-external-program',
-        message: `Unable to open file ${fullPath} in an external program. Please check you have a program associated with this file extension`,
+        message: `Unable to open file ${fullPath} in an external program. Failed to open path`,
       },
     ])
+  })
+
+  it('shows an uncertain opening result without retrying', async () => {
+    const openPath = vi
+      .spyOn(shell, 'openPath')
+      .mockResolvedValue('Unable to confirm that the path was opened.')
+    const postError = vi.fn(async (_error: Error) => {})
+    const fullPath = join(root, 'file.txt')
+    await openFile(fullPath, createMockDispatcher(postError))
+    assert.equal(openPath.mock.calls.length, 1)
+    assert.match(
+      postError.mock.calls[0][0].message,
+      /Unable to confirm that the path was opened/
+    )
   })
 
   it('propagates unexpected opening errors', async () => {

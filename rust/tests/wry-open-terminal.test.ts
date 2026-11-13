@@ -51,7 +51,7 @@ async function stopProcessGroup(pid: number, closed: Promise<void>) {
 describe.skipIf(
   process.env.DESKTOP_WRY_WEBVIEW_TEST !== '1' || process.platform !== 'linux'
 )('Wry repository terminal', () => {
-  it('opens an unregistered repository and confines the requested directory', async () => {
+  it('opens an unregistered repository terminal and exact local files', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'desktop-wry-terminal-'))
     const home = path.join(root, 'home')
     const output = path.join(root, 'bundle')
@@ -61,8 +61,11 @@ describe.skipIf(
     const terminal = '/usr/bin/konsole'
     const terminalFixture = path.join(root, 'terminal-fixture')
     const capture = path.join(root, 'terminal-capture')
+    const openCapture = path.join(root, 'open-path-capture')
+    const bin = path.join(root, 'bin')
     const repository = path.join(root, 'repository with spaces')
     const directory = path.join(repository, 'nested ; dollar $()')
+    const file = path.join(directory, "-资料 '$?.txt")
     const outside = path.join(root, 'outside')
     const env: NodeJS.ProcessEnv = { ...process.env, HOME: home }
     for (const key of Object.keys(env)) {
@@ -77,6 +80,8 @@ describe.skipIf(
       GIT_TERMINAL_PROMPT: '0',
       DESKTOP_USER_DATA: path.join(home, 'user-data'),
       DESKTOP_TERMINAL_CAPTURE: capture,
+      DESKTOP_OPEN_PATH_CAPTURE: openCapture,
+      PATH: `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
       XDG_CONFIG_HOME: path.join(home, 'config'),
       XDG_DATA_HOME: path.join(home, 'data'),
       XDG_CACHE_HOME: path.join(home, 'cache'),
@@ -98,7 +103,14 @@ describe.skipIf(
         mkdirSync(path.join(home, item), { recursive: true, mode: 0o700 })
       }
       mkdirSync(directory, { recursive: true })
+      mkdirSync(bin)
       mkdirSync(outside)
+      writeFileSync(file, 'test')
+      writeFileSync(
+        path.join(bin, 'xdg-open'),
+        '#!/bin/sh\nprintf "%s\\n" "$1" >> "$DESKTOP_OPEN_PATH_CAPTURE"\n'
+      )
+      chmodSync(path.join(bin, 'xdg-open'), 0o700)
       symlinkSync(outside, path.join(repository, 'escape'))
       execFileSync(
         'git',
@@ -116,6 +128,7 @@ describe.skipIf(
 import { BackendClient } from ${JSON.stringify(
           path.resolve('app/src/backend/client')
         )}
+import { shell } from ${JSON.stringify(path.resolve('app/src/web/electron'))}
 ;(window as any).runProbe = async () => {
   const client = new BackendClient()
   const available = await client.availableRustTerminals()
@@ -134,6 +147,15 @@ import { BackendClient } from ${JSON.stringify(
   await client.openRepositoryTerminal(${JSON.stringify(
     repository
   )}, 'Konsole', ${JSON.stringify(directory)})
+  for (const target of ${JSON.stringify([file, directory])}) {
+    const result = await shell.openPath(target)
+    if (result !== '') throw new Error('opening a file or folder failed: ' + result)
+  }
+  for (const target of ['-relative', ${JSON.stringify(
+    path.join(root, 'missing')
+  )}]) {
+    if (await shell.openPath(target) === '') throw new Error('invalid path was opened')
+  }
   return 'opened'
 }
 `
@@ -221,6 +243,10 @@ import { BackendClient } from ${JSON.stringify(
         assert.equal(
           readFileSync(capture, 'utf8'),
           `${directory}\n--workdir\n${directory}\n`
+        )
+        assert.equal(
+          readFileSync(openCapture, 'utf8'),
+          `${file}\n${directory}\n`
         )
         const registry = path.join(home, 'user-data', 'repositories.json')
         if (existsSync(registry)) {

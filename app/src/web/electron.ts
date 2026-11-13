@@ -95,8 +95,18 @@ export const shell = {
       new AudioContext().createOscillator().start()
     } catch {}
   },
-  openPath: async (p: string) => {
-    throw new Error(`openPath not available in web: ${p}`)
+  openPath: async (p: string): Promise<string> => {
+    const bridge = Reflect.get(window, '__desktop')
+    if (!bridge || bridge.platform !== 'wry' || typeof bridge.invoke !== 'function') {
+      return 'Opening a host file is unavailable from this browser.'
+    }
+    try {
+      const result: unknown = await bridge.invoke('desktop.io.open-path', { path: p })
+      return typeof result === 'string' ? result : 'Unable to open the path.'
+    } catch {
+      // A cancelled or disconnected request can have already opened the file.
+      return 'Unable to confirm that the path was opened. The application may already be open; check before retrying.'
+    }
   },
   openExternal: async (url: string) => {
     window.open(url, '_blank', 'noopener')
