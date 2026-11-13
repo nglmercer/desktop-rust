@@ -2482,8 +2482,9 @@ verification remains open.
 Background requests pass the existing credential-manager interaction policy,
 and common failures, including a matching SAML owner, are classified without
 returning Git diagnostics; unclassified errors and full remote details remain
-unavailable. Request-scoped Git and LFS progress uses bounded best-effort
-delivery that can drop chunks. LFS progress uses a private temporary file;
+unavailable. Native fetch mutations have a one-hour deadline; the legacy Wry
+Git execution path has no equivalent fixed deadline. Request-scoped Git and LFS
+progress uses bounded best-effort delivery that can drop chunks. LFS progress uses a private temporary file;
 Windows verifies its ACL and omits capture if the filesystem does not enforce
 it. Native Windows capture has not been verified. A local HTTP fixture verifies
 real Git LFS progress through the Rust fetch runner and renderer parser using a
@@ -2493,3 +2494,9 @@ credential parity remains open. A `FETCH_HEAD` larger than 8 MiB cannot be
 reviewed. Explicit refspec fetches also use the reviewed operation over
 WebSocket, preserving Git's original argument shape and exit-128 handling;
 Wry and Electron retain their existing refspec path.
+
+Browser WebSocket remote-HEAD refresh uses a reviewed Rust operation. It binds
+the raw loose HEAD file, including dangling symbolic refs, and checks path
+components for links. It currently accepts only Git's files ref backend and
+also requires a reviewable `FETCH_HEAD`. Git and independent writers can still
+race the final review. Wry and Electron retain their existing refresh path.

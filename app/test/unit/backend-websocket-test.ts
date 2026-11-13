@@ -147,6 +147,50 @@ describe('WebSocket backend transport', () => {
     await secondResult
   })
 
+  it('allows a fetch mutation to run beyond the ordinary request timeout', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.fetchRepositoryRemote('/repo', 'origin', '/source', false)
+    socket.message({ id: 1, result: { root_id: 'repo-1' } })
+    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch_preview'))
+    socket.message({ id: 2, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
+    await vi.waitFor(() => expect(socket.sent[3]?.method).toBe('repository_binding'))
+    socket.message({ id: 3, result: { root_id: 'repo-1' } })
+    await vi.waitFor(() => expect(socket.sent[4]?.method).toBe('renderer_fetch'))
+    await vi.advanceTimersByTimeAsync(170_001)
+    expect(socket.sent.some(message => message.method === 'cancel')).toBe(false)
+    socket.message({ id: 4, result: { code: 0, error_kind: null } })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it.each([0, 1, 128])('accepts remote HEAD refresh exit code %s', async code => {
+    const { client: value, socket } = await connected()
+    const pending = value.refreshRepositoryRemoteHead('/repo', 'origin', '/source', false)
+    socket.message({ id: 1, result: { root_id: 'repo-1' } })
+    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_remote_head_preview'))
+    socket.message({ id: 2, result: { remote: 'origin', basis: 'a'.repeat(64) } })
+    await vi.waitFor(() => expect(socket.sent[3]?.method).toBe('repository_binding'))
+    socket.message({ id: 3, result: { root_id: 'repo-1' } })
+    await vi.waitFor(() => expect(socket.sent[4]?.method).toBe('renderer_remote_head'))
+    socket.message({ id: 4, result: { code } })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('cancels a fetch mutation at the bounded deadline without retrying', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.fetchRepositoryRemote('/repo', 'origin', '/source', false)
+    const result = expect(pending).rejects.toMatchObject({ code: 'timeout', retryable: false })
+    socket.message({ id: 1, result: { root_id: 'repo-1' } })
+    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch_preview'))
+    socket.message({ id: 2, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
+    await vi.waitFor(() => expect(socket.sent[3]?.method).toBe('repository_binding'))
+    socket.message({ id: 3, result: { root_id: 'repo-1' } })
+    await vi.waitFor(() => expect(socket.sent[4]?.method).toBe('renderer_fetch'))
+    await vi.advanceTimersByTimeAsync(3_600_001)
+    await result
+    expect(socket.sent.filter(message => message.method === 'renderer_fetch')).toHaveLength(1)
+    expect(socket.sent).toContainEqual(expect.objectContaining({ method: 'cancel', request_id: 4 }))
+  })
+
   it('allows a long Copilot turn to finish before the transport deadline', async () => {
     const { client: value, socket } = await connected()
     let finished = false

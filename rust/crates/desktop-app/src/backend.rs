@@ -873,11 +873,19 @@ impl Backend {
         {
             return Err(AppError::BadArgs("unsupported tag operation".into()));
         }
-        let duration = request.deadline_ms.unwrap_or(60_000);
-        if !(1..=60_000).contains(&duration) {
-            return Err(AppError::BadArgs(
-                "deadline_ms must be between 1 and 60000".into(),
-            ));
+        let is_fetch = matches!(
+            &request.operation,
+            GitInfoOperation::FetchRemote {
+                operation: Operation::RendererFetch { .. },
+                ..
+            }
+        );
+        let maximum = if is_fetch { 3_600_000 } else { 60_000 };
+        let duration = request.deadline_ms.unwrap_or(maximum);
+        if !(1..=maximum).contains(&duration) {
+            return Err(AppError::BadArgs(format!(
+                "deadline_ms must be between 1 and {maximum}"
+            )));
         }
         let token = Cancellation::default();
         if let Some(id) = request.request_id {
@@ -2044,6 +2052,35 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn wry_fetch_deadlines_are_bounded_and_mutation_specific() {
+        let backend = Backend::new(16).unwrap();
+        let request =
+            json!({"remote":"origin", "expected_url":"/source", "recurse_submodules":false});
+        let route = |method: &str, deadline: u64| {
+            let operation = if method == "renderer_fetch" {
+                json!({"method":method, "request":request, "basis":"test"})
+            } else {
+                json!({"method":method, "request":request})
+            };
+            backend.admit_git_info(vec![json!({
+                "deadline_ms": deadline,
+                "operation":{"type":"fetch_remote", "repository_path":"/repo", "operation":operation}
+            })])
+        };
+        assert!(route("renderer_fetch_preview", 60_000).is_ok());
+        assert!(route("renderer_fetch", 3_600_000).is_ok());
+        assert!(route("renderer_fetch", 3_600_001).is_err());
+        assert!(route("renderer_fetch_preview", 60_001).is_err());
+        assert!(
+            backend
+                .admit_git_info(vec![
+                    json!({"deadline_ms":60_001, "operation":{"type":"version"}})
+                ])
+                .is_err()
+        );
     }
 
     #[test]

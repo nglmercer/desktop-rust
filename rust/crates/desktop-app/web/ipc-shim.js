@@ -120,12 +120,21 @@
     }
     return new Promise(function (resolvePromise, reject) {
       var id = nextId++;
+      var timeout = channel === 'desktop.backend.copilot' ? 360000 : 180000;
+      var request = args[0];
+      var operation = request && request.operation;
+      if (channel === 'desktop.backend.git_info' && operation &&
+          operation.type === 'fetch_remote' && operation.operation &&
+          operation.operation.method === 'renderer_fetch' &&
+          Number.isInteger(request.deadline_ms) && request.deadline_ms >= 1 && request.deadline_ms <= 3600000) {
+        timeout = Math.max(timeout, request.deadline_ms + 30000);
+      }
       var timer = setTimeout(function () {
         if (pending.has(id)) {
           pending.delete(id);
           reject(new Error('IPC timeout: ' + channel));
         }
-      }, channel === 'desktop.backend.copilot' ? 360000 : 180000);
+      }, timeout);
       pending.set(id, { resolve: resolvePromise, reject: reject, timer: timer, progress: onProgress });
 
       if (!post({ __rpc: id, channel: channel, args: args })) {

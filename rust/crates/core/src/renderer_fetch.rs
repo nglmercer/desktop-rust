@@ -21,7 +21,7 @@ fn windows_file_identity(file: &std::fs::File) -> Result<(u32, u64, u64, u32)> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: file owns a live handle and info is a valid writable structure.
     let success = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
-    anyhow::ensure!(success != 0, "Cannot inspect FETCH_HEAD identity");
+    anyhow::ensure!(success != 0, "Cannot inspect Git metadata identity");
     anyhow::ensure!(
         info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0,
         "Cannot fetch into a reparse point"
@@ -37,7 +37,11 @@ fn windows_file_identity(file: &std::fs::File) -> Result<(u32, u64, u64, u32)> {
     ))
 }
 
-fn fetch_head_certificate(directory: &std::path::Path) -> Result<Vec<u8>> {
+fn file_certificate(
+    directory: &std::path::Path,
+    name: &std::path::Path,
+    limit: u64,
+) -> Result<Vec<u8>> {
     let dir = Dir::open_ambient_dir(directory, ambient_authority())?;
     let mut options = OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
@@ -46,30 +50,30 @@ fn fetch_head_certificate(directory: &std::path::Path) -> Result<Vec<u8>> {
         use cap_std::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NONBLOCK);
     }
-    let file = match dir.open_with("FETCH_HEAD", &options) {
+    let file = match dir.open_with(name, &options) {
         Ok(file) => file.into_std(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![0]),
-        Err(_) => anyhow::bail!("Cannot safely inspect FETCH_HEAD"),
+        Err(_) => anyhow::bail!("Cannot safely inspect Git metadata file"),
     };
     let metadata = file.metadata()?;
     anyhow::ensure!(
-        metadata.is_file() && metadata.len() <= 8 * 1024 * 1024,
-        "Cannot safely inspect FETCH_HEAD"
+        metadata.is_file() && metadata.len() <= limit,
+        "Cannot safely inspect Git metadata file"
     );
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         anyhow::ensure!(
             metadata.nlink() == 1,
-            "Cannot fetch into a multiply linked FETCH_HEAD"
+            "Git metadata file has multiple hard links"
         );
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        file.take(limit + 1).read_to_end(&mut bytes)?;
         anyhow::ensure!(
             bytes.len() as u64 == metadata.len(),
-            "FETCH_HEAD changed during review"
+            "Git metadata file changed during review"
         );
-        let reopened = dir.open_with("FETCH_HEAD", &options)?.into_std();
+        let reopened = dir.open_with(name, &options)?.into_std();
         let after = reopened.metadata()?;
         anyhow::ensure!(
             after.is_file()
@@ -79,7 +83,7 @@ fn fetch_head_certificate(directory: &std::path::Path) -> Result<Vec<u8>> {
                 && after.len() == metadata.len()
                 && after.mtime() == metadata.mtime()
                 && after.mtime_nsec() == metadata.mtime_nsec(),
-            "FETCH_HEAD changed during review"
+            "Git metadata file changed during review"
         );
         let mut hash = Sha256::new();
         hash.update([1]);
@@ -91,23 +95,20 @@ fn fetch_head_certificate(directory: &std::path::Path) -> Result<Vec<u8>> {
     #[cfg(windows)]
     {
         let identity = windows_file_identity(&file)?;
-        anyhow::ensure!(
-            identity.3 == 1,
-            "Cannot fetch into a multiply linked FETCH_HEAD"
-        );
+        anyhow::ensure!(identity.3 == 1, "Git metadata file has multiple hard links");
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        file.take(limit + 1).read_to_end(&mut bytes)?;
         anyhow::ensure!(
             bytes.len() as u64 == metadata.len(),
-            "FETCH_HEAD changed during review"
+            "Git metadata file changed during review"
         );
-        let reopened = dir.open_with("FETCH_HEAD", &options)?.into_std();
+        let reopened = dir.open_with(name, &options)?.into_std();
         let after = reopened.metadata()?;
         anyhow::ensure!(
             after.is_file()
                 && after.len() == metadata.len()
                 && windows_file_identity(&reopened)? == identity,
-            "FETCH_HEAD changed during review"
+            "Git metadata file changed during review"
         );
         let mut hash = Sha256::new();
         hash.update([1]);
@@ -119,11 +120,109 @@ fn fetch_head_certificate(directory: &std::path::Path) -> Result<Vec<u8>> {
     #[cfg(not(any(unix, windows)))]
     {
         let _ = file;
-        anyhow::bail!("Existing FETCH_HEAD requires platform-specific hardlink validation")
+        anyhow::bail!("Existing Git metadata requires platform-specific hardlink validation")
     }
 }
 
 impl Repository {
+    // Git updates this ref through a lockfile. Reject filesystem indirections
+    // in the destination path before review and immediately before spawning
+    // Git; independent writers can still race the final check.
+    async fn validate_remote_head_path(&self, remote: &str) -> Result<()> {
+        anyhow::ensure!(
+            remote.split('/').all(|part| {
+                !part.is_empty() && part != "." && part != ".." && !part.contains(['\\', ':', '\0'])
+            }),
+            "Invalid configured remote"
+        );
+        let mut path = self.common_directory().await?;
+        let components: Vec<_> = ["refs", "remotes"]
+            .into_iter()
+            .chain(remote.split('/'))
+            .chain(["HEAD"])
+            .collect();
+        for (index, component) in components.iter().enumerate() {
+            path.push(component);
+            match std::fs::symlink_metadata(&path) {
+                Ok(metadata) => {
+                    anyhow::ensure!(
+                        !metadata.file_type().is_symlink(),
+                        "Remote HEAD path contains a symlink"
+                    );
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::fs::MetadataExt;
+                        anyhow::ensure!(
+                            metadata.file_attributes() & 0x400 == 0,
+                            "Remote HEAD path contains a reparse point"
+                        );
+                    }
+                    if index + 1 == components.len() {
+                        anyhow::ensure!(metadata.is_file(), "Invalid remote HEAD file");
+                    } else {
+                        anyhow::ensure!(metadata.is_dir(), "Invalid remote HEAD directory");
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    }
+
+    async fn remote_head_review(&self, request: &RendererFetchRequest) -> Result<String> {
+        anyhow::ensure!(
+            request.refspec.is_none() && !request.report_progress,
+            "Invalid remote HEAD request"
+        );
+        let format = self.run(&args(&["rev-parse", "--show-ref-format"])).await?;
+        anyhow::ensure!(
+            format.code == 0 && format.stdout == b"files\n",
+            "Remote HEAD review requires the files ref backend"
+        );
+        self.validate_remote_head_path(&request.remote).await?;
+        let fetch_review = self.renderer_fetch_review(request).await?;
+        self.validate_remote_head_path(&request.remote).await?;
+        let path = std::path::Path::new("refs/remotes")
+            .join(&request.remote)
+            .join("HEAD");
+        let certificate = file_certificate(&self.common_directory().await?, &path, 8192)?;
+        self.validate_remote_head_path(&request.remote).await?;
+        let mut digest = Sha256::new();
+        digest.update(b"remote-head:");
+        digest.update(fetch_review.as_bytes());
+        digest.update(certificate);
+        Ok(format!("{:x}", digest.finalize()))
+    }
+
+    pub(crate) async fn renderer_remote_head_preview(
+        &self,
+        request: &RendererFetchRequest,
+    ) -> Result<Value> {
+        Ok(json!({"remote":request.remote, "basis":self.remote_head_review(request).await?}))
+    }
+
+    pub(crate) async fn renderer_remote_head(
+        &self,
+        request: &RendererFetchRequest,
+        basis: &str,
+    ) -> Result<Value> {
+        let _lock = self.stash_lock().await?;
+        anyhow::ensure!(
+            self.remote_head_review(request).await? == basis,
+            "Remote HEAD context changed; refresh before continuing"
+        );
+        self.validate_remote_head_path(&request.remote).await?;
+        let output = process::run_bound_remote_fetch(
+            &self.path,
+            &args(&["remote", "set-head", "-a", "--", &request.remote]),
+            request.is_background_task,
+            false,
+        )
+        .await?;
+        Ok(json!({"code":output.code}))
+    }
+
     async fn renderer_fetch_review(&self, request: &RendererFetchRequest) -> Result<String> {
         for variable in [
             "GIT_DIR",
@@ -188,7 +287,11 @@ impl Repository {
         anyhow::ensure!(refs.code == 0, "Cannot inspect repository refs");
         let config = self.checkout_configuration().await?;
         let worktrees = self.worktrees().await?;
-        let fetch_head = fetch_head_certificate(&self.git_directory().await?)?;
+        let fetch_head = file_certificate(
+            &self.git_directory().await?,
+            std::path::Path::new("FETCH_HEAD"),
+            8 * 1024 * 1024,
+        )?;
         let mut hash = Sha256::new();
         for part in [
             self.id().as_bytes(),
@@ -372,6 +475,132 @@ mod tests {
             );
             assert!(f.0.join("target/.git/FETCH_HEAD").is_file());
         }
+    }
+
+    #[tokio::test]
+    async fn refreshes_remote_head_only_after_review() {
+        use std::os::unix::fs::symlink;
+        let f = Fixture::new();
+        let target = f.0.join("target");
+        let source = f.0.join("source");
+        let request = f.remote("--test", &source.to_string_lossy());
+        git(&target, &["fetch", "--", "--test"]);
+        let repo = Repository::open(&target).await.unwrap();
+        let preview = repo.renderer_remote_head_preview(&request).await.unwrap();
+        let basis = preview["basis"].as_str().unwrap();
+        let unrelated = repo.renderer_fetch_preview(&request).await.unwrap();
+        assert!(
+            repo.renderer_remote_head(&request, unrelated["basis"].as_str().unwrap())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            repo.renderer_remote_head(&request, basis).await.unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            git(&target, &["symbolic-ref", "refs/remotes/--test/HEAD"]),
+            "refs/remotes/--test/main"
+        );
+
+        let head = target.join(".git/refs/remotes/--test/HEAD");
+        fs::write(&head, "ref: refs/remotes/--test/missing-one\n").unwrap();
+        let dangling = repo.renderer_remote_head_preview(&request).await.unwrap();
+        fs::write(&head, "ref: refs/remotes/--test/missing-two\n").unwrap();
+        assert!(
+            repo.renderer_remote_head(&request, dangling["basis"].as_str().unwrap())
+                .await
+                .is_err()
+        );
+        fs::remove_file(&head).unwrap();
+        let outside = f.0.join("outside");
+        fs::write(&outside, "sentinel").unwrap();
+        symlink(&outside, &head).unwrap();
+        assert!(repo.renderer_remote_head_preview(&request).await.is_err());
+        assert_eq!(fs::read_to_string(outside).unwrap(), "sentinel");
+        fs::remove_file(&head).unwrap();
+        let parent = target.join(".git/refs/remotes/--test");
+        fs::rename(&parent, f.0.join("original-refs")).unwrap();
+        fs::create_dir(f.0.join("redirected-refs")).unwrap();
+        symlink(f.0.join("redirected-refs"), &parent).unwrap();
+        assert!(repo.renderer_remote_head_preview(&request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn refreshes_head_in_a_linked_worktree_and_reports_git_refusal() {
+        let f = Fixture::new();
+        let target = f.0.join("target");
+        let source = f.0.join("source");
+        let request = f.remote("origin", &source.to_string_lossy());
+        git(&target, &["fetch", "--", "origin"]);
+        git(
+            &target,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "root",
+            ],
+        );
+        let worktree = f.0.join("worktree");
+        git(
+            &target,
+            &["worktree", "add", "--detach", worktree.to_str().unwrap()],
+        );
+        git(
+            &target,
+            &["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"],
+        );
+        let repo = Repository::open(&worktree).await.unwrap();
+        let preview = repo.renderer_remote_head_preview(&request).await.unwrap();
+        assert_eq!(
+            repo.renderer_remote_head(&request, preview["basis"].as_str().unwrap())
+                .await
+                .unwrap()["code"],
+            0
+        );
+        assert_eq!(
+            git(&target, &["symbolic-ref", "refs/remotes/origin/HEAD"]),
+            "refs/remotes/origin/main"
+        );
+        let missing = f.remote("missing", &f.0.join("absent").to_string_lossy());
+        let preview = repo.renderer_remote_head_preview(&missing).await.unwrap();
+        let result = repo
+            .renderer_remote_head(&missing, preview["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert!(result["code"] == 1 || result["code"] == 128);
+    }
+
+    #[tokio::test]
+    async fn remote_head_review_rejects_non_file_ref_storage() {
+        let f = Fixture::new();
+        let path = f.0.join("reftable");
+        fs::create_dir(&path).unwrap();
+        let initialized = Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args(["init", "-q", "--ref-format=reftable"])
+            .output()
+            .unwrap();
+        if !initialized.status.success() {
+            return;
+        }
+        let source = f.0.join("source");
+        let url = source.to_str().unwrap();
+        git(&path, &["remote", "add", "origin", url]);
+        let request: RendererFetchRequest = serde_json::from_value(json!({
+            "remote": "origin", "expected_url": url, "recurse_submodules": false,
+        }))
+        .unwrap();
+        let repo = Repository::open(&path).await.unwrap();
+        assert!(repo.renderer_remote_head_preview(&request).await.is_err());
     }
 
     #[tokio::test]

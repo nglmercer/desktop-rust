@@ -33,3 +33,26 @@ it('delivers native progress only to its pending invocation', async () => {
   await secondRequest
   dom.window.close()
 })
+
+it('allows only a bounded fetch mutation to extend the IPC timeout', async () => {
+  const dom = new JSDOM('', { url: 'http://localhost/', runScripts: 'outside-only' })
+  const window = dom.window as any
+  const sent: Array<{ __rpc: number }> = []
+  window.ipc = { postMessage: (body: string) => sent.push(JSON.parse(body)) }
+  window.fetch = vi.fn()
+  window.XMLHttpRequest = class { open() {} send() {} }
+  const timers = vi.spyOn(window, 'setTimeout')
+  window.eval(readFileSync('rust/crates/desktop-app/web/ipc-shim.js', 'utf8'))
+  const mutation = { operation: { type: 'fetch_remote', operation: { method: 'renderer_fetch' } }, deadline_ms: 3_600_000 }
+  const preview = { operation: { type: 'fetch_remote', operation: { method: 'renderer_fetch_preview' } }, deadline_ms: 3_600_000 }
+  const calls = [
+    window.__desktop.invoke('desktop.backend.git_info', mutation),
+    window.__desktop.invoke('desktop.backend.git_info', preview),
+    window.__desktop.invoke('desktop.backend.git_info', { ...mutation, deadline_ms: 3_600_001 }),
+  ]
+  expect(timers.mock.calls.map(call => call[1])).toContain(3_630_000)
+  expect(timers.mock.calls.filter(call => call[1] === 180_000)).toHaveLength(2)
+  sent.forEach(message => window.__desktop.resolve(message.__rpc, { ok: true, value: null }))
+  await Promise.all(calls)
+  dom.window.close()
+})

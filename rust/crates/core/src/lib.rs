@@ -696,6 +696,12 @@ impl Repository {
             Operation::RendererFetch { request, basis } => {
                 return self.renderer_fetch(&request, &basis).await;
             }
+            Operation::RendererRemoteHeadPreview { request } => {
+                return self.renderer_remote_head_preview(&request).await;
+            }
+            Operation::RendererRemoteHead { request, basis } => {
+                return self.renderer_remote_head(&request, &basis).await;
+            }
             Operation::RendererFastForward { request, basis } => {
                 return self.renderer_fast_forward(&request, &basis).await;
             }
@@ -1355,6 +1361,8 @@ impl Repository {
             | RendererFastForwardPreview { .. }
             | RendererFetchPreview { .. }
             | RendererFetch { .. }
+            | RendererRemoteHeadPreview { .. }
+            | RendererRemoteHead { .. }
             | RendererFastForward { .. }
             | RendererMixedReset { .. }
             | RendererMergeStart { .. }

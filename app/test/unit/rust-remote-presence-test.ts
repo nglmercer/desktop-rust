@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   hasRemotes: vi.fn(),
   remoteUrl: vi.fn(),
   manage: vi.fn(),
+  refreshHead: vi.fn(),
   git: vi.fn(),
   scope: vi.fn(
     async (_path: string, _kind: string, read: () => Promise<unknown>) => read()
@@ -16,6 +17,7 @@ vi.mock('../../src/backend/client', () => ({
     repositorySafeFetchRemotes: mocks.hasRemotes,
     repositorySafeRemoteUrl: mocks.remoteUrl,
     manageRepositoryRemote: mocks.manage,
+    refreshRepositoryRemoteHead: mocks.refreshHead,
   }),
 }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
@@ -33,6 +35,7 @@ import {
   getRemotes,
   removeRemote,
   setRemoteURL,
+  updateRemoteHEAD,
 } from '../../src/lib/git/remote'
 import type { Repository } from '../../src/models/repository'
 
@@ -42,6 +45,16 @@ describe('Rust remote discovery', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.transport = 'ws'
+  })
+
+  it('refreshes remote HEAD over WebSocket without legacy Git', async () => {
+    const remote = { name: '--test', url: '/remote' }
+    await updateRemoteHEAD(repository, remote, true)
+    expect(mocks.refreshHead).toHaveBeenCalledWith('/repo', '--test', '/remote', true)
+    expect(mocks.git).not.toHaveBeenCalled()
+    mocks.refreshHead.mockRejectedValueOnce(new Error('outcome uncertain'))
+    await expect(updateRemoteHEAD(repository, remote, false)).rejects.toThrow('outcome uncertain')
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it.each(['ws', 'wry'])(

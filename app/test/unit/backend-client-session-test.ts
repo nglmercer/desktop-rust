@@ -613,6 +613,8 @@ describe('backend Copilot session cleanup', () => {
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
     const client = new BackendClient()
     await client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false)
+    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.backend.git_info', expect.objectContaining({ deadline_ms: 60_000 }))
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ deadline_ms: 3_600_000 }))
     expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'fetch_remote', repository_path: '/repo', operation: { method: 'renderer_fetch', request, basis: preview.basis } } }))
     invoke.mockResolvedValueOnce({ ...preview, remote: 'other' })
     await expect(client.fetchRepositoryRemote('/repo', request.remote, request.expected_url, false)).rejects.toMatchObject({ code: 'invalid_response' })

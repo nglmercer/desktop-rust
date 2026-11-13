@@ -216,6 +216,11 @@ export async function updateRemoteHEAD(
   remote: IRemote,
   isBackgroundTask: boolean
 ): Promise<void> {
+  if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
+    await withRepositoryGitOperation(repository.path, 'mutation', () =>
+      backend().refreshRepositoryRemoteHead(repository.path, remote.name, remote.url, isBackgroundTask), true)
+    return
+  }
   const options = {
     successExitCodes: new Set([0, 1, 128]),
     env: await envForRemoteOperation(remote.url),

@@ -334,6 +334,13 @@ pub enum Operation {
         request: RendererFetchRequest,
         basis: String,
     },
+    RendererRemoteHeadPreview {
+        request: RendererFetchRequest,
+    },
+    RendererRemoteHead {
+        request: RendererFetchRequest,
+        basis: String,
+    },
     RendererRebaseStart {
         request: RendererRebaseStartRequest,
         basis: String,

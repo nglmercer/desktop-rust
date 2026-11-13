@@ -145,6 +145,10 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(git('rev-parse', 'refs/remotes/--test/main')).toBe(execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim())
       expect(await readFile(path.join(repository, '.git', 'FETCH_HEAD'), 'utf8')).toContain('branch')
       const repositoryModel = { path: repository, gitHubRepository: null } as Repository
+      const { updateRemoteHEAD } = await import('../../src/lib/git/remote')
+      git('symbolic-ref', '--delete', 'refs/remotes/--test/HEAD')
+      await updateRemoteHEAD(repositoryModel, { name: '--test', url: source }, true)
+      expect(git('symbolic-ref', 'refs/remotes/--test/HEAD')).toBe('refs/remotes/--test/main')
       await fetchRefspec(repositoryModel, { name: '--test', url: source }, 'refs/heads/main:refs/remotes/--test/review')
       expect(git('rev-parse', 'refs/remotes/--test/review')).toBe(git('rev-parse', 'refs/remotes/--test/main'))
       await expect(fetchRefspec(repositoryModel, { name: '--test', url: source }, 'refs/heads/missing')).resolves.toBeUndefined()

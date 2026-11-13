@@ -396,8 +396,11 @@ class WryTransport {
           retryable: false,
         })
       }
-      const maximum = method === 'copilot' ? 330_000 : 60_000
-      const deadline = opts.deadlineMs ?? (method === 'copilot' ? 170_000 : 60_000)
+      const fetchMutation = method === 'git_info' && isRecord(params) &&
+        isRecord(params.operation) && params.operation.type === 'fetch_remote' &&
+        isRecord(params.operation.operation) && params.operation.operation.method === 'renderer_fetch'
+      const maximum = fetchMutation ? 3_600_000 : method === 'copilot' ? 330_000 : 60_000
+      const deadline = opts.deadlineMs ?? (fetchMutation ? 3_600_000 : method === 'copilot' ? 170_000 : 60_000)
       if (!Number.isInteger(deadline) || deadline < 1 || deadline > maximum) {
         throw new BackendError({
           code: 'invalid_request',
@@ -2629,6 +2632,21 @@ export class BackendClient {
     if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the squash'}; inspect the repository`, retryable: false })
   }
 
+  /** Refresh a named remote's HEAD after reviewing its configuration and refs. */
+  async refreshRepositoryRemoteHead(repositoryPath: string, remote: string, expectedUrl: string, isBackgroundTask: boolean): Promise<void> {
+    if (this.transport !== 'ws') throw new BackendError({ code: 'unsupported', message: 'Remote HEAD refresh requires the browser bridge', retryable: false })
+    const request = { remote, expected_url: expectedUrl, recurse_submodules: false, is_background_task: isBackgroundTask }
+    const preview = await this.repositoryRead(repositoryPath, 'renderer_remote_head_preview', { request })
+    if (!isRecord(preview) || preview.remote !== remote || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid remote HEAD review', retryable: false })
+    let result: unknown
+    try { result = await this.repositoryRead(repositoryPath, 'renderer_remote_head', { request, basis: preview.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: 'Remote HEAD outcome is uncertain; inspect the remote reference before retrying', retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || ![0, 1, 128].includes(result.code as number)) throw new BackendError({ code: 'git_error', message: 'Unable to update remote HEAD; inspect the remote reference before retrying', retryable: false })
+  }
+
   /** Fetch a named remote after reviewing its configuration and repository state. */
   async fetchRepositoryRemote(repositoryPath: string, remote: string, expectedUrl: string, recurseSubmodules: boolean, isBackgroundTask = false, expectedSamlOwner?: string, onProgress?: (chunk: FetchProgressChunk) => void, refspec?: string): Promise<FetchFailure | undefined> {
     if (onProgress && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
@@ -2636,7 +2654,7 @@ export class BackendClient {
     }
     const request = { remote, expected_url: expectedUrl, recurse_submodules: recurseSubmodules, is_background_task: isBackgroundTask, report_progress: onProgress !== undefined, ...(expectedSamlOwner === undefined ? {} : { expected_saml_owner: expectedSamlOwner }), ...(refspec === undefined ? {} : { refspec }) }
     const call = (method: 'renderer_fetch_preview' | 'renderer_fetch', extra: Record<string, unknown> = {}) => {
-      const options = method === 'renderer_fetch' ? { onProgress } : {}
+      const options = method === 'renderer_fetch' ? { onProgress, deadlineMs: 3_600_000 } : {}
       return this.transport === 'wry'
         ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } }, options)
         : this.repositoryRead(repositoryPath, method, { request, ...extra }, options)
