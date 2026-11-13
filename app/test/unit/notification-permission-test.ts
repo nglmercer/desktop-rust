@@ -28,13 +28,15 @@ describe('system notification permission', () => {
       } without requesting it`, async () => {
         const previousWindows = __WIN32__
         Object.assign(globalThis, { __WIN32__: windows })
-        onTestFinished(() =>
+        onTestFinished(() => {
           Object.assign(globalThis, { __WIN32__: previousWindows })
-        )
+        })
         nativeNotificationsSupported = true
         const ipc = new MockIPC()
         ipc.onInvoke('get-notifications-permission', async () => permission)
-        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
+        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
+          ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+        )
 
         assert.strictEqual(
           await getSystemNotificationsPermission(),

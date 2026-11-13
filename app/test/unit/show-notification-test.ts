@@ -42,14 +42,16 @@ describe('showNotification', () => {
       }`, async () => {
         const previousWindows = __WIN32__
         Object.assign(globalThis, { __WIN32__: windows })
-        onTestFinished(() =>
+        onTestFinished(() => {
           Object.assign(globalThis, { __WIN32__: previousWindows })
-        )
+        })
 
         const ipc = new MockIPC()
         ipc.onInvoke('show-notification', async () => 'notification-id')
         ipc.onInvoke('get-notifications-permission', async () => permission)
-        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
+        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
+          ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+        )
         const onClick = () => {}
 
         assert.strictEqual(
@@ -71,7 +73,9 @@ describe('showNotification', () => {
   it('does not count native failures or register a click callback', async () => {
     const ipc = new MockIPC()
     ipc.onInvoke('show-notification', async () => null)
-    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
+    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
+      ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+    )
     const warn = vi.spyOn(log, 'warn')
 
     assert.strictEqual(
@@ -103,7 +107,9 @@ describe('showNotification', () => {
     ipc.onInvoke('get-notifications-permission', async () => {
       throw new Error('Permission lookup failed')
     })
-    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(ipc.invoke.bind(ipc))
+    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
+      ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+    )
     const warn = vi.spyOn(log, 'warn')
     assert.strictEqual(
       await showNotification({

@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BackendClient, FetchPreviewUnsupported } from '../../src/backend/client'
 
+// The snapshot transport is private in production; this shape keeps the
+// request arguments checked when observing it in focused client tests.
+function snapshotTransport(client: BackendClient) {
+  return client as unknown as {
+    repositoryRendererRequest: (
+      path: string,
+      method: string,
+      params: Record<string, unknown>
+    ) => Promise<unknown>
+    releaseComparisonSnapshot: (id: string) => Promise<void>
+  }
+}
+
 describe('backend Copilot session cleanup', () => {
   afterEach(() => {
     Reflect.deleteProperty(window, '__desktop')
@@ -9,8 +22,8 @@ describe('backend Copilot session cleanup', () => {
   it('rejects oversized working-file snapshots before requesting chunks', async () => {
     const client = new BackendClient()
     const id = '12345678-1234-4234-8234-123456789abc'
-    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockResolvedValue({ kind: 'snapshot', id, size: 11 })
-    const release = vi.spyOn(client as any, 'releaseComparisonSnapshot').mockResolvedValue(undefined)
+    const request = vi.spyOn(snapshotTransport(client), 'repositoryRendererRequest').mockResolvedValue({ kind: 'snapshot', id, size: 11 })
+    const release = vi.spyOn(snapshotTransport(client), 'releaseComparisonSnapshot').mockResolvedValue(undefined)
     await expect(client.repositoryReadSnapshot('/repo', 'renderer_working_file', { path: 'file', max_bytes: 10 })).rejects.toMatchObject({ code: 'invalid_response' })
     expect(request).toHaveBeenCalledOnce()
     expect(release).toHaveBeenCalledWith(id)
@@ -46,12 +59,15 @@ describe('backend Copilot session cleanup', () => {
   it('releases resolution uploads after a failure and permits the next request', async () => {
     const client = new BackendClient()
     const id = '12345678-1234-4234-8234-123456789abc'
-    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockImplementation(async (_path, method, params) => {
+    const request = vi.spyOn(snapshotTransport(client), 'repositoryRendererRequest').mockImplementation(async (_path, method, params) => {
       if (method === 'renderer_resolution_begin') return { kind: 'snapshot', id, size: 0 }
-      if (method === 'renderer_resolution_append') return { size: params.offset + atob(params.data).length }
+      if (method === 'renderer_resolution_append') {
+        if (typeof params.offset !== 'number' || typeof params.data !== 'string') throw new Error('Invalid upload request')
+        return { size: params.offset + atob(params.data).length }
+      }
       throw new Error('preview failed')
     })
-    const release = vi.spyOn(client as any, 'releaseComparisonSnapshot').mockResolvedValue(undefined)
+    const release = vi.spyOn(snapshotTransport(client), 'releaseComparisonSnapshot').mockResolvedValue(undefined)
     const content = 'x'.repeat(50_000)
     await expect(client.repositoryResolutionDiff('/repo', 'file', { content }, false)).rejects.toThrow('preview failed')
     expect(request.mock.calls.filter(call => call[1] === 'renderer_resolution_append')).toHaveLength(3)
@@ -93,7 +109,7 @@ describe('backend Copilot session cleanup', () => {
   })
 
   it('falls back to the bounded inline comparison on an older host', async () => {
-    const invoke = vi.fn().mockRejectedValueOnce(new Error('invalid Git identity request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('hello\0world') })
+    const invoke = vi.fn<(_channel: string, payload: { operation: { operation: { snapshot?: boolean } } }) => Promise<unknown>>().mockRejectedValueOnce(new Error('invalid Git identity request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('hello\0world') })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
     const client = new BackendClient()
     const result = await client.repositoryRendererCompareDiff('/repo', 'a', 'b', true, 'file', undefined, false)
@@ -105,7 +121,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('falls back to an older host for commit diffs without retrying Git errors', async () => {
     const client = new BackendClient()
-    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce(btoa('legacy\0diff'))
+    const request = vi.spyOn(snapshotTransport(client), 'repositoryRendererRequest').mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce(btoa('legacy\0diff'))
     const result = await client.repositoryRendererCommitDiff('/repo', 'HEAD', 'file', undefined, false)
     expect(Array.from(result as Uint8Array)).toEqual(Array.from(new TextEncoder().encode('legacy\0diff')))
     expect(request.mock.calls[0][2].snapshot).toBe(true)
@@ -117,7 +133,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('uses the inline comparison when an older WS host rejects the typed request', async () => {
     const client = new BackendClient()
-    const request = vi.spyOn(client as any, 'repositoryRendererRequest').mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('legacy') })
+    const request = vi.spyOn(snapshotTransport(client), 'repositoryRendererRequest').mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce({ kind: 'diff', data: btoa('legacy') })
     const result = await client.repositoryRendererCompareDiff('/repo', 'a', 'b', false, 'file', undefined, false)
     expect(Array.from(result as Uint8Array)).toEqual(Array.from(new TextEncoder().encode('legacy')))
     expect(request).toHaveBeenCalledTimes(2)

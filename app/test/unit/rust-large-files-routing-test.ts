@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DiffSelectionType } from '../../src/models/diff'
+import { DiffSelection, DiffSelectionType } from '../../src/models/diff'
 import type { Repository } from '../../src/models/repository'
-import type { WorkingDirectoryStatus } from '../../src/models/status'
+import {
+  AppFileStatusKind,
+  WorkingDirectoryFileChange,
+  WorkingDirectoryStatus,
+} from '../../src/models/status'
 
 const mocks = vi.hoisted(() => ({
   transport: 'wry',
@@ -22,13 +26,14 @@ vi.mock('../../src/lib/git/repository-operation', () => ({
 import { getLargeFilePaths } from '../../src/lib/large-files'
 
 const repository = { path: '/repo' } as Repository
-const file = (path: string, selected: boolean) => ({
-  path,
-  selection: {
-    getSelectionType: () =>
-      selected ? DiffSelectionType.All : DiffSelectionType.None,
-  },
-})
+const file = (path: string, selected: boolean) =>
+  new WorkingDirectoryFileChange(
+    path,
+    { kind: AppFileStatusKind.Modified },
+    DiffSelection.fromInitialSelection(
+      selected ? DiffSelectionType.All : DiffSelectionType.None
+    )
+  )
 
 describe.each(['wry', 'ws'])('Rust file-size review via %s', transport => {
   beforeEach(() => {
@@ -37,13 +42,11 @@ describe.each(['wry', 'ws'])('Rust file-size review via %s', transport => {
   })
   it('checks only selected files and returns large paths', async () => {
     mocks.read.mockResolvedValue([false, true])
-    const status = {
-      files: [
-        file('small', true),
-        file('excluded', false),
-        file('large', true),
-      ],
-    } as WorkingDirectoryStatus
+    const status = WorkingDirectoryStatus.fromFiles([
+      file('small', true),
+      file('excluded', false),
+      file('large', true),
+    ])
     await expect(getLargeFilePaths(repository, status)).resolves.toEqual([
       'large',
     ])
@@ -52,7 +55,7 @@ describe.each(['wry', 'ws'])('Rust file-size review via %s', transport => {
   })
   it('propagates review errors and never silently treats them as small', async () => {
     mocks.read.mockRejectedValue(new Error('unavailable'))
-    const status = { files: [file('large', true)] } as WorkingDirectoryStatus
+    const status = WorkingDirectoryStatus.fromFiles([file('large', true)])
     await expect(getLargeFilePaths(repository, status)).rejects.toThrow(
       'unavailable'
     )
@@ -61,9 +64,9 @@ describe.each(['wry', 'ws'])('Rust file-size review via %s', transport => {
     mocks.read.mockImplementation(async (_path, paths: string[]) =>
       paths.map(() => false)
     )
-    const status = {
-      files: Array.from({ length: 1100 }, (_, i) => file(`file-${i}`, true)),
-    } as WorkingDirectoryStatus
+    const status = WorkingDirectoryStatus.fromFiles(
+      Array.from({ length: 1100 }, (_, i) => file(`file-${i}`, true))
+    )
     await expect(getLargeFilePaths(repository, status)).resolves.toEqual([])
     expect(mocks.read).toHaveBeenCalledTimes(2)
   })

@@ -35,8 +35,9 @@ describe('Git identity setup', () => {
     saveSetting.mockReset()
   })
   it('does not advance after a failed or partially completed save and permits a retry', async () => {
-    root = document.createElement('div')
-    document.body.appendChild(root)
+    const container = document.createElement('div')
+    root = container
+    document.body.appendChild(container)
     const ref = React.createRef<ConfigureGitUser>()
     const onSave = vi.fn()
     await act(async () => {
@@ -48,7 +49,7 @@ describe('Git identity setup', () => {
           globalUserEmail={undefined}
           onSave={onSave}
         />,
-        root
+        container
       )
     })
     await act(async () => {
