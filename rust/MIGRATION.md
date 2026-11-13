@@ -2485,9 +2485,10 @@ returning Git diagnostics; unclassified errors and full remote details remain
 unavailable. Request-scoped Git and LFS progress uses bounded best-effort
 delivery that can drop chunks. LFS progress uses a private temporary file;
 Windows verifies its ACL and omits capture if the filesystem does not enforce
-it. Native Windows capture has not been verified. A local HTTP fixture has
-verified that a real Git LFS transfer produces progress understood by the
-renderer parser; it does not exercise the Rust fetch runner. Nested-submodule
+it. Native Windows capture has not been verified. A local HTTP fixture verifies
+real Git LFS progress through the Rust fetch runner and renderer parser using a
+test SSH wrapper that explicitly invokes LFS; ordinary Git fetch does not do so.
+Nested-submodule
 credential parity remains open. A `FETCH_HEAD` larger than 8 MiB cannot be
 reviewed. Explicit refspec fetches also use the reviewed operation over
 WebSocket, preserving Git's original argument shape and exit-128 handling;
