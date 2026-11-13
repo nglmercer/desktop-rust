@@ -418,6 +418,13 @@ mod tests {
             "#!/bin/sh\nprintf '%s:%s\\n' \"$#\" \"${1-}\" >> .git/shared-events\ncat >> .git/shared-stdin\n",
         ).unwrap();
         f.git(&["config", "hook.shared.command", "sh .git/shared-hook"]);
+        f.git(&["config", "hook.disabled.event", "pre-commit"]);
+        f.git(&[
+            "config",
+            "hook.disabled.command",
+            "touch .git/disabled-hook-ran",
+        ]);
+        f.git(&["config", "hook.disabled.enabled", "false"]);
         let repo = Repository::open(&f.root).await.unwrap();
         let branch = f.git(&["symbolic-ref", "HEAD"]);
         let head = f.git(&["rev-parse", "HEAD"]);
@@ -451,6 +458,7 @@ mod tests {
         }
         let stdin = fs::read_to_string(f.root.join(".git/shared-stdin")).unwrap();
         assert!(stdin.lines().any(|line| line.ends_with(&branch)));
+        assert!(!f.root.join(".git/disabled-hook-ran").exists());
         assert_eq!(
             fs::read_to_string(f.root.join(".git/pre-events")).unwrap(),
             "pre"
