@@ -484,6 +484,7 @@ pub enum Operation {
         #[serde(default)]
         no_textconv: bool,
     },
+    RendererWorkingFile { path: GitPath },
     RendererBlobPrefix {
         revision: String,
         path: GitPath,

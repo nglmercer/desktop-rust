@@ -119,6 +119,36 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('reads bounded working images through the Rust bridge', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-image-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      const sessionUrl = line.startsWith('Open ') ? line.slice(5) : ''
+      dom = new JSDOM('', { url: sessionUrl })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
+      const repository = path.join(directory, 'repository')
+      await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
+      const imagePath = path.join(repository, '[a].PNG')
+      const bytes = Buffer.alloc(2 * 1024 * 1024 + 23, 0xab); bytes[0] = 0; bytes[1] = 255
+      await writeFile(imagePath, bytes)
+      const { getWorkingDirectoryImage } = await import('../../src/lib/git/diff')
+      const model = { path: repository } as Repository
+      const image = await getWorkingDirectoryImage(model, new FileChange('[a].PNG', { kind: AppFileStatusKind.Modified }))
+      expect(Buffer.from(image.rawContents)).toEqual(bytes)
+      expect(image.contents).toBe(bytes.toString('base64'))
+      expect(image.mediaType).toBe('image/png')
+      await expect(getWorkingDirectoryImage(model, new FileChange('missing.png', { kind: AppFileStatusKind.Modified }))).rejects.toThrow()
+      await symlink('[a].PNG', path.join(repository, 'link.png'))
+      const linked = await getWorkingDirectoryImage(model, new FileChange('link.png', { kind: AppFileStatusKind.Modified }))
+      expect(Buffer.from(linked.rawContents)).toEqual(bytes)
+      await symlink('/etc/passwd', path.join(repository, 'outside.png'))
+      await expect(getWorkingDirectoryImage(model, new FileChange('outside.png', { kind: AppFileStatusKind.Modified }))).rejects.toThrow()
+      const huge = await open(path.join(repository, 'huge.png'), 'w'); await huge.truncate(70_000_001); await huge.close()
+      await expect(getWorkingDirectoryImage(model, new FileChange('huge.png', { kind: AppFileStatusKind.Modified }))).rejects.toThrow()
+    }, 90_000)
+
     it('reviews worktree lifecycle and relocates the selected saved record', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-worktree-bridge-'))
       const registryPath = path.join(directory, 'registry.json')

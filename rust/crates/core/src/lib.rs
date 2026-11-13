@@ -60,6 +60,7 @@ mod renderer_rebase;
 mod renderer_reset;
 mod renderer_revert;
 pub mod renderer_worktree;
+mod renderer_working_file;
 mod resolution_diff;
 pub use refs::symbolic_ref;
 mod repository_discovery;
@@ -611,6 +612,7 @@ impl Repository {
             Operation::RendererStagedDiff { amend_head } => {
                 return self.renderer_staged_diff(amend_head.as_deref()).await;
             }
+            Operation::RendererWorkingFile { path } => return self.renderer_working_file(path).await,
             Operation::RendererWorkingDiff {
                 path,
                 base,
@@ -1285,6 +1287,7 @@ impl Repository {
             | RendererCompareDiffRelease { .. }
             | RendererStagedDiff { .. }
             | RendererWorkingDiff { .. }
+            | RendererWorkingFile { .. }
             | RendererBlobPrefix { .. }
             | RendererBlobChunk { .. }
             | SafeFetchRemotes

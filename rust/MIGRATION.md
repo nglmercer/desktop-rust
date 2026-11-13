@@ -2593,3 +2593,10 @@ are capped at 70,000,000 bytes; an oversized preview returns an error. Uploads
 and results share session-owned comparison snapshots with idle and disconnect
 cleanup. Electron retains its existing preview implementation. Windows native
 runtime behavior remains to be verified.
+
+Working-tree image previews use bounded, session-owned Rust snapshots on Wry
+and WebSocket. Relative symlinks resolving within the repository are supported;
+absolute symlinks, links escaping the root and `.git` targets are refused.
+Missing or larger-than-70,000,000-byte images report an error. The binary data
+and encoded image string can still require substantial memory at that limit.
+Electron retains its existing image read path, including its symlink semantics.

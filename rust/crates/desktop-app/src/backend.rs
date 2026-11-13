@@ -563,6 +563,7 @@ impl Backend {
                     | Operation::SelectRenamedDiff { .. }
                     | Operation::RendererStagedDiff { .. }
                     | Operation::RendererWorkingDiff { .. }
+                    | Operation::RendererWorkingFile { .. }
                     | Operation::RendererBlobPrefix { .. }
                     | Operation::RendererBlobChunk { .. }
                     | Operation::RendererCommitDiff { .. }
@@ -2104,6 +2105,25 @@ mod tests {
             let chunk = backend.read(route(json!({"method":"renderer_compare_diff_chunk","snapshot_id":result_id,"offset":0,"length":524288}))).unwrap();
             assert!(!chunk["data"].as_str().unwrap().is_empty());
             let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":result_id}})]).unwrap();
+            assert_eq!(backend.read(release).unwrap()["released"], true);
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn wry_reads_working_image_bytes() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-image-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let init = Command::new("git").arg("-C").arg(&root).args(["init", "-q"]).output().unwrap(); assert!(init.status.success());
+            fs::write(root.join("[a].png"), [0, 255, 0, 128, 42, 10]).unwrap();
+            let backend = Backend::new(16).unwrap();
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":operation}})]).unwrap();
+            let preview = backend.read(route(json!({"method":"renderer_working_file","path":"[a].png"}))).unwrap();
+            let id = preview["id"].as_str().unwrap();
+            let chunk = backend.read(route(json!({"method":"renderer_compare_diff_chunk","snapshot_id":id,"offset":0,"length":64}))).unwrap();
+            assert_eq!(chunk["data"], "AP8AgCoK");
+            let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
             assert_eq!(backend.read(release).unwrap()["released"], true);
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();

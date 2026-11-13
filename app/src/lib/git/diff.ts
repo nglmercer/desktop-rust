@@ -1017,10 +1017,10 @@ export async function getBlobImage(
   path: string,
   commitish: string
 ): Promise<Image> {
-  const extension = Path.extname(path)
+  const extension = Path.extname(path).toLowerCase()
   const contents = await getBlobContents(repository, commitish, path)
   return new Image(
-    contents.buffer,
+    Uint8Array.from(contents).buffer,
     contents.toString('base64'),
     getMediaType(extension),
     contents.length
@@ -1039,11 +1039,24 @@ export async function getWorkingDirectoryImage(
   repository: Repository,
   file: FileChange
 ): Promise<Image> {
-  const contents = await readFile(Path.join(repository.path, file.path))
+  let contents: Buffer
+  let rawContents: ArrayBufferLike
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    const read = () => backend().repositoryReadSnapshot(repository.path, 'renderer_working_file', { path: file.path })
+    const bytes = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    if (bytes === null) throw new Error('Working image is unavailable')
+    contents = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    rawContents = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.slice().buffer
+  } else {
+    contents = await readFile(Path.join(repository.path, file.path))
+    rawContents = Uint8Array.from(contents).buffer
+  }
   return new Image(
-    contents.buffer,
+    rawContents,
     contents.toString('base64'),
-    getMediaType(Path.extname(file.path)),
+    getMediaType(Path.extname(file.path).toLowerCase()),
     contents.length
   )
 }

@@ -1972,7 +1972,7 @@ export class BackendClient {
     return value
   }
 
-  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_compare_changes' | 'renderer_staged_diff' | 'renderer_resolution_begin' | 'renderer_resolution_append' | 'renderer_resolution_diff' | 'renderer_compare_diff_chunk' | 'renderer_compare_diff_release' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
+  private async repositoryRendererRequest(repositoryPath: string, method: 'renderer_commit_diff' | 'renderer_compare_diff' | 'renderer_compare_changes' | 'renderer_staged_diff' | 'renderer_resolution_begin' | 'renderer_resolution_append' | 'renderer_resolution_diff' | 'renderer_compare_diff_chunk' | 'renderer_compare_diff_release' | 'renderer_blob_prefix' | 'renderer_blob_chunk' | 'renderer_working_diff' | 'renderer_working_file' | 'diff_detail' | 'select_diff' | 'select_renamed_diff' | 'discard_preview' | 'discard' | 'undo_discard' | 'list_discards' | 'forget_discard' | 'discard_batch_preview' | 'discard_batch' | 'conflict_detail' | 'stage_conflict' | 'resolve_conflict', params: Record<string, unknown>): Promise<unknown> {
     if (this.transport === 'wry') {
       return this.request('git_info', { operation: { type: 'reviewed_discard', repository_path: repositoryPath, operation: { method, ...params } } })
     }
@@ -2051,13 +2051,13 @@ export class BackendClient {
     return this.decodeComparisonSnapshot(repositoryPath, value, !mergeBase)
   }
 
-  async repositoryReadSnapshot(repositoryPath: string, method: 'renderer_staged_diff', params: Record<string, unknown>): Promise<Uint8Array | null> {
+  async repositoryReadSnapshot(repositoryPath: string, method: 'renderer_staged_diff' | 'renderer_working_file', params: Record<string, unknown>): Promise<Uint8Array | null> {
     const previous = this.comparisonTurn
     let releaseTurn!: () => void
     this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
     await previous
     try {
-      const result = await this.decodeComparisonSnapshot(repositoryPath, await this.repositoryRendererRequest(repositoryPath, method, params), true, 10 * 1024 * 1024)
+      const result = await this.decodeComparisonSnapshot(repositoryPath, await this.repositoryRendererRequest(repositoryPath, method, params), method === 'renderer_staged_diff', method === 'renderer_staged_diff' ? 10 * 1024 * 1024 : 70_000_000)
       if (result !== null && !(result instanceof Uint8Array)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison snapshot', retryable: false })
       return result
     } finally { releaseTurn() }

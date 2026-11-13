@@ -141,7 +141,7 @@ impl WorkingFile {
         let metadata = file.metadata()?;
         anyhow::ensure!(
             metadata.is_file() && metadata.len() <= limit,
-            "Resolution file is not a supported regular file"
+            "Working file is not a supported regular file"
         );
         let mut input = file.take(limit + 1);
         let mut bytes = Vec::new();
@@ -156,8 +156,32 @@ impl WorkingFile {
         }
         anyhow::ensure!(
             bytes.len() as u64 <= limit,
-            "Resolution file exceeds the supported size"
+            "Working file exceeds the supported size"
         );
+        let after = input.into_inner().metadata()?;
+        anyhow::ensure!(
+            bytes.len() as u64 == metadata.len()
+                && after.len() == metadata.len()
+                && after.modified().ok() == metadata.modified().ok(),
+            "Working file changed while reading"
+        );
+        let current = self.parent.symlink_metadata(&self.name)?;
+        anyhow::ensure!(
+            current.is_file() && current.len() == metadata.len(),
+            "Working file changed while reading"
+        );
+        #[cfg(unix)]
+        {
+            use cap_std::fs::MetadataExt as CapMetadataExt;
+            use std::os::unix::fs::MetadataExt as StdMetadataExt;
+            anyhow::ensure!(
+                CapMetadataExt::dev(&current) == StdMetadataExt::dev(&metadata)
+                    && CapMetadataExt::ino(&current) == StdMetadataExt::ino(&metadata)
+                    && StdMetadataExt::ctime(&after) == StdMetadataExt::ctime(&metadata)
+                    && StdMetadataExt::ctime_nsec(&after) == StdMetadataExt::ctime_nsec(&metadata),
+                "Working file changed while reading"
+            );
+        }
         Ok(bytes)
     }
 
