@@ -6,6 +6,7 @@ settings:
 
 overrides:
   '@types/glob>@types/minimatch': 3.0.5
+  '@types/react': 16.14.70
 
 importers:
 
@@ -220,7 +221,7 @@ importers:
         specifier: ^3.0.2
         version: 3.0.5
       '@types/react':
-        specifier: ^16.14.62
+        specifier: 16.14.70
         version: 16.14.70
       '@types/react-css-transition-replace':
         specifier: ^2.1.3
@@ -1762,18 +1763,15 @@ packages:
   '@types/react-dom@16.9.25':
     resolution: {integrity: sha512-ZK//eAPhwft9Ul2/Zj+6O11YR6L4JX0J2sVeBC9Ft7x7HFN7xk7yUV/zDxqV6rjvqgl6r8Dq7oQImxtyf/Mzcw==}
     peerDependencies:
-      '@types/react': ^16.0.0
+      '@types/react': 16.14.70
 
   '@types/react-transition-group@4.4.12':
     resolution: {integrity: sha512-8TV6R3h2j7a91c+1DXdJi3Syo69zzIZbz7Lg5tORM5LEJG7X/E6a1V3drRyBRZq7/utz7A+c4OgYLiLcYGHG6w==}
     peerDependencies:
-      '@types/react': '*'
+      '@types/react': 16.14.70
 
   '@types/react-virtualized@9.22.4':
     resolution: {integrity: sha512-7xBz1a/zXt4Qpogi9khBeaZhphcHPnEF3uchRXsqsKhpHwgxgrpo6OgghLqgc5NWQ6aj5/ws7HaNzIShKNCnXg==}
-
-  '@types/react@15.7.37':
-    resolution: {integrity: sha512-y9gCkVBkqZ8n6xdprjlQ4LhM9RSmbQBMy/RsLSOgZBeQNfO3FrO9c5/IYojOPn+JpSbJdL/3pCU5ghAtE2a36w==}
 
   '@types/react@16.14.70':
     resolution: {integrity: sha512-DM5Q7rSx9G6QYcVvMgxvEurL5P06OxcDNUXrLxlpBzG4ccUewcBCmsztYbxJBobzO8RIwwmjoaD5OsKqdHDuYQ==}
@@ -6859,16 +6857,16 @@ snapshots:
 
   '@types/react-addons-css-transition-group@15.0.10':
     dependencies:
-      '@types/react': 15.7.37
+      '@types/react': 16.14.70
       '@types/react-addons-transition-group': 15.0.10
 
   '@types/react-addons-transition-group@15.0.10':
     dependencies:
-      '@types/react': 15.7.37
+      '@types/react': 16.14.70
 
   '@types/react-css-transition-replace@2.1.7':
     dependencies:
-      '@types/react': 15.7.37
+      '@types/react': 16.14.70
       '@types/react-addons-css-transition-group': 15.0.10
 
   '@types/react-dom@16.9.25(@types/react@16.14.70)':
@@ -6883,8 +6881,6 @@ snapshots:
     dependencies:
       '@types/prop-types': 15.7.15
       '@types/react': 16.14.70
-
-  '@types/react@15.7.37': {}
 
   '@types/react@16.14.70':
     dependencies:
