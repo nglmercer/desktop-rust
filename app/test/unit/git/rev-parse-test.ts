@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import * as path from 'path'
 import { cp, mkdir, realpath, symlink } from 'fs/promises'
@@ -168,7 +168,7 @@ describe('git/rev-parse', () => {
 
           for (const variable of traceVariables) {
             const previous = process.env[variable]
-            t.after(() => {
+            t.onTestFinished(() => {
               if (previous === undefined) {
                 delete process.env[variable]
               } else {
