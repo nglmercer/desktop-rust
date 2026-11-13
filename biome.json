@@ -50,10 +50,7 @@
       "app/test/unit/preferences-git-save-test.ts",
       "app/test/helpers/usage-data.ts",
       "app/src/lib/stats/stats-payload.ts",
-      "app/src/web/electron-shim-loader.ts",
-      "app/src/web/async_hooks.ts",
-      "app/src/web/crypto.ts",
-      "app/src/web/stream.ts",
+      "app/src/web/**",
       "app/src/lib/git/repository-operation-context.ts",
       "app/src/lib/git/rev-list.ts",
       "app/src/lib/git/gitignore.ts",
@@ -103,6 +100,12 @@
     "indentStyle": "space",
     "indentWidth": 2
   },
+  "overrides": [
+    {
+      "includes": ["app/src/web/fs.ts", "app/src/web/child_process.ts"],
+      "formatter": { "enabled": false }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "single",

@@ -4,8 +4,11 @@
 import legacy from 'desktop-url-impl'
 import { bundleUrl } from './bundle'
 
-export const parse: (url: string, parseQuery?: boolean, slashes?: boolean) => any =
-  legacy.parse
+export const parse: (
+  url: string,
+  parseQuery?: boolean,
+  slashes?: boolean
+) => any = legacy.parse
 export const format: (url: any) => string = legacy.format
 export const resolve: (from: string, to: string) => string = legacy.resolve
 export const resolveObject = legacy.resolveObject
@@ -36,6 +39,13 @@ export function fileURLToPath(url: string | URL): string {
 }
 
 export default {
-  parse, format, resolve, resolveObject, Url, URL, URLSearchParams,
-  pathToFileURL, fileURLToPath,
+  parse,
+  format,
+  resolve,
+  resolveObject,
+  Url,
+  URL,
+  URLSearchParams,
+  pathToFileURL,
+  fileURLToPath,
 }

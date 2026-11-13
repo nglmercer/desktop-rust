@@ -185,16 +185,37 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
       await page.locator('.branch-button').click()
       await page.getByText('checkout-target', { exact: true }).first().click()
       const switchDialog = page.getByRole('dialog', { name: /switch branch/i })
-      await switchDialog.getByText('Bring my changes to checkout-target').click()
+      await switchDialog
+        .getByText('Bring my changes to checkout-target')
+        .click()
       await switchDialog.getByRole('button', { name: /switch branch/i }).click()
       await switchDialog.waitFor({ state: 'hidden', timeout: 20_000 })
-      await vi.waitFor(() => {
-        expect(execFileSync('git', ['-C', repository, 'branch', '--show-current'], { encoding: 'utf8' }).trim()).toBe('checkout-target')
-      }, { timeout: 20_000 })
-      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe('modified\n')
-      const checkoutCalls = await page.evaluate(() => Reflect.get(window, '__browserAudit') as string[])
-      expect(checkoutCalls.some(call => JSON.parse(call).method === 'checkout_preview')).toBe(true)
-      expect(checkoutCalls.some(call => JSON.parse(call).method === 'checkout')).toBe(true)
+      await vi.waitFor(
+        () => {
+          expect(
+            execFileSync(
+              'git',
+              ['-C', repository, 'branch', '--show-current'],
+              { encoding: 'utf8' }
+            ).trim()
+          ).toBe('checkout-target')
+        },
+        { timeout: 20_000 }
+      )
+      expect(await readFile(path.join(repository, 'changed.txt'), 'utf8')).toBe(
+        'modified\n'
+      )
+      const checkoutCalls = await page.evaluate(
+        () => Reflect.get(window, '__browserAudit') as string[]
+      )
+      expect(
+        checkoutCalls.some(
+          call => JSON.parse(call).method === 'checkout_preview'
+        )
+      ).toBe(true)
+      expect(
+        checkoutCalls.some(call => JSON.parse(call).method === 'checkout')
+      ).toBe(true)
       await page.waitForFunction(() =>
         (Reflect.get(window, '__browserAudit') as string[]).some(
           call => JSON.parse(call).method === 'renderer_blob_prefix'

@@ -14,7 +14,9 @@ const env = (): IDesktopEnv => (globalThis as any).__desktopEnv ?? {}
 export const EOL = __WIN32__ ? '\r\n' : '\n'
 
 export function platform() {
-  return env().platform ?? (__WIN32__ ? 'win32' : __DARWIN__ ? 'darwin' : 'linux')
+  return (
+    env().platform ?? (__WIN32__ ? 'win32' : __DARWIN__ ? 'darwin' : 'linux')
+  )
 }
 export function arch() {
   return env().arch ?? 'x64'
@@ -36,7 +38,10 @@ export function type() {
   return p === 'win32' ? 'Windows_NT' : p === 'darwin' ? 'Darwin' : 'Linux'
 }
 export function cpus() {
-  return new Array(navigator.hardwareConcurrency || 1).fill({ model: '', speed: 0 })
+  return new Array(navigator.hardwareConcurrency || 1).fill({
+    model: '',
+    speed: 0,
+  })
 }
 export function totalmem() {
   return 0
@@ -49,6 +54,16 @@ export function userInfo() {
 }
 
 export default {
-  EOL, platform, arch, release, homedir, tmpdir, hostname, type, cpus,
-  totalmem, freemem, userInfo,
+  EOL,
+  platform,
+  arch,
+  release,
+  homedir,
+  tmpdir,
+  hostname,
+  type,
+  cpus,
+  totalmem,
+  freemem,
+  userInfo,
 }

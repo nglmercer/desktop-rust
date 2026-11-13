@@ -42,7 +42,9 @@ class Emitter {
     if (set === undefined || set.size === 0) {
       return false
     }
-    set.forEach(handler => handler(...args))
+    set.forEach(handler => {
+      handler(...args)
+    })
     return true
   }
 }

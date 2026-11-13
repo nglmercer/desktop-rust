@@ -15,8 +15,11 @@ export const ExecError: new (
   stdout: Buffer | string,
   stderr: Buffer | string,
   cause?: unknown
-) => Error & { code?: string; stdout: Buffer | string; stderr: Buffer | string } =
-  errors.ExecError
+) => Error & {
+  code?: string
+  stdout: Buffer | string
+  stderr: Buffer | string
+} = errors.ExecError
 export const parseError = parseErrorModule.parseError
 export const parseBadConfigValueErrorInfo =
   badConfigModule.parseBadConfigValueErrorInfo
@@ -40,7 +43,9 @@ export type IGitStringExecutionOptions = IGitExecutionOptions
 export type IGitBufferExecutionOptions = IGitExecutionOptions
 export type IGitStringResult = IGitResult & { stdout: string; stderr: string }
 export type IGitBufferResult = IGitResult & { stdout: Buffer; stderr: Buffer }
-export type IGitSpawnOptions = { readonly env?: Record<string, string | undefined> }
+export type IGitSpawnOptions = {
+  readonly env?: Record<string, string | undefined>
+}
 
 interface IBridge {
   invoke(channel: string, options: object): Promise<any>
@@ -153,8 +158,8 @@ export async function exec(
           value === undefined || value === ''
             ? emptyOutput()
             : binary
-            ? Buffer.from(bridge().decodeBase64(value))
-            : value
+              ? Buffer.from(bridge().decodeBase64(value))
+              : value
         const details = error.details
         throw new ExecError(
           message,

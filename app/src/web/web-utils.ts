@@ -1,1 +1,3 @@
-export function getPathForFile(_f:File){ return '' }
+export function getPathForFile(_f: File) {
+  return ''
+}

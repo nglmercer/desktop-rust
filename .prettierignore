@@ -23,3 +23,8 @@ rust/crates/core/src/repo_rules/re2js.js
 script/test.mts
 vitest.config.ts
 app/test/vitest-setup.ts
+# Browser shims are checked by Biome; the two large shims remain on Prettier
+# until their formatting migration is completed.
+app/src/web/*
+!app/src/web/fs.ts
+!app/src/web/child_process.ts

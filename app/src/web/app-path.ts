@@ -1,2 +1,4 @@
-export function getAppPath(){ return '' }
+export function getAppPath() {
+  return ''
+}
 export default { getAppPath }

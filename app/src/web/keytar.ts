@@ -1,7 +1,10 @@
 // `keytar` for the webview build: secrets live in the Rust shell's
 // credential store and never in web storage.
 const invoke = (operation: string, options: object) =>
-  (globalThis as any).__desktop.invoke(`desktop.io.keychain-${operation}`, options)
+  (globalThis as any).__desktop.invoke(
+    `desktop.io.keychain-${operation}`,
+    options
+  )
 
 export function getPassword(
   service: string,
