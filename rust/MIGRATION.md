@@ -1500,7 +1500,11 @@ snapshots.
 Fetch remote enumeration filters empty URL entries, excludes push-only entries,
 delegates URL resolution to installed Git, and uses Desktop's UTF-16 name ordering.
 URL contents never enter policy output. Git versions differ in their treatment
-of a trailing empty URL; filtering that case needs further parity work.
+of a trailing empty URL; an offline, isolated synthetic lookup detects the
+installed Git's behavior before enumerating those remotes. If that lookup is
+ambiguous, the operation returns unsupported instead of guessing. The previous
+Electron enumeration omitted such remotes even when older Git still fetched the
+previous URL; the native result follows the Git executable that performs fetch.
 
 The renderer's last-fetch indicator reads FETCH_HEAD metadata through Rust on
 Wry and WebSocket. The lookup uses the selected worktree's Git directory and

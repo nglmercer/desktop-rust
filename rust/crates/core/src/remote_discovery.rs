@@ -87,6 +87,14 @@ pub async fn safe_fetch_remotes(path: &Path) -> Result<Value> {
     let Some(mut names) = remote_names(&output.stdout)? else {
         return Ok(Value::Null);
     };
+    if !names.cleared.is_empty() {
+        match empty_url_clears_previous(path).await? {
+            Some(true) => {}
+            Some(false) => names.active.extend(names.cleared),
+            None => return Ok(Value::Null),
+        }
+    }
+    let mut names = names.active;
     names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
     let mut remotes = Vec::with_capacity(names.len());
     for name in names {
@@ -121,6 +129,43 @@ pub async fn safe_fetch_remotes(path: &Path) -> Result<Value> {
         return Ok(Value::Null);
     }
     Ok(result)
+}
+
+/// Ask the actual Git executable whether an empty URL resets earlier URLs.
+/// Git releases differ, so a version check would be unreliable for patched
+/// distributions. Unique rewrite prefixes make both possible results distinct
+/// even when the repository has unrelated URL rewriting rules.
+async fn empty_url_clears_previous(path: &Path) -> Result<Option<bool>> {
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let name = format!("desktop-probe-{id}");
+    let source = format!("desktop-probe-source-{id}");
+    let previous = format!("desktop-probe-previous-{id}");
+    let cleared = format!("desktop-probe-cleared-{id}");
+    let initial = format!("remote.{name}.url={source}");
+    let empty = format!("remote.{name}.url=");
+    let previous_rewrite = format!("url.{previous}.insteadOf={source}");
+    let cleared_rewrite = format!("url.{cleared}.insteadOf={name}");
+    let result = process::run(
+        path,
+        &args(&[
+            "-c", &initial, "-c", &empty, "-c", &previous_rewrite, "-c", &cleared_rewrite,
+            "ls-remote", "--get-url", "--", &name,
+        ]),
+    )
+    .await?;
+    if result.code != 0 {
+        return Ok(None);
+    }
+    let Some(output) = result.stdout.strip_suffix(b"\n") else {
+        return Ok(None);
+    };
+    Ok(if output == previous.as_bytes() {
+        Some(false)
+    } else if output == cleared.as_bytes() {
+        Some(true)
+    } else {
+        None
+    })
 }
 
 async fn is_repository(path: &Path) -> Result<bool> {
@@ -169,15 +214,25 @@ pub async fn safe_remote_url(path: &Path, name: &str) -> Result<Value> {
     Ok(json!({"kind":"resolved","url":url}))
 }
 
-fn remote_names(data: &[u8]) -> Result<Option<Vec<String>>> {
+struct RemoteNames {
+    active: Vec<String>,
+    cleared: Vec<String>,
+}
+
+fn remote_names(data: &[u8]) -> Result<Option<RemoteNames>> {
     if data.is_empty() {
-        return Ok(Some(Vec::new()));
+        return Ok(Some(RemoteNames {
+            active: Vec::new(),
+            cleared: Vec::new(),
+        }));
     }
     anyhow::ensure!(
         data.last() == Some(&0),
         "Incomplete Git remote configuration"
     );
     let mut names = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut cleared = BTreeSet::new();
     for entry in data
         .split(|byte| *byte == 0)
         .filter(|entry| !entry.is_empty())
@@ -194,17 +249,33 @@ fn remote_names(data: &[u8]) -> Result<Option<Vec<String>>> {
         anyhow::ensure!(!name.is_empty(), "Invalid Git remote name");
         if entry[separator + 1..].is_empty() {
             names.remove(name);
+            if seen.contains(name) {
+                cleared.insert(name);
+            }
         } else {
             names.insert(name);
+            seen.insert(name);
+            cleared.remove(name);
         }
     }
-    if names.len() > 1000 {
+    if names.len() + cleared.len() > 1000 {
         return Ok(None);
     }
-    Ok(names
+    let Some(active) = names
         .into_iter()
         .map(|name| std::str::from_utf8(name).ok().map(str::to_owned))
-        .collect())
+        .collect()
+    else {
+        return Ok(None);
+    };
+    let Some(cleared) = cleared
+        .into_iter()
+        .map(|name| std::str::from_utf8(name).ok().map(str::to_owned))
+        .collect()
+    else {
+        return Ok(None);
+    };
+    Ok(Some(RemoteNames { active, cleared }))
 }
 
 /// Preserve the exact URL for editable settings. Ambiguous URL forms stay on
@@ -470,21 +541,61 @@ mod tests {
 
     #[test]
     fn tracks_empty_overrides_without_returning_urls() {
-        assert_eq!(remote_names(b"").unwrap().unwrap(), Vec::<String>::new());
-        assert_eq!(
-            remote_names(b"remote.origin.url\nvalue\0remote.origin.url\n\0")
-                .unwrap()
-                .unwrap(),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            remote_names(b"remote.one.url\nvalue\0remote.two.url\nvalue\0remote.one.url\n\0")
-                .unwrap()
-                .unwrap(),
-            vec!["two"]
-        );
+        let empty = remote_names(b"").unwrap().unwrap();
+        assert!(empty.active.is_empty());
+        assert!(empty.cleared.is_empty());
+        let cleared = remote_names(b"remote.origin.url\nvalue\0remote.origin.url\n\0")
+            .unwrap().unwrap();
+        assert!(cleared.active.is_empty());
+        assert_eq!(cleared.cleared, vec!["origin"]);
+        let multiple = remote_names(b"remote.one.url\nvalue\0remote.two.url\nvalue\0remote.one.url\n\0")
+            .unwrap().unwrap();
+        assert_eq!(multiple.active, vec!["two"]);
+        assert_eq!(multiple.cleared, vec!["one"]);
+        let reset = remote_names(b"remote.origin.url\nvalue\0remote.origin.url\n\0remote.origin.url\nnew\0")
+            .unwrap().unwrap();
+        assert_eq!(reset.active, vec!["origin"]);
+        assert!(reset.cleared.is_empty());
+        let empty_only = remote_names(b"remote.origin.url\n\0").unwrap().unwrap();
+        assert!(empty_only.active.is_empty());
+        assert!(empty_only.cleared.is_empty());
         assert!(remote_names(b"remote.origin.url\0").is_err());
         assert!(remote_names(b"remote.origin.url\nvalue").is_err());
+    }
+
+    #[tokio::test]
+    async fn lists_trailing_empty_urls_as_the_installed_git_does() {
+        let root = std::env::temp_dir().join(format!("desktop-remote-empty-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            String::from_utf8(output.stdout).unwrap()
+        };
+        git(&["init", "-q"]);
+        git(&["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "initial"]);
+        let source = root.join("source.git");
+        let source = source.to_str().unwrap();
+        git(&["init", "--bare", "-q", source]);
+        git(&["push", "-q", source, "HEAD:refs/heads/main"]);
+        git(&["--git-dir", source, "symbolic-ref", "HEAD", "refs/heads/main"]);
+        git(&["config", "--add", "remote.cleared.url", source]);
+        git(&["config", "--add", "remote.cleared.url", ""]);
+        git(&["config", "remote.active.url", "/active"]);
+        // A broad rewrite must not make the synthetic capability probe ambiguous.
+        git(&["config", "url./rewritten/.insteadOf", "desktop-"]);
+        let output = git(&["remote", "-v"]);
+        let expects_cleared = output.lines().any(|line| line == format!("cleared\t{source} (fetch)"));
+        let fetch = std::process::Command::new("git")
+            .arg("-C").arg(&root).args(["fetch", "-q", "--", "cleared"])
+            .output().unwrap();
+        assert_eq!(fetch.status.success(), expects_cleared);
+        let mut expected = vec![serde_json::json!({"name":"active", "url":"/active"})];
+        if expects_cleared {
+            expected.push(serde_json::json!({"name":"cleared", "url":source}));
+        }
+        assert_eq!(super::safe_fetch_remotes(&root).await.unwrap(), serde_json::json!(expected));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
