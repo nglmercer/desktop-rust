@@ -303,6 +303,13 @@ pub enum Operation {
     RendererRebaseContinuePreview {
         expected: String,
     },
+    RendererRebaseStartPreview {
+        request: RendererRebaseStartRequest,
+    },
+    RendererRebaseStart {
+        request: RendererRebaseStartRequest,
+        basis: String,
+    },
     RendererRebaseContinue {
         expected: String,
         basis: String,
@@ -962,6 +969,17 @@ pub struct Snapshot {
     pub ahead: Option<u64>,
     pub behind: Option<u64>,
     pub operation: Option<crate::OperationState>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererRebaseStartRequest {
+    pub base_ref: String,
+    pub base_head: String,
+    pub target_ref: String,
+    pub target_head: String,
+    pub current_head: String,
+    pub current_branch: Option<String>,
 }
 
 fn history_limit() -> u16 {

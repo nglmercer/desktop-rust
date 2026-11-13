@@ -749,8 +749,11 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await writeFile(path.join(firstRepository, '-binary file'), 'base rebase\n')
       execFileSync('git', ['-C', firstRepository, 'add', '--', '-binary file'])
       execFileSync('git', ['-C', firstRepository, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'rebase base'])
+      const rebaseBase = execFileSync('git', ['-C', firstRepository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
       execFileSync('git', ['-C', firstRepository, 'switch', '-q', 'rebase-source'])
-      expect(spawnSync('git', ['-C', firstRepository, 'rebase', 'rebase-base']).status).not.toBe(0)
+      const rebaseRequest = { base_ref: 'refs/heads/rebase-base', base_head: rebaseBase, target_ref: 'refs/heads/rebase-source', target_head: rebaseTarget, current_head: rebaseTarget, current_branch: 'refs/heads/rebase-source' }
+      await expect(client.startRepositoryRebase(firstRepository, { ...rebaseRequest, target_head: '0'.repeat(40) })).rejects.toThrow()
+      await expect(client.startRepositoryRebase(firstRepository, rebaseRequest)).resolves.toBe('conflict')
       await expect(client.continueRepositoryRebase(firstRepository, rebaseTarget, false, false)).rejects.toThrow()
       await writeFile(path.join(firstRepository, '-binary file'), 'resolved rebase\n')
       execFileSync('git', ['-C', firstRepository, 'add', '--', '-binary file'])

@@ -386,6 +386,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::RendererCherryPickContinue { .. }
             | Operation::RendererCherryPickStart { .. }
             | Operation::RendererRebaseContinue { .. }
+            | Operation::RendererRebaseStart { .. }
             | Operation::Revert { .. }
             | Operation::RendererRevertPreview { .. }
             | Operation::RendererRevert { .. }

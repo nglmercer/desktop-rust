@@ -672,6 +672,12 @@ impl Repository {
             Operation::RendererRebaseContinuePreview { expected } => {
                 return self.renderer_rebase_continue_preview(&expected).await;
             }
+            Operation::RendererRebaseStartPreview { request } => {
+                return self.renderer_rebase_start_preview(&request).await;
+            }
+            Operation::RendererRebaseStart { request, basis } => {
+                return self.renderer_rebase_start(&request, &basis).await;
+            }
             Operation::RendererRebaseContinue {
                 expected,
                 basis,
@@ -1313,6 +1319,8 @@ impl Repository {
             | RendererCherryPickStart { .. }
             | RendererCherryPickContinue { .. }
             | RendererRebaseContinuePreview { .. }
+            | RendererRebaseStartPreview { .. }
+            | RendererRebaseStart { .. }
             | RendererRebaseContinue { .. }
             | CheckoutHistory
             | AcknowledgeCheckout { .. } => unreachable!("handled by execute"),

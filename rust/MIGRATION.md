@@ -2420,5 +2420,13 @@ sequencer state before running Git, preserves the empty-resolution skip behavior
 and reports subsequent conflicts and uncertain interruptions. State reads now
 ignore a stale REBASE_HEAD when no rebase directory is active. External Git
 writers may race the review and Git's locks; apply-backend continuation, custom
-editors, live progress, interactive hook failures, the start operation, Electron
-fallback and cross-platform parity remain open.
+editors, live progress, interactive hook failures, Electron fallback and
+cross-platform parity remain open.
+
+The native renderers also start reviewed rebases. The review binds both branch
+object IDs and canonical refs, the current branch and head, working files,
+index and linked worktree ownership. Git receives the immutable base object and
+an unambiguous, option-terminated local target name, so it updates the branch
+instead of detaching HEAD. Conflicts retain Git's rebase state and interrupted
+outcomes require inspection. Independent Git processes can still race between
+review and Git taking its own locks; cross-platform behavior remains to audit.

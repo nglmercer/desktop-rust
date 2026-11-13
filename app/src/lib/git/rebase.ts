@@ -375,8 +375,15 @@ export async function rebase(
   repository: Repository,
   baseBranch: Branch,
   targetBranch: Branch,
-  progressCallback?: (progress: IMultiCommitOperationProgress) => void
+  progressCallback?: (progress: IMultiCommitOperationProgress) => void,
+  expected?: { readonly head: string; readonly branch: string | null }
 ): Promise<RebaseResult> {
+  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    if (expected === undefined) throw new Error('Refresh the current branch before rebasing')
+    const request = { base_ref: baseBranch.ref, base_head: baseBranch.tip.sha, target_ref: targetBranch.ref, target_head: targetBranch.tip.sha, current_head: expected.head, current_branch: expected.branch }
+    const result = await withRepositoryGitOperation(repository.path, 'mutation', () => backend().startRepositoryRebase(repository.path, request), true)
+    return result === 'conflict' ? RebaseResult.ConflictsEncountered : result === 'up_to_date' ? RebaseResult.AlreadyUpToDate : RebaseResult.CompletedWithoutError
+  }
   const baseOptions: IGitStringExecutionOptions = {
     expectedErrors: new Set([GitError.RebaseConflicts]),
   }

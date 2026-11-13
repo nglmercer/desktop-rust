@@ -153,6 +153,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    StartRebase {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -449,6 +453,9 @@ impl Backend {
         | GitInfoOperation::ContinueRebase {
             repository_path, ..
         }
+        | GitInfoOperation::StartRebase {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -674,6 +681,17 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported rebase continuation operation".into(),
+            ));
+        }
+        if let GitInfoOperation::StartRebase { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererRebaseStartPreview { .. }
+                    | Operation::RendererRebaseStart { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported rebase start operation".into(),
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
@@ -1454,6 +1472,10 @@ impl Backend {
                         operation: Operation::RendererRebaseContinue { .. },
                         ..
                     }
+                    | GitInfoOperation::StartRebase {
+                        operation: Operation::RendererRebaseStart { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1635,6 +1657,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::ContinueRebase { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::StartRebase { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1916,10 +1945,17 @@ mod tests {
             let target = git(&["rev-parse", "HEAD"]);
             git(&["switch", "-q", "main"]);
             fs::write(root.join("file"), "main\n").unwrap(); git(&["commit", "-qam", "main"]);
+            let base = git(&["rev-parse", "HEAD"]);
             git(&["switch", "-q", "source"]);
-            assert!(!run(&["rebase", "main"]).status.success());
-            fs::write(root.join("file"), "resolved\n").unwrap(); git(&["add", "file"]);
             let backend = Backend::new(16).unwrap();
+            let start = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"start_rebase","repository_path":root,"operation":operation}})]);
+            let request = json!({"base_ref":"refs/heads/main","base_head":base,"target_ref":"refs/heads/source","target_head":target,"current_head":target,"current_branch":"refs/heads/source"});
+            assert!(start(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(start(json!({"method":"renderer_rebase_start_preview","request":request})).unwrap()).unwrap();
+            assert!(backend.read(start(json!({"method":"renderer_rebase_start","request":request,"basis":"bad"})).unwrap()).is_err());
+            let started = backend.read(start(json!({"method":"renderer_rebase_start","request":request,"basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(started["outcome"], "conflict");
+            fs::write(root.join("file"), "resolved\n").unwrap(); git(&["add", "file"]);
             let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"continue_rebase","repository_path":root,"operation":operation}})]);
             assert!(route(json!({"method":"stage","paths":["file"]})).is_err());
             let preview = backend.read(route(json!({"method":"renderer_rebase_continue_preview","expected":target})).unwrap()).unwrap();
