@@ -115,4 +115,63 @@ describe.skipIf(process.platform === 'win32')('traditional Git hook execution', 
     expect(conn.exit).toHaveBeenCalledWith(0)
     expect(failure).not.toHaveBeenCalled()
   })
+
+  it('offers an ignore decision when a hook terminates itself by signal', async () => {
+    root = mkdtempSync(join(tmpdir(), 'desktop-hook-signal-'))
+    const hooks = join(root, 'hooks'); const temp = join(root, 'temp')
+    mkdirSync(hooks); mkdirSync(temp)
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nkill -TERM $$\n', { mode: 0o755 })
+    const conn = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(), stderr: new PassThrough(),
+      getArgs: async () => ['/proxy/pre-commit'], getEnv: async () => ({}),
+      getCwd: async () => root, isStdinConnected: async () => false,
+      exit: vi.fn(async () => {}),
+    })
+    const failure = vi.fn(async (_name: string, _output: TerminalOutput) => 'ignore' as const)
+    const proxy = createHooksProxy(async () => ({ kind: 'success', env: { ...process.env, GIT_EXEC_PATH: '/unused' } }), temp, undefined, failure, undefined, hooks)
+    conn.stdin.end()
+    await proxy(conn as never)
+    expect(failure).toHaveBeenCalledOnce()
+    expect(conn.exit).toHaveBeenCalledWith(0)
+  })
+
+  it('preserves the signal exit status when the user aborts the operation', async () => {
+    root = mkdtempSync(join(tmpdir(), 'desktop-hook-signal-status-'))
+    const hooks = join(root, 'hooks'); const temp = join(root, 'temp')
+    mkdirSync(hooks); mkdirSync(temp)
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nkill -TERM $$\n', { mode: 0o755 })
+    const conn = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(), stderr: new PassThrough(),
+      getArgs: async () => ['/proxy/pre-commit'], getEnv: async () => ({}),
+      getCwd: async () => root, isStdinConnected: async () => false,
+      exit: vi.fn(async () => {}),
+    })
+    const failure = vi.fn(async (_name: string, _output: TerminalOutput) => 'abort' as const)
+    const proxy = createHooksProxy(async () => ({ kind: 'success', env: { ...process.env, GIT_EXEC_PATH: '/unused' } }), temp, undefined, failure, undefined, hooks)
+    conn.stdin.end()
+    await proxy(conn as never)
+    expect(failure).toHaveBeenCalledOnce()
+    expect(conn.exit).toHaveBeenCalledWith(143)
+  })
+
+  it('does not request a decision when the user aborts a running hook', async () => {
+    root = mkdtempSync(join(tmpdir(), 'desktop-hook-abort-'))
+    const hooks = join(root, 'hooks'); const temp = join(root, 'temp')
+    mkdirSync(hooks); mkdirSync(temp)
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nwhile :; do :; done\n', { mode: 0o755 })
+    const conn = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(), stderr: new PassThrough(),
+      getArgs: async () => ['/proxy/pre-commit'], getEnv: async () => ({}),
+      getCwd: async () => root, isStdinConnected: async () => false,
+      exit: vi.fn(async () => {}),
+    })
+    const failure = vi.fn(async (_name: string, _output: TerminalOutput) => 'ignore' as const)
+    const progress = (event: { status: string; abort?: () => void }) => {
+      if (event.status === 'started') setTimeout(() => event.abort?.(), 30)
+    }
+    const proxy = createHooksProxy(async () => ({ kind: 'success', env: { ...process.env, GIT_EXEC_PATH: '/unused' } }), temp, progress, failure, undefined, hooks)
+    conn.stdin.end()
+    await expect(proxy(conn as never)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(failure).not.toHaveBeenCalled()
+  })
 })

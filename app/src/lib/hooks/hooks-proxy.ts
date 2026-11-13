@@ -12,6 +12,7 @@ import memoizeOne from 'memoize-one'
 import which from 'which'
 import { createReadStream, createWriteStream } from 'fs'
 import { spawnTraditionalHook } from './traditional-hook'
+import { constants as osConstants } from 'os'
 
 const execFileAsync = promisify(execFile)
 
@@ -300,8 +301,9 @@ export const createHooksProxy = (
     )
 
     const ignoreError =
-      code !== null &&
+      !abortController.signal.aborted &&
       code !== 0 &&
+      (code !== null || signal !== null) &&
       !ignoredOnFailureHooks.includes(hookName) &&
       onHookFailure
         ? (await onHookFailure(hookName, hookFailureTerminalOutput)) ===
@@ -318,7 +320,10 @@ export const createHooksProxy = (
       await writeline(conn.stderr, `${hookName} hook failure ignored by user`)
     }
 
-    const exitCode = ignoreError ? 0 : code ?? 1
+    const signalNumber = signal === null
+      ? undefined
+      : (osConstants.signals as Record<string, number | undefined>)[signal]
+    const exitCode = ignoreError ? 0 : code ?? (signalNumber === undefined ? 1 : 128 + signalNumber)
 
     await tryExit(conn, exitCode)
 
