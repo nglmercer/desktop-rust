@@ -225,8 +225,8 @@ body.theme-dark {
   --toolbar-tooltip-shadow-color: black;
 
   /**
-    * App menu bar colors (Windows/Linux only)
-    */
+   * App menu bar colors (Windows/Linux only)
+   */
   --app-menu-button-color: var(--toolbar-text-color);
   --app-menu-button-hover-color: var(--toolbar-button-hover-color);
   --app-menu-button-hover-background-color: var(--toolbar-button-hover-background-color);
@@ -255,10 +255,10 @@ body.theme-dark {
   --tab-bar-count-background-color: #{$gray-700};
 
   /**
-    * Badge colors when used inside of list items.
-    * Example of this is the ahead/behind indicators inside
-    * of the repository list.
-    */
+   * Badge colors when used inside of list items.
+   * Example of this is the ahead/behind indicators inside
+   * of the repository list.
+   */
   --list-item-badge-color: var(--text-color);
   --list-item-badge-background-color: #{$gray-600};
   --list-item-selected-badge-color: #{$white};

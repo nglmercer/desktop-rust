@@ -105,7 +105,9 @@
       "rust/tests/branch-rules-oracle/*.test.ts",
       "script/draft-release/format-json.ts",
       "script/draft-release/format-json-cli.ts",
-      "script/draft-release/format-json.test.ts"
+      "script/draft-release/format-json.test.ts",
+      "app/styles/**/*.scss",
+      "app/src/crash/styles/*.scss"
     ]
   },
   "formatter": {
@@ -115,7 +117,27 @@
   "overrides": [
     {
       "includes": ["app/src/web/fs.ts", "app/src/web/child_process.ts"],
-      "formatter": { "enabled": false }
+      "formatter": {
+        "enabled": false
+      }
+    },
+    {
+      "includes": ["app/styles/**/*.scss", "app/src/crash/styles/*.scss"],
+      "linter": {
+        "enabled": false
+      },
+      "css": {
+        "formatter": {
+          "lineWidth": 200,
+          "quoteStyle": "single"
+        }
+      }
+    },
+    {
+      "includes": ["app/styles/ui/_dialog.scss"],
+      "formatter": {
+        "enabled": false
+      }
     }
   ],
   "javascript": {

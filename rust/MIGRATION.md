@@ -28,6 +28,12 @@ missing native modules. `tsx` transpiles without type-checking; the existing
 `compile:script` configuration currently fails on unrelated project-wide
 JSX/global type errors and does not yet replace that implicit check.
 
+Biome 2.6 now formats the application's SCSS, except for
+`app/styles/ui/_dialog.scss`, which remains under Prettier because Biome
+rewrites whitespace inside custom-property SVG values. The compressed desktop
+and crash CSS outputs were compared byte for byte before and after migration.
+Prettier and ESLint remain necessary for other files and rules.
+
 Linux CI now exercises the active `github-desktop-rs` Wry webview: its
 isolated smoke run waits for the shared React renderer to mount and performs
 both shell and Rust backend IPC calls. The obsolete `desktop-native` smoke

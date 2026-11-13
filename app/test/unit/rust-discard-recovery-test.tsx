@@ -38,7 +38,10 @@ vi.mock('../../src/ui/dialog', () => {
     DefaultDialogFooter: () => null,
   }
 })
-import { DiscardRecovery, DiscardRecoveryDialog } from '../../src/ui/changes/discard-recovery'
+import {
+  DiscardRecovery,
+  DiscardRecoveryDialog,
+} from '../../src/ui/changes/discard-recovery'
 
 const repository = { path: '/repo' } as Repository
 const dispatcher = {
@@ -77,29 +80,61 @@ afterEach(() => {
 
 describe('discard recovery history', () => {
   it('opens recovery through the application popup stack', () => {
-    render(<DiscardRecovery repository={repository} dispatcher={dispatcher} disabled={false} />)
+    render(
+      <DiscardRecovery
+        repository={repository}
+        dispatcher={dispatcher}
+        disabled={false}
+      />
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Recovery history' }))
-    expect(mocks.showPopup).toHaveBeenCalledWith({ type: PopupType.RecoveryHistory, repository })
+    expect(mocks.showPopup).toHaveBeenCalledWith({
+      type: PopupType.RecoveryHistory,
+      repository,
+    })
   })
 
   it('shows a prepared commit and requires confirmation before discarding it', async () => {
     mocks.history.mockResolvedValue([])
-    mocks.commitHistory.mockResolvedValueOnce([
-      { id, state: 'prepared', head: null, branch: 'refs/heads/main' },
-    ]).mockResolvedValueOnce([])
+    mocks.commitHistory
+      .mockResolvedValueOnce([
+        { id, state: 'prepared', head: null, branch: 'refs/heads/main' },
+      ])
+      .mockResolvedValueOnce([])
     mocks.forgetPreparedCommit.mockResolvedValue(undefined)
-    mocks.inspectCommit.mockResolvedValue({ id, state: 'prepared', branch_matches: true, head_matches: true, index_matches: false, operation_matches: true })
-    render(<DiscardRecoveryDialog onDismissed={() => {}} repository={repository} dispatcher={dispatcher} />)
+    mocks.inspectCommit.mockResolvedValue({
+      id,
+      state: 'prepared',
+      branch_matches: true,
+      head_matches: true,
+      index_matches: false,
+      operation_matches: true,
+    })
+    render(
+      <DiscardRecoveryDialog
+        onDismissed={() => {}}
+        repository={repository}
+        dispatcher={dispatcher}
+      />
+    )
     await screen.findByText('Prepared commit was not published')
     expect(screen.getByText(id)).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Recover commit' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect prepared attempt' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Inspect prepared attempt' })
+    )
     await screen.findByText(/index changed/)
     expect(mocks.inspectCommit).toHaveBeenCalledWith('/repo', id)
-    fireEvent.click(screen.getByRole('button', { name: 'Remove prepared attempt' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove prepared attempt' })
+    )
     expect(mocks.forgetPreparedCommit).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Discard prepared attempt' }))
-    await waitFor(() => expect(mocks.forgetPreparedCommit).toHaveBeenCalledWith(repository, id))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Discard prepared attempt' })
+    )
+    await waitFor(() =>
+      expect(mocks.forgetPreparedCommit).toHaveBeenCalledWith(repository, id)
+    )
     await screen.findByText('No recovery records.')
   })
 
@@ -108,11 +143,25 @@ describe('discard recovery history', () => {
     mocks.commitHistory.mockResolvedValue([
       { id, state: 'prepared', head: null, branch: 'refs/heads/main' },
     ])
-    mocks.forgetPreparedCommit.mockRejectedValue(new Error('Commit checkpoint requires recovery'))
-    render(<DiscardRecoveryDialog onDismissed={() => {}} repository={repository} dispatcher={dispatcher} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove prepared attempt' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Discard prepared attempt' }))
-    expect((await screen.findByRole('alert')).textContent).toContain('requires recovery')
+    mocks.forgetPreparedCommit.mockRejectedValue(
+      new Error('Commit checkpoint requires recovery')
+    )
+    render(
+      <DiscardRecoveryDialog
+        onDismissed={() => {}}
+        repository={repository}
+        dispatcher={dispatcher}
+      />
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Remove prepared attempt' })
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Discard prepared attempt' })
+    )
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'requires recovery'
+    )
     expect(screen.getByText(id)).toBeTruthy()
   })
 
