@@ -1,11 +1,15 @@
 import { describe, it } from 'vitest'
 import assert from 'node:assert'
-import { encodePathAsUrl, resolveWithin } from '../../src/lib/path'
-import { resolve, basename, join } from 'path'
+import {
+  encodePathAsUrl,
+  isPathWithin,
+  resolveWithin,
+} from '../../src/lib/path'
+import { resolve, basename, join, posix, win32 } from 'path'
 import { promises } from 'fs'
 import { tmpdir } from 'os'
 
-const { rmdir, mkdtemp, symlink, unlink } = promises
+const { rmdir, mkdtemp, mkdir, rm, symlink, unlink, writeFile } = promises
 
 describe('path', () => {
   describe('encodePathAsUrl', () => {
@@ -60,6 +64,44 @@ describe('path', () => {
     it('succeeds for absolute relative paths as long as they stay within the root', async () => {
       const parent = resolve(root, '..')
       assert.equal(await resolveWithin(parent, root), root)
+    })
+
+    it('accepts the root and descendants but rejects sibling prefixes', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'path-containment-'))
+      const root = join(directory, 'repo')
+      const sibling = join(directory, 'repo-other')
+      try {
+        await mkdir(root)
+        await mkdir(sibling)
+        await writeFile(join(root, 'inside'), 'inside')
+        await writeFile(join(sibling, 'outside'), 'outside')
+        assert.equal(await resolveWithin(root, '.'), root)
+        assert.equal(await resolveWithin(root, 'inside'), join(root, 'inside'))
+        assert.equal(
+          await resolveWithin(root, '..', 'repo-other', 'outside'),
+          null
+        )
+        if (!__WIN32__) {
+          await symlink(sibling, join(root, 'link'))
+          assert.equal(await resolveWithin(root, 'link', 'outside'), null)
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true })
+      }
+    })
+
+    it('checks path boundaries and drive changes with POSIX and Windows rules', () => {
+      assert.equal(isPathWithin('/repo', '/repo', posix), true)
+      assert.equal(isPathWithin('/repo', '/repo/nested', posix), true)
+      assert.equal(isPathWithin('/repo', '/repo-other', posix), false)
+      assert.equal(isPathWithin('/', '/repo', posix), true)
+      assert.equal(isPathWithin('C:\\Repo', 'c:\\repo\\nested', win32), true)
+      assert.equal(isPathWithin('C:\\Repo', 'C:\\Repo-other', win32), false)
+      assert.equal(isPathWithin('C:\\Repo', 'D:\\Repo', win32), false)
+      assert.equal(
+        isPathWithin('\\\\server\\share\\repo', '\\\\server\\share\\repo-other', win32),
+        false
+      )
     })
 
     if (!__WIN32__) {

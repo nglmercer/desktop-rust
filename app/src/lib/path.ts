@@ -10,6 +10,25 @@ import { pathToFileURL } from 'url'
 export const encodePathAsUrl = (...pathSegments: string[]) =>
   pathToFileURL(Path.resolve(...pathSegments)).toString()
 
+/** Compare canonical paths using path-component boundaries. */
+export function isPathWithin(
+  root: string,
+  candidate: string,
+  path: {
+    relative: (from: string, to: string) => string
+    isAbsolute: (p: string) => boolean
+    sep: string
+  } = Path
+): boolean {
+  const relative = path.relative(root, candidate)
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  )
+}
+
 /**
  * Resolve one or more path sequences into an absolute path underneath
  * or at the given root path.
@@ -40,6 +59,9 @@ async function _resolveWithin(
     join: (...pathSegments: string[]) => string
     normalize: (p: string) => string
     resolve: (...pathSegments: string[]) => string
+    relative: (from: string, to: string) => string
+    isAbsolute: (p: string) => boolean
+    sep: string
   } = Path
 ) {
   // An empty root path would let all relative
@@ -68,7 +90,8 @@ async function _resolveWithin(
   const realRoot = await realpath(normalizedRoot)
   const realResolved = await realpath(resolved)
 
-  return realResolved.startsWith(realRoot) ? resolved : null
+  // This verifies the observed paths; later symlink replacement can race use.
+  return isPathWithin(realRoot, realResolved, options) ? resolved : null
 }
 
 /**
