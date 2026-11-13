@@ -120,6 +120,17 @@ describe('backend Copilot session cleanup', () => {
     ).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('finishes an existing merge through the native host without retrying interruptions', async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ code: 0, stdout: '[main abc1234] Merge\n', stderr: '' }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.finishRepositoryMergeCommit('/repo')).resolves.toContain('abc1234')
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'finish_merge_commit', repository_path: '/repo', operation: { method: 'renderer_finish_merge_commit' } } }))
+    invoke.mockRejectedValueOnce({ code: 'cancelled', message: 'interrupted', retryable: true })
+    await expect(client.finishRepositoryMergeCommit('/repo')).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('inspect HEAD') })
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('uses a restricted native abort and does not retry uncertain results', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' }))
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

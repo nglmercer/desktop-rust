@@ -425,7 +425,7 @@ class WryTransport {
         params.operation.type === 'reviewed_discard' &&
         isRecord(params.operation.operation) &&
         (params.operation.operation.method === 'discard' || params.operation.operation.method === 'discard_batch' || params.operation.operation.method === 'undo_discard' || params.operation.operation.method === 'forget_discard' || params.operation.operation.method === 'stage_conflict' || params.operation.operation.method === 'resolve_conflict')
-      const recoveryWrite = method === 'git_info' && isRecord(params) && isRecord(params.operation) && params.operation.type === 'abort_git_operation'
+      const recoveryWrite = method === 'git_info' && isRecord(params) && isRecord(params.operation) && (params.operation.type === 'abort_git_operation' || params.operation.type === 'finish_merge_commit')
       const initialization =
         method === 'git_info' &&
         isRecord(params) &&
@@ -2341,6 +2341,23 @@ export class BackendClient {
     if (!isRecord(result) || result.code !== 0) {
       throw new BackendError({ code: 'invalid_response', message: 'Backup deletion outcome is uncertain; inspect recovery history', retryable: false })
     }
+  }
+
+  /** Complete an existing merge or squash with Git's prepared message. */
+  async finishRepositoryMergeCommit(repositoryPath: string): Promise<string> {
+    const operation = { method: 'renderer_finish_merge_commit' }
+    let result: unknown
+    try {
+      result = this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'finish_merge_commit', repository_path: repositoryPath, operation } })
+        : await this.repositoryRead(repositoryPath, operation.method, operation)
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect HEAD and the index before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Merge commit outcome is uncertain; inspect HEAD and the index', retryable: false })
+    if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to complete the merge'}; inspect HEAD and the index`, retryable: false })
+    return result.stdout
   }
 
   /** Abort only the named in-progress Git operation; never replay an uncertain result. */

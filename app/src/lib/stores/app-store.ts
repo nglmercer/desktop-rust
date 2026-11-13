@@ -9163,10 +9163,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
       changesState: { workingDirectory },
     } = this.repositoryStateCache.get(repository)
 
+    // Keep the commit and the following reset on the same path until reset is migrated.
     const commitResult = await this._finishConflictedMerge(
       repository,
       workingDirectory,
-      new Map<string, ManualConflictResolution>()
+      new Map<string, ManualConflictResolution>(),
+      false
     )
 
     // By committing, we clear out the SQUASH_MSG (and anything else git would
@@ -9200,7 +9202,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
   public async _finishConflictedMerge(
     repository: Repository,
     workingDirectory: WorkingDirectoryStatus,
-    manualResolutions: Map<string, ManualConflictResolution>
+    manualResolutions: Map<string, ManualConflictResolution>,
+    useNative = true
   ): Promise<string | undefined> {
     return this.withAssistedCommitMutationResources(repository, async () => {
       this.assistedCommits.state.assertAvailable(repository)
@@ -9208,7 +9211,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
         this.finishConflictedMergeCore(
           repository,
           workingDirectory,
-          manualResolutions
+          manualResolutions,
+          useNative
         )
       )
     })
@@ -9217,7 +9221,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private async finishConflictedMergeCore(
     repository: Repository,
     workingDirectory: WorkingDirectoryStatus,
-    manualResolutions: Map<string, ManualConflictResolution>
+    manualResolutions: Map<string, ManualConflictResolution>,
+    useNative: boolean
   ): Promise<string | undefined> {
     /**
      *  The assumption made here is that all other files that were part of this merge
@@ -9239,7 +9244,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
     const gitStore = this.gitStoreCache.get(repository)
     return await gitStore.performFailableOperation(() =>
-      createMergeCommit(repository, conflictedFiles, manualResolutions)
+      createMergeCommit(repository, conflictedFiles, manualResolutions, { useNative })
     )
   }
 

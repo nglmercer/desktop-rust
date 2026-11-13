@@ -113,6 +113,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    FinishMergeCommit {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -379,6 +383,9 @@ impl Backend {
         | GitInfoOperation::AbortGitOperation {
             repository_path, ..
         }
+        | GitInfoOperation::FinishMergeCommit {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -476,6 +483,13 @@ impl Backend {
             )
         {
             return Err(AppError::BadArgs("unsupported Git abort operation".into()));
+        }
+        if let GitInfoOperation::FinishMergeCommit { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererFinishMergeCommit)
+        {
+            return Err(AppError::BadArgs(
+                "unsupported merge completion operation".into(),
+            ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
             && !matches!(
@@ -1240,7 +1254,10 @@ impl Backend {
         );
         let recovery_write = matches!(
             job.operation,
-            BackendOperation::GitInfo(GitInfoOperation::AbortGitOperation { .. })
+            BackendOperation::GitInfo(
+                GitInfoOperation::AbortGitOperation { .. }
+                    | GitInfoOperation::FinishMergeCommit { .. }
+            )
         );
         let checkpoint_write = matches!(
             job.operation,
@@ -1323,6 +1340,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::AbortGitOperation { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::FinishMergeCommit { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1476,11 +1500,11 @@ impl Backend {
             };
             tokio::pin!(work);
             tokio::select! {
-                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if recovery_write { "Git operation abort cancelled; inspect the repository before retrying" } else if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
+                result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if recovery_write { "Git operation cancelled; inspect the repository before retrying" } else if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
                     let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
-                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if recovery_write { "Git operation abort timed out; inspect the repository before retrying" } else if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
+                    Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if recovery_write { "Git operation timed out; inspect the repository before retrying" } else if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
         });
@@ -1550,6 +1574,23 @@ mod tests {
             assert_eq!(backend.read(abort("merge", "abort").unwrap()).unwrap()["code"], 0);
             assert!(!root.join(".git/MERGE_HEAD").exists());
             assert_eq!(fs::read(root.join("file")).unwrap(), b"main\n");
+            assert!(!Command::new("git").arg("-C").arg(&root).args(["merge", "side"]).output().unwrap().status.success());
+            fs::write(root.join("file"), "resolved\n").unwrap();
+            git(&["add", "file"]);
+            let finish = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"finish_merge_commit","repository_path":root,"operation":operation}})]);
+            assert!(finish(json!({"method":"recover","kind":"merge","action":"abort"})).is_err());
+            use std::os::unix::fs::PermissionsExt;
+            let hook = root.join(".git/hooks/pre-commit");
+            fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+            let rejected = backend.read(finish(json!({"method":"renderer_finish_merge_commit"})).unwrap()).unwrap();
+            assert_ne!(rejected["code"], 0);
+            assert!(root.join(".git/MERGE_HEAD").exists());
+            fs::remove_file(hook).unwrap();
+            let result = backend.read(finish(json!({"method":"renderer_finish_merge_commit"})).unwrap()).unwrap();
+            assert_eq!(result["code"], 0, "{result}");
+            let parents = String::from_utf8(git(&["rev-list", "--parents", "-n", "1", "HEAD"])).unwrap();
+            assert_eq!(parents.split_whitespace().count(), 3);
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

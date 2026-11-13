@@ -360,6 +360,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::RendererResetSubmodules { .. }
             | Operation::RendererUpdateSubmodules { .. }
             | Operation::InitialCommit { .. }
+            | Operation::RendererFinishMergeCommit
             | Operation::ManageRemote { .. }
             | Operation::Stage { .. }
             | Operation::SelectDiff { .. }

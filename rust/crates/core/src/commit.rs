@@ -15,6 +15,76 @@ const LARGE_BLOB_LIMIT: u64 = 100 * 1024 * 1024;
 mod trailer_tests {
     use super::*;
     #[tokio::test]
+    async fn finishes_only_active_merge_or_squash_with_git_message_cleanup() {
+        use std::{fs, process::Command};
+        for squash in [false, true] {
+            let root =
+                std::env::temp_dir().join(format!("desktop-finish-merge-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let run = |arguments: &[&str]| {
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args(arguments)
+                    .output()
+                    .unwrap()
+            };
+            let git = |arguments: &[&str]| {
+                let result = run(arguments);
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                result.stdout
+            };
+            git(&["init", "-q"]);
+            git(&["config", "user.name", "Test"]);
+            git(&["config", "user.email", "test@example.invalid"]);
+            fs::write(root.join("file"), "base\n").unwrap();
+            git(&["add", "file"]);
+            git(&["commit", "-qm", "base"]);
+            let repo = Repository::open(&root).await.unwrap();
+            assert!(repo.renderer_finish_merge_commit().await.is_err());
+            git(&["checkout", "-qb", "side"]);
+            fs::write(root.join("file"), "side\n").unwrap();
+            git(&["commit", "-qam", "side"]);
+            git(&["checkout", "-q", "-"]);
+            fs::write(root.join("file"), "main\n").unwrap();
+            git(&["commit", "-qam", "main"]);
+            let result = if squash {
+                run(&["merge", "--squash", "side"])
+            } else {
+                run(&["merge", "--no-edit", "side"])
+            };
+            assert!(!result.status.success(), "expected conflicting merge");
+            fs::write(root.join("file"), "resolved\n").unwrap();
+            git(&["add", "file"]);
+            let message_path = root.join(if squash {
+                ".git/SQUASH_MSG"
+            } else {
+                ".git/MERGE_MSG"
+            });
+            fs::write(message_path, "Resolved merge\n\n# Remove this comment\n").unwrap();
+            let result = repo.renderer_finish_merge_commit().await.unwrap();
+            assert_eq!(result["code"], 0, "{result}");
+            assert_eq!(git(&["log", "-1", "--format=%s"]), b"Resolved merge\n");
+            assert!(
+                !String::from_utf8(git(&["log", "-1", "--format=%B"]))
+                    .unwrap()
+                    .contains("Remove this comment")
+            );
+            let parents =
+                String::from_utf8(git(&["rev-list", "--parents", "-n", "1", "HEAD"])).unwrap();
+            assert_eq!(
+                parents.split_whitespace().count(),
+                if squash { 2 } else { 3 }
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn reviewed_tree_verification_observes_index_and_head_without_changing_index() {
         let root =
             std::env::temp_dir().join(format!("desktop-review-tree-{}", uuid::Uuid::new_v4()));
@@ -717,6 +787,21 @@ impl Repository {
 
     pub(crate) async fn commit_preview(&self) -> Result<Value> {
         Ok(serde_json::to_value(self.capture_commit_preview().await?)?)
+    }
+
+    /// Finish the current merge or squash using Git's existing index and message.
+    pub(crate) async fn renderer_finish_merge_commit(&self) -> Result<Value> {
+        let state = self.status_context().await?;
+        anyhow::ensure!(
+            state["mergeHeadFound"] == true || state["squashMsgFound"] == true,
+            "No merge or squash message remains; refresh the repository before committing"
+        );
+        let output = process::run_commit(
+            &self.path,
+            &args(&["commit", "--no-edit", "--cleanup=strip"]),
+        )
+        .await?;
+        Ok(serde_json::to_value(output.text())?)
     }
 
     pub(crate) async fn reviewed_commit(

@@ -386,6 +386,9 @@ impl Repository {
                 return self.forget_commit_checkpoint(&checkpoint_id).await;
             }
             Operation::InitialCommit { paths } => return self.initial_commit(paths).await,
+            Operation::RendererFinishMergeCommit => {
+                return self.renderer_finish_merge_commit().await;
+            }
             Operation::Commit {
                 summary,
                 description,
@@ -1174,7 +1177,8 @@ impl Repository {
             | RecoverPublishedCommitCheckpoint { .. }
             | CloseUnchangedCommitCheckpoint { .. }
             | ForgetCommitCheckpoint { .. }
-            | InitialCommit { .. } => {
+            | InitialCommit { .. }
+            | RendererFinishMergeCommit => {
                 unreachable!("handled by execute")
             }
             Checkout { .. }

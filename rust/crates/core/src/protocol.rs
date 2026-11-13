@@ -168,6 +168,7 @@ pub enum Operation {
     StatusContext,
     RendererCherryPickState,
     RendererRebaseState,
+    RendererFinishMergeCommit,
     StatusConflictDetails {
         kind: StatusConflictKind,
     },

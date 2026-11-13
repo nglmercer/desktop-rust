@@ -2304,3 +2304,12 @@ admits these three abort actions, and a mismatched in-progress operation is
 rejected. Interrupted outcomes require repository inspection rather than retry.
 Starting and continuing these workflows, including hook and progress parity,
 remain separate legacy-removal gates.
+
+## Conflicted merge completion
+
+Wry and WebSocket merge completion now invoke a fixed Rust Git operation using
+the existing index and Git's prepared merge or squash message. Git runs normal
+hooks and performs the existing message cleanup; cancellation is reported as
+an uncertain commit outcome. Squash abort intentionally retains its legacy
+commit-and-reset path until reset is migrated as one verified workflow. Other
+commit, rebase and cherry-pick execution and hook-interaction gates remain open.

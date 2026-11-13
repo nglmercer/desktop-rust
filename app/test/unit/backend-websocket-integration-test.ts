@@ -991,6 +991,12 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await client.abortRepositoryGitOperation(firstRepository, 'merge')
       expect(await readFile(path.join(firstRepository, '.git', 'MERGE_HEAD'), 'utf8').catch(() => null)).toBeNull()
       expect(await readFile(path.join(firstRepository, 'conflict.txt'), 'utf8')).toBe('main\n')
+      expect(() => execFileSync('git', ['-C', firstRepository, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'merge', 'conflicting'], { stdio: 'pipe' })).toThrow()
+      await writeFile(path.join(firstRepository, 'conflict.txt'), 'resolved\n')
+      execFileSync('git', ['-C', firstRepository, 'add', '--', 'conflict.txt', 'binary.dat'])
+      const mergeOutput = await client.finishRepositoryMergeCommit(firstRepository)
+      expect(mergeOutput).toContain(']')
+      expect(execFileSync('git', ['-C', firstRepository, 'rev-list', '--parents', '-n', '1', 'HEAD'], { encoding: 'utf8' }).trim().split(' ')).toHaveLength(3)
       await bounded(
         client.request('init_repository', { path: secondRepository })
       )
