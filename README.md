@@ -4,8 +4,9 @@ This checkout is migrating GitHub Desktop to Rust. The desktop UI that runs
 today is the React app in `app/`, built with Vite and hosted by a tao/wry shell
 in `rust/crates/desktop-app`. Host services (git, files, HTTP, processes) are
 Rust in `rust/crates/desktop-core`; parts of the application logic are still
-TypeScript. The browser/WebSocket transport for Termux is **not** connected in
-this tree, so `desktop-rs serve` no longer has a UI to serve.
+TypeScript. The browser/WebSocket renderer is available as an experimental
+opt-in build; the default `desktop-rs serve` exposes the API but returns 503
+for the page until the frontend is included.
 
 Build and start the desktop shell:
 
@@ -15,6 +16,18 @@ pnpm vite:build                                   # renderer bundle -> out/vite-
 cargo build -p desktop-app --locked
 ./rust/target/debug/github-desktop-rs
 ```
+
+To try the same renderer over the loopback WebSocket bridge, build the web
+bundle above, then run:
+
+```sh
+cargo build -p desktop-cli --features embedded-ui --locked
+./rust/target/debug/desktop-rs serve --empty
+```
+
+The printed URL contains a session secret. The browser workflow is still
+undergoing parity and recovery testing; see the migration ledger before relying
+on it as a replacement for the existing desktop application.
 
 `pnpm` is pinned by `packageManager` in `package.json`. The root Cargo workspace
 contains the headless CLI, bridge, native host, and desktop shell. Its default
@@ -30,7 +43,7 @@ custom rules while their migration is in progress.
 See [Rust development and commands](rust/README.md) and the
 [full migration ledger](rust/MIGRATION.md). The Electron-era `postinstall`
 script in `package.json` is not used by the Rust shell; `--ignore-scripts`
-skips it, and the native-helper warnings that pnpm then prints are expected.
+skips it.
 This is an in-progress fork, not an official GitHub Desktop release.
 
 ---

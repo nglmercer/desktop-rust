@@ -1,12 +1,12 @@
 # Desktop Rust migration
 
 > **Current state.** The desktop UI is the React app in `app/`, built by Vite
-> (`pnpm vite:build`) and hosted by `rust/crates/desktop-app`. The browser
-> frontend that used to live in `rust/web` was removed, so the browser/WebSocket
-> transport described below (`desktop-rs serve`, `web/`) has no UI in this tree
-> and is pending. The root Cargo workspace still builds the CLI, bridge and
-> native host crates. See [MIGRATION.md](../MIGRATION.md) for what is
-> implemented, connected and verified.
+> (`pnpm vite:build`) and hosted by `rust/crates/desktop-app`. An experimental
+> `embedded-ui` feature also serves this renderer over the authenticated
+> WebSocket bridge. The default CLI build still returns 503 for the page.
+> Descriptions of the removed `rust/web` frontend below do not establish parity
+> for the shared renderer. See [MIGRATION.md](../MIGRATION.md) for current
+> implementation and validation status.
 
 Rust replacement for GitHub Desktop's backend, CLI, and platform transports. The
 full migration is active. The original Electron app remains until the
@@ -35,10 +35,13 @@ cargo build --locked -j 1
 ./target/debug/desktop-rs -C .. serve --port 9418
 ```
 
-`serve` starts the authenticated loopback WebSocket API, but the browser
-frontend is not currently available. Its printed URL contains a session secret;
-do not share it. `--port 0` selects an available port, and Ctrl-C stops the
-server. Use `serve --empty` to start without selecting a working tree.
+`serve` starts the authenticated loopback WebSocket API. The default build
+returns 503 for the page; to try the experimental shared frontend, first build
+the renderer from the repository root with `pnpm vite:build`, then rebuild the
+CLI with `cargo build -p desktop-cli --features embedded-ui --locked`. Its
+printed URL contains a session secret; do not share it. `--port 0` selects an
+available port, and Ctrl-C stops the server. Use `serve --empty` to start without
+selecting a working tree.
 
 ## Optional desktop host
 
