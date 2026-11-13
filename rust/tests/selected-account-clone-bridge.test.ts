@@ -20,7 +20,7 @@ async function bounded<T>(promise: Promise<T>, ms = 30_000): Promise<T> {
   } finally { if (timer !== undefined) clearTimeout(timer) }
 }
 
-describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !== 'linux')('selected-account clone bridge', () => {
+describe.skip('selected-account clone bridge (disabled pending safe child-local descriptor lifetime)', () => {
   let suite: Credentials
   let server: ChildProcess
   let client: BackendClient

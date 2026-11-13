@@ -2531,20 +2531,29 @@ defaults for old clients. These options are covered by real Git and WebSocket
 tests, including a rewritten external helper in a submodule. Requests without
 an account retain native Git credential configuration.
 
-An opt-in WebSocket request may instead name a stored account and numeric actor
-for an HTTPS clone. It verifies the account and repository, rejects URL rewrites
-and redirects, and uses an isolated Git configuration and private credential
-broker for a no-checkout network phase. Git uses a private HOME for this phase;
+An experimental selected-account clone implementation can name a stored
+account and numeric actor for an HTTPS clone. It verifies the account and
+repository, rejects URL rewrites and redirects, and uses an isolated Git
+configuration and private credential broker for a no-checkout network phase.
+Git uses a private HOME for this phase;
 the supported TLS and proxy settings are copied explicitly. Templates are
 installed only after the provisional broker ends, and checkout uses the saved
 account broker. The clone is staged privately and published with a no-replace
 rename after a no-follow contents and metadata review. The saved result is not
 selected automatically; callers must explicitly open it.
 
+The selected-account WebSocket clone and recovery endpoints are temporarily
+disabled. Their descriptor paths can outlive the server in a detached child,
+allowing PID reuse to redirect a later access; recovery records remain
+available for inspection. A child-local descriptor design still needs verified
+Git/helper inheritance and cancellation and server-shutdown tests before these
+operations can be enabled safely.
+
 The private clone journal is separate from the version-1 registry. It records
 download, checkout and ready phases before publication. `list_clone_recoveries`
-shows pending records; `recover_clone` can resume only a ready publication
-after rechecking its actor, origin, directory identity and reviewed contents.
+shows pending records; the disabled recovery implementation only resumes a
+ready publication after rechecking its actor, origin, directory identity and
+reviewed contents.
 Interrupted downloads and checkouts require inspection and are not replayed.
 A saved record is committed before the journal is cleared, allowing recovery if
 the process stops between those writes. Recovery leaves private staging
@@ -2565,8 +2574,8 @@ It forwards only fixed phase labels and numeric percentages, discarding raw
 remote output and rewritten URLs; notifications are bounded and best effort.
 Cancellation interrupts the Git process group on Unix and leaves the caller
 responsible for inspecting any partial destination. Windows process-tree
-cancellation, Git LFS progress, selected-account isolation, and routing the
-browser clone workflow through this endpoint remain open.
+cancellation, Git LFS progress, selected-account clone and recovery safety, and
+routing the browser clone workflow through this endpoint remain open.
 
 Wry and browser WebSocket remote-HEAD refresh use a reviewed Rust operation. It binds
 the raw loose HEAD file, including dangling symbolic refs, and checks path

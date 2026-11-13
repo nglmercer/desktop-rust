@@ -26,6 +26,8 @@
   "rust/tests/git-credentials.test.ts",
   "rust/tests/selected-account-clone.test.ts",
   "rust/tests/selected-account-clone-bridge.test.ts",
+  "rust/tests/selected-account-clone-blocked.test.ts",
+  "rust/tests/selected-account-clone-bridge-blocked.test.ts",
   "rust/tests/git-credential-policy.test.ts",
   "rust/tests/git-credential-checkout.test.ts",
   "rust/tests/github-checkout-tracking.test.ts",

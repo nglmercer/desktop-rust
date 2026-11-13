@@ -612,7 +612,7 @@ async fn execute(
         ApplicationOperation::Management(RecoverClone { recovery_id }) => {
             anyhow::ensure!(expected_repository.is_none(), "Clone recovery cannot use a selected-repository binding");
             anyhow::ensure!(uuid::Uuid::parse_str(&recovery_id).is_ok_and(|value| value.to_string() == recovery_id), "Invalid clone recovery ID");
-            Ok(serde_json::to_value(desktop_core::recover_selected_clone(registry, &recovery_id).await?)?)
+            anyhow::bail!("Selected-account clone recovery is temporarily unavailable; inspect the staging directory before retrying")
         }
         ApplicationOperation::Management(RepositorySafeFetchRemotes { path }) => {
             anyhow::ensure!(
@@ -831,29 +831,9 @@ async fn execute(
             state.changes.send_replace(snapshot.clone());
             Ok(snapshot)
         }
-        ApplicationOperation::Management(CloneRepository { url, path, branch, default_branch, recursive, report_progress, account: Some(account) }) => {
+        ApplicationOperation::Management(CloneRepository { account: Some(_), .. }) => {
             anyhow::ensure!(expected_repository.is_none(), "Clone cannot use a selected-repository binding");
-            let destination = desktop_core::directory_path(path)?;
-            let assigned = desktop_core::AccountAssignment::Assigned { host: account.host.to_ascii_lowercase(), login: account.login.clone(), id: account.id };
-            let repository = desktop_core::clone_repository_selected(
-                registry.clone(), &url, &destination,
-                desktop_core::CloneOptions { branch, default_branch, recursive, report_progress }, account,
-            ).await?;
-            let finished: anyhow::Result<serde_json::Value> = async {
-                let account_view = repository.execute(Operation::RepositoryAccount).await?;
-                let bound_record = account_view["scope_id"].as_str().ok_or_else(|| anyhow::anyhow!("Clone account binding is unavailable"))?.to_owned();
-                let snapshot = repository.execute(Operation::Snapshot).await?;
-                let root = repository.path().to_owned();
-                let saved = registry.clone();
-                let record_root = root.clone();
-                let record = cancellation::blocking(move || saved.record_for_path(&record_root)).await?
-                    .ok_or_else(|| anyhow::anyhow!("Clone account is unavailable"))?;
-                anyhow::ensure!(record.id == bound_record && record.account.assignment == assigned, "Clone account changed after completion");
-                // Selection is deliberately explicit: an older running
-                // backend cannot participate in a cross-version CAS witness.
-                Ok(json!({"kind":"clone_completed_unselected", "record":record, "snapshot":snapshot}))
-            }.await;
-            finished.map_err(|_| anyhow::anyhow!("Clone completed and was saved; inspect the destination before retrying"))
+            anyhow::bail!("Selected-account cloning is temporarily unavailable")
         }
         ApplicationOperation::Management(operation) => {
             let selecting = matches!(operation, SelectRepository { .. });

@@ -1224,7 +1224,8 @@ pub struct CloneAccount {
 /// Clone privately with a selected account. A write-ahead recovery record
 /// precedes transport and publication never replaces data.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub async fn clone_repository_selected(
+#[allow(dead_code)]
+async fn clone_repository_selected_unavailable_implementation(
     registry: Registry,
     url: &str,
     path: &Path,
@@ -1371,7 +1372,8 @@ pub async fn clone_repository_selected(
 /// Resume only a finished staged clone, rechecking its actor, origin and
 /// directory identity. Earlier phases are intentionally not replayed.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub async fn recover_selected_clone(registry: Registry, id: &str) -> Result<SavedRepositoryRecord> {
+#[allow(dead_code)]
+async fn recover_selected_clone_unavailable_implementation(registry: Registry, id: &str) -> Result<SavedRepositoryRecord> {
     let intent = registry.read()?.clone_intents.into_iter().find(|intent| intent.id == id).context("Clone recovery record not found")?;
     anyhow::ensure!(intent.phase == "ready", "Clone download or checkout was interrupted; inspect its staging directory before retrying");
     let candidate = match fs::symlink_metadata(&intent.stage) {
@@ -1401,14 +1403,12 @@ pub async fn recover_selected_clone(registry: Registry, id: &str) -> Result<Save
     Ok(record)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub async fn recover_selected_clone(_registry: Registry, _id: &str) -> Result<SavedRepositoryRecord> {
-    bail!("Selected-account clone recovery is unavailable on this platform")
+    bail!("Selected-account clone recovery is temporarily unavailable; inspect the staging directory before retrying")
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub async fn clone_repository_selected(_registry: Registry, _url: &str, _path: &Path, _options: CloneOptions, _account: CloneAccount) -> Result<Repository> {
-    bail!("Selected-account clone is not available on this platform")
+    bail!("Selected-account cloning is temporarily unavailable")
 }
 
 pub async fn clone_repository_with_options(

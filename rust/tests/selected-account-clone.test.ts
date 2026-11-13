@@ -9,7 +9,7 @@ import { Credentials } from './fixtures/credentials'
 
 const prototype = path.resolve('rust/target/debug/examples/selected_clone_prototype')
 
-describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !== 'linux')('selected-account clone prototype', () => {
+describe.skip('selected-account clone prototype (disabled pending safe child-local descriptor lifetime)', () => {
   let suite: Credentials
   let url: string
   beforeAll(async () => {
