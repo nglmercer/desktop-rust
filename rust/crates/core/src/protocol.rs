@@ -492,6 +492,10 @@ pub enum Operation {
         path: GitPath,
         length: u32,
     },
+    RendererBlobSnapshot {
+        revision: String,
+        path: GitPath,
+    },
     RendererBlobChunk {
         revision: String,
         path: GitPath,

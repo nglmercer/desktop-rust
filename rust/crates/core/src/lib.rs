@@ -631,6 +631,9 @@ impl Repository {
             } => {
                 return self.renderer_blob_prefix(&revision, path, length).await;
             }
+            Operation::RendererBlobSnapshot { revision, path } => {
+                return self.renderer_blob_snapshot(&revision, path).await;
+            }
             Operation::RendererBlobChunk {
                 revision,
                 path,
@@ -1290,6 +1293,7 @@ impl Repository {
             | RendererWorkingDiff { .. }
             | RendererWorkingFile { .. }
             | RendererBlobPrefix { .. }
+            | RendererBlobSnapshot { .. }
             | RendererBlobChunk { .. }
             | SafeFetchRemotes
             | ManageRemote { .. }

@@ -46,6 +46,9 @@ export const getBlobContents = async (
 ) => {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     const read = async () => {
+      const snapshot = await backend().repositoryBlobSnapshot(repository.path, commitish, path)
+      if (snapshot === null) throw new Error('Blob path does not exist in the requested revision')
+      if (snapshot !== 'unsupported') return Buffer.from(snapshot.buffer, snapshot.byteOffset, snapshot.byteLength)
       const chunks: Buffer[] = []
       let offset = 0
       let oid: string | null = null

@@ -494,6 +494,31 @@ impl Repository {
         Ok(result.map_or(Value::Null, |(_, _, data)| json!(data)))
     }
 
+    /// Resolve once, then capture a byte-exact bounded blob for session-owned
+    /// chunk reads. Larger blobs retain the legacy streaming path.
+    pub(crate) async fn renderer_blob_snapshot(&self, revision: &str, path: GitPath) -> Result<Value> {
+        let Some((oid, size, _)) = self.read_renderer_blob(revision, path, 0, 0, None).await? else {
+            return Ok(Value::Null);
+        };
+        if size > crate::comparison_snapshots::MAX_BYTES as u64 {
+            return Ok(json!({"kind":"too_large"}));
+        }
+        let permit = crate::comparison_snapshots::reserve().await?;
+        let output = process::run_resolution_blob(&self.path, &args(&["cat-file", "blob", &oid])).await?;
+        ensure(&output)?;
+        anyhow::ensure!(output.stdout.len() as u64 == size, "blob size changed during read");
+        let cancellation = crate::cancellation::Cancellation::current();
+        cancellation.check()?;
+        let result = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;
+        if let Err(error) = cancellation.check() {
+            if let Some(id) = result["id"].as_str() {
+                let _ = crate::comparison_snapshots::release_owned(id);
+            }
+            return Err(error);
+        }
+        Ok(result)
+    }
+
     pub(crate) async fn renderer_blob_chunk(
         &self,
         revision: &str,
@@ -601,6 +626,9 @@ impl Repository {
         ensure(&size)?;
         let size: u64 = std::str::from_utf8(&size.stdout)?.trim().parse()?;
         anyhow::ensure!(offset <= size, "blob offset exceeds size");
+        if length == 0 {
+            return Ok(Some((oid, size, String::new())));
+        }
         let output = process::blob_range(&self.path, &oid, offset, u64::from(length)).await?;
         let expected = (size - offset).min(u64::from(length)) as usize;
         anyhow::ensure!(

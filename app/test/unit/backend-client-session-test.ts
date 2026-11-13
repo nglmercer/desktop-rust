@@ -939,6 +939,7 @@ describe('backend Copilot session cleanup', () => {
     const contents = Buffer.alloc(1024 * 1024 + 3, 0xab)
     const invoke = vi.fn(async (_method: string, request: any): Promise<unknown> => {
       const operation = request.operation.operation
+      if (operation.method === 'renderer_blob_snapshot') throw new Error('invalid Git identity request')
       expect(operation.method).toBe('renderer_blob_chunk')
       expect(operation.expected_oid).toBe(operation.offset === 0 ? null : oid)
       return { oid, size: contents.length, data: contents.subarray(operation.offset, operation.offset + operation.length).toString('base64') }
@@ -949,8 +950,19 @@ describe('backend Copilot session cleanup', () => {
     const { getBlobContents } = await import('../../src/lib/git/show')
     const { Repository } = await import('../../src/models/repository')
     expect((await getBlobContents(new Repository('/tmp', 1, null, false), 'HEAD', 'file')).equals(contents)).toBe(true)
-    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(invoke).toHaveBeenCalledTimes(3)
   }, 30_000)
+
+  it('falls back from blob snapshots only for older hosts or oversized blobs', async () => {
+    const client = new BackendClient()
+    const request = vi.spyOn(client as any, 'repositoryRendererRequest')
+    request.mockRejectedValueOnce(new Error('invalid typed repository request')).mockResolvedValueOnce({ kind: 'too_large' }).mockResolvedValueOnce(null)
+    await expect(client.repositoryBlobSnapshot('/repo', 'HEAD', 'file')).resolves.toBe('unsupported')
+    await expect(client.repositoryBlobSnapshot('/repo', 'HEAD', 'file')).resolves.toBe('unsupported')
+    await expect(client.repositoryBlobSnapshot('/repo', 'HEAD', 'missing')).resolves.toBeNull()
+    request.mockRejectedValueOnce(new Error('permission denied'))
+    await expect(client.repositoryBlobSnapshot('/repo', 'HEAD', 'file')).rejects.toThrow('permission denied')
+  })
 
   it('routes application branch creation, rename and deletion through Rust', async () => {
     vi.resetModules()

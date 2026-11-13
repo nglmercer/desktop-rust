@@ -565,6 +565,7 @@ impl Backend {
                     | Operation::RendererWorkingDiff { .. }
                     | Operation::RendererWorkingFile { .. }
                     | Operation::RendererBlobPrefix { .. }
+                    | Operation::RendererBlobSnapshot { .. }
                     | Operation::RendererBlobChunk { .. }
                     | Operation::RendererCommitDiff { .. }
                     | Operation::RendererCompareDiff { .. }
@@ -3920,6 +3921,13 @@ esac
         assert_eq!(blob("HEAD", "file").unwrap(), json!("aGVsbG8="));
         assert_eq!(blob("HEAD", "missing").unwrap(), Value::Null);
         assert!(blob("missing", "file").is_err());
+        let snapshot = backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_blob_snapshot","revision":"HEAD","path":"file"}}})]).unwrap()).unwrap();
+        assert_eq!(snapshot["kind"], "snapshot");
+        assert_eq!(snapshot["size"], 11);
+        let chunk = backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_compare_diff_chunk","snapshot_id":snapshot["id"],"offset":0,"length":11}}})]).unwrap()).unwrap();
+        assert_eq!(chunk["data"], "aGVsbG8Ad29ybGQ=");
+        let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":snapshot["id"]}})]).unwrap();
+        assert_eq!(backend.read(release).unwrap()["released"], true);
         let chunk = |offset: u64, expected: Option<&str>| {
             backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_blob_chunk","revision":"HEAD","path":"file","offset":offset,"length":5,"expected_oid":expected}}})]).unwrap())
         };

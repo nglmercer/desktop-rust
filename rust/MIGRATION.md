@@ -2633,3 +2633,10 @@ submodule SHA extraction does not allocate per-line objects. Focused Wry and
 real WebSocket Git tests cover large snapshots, literal paths and root binary
 commits; renderer tests cover the line limit, ordinary large diffs and
 submodule SHAs. Electron retains its existing Git command path.
+
+Committed-file blob reads on Wry and WebSocket use an immutable snapshot for
+objects up to 70,000,000 bytes. The object is resolved and size-checked before
+one bounded, byte-preserving Git read; snapshot chunks are session-owned and
+released after download. Larger objects and older hosts keep the existing
+chunked reader, which preserves support for larger files but can repeatedly
+decompress the same object. Electron retains its existing blob read path.
