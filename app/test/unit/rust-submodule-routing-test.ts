@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   checkoutIndex: vi.fn(),
   checkoutHead: vi.fn(),
   resetIndex: vi.fn(),
+  mixedReset: vi.fn(),
   updateIndex: vi.fn(),
   applyPatch: vi.fn(),
   unstageAll: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('../../src/backend/client', () => ({
     repositoryCheckoutIndex: mocks.checkoutIndex,
     repositoryCheckoutHeadPaths: mocks.checkoutHead,
     repositoryResetIndex: mocks.resetIndex,
+    mixedResetRepository: mocks.mixedReset,
     repositoryUpdateIndex: mocks.updateIndex,
     repositoryUnstageAll: mocks.unstageAll,
     repositoryRemoveIndexAll: mocks.removeIndexAll,
@@ -57,7 +59,7 @@ import {
   updateSubmodulesAfterOperation,
 } from '../../src/lib/git/submodule'
 import { checkoutIndex } from '../../src/lib/git/checkout-index'
-import { GitResetMode, resetPaths, unstageAll } from '../../src/lib/git/reset'
+import { GitResetMode, reset, resetPaths, unstageAll } from '../../src/lib/git/reset'
 import { unstageAllFiles } from '../../src/lib/git/rm'
 import { checkoutPaths } from '../../src/lib/git/checkout'
 import { stageFiles } from '../../src/lib/git/update-index'
@@ -287,6 +289,15 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
     expect(mocks.unstageAll).toHaveBeenCalledWith('/repo')
     expect(mocks.scope).toHaveBeenCalledTimes(2)
     expect(mocks.git).not.toHaveBeenCalled()
+  })
+  it('routes reviewed mixed reset and undo through Rust', async () => {
+    const repository = { path: '/repo' } as Repository
+    const target = 'a'.repeat(40)
+    const expected = { head: 'b'.repeat(40), branch: 'refs/heads/main', undo: true }
+    await expect(reset(repository, GitResetMode.Mixed, target, expected)).resolves.toBe(true)
+    expect(mocks.mixedReset).toHaveBeenCalledWith('/repo', { target, ...expected })
+    expect(mocks.git).not.toHaveBeenCalled()
+    await expect(reset(repository, GitResetMode.Mixed, target)).rejects.toThrow('Refresh the current branch')
   })
   it('removes index entries without resetting to HEAD', async () => {
     const repository = { path: '/repo' } as Repository

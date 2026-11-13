@@ -161,6 +161,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    MixedReset {
+        repository_path: String,
+        operation: Operation,
+    },
     SelectedCommitPreview {
         repository_path: String,
         operation: Operation,
@@ -463,6 +467,9 @@ impl Backend {
         | GitInfoOperation::StartMerge {
             repository_path, ..
         }
+        | GitInfoOperation::MixedReset {
+            repository_path, ..
+        }
         | GitInfoOperation::SelectedCommitPreview {
             repository_path, ..
         }
@@ -709,6 +716,16 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "unsupported merge start operation".into(),
+            ));
+        }
+        if let GitInfoOperation::MixedReset { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererMixedResetPreview { .. } | Operation::RendererMixedReset { .. }
+            )
+        {
+            return Err(AppError::BadArgs(
+                "unsupported mixed reset operation".into(),
             ));
         }
         if let GitInfoOperation::SelectedCommitPreview { operation, .. } = &request.operation
@@ -1497,6 +1514,10 @@ impl Backend {
                         operation: Operation::RendererMergeStart { .. },
                         ..
                     }
+                    | GitInfoOperation::MixedReset {
+                        operation: Operation::RendererMixedReset { .. },
+                        ..
+                    }
                     | GitInfoOperation::BranchCreation {
                         operation: Operation::CreateBranch { .. },
                         ..
@@ -1692,6 +1713,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::StartMerge { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::MixedReset { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
@@ -1956,6 +1984,32 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn wry_resets_a_reviewed_commit() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let root = std::env::temp_dir().join(format!("desktop-wry-reset-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let git = |args: &[&str]| { let out = Command::new("git").arg("-C").arg(&root).args(args).output().unwrap(); assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr)); String::from_utf8(out.stdout).unwrap().trim().to_owned() };
+            git(&["init", "-q", "-b", "main"]); git(&["config", "user.name", "Test"]); git(&["config", "user.email", "test@example.invalid"]); git(&["config", "commit.gpgsign", "false"]);
+            fs::write(root.join("file"), "base\n").unwrap(); git(&["add", "file"]); git(&["commit", "-qm", "base"]);
+            let target = git(&["rev-parse", "HEAD"]);
+            fs::write(root.join("file"), "new\n").unwrap(); git(&["commit", "-qam", "new"]); let head = git(&["rev-parse", "HEAD"]);
+            fs::write(root.join("file"), "local\n").unwrap();
+            let backend = Backend::new(16).unwrap();
+            let request = json!({"target":target,"head":head,"branch":"refs/heads/main","undo":true});
+            let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"mixed_reset","repository_path":root,"operation":operation}})]);
+            assert!(route(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(route(json!({"method":"renderer_mixed_reset_preview","request":request})).unwrap()).unwrap();
+            assert!(backend.read(route(json!({"method":"renderer_mixed_reset","request":request,"basis":"bad"})).unwrap()).is_err());
+            let result = backend.read(route(json!({"method":"renderer_mixed_reset","request":request,"basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(result["code"], 0);
+            assert_eq!(git(&["rev-parse", "HEAD"]), target);
+            assert_eq!(git(&["show", ":file"]), "base");
+            assert_eq!(fs::read(root.join("file")).unwrap(), b"local\n");
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
     }
 
     #[test]

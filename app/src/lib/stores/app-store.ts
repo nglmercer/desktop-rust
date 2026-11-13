@@ -7093,8 +7093,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
       RepositorySectionTab.Changes
     )
 
+    const tip = gitStore.tip
+    const expected = tip.kind === TipState.Valid
+      ? { head: tip.branch.tip.sha, branch: tip.branch.ref, undo: false }
+      : tip.kind === TipState.Detached
+      ? { head: tip.currentSha, branch: null, undo: false }
+      : undefined
     await gitStore.performFailableOperation(() =>
-      reset(repository, GitResetMode.Mixed, commit.sha)
+      reset(repository, GitResetMode.Mixed, commit.sha, expected)
     )
 
     // this.statsStore.recordCommitUndone(isWorkingDirectoryClean)

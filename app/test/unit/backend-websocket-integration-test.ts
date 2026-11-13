@@ -106,6 +106,43 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('performs reviewed mixed reset without changing working bytes', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-reset-bridge-'))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], { env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      const sessionUrl = line.startsWith('Open ') ? line.slice(5) : ''
+      expect(sessionUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#token=/)
+      dom = new JSDOM('', { url: sessionUrl })
+      vi.stubGlobal('window', dom.window)
+      vi.stubGlobal('sessionStorage', dom.window.sessionStorage)
+      vi.stubGlobal('WebSocket', dom.window.WebSocket)
+      const client = new BackendClient()
+      clients.push(client)
+      await bounded(client.waitReady())
+      const repository = path.join(directory, 'repository')
+      await client.request('init_repository', { path: repository })
+      await client.selectBrowserRepository(repository)
+      execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
+      await writeFile(path.join(repository, 'file'), 'base\n')
+      execFileSync('git', ['-C', repository, 'add', 'file'])
+      execFileSync('git', ['-C', repository, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base'])
+      const target = execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+      await writeFile(path.join(repository, 'file'), 'commit\n')
+      execFileSync('git', ['-C', repository, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qam', 'change'])
+      const head = execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+      const branch = execFileSync('git', ['-C', repository, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()
+      await writeFile(path.join(repository, 'file'), 'working\n')
+      const request = { target, head, branch, undo: true }
+      await expect(client.mixedResetRepository(repository, { ...request, target: head })).rejects.toThrow()
+      await client.mixedResetRepository(repository, request)
+      expect(execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(target)
+      expect(execFileSync('git', ['-C', repository, 'show', ':file'], { encoding: 'utf8' })).toBe('base\n')
+      expect(await readFile(path.join(repository, 'file'), 'utf8')).toBe('working\n')
+    }, 90_000)
+
+    // This journey exercises many real Git and bridge workflows; slower hosts
+    // can exceed the smaller timeout even while every operation is progressing.
     it('authenticates, cancels work, delivers events and reconnects without replay', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-websocket-test-'))
       const bin = path.join(directory, 'gh')
@@ -763,6 +800,21 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(await client.repositoryRebaseState(firstRepository)).toBeNull()
       execFileSync('git', ['-C', firstRepository, 'switch', '-q', branchHead.replace(/^refs\/heads\//, '')])
       execFileSync('git', ['-C', firstRepository, 'branch', '-D', 'rebase-source', 'rebase-base'])
+      execFileSync('git', ['-C', firstRepository, 'switch', '-qc', 'reset-test'])
+      const resetTarget = execFileSync('git', ['-C', firstRepository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+      await writeFile(path.join(firstRepository, '-binary file'), 'reset commit\n')
+      execFileSync('git', ['-C', firstRepository, 'add', '--', '-binary file'])
+      execFileSync('git', ['-C', firstRepository, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'reset commit'])
+      const resetHead = execFileSync('git', ['-C', firstRepository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+      await writeFile(path.join(firstRepository, '-binary file'), 'local reset content\n')
+      const resetRequest = { target: resetTarget, head: resetHead, branch: 'refs/heads/reset-test', undo: true }
+      await expect(client.mixedResetRepository(firstRepository, { ...resetRequest, target: resetHead })).rejects.toThrow()
+      await client.mixedResetRepository(firstRepository, resetRequest)
+      expect(execFileSync('git', ['-C', firstRepository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(resetTarget)
+      expect(await readFile(path.join(firstRepository, '-binary file'), 'utf8')).toBe('local reset content\n')
+      await writeFile(path.join(firstRepository, '-binary file'), binary)
+      execFileSync('git', ['-C', firstRepository, 'switch', '-q', branchHead.replace(/^refs\/heads\//, '')])
+      execFileSync('git', ['-C', firstRepository, 'branch', '-D', 'reset-test'])
       expect(spawnSync('git', ['-C', firstRepository, 'config', '--get', 'branch.new-from-remote.remote']).status).toBe(1)
       execFileSync('git', ['-C', firstRepository, 'remote', 'add', 'typed-test', 'https://example.invalid/repo'])
       execFileSync('git', ['-C', firstRepository, 'update-ref', 'refs/remotes/typed-test/main', 'HEAD'])
@@ -1399,7 +1451,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         retryable: false,
       })
       expect(dom.window.sessionStorage.getItem('desktopBridgeToken')).toBeNull()
-    }, 90_000)
+    }, 180_000)
 
     it('initializes the requested directory even when Git environment points elsewhere', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-init-env-'))

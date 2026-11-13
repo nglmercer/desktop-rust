@@ -606,6 +606,21 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.checkoutDetachedCommit('/repo', oid, false)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('checkout history') })
   })
 
+  it('reviews mixed reset and never replays an interrupted mutation', async () => {
+    const request = { target: 'a'.repeat(40), head: 'b'.repeat(40), branch: 'refs/heads/main', undo: true }
+    const preview = { request, basis: 'c'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview).mockResolvedValueOnce({ target: request.target, code: 0, stdout: '', stderr: '' })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.mixedResetRepository('/repo', request)).resolves.toBeUndefined()
+    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.backend.git_info', expect.objectContaining({ operation: { type: 'mixed_reset', repository_path: '/repo', operation: { method: 'renderer_mixed_reset', request, basis: preview.basis } } }))
+    invoke.mockResolvedValueOnce({ ...preview, request: { ...request, head: 'd'.repeat(40) } })
+    await expect(client.mixedResetRepository('/repo', request)).rejects.toMatchObject({ code: 'invalid_response' })
+    invoke.mockResolvedValueOnce(preview).mockRejectedValueOnce(new Error('disconnected'))
+    await expect(client.mixedResetRepository('/repo', request)).rejects.toMatchObject({ retryable: false, message: expect.stringContaining('inspect HEAD') })
+    expect(invoke).toHaveBeenCalledTimes(5)
+  })
+
   it('reviews merge start and never replays an interrupted mutation', async () => {
     const request = { source_ref: 'refs/remotes/origin/main', source_head: 'a'.repeat(40), current_ref: 'refs/heads/main', current_head: 'b'.repeat(40), squash: true, no_verify: false }
     const preview = { request, basis: 'c'.repeat(64) }

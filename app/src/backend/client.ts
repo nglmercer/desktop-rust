@@ -2581,6 +2581,27 @@ export class BackendClient {
     if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to abort the squash'}; inspect the repository`, retryable: false })
   }
 
+  /** Reset HEAD and the index after reviewing the exact current repository state. */
+  async mixedResetRepository(repositoryPath: string, request: { readonly target: string; readonly head: string; readonly branch: string | null; readonly undo: boolean }): Promise<void> {
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
+    if (!oid.test(request.target) || !oid.test(request.head) || request.target.length !== request.head.length || (request.branch !== null && !request.branch.startsWith('refs/heads/'))) throw new BackendError({ code: 'invalid_request', message: 'Reviewed current and target commits are required', retryable: false })
+    const call = (method: 'renderer_mixed_reset_preview' | 'renderer_mixed_reset', extra: Record<string, unknown> = {}) => this.transport === 'wry'
+      ? this.request('git_info', { operation: { type: 'mixed_reset', repository_path: repositoryPath, operation: { method, request, ...extra } } })
+      : this.repositoryRead(repositoryPath, method, { request, ...extra })
+    const preview = await call('renderer_mixed_reset_preview')
+    if (!isRecord(preview) || !isRecord(preview.request) || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) throw new BackendError({ code: 'invalid_response', message: 'Invalid reset review', retryable: false })
+    const reviewed = preview.request
+    if (Object.entries(request).some(([key, value]) => reviewed[key] !== value)) throw new BackendError({ code: 'invalid_response', message: 'Invalid reset review', retryable: false })
+    let result: unknown
+    try { result = await call('renderer_mixed_reset', { basis: preview.basis }) }
+    catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: `${cause.message}; inspect HEAD, index and working files before retrying`, retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || result.target !== request.target || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new BackendError({ code: 'invalid_response', message: 'Reset outcome is uncertain; inspect the repository', retryable: false })
+    if (result.code !== 0) throw new BackendError({ code: 'git_error', message: `${result.stderr || 'Unable to reset'}; inspect HEAD and index before retrying`, retryable: false })
+  }
+
   /** Start a reviewed merge without replaying an uncertain result. */
   async startRepositoryMerge(repositoryPath: string, request: { readonly source_ref: string; readonly source_head: string; readonly current_ref: string; readonly current_head: string; readonly squash: boolean; readonly no_verify: boolean }): Promise<'complete' | 'conflict' | 'up_to_date'> {
     const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/

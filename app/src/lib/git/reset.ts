@@ -44,8 +44,14 @@ function resetModeToArgs(mode: GitResetMode, ref: string): string[] {
 export async function reset(
   repository: Repository,
   mode: GitResetMode,
-  ref: string
+  ref: string,
+  expected?: { readonly head: string; readonly branch: string | null; readonly undo: boolean }
 ): Promise<true> {
+  if (mode === GitResetMode.Mixed && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    if (expected === undefined) throw new Error('Refresh the current branch before resetting')
+    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().mixedResetRepository(repository.path, { target: ref, ...expected }), true)
+    return true
+  }
   const args = resetModeToArgs(mode, ref)
   await git(args, repository.path, 'reset')
   return true

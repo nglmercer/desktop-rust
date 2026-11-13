@@ -52,6 +52,7 @@ mod refs;
 mod renderer_cherry_pick;
 mod renderer_merge;
 mod renderer_rebase;
+mod renderer_reset;
 mod renderer_revert;
 pub use refs::symbolic_ref;
 mod repository_discovery;
@@ -678,6 +679,12 @@ impl Repository {
             }
             Operation::RendererMergeStartPreview { request } => {
                 return self.renderer_merge_start_preview(&request).await;
+            }
+            Operation::RendererMixedResetPreview { request } => {
+                return self.renderer_mixed_reset_preview(&request).await;
+            }
+            Operation::RendererMixedReset { request, basis } => {
+                return self.renderer_mixed_reset(&request, &basis).await;
             }
             Operation::RendererMergeStart { request, basis } => {
                 return self.renderer_merge_start(&request, &basis).await;
@@ -1328,6 +1335,8 @@ impl Repository {
             | RendererRebaseContinuePreview { .. }
             | RendererRebaseStartPreview { .. }
             | RendererMergeStartPreview { .. }
+            | RendererMixedResetPreview { .. }
+            | RendererMixedReset { .. }
             | RendererMergeStart { .. }
             | RendererRebaseStart { .. }
             | RendererRebaseContinue { .. }

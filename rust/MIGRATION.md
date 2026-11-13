@@ -2442,3 +2442,14 @@ an unambiguous, option-terminated local target name, so it updates the branch
 instead of detaching HEAD. Conflicts retain Git's rebase state and interrupted
 outcomes require inspection. Independent Git processes can still race between
 review and Git taking its own locks; cross-platform behavior remains to audit.
+
+## Reviewed mixed reset
+
+Wry and WebSocket use Rust for mixed reset to a selected commit and for undoing
+a non-initial commit. The review binds the selected target, current HEAD and
+branch, index, working files and operation state; undo also verifies the selected
+commit's first parent. Native Git preserves working files and resets HEAD and
+index with its normal reflog behavior. As with the existing mixed reset, staged
+content that differs from the working file is no longer in the index after the
+operation. Independent Git writers can race review and Git taking locks; hard
+and soft reset, first-commit undo and cross-platform parity remain open.

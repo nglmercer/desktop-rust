@@ -313,6 +313,13 @@ pub enum Operation {
         request: RendererMergeStartRequest,
         basis: String,
     },
+    RendererMixedResetPreview {
+        request: RendererMixedResetRequest,
+    },
+    RendererMixedReset {
+        request: RendererMixedResetRequest,
+        basis: String,
+    },
     RendererRebaseStart {
         request: RendererRebaseStartRequest,
         basis: String,
@@ -998,6 +1005,15 @@ pub struct RendererMergeStartRequest {
     pub current_head: String,
     pub squash: bool,
     pub no_verify: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererMixedResetRequest {
+    pub target: String,
+    pub head: String,
+    pub branch: Option<String>,
+    pub undo: bool,
 }
 
 fn history_limit() -> u16 {
