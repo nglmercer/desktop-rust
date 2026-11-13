@@ -1,8 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { SuiteContext, TestContext } from 'node:test'
-import type { TestContext as VitestTestContext } from 'vitest'
-import { createTempDirectory } from './temp'
+import { createTempDirectory, type TestCleanupContext } from './temp'
 
 /**
  * Isolate a test from inherited global and system Git configuration.
@@ -12,7 +10,7 @@ import { createTempDirectory } from './temp'
  * values. Since the environment is process-wide, these tests must run serially.
  */
 export async function isolateGitConfig(
-  t: TestContext | SuiteContext | VitestTestContext
+  t: TestCleanupContext
 ): Promise<void> {
   const config = join(await createTempDirectory(t), 'empty-config')
   await writeFile(config, '')

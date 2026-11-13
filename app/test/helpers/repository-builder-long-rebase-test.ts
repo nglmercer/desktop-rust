@@ -1,4 +1,4 @@
-import { TestContext } from 'node:test'
+import type { TestCleanupContext as TestContext } from './temp'
 import { Repository } from '../../src/models/repository'
 import { setupEmptyRepository } from './repositories'
 import { makeCommit, switchTo, createBranch } from './repository-scaffolding'

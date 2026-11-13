@@ -249,7 +249,12 @@ describe('GitStore', () => {
   })
 
   describe('loadBranches', () => {
-    beforeEach(isolateGitConfig)
+    beforeEach(async t => {
+      if (!('after' in t)) {
+        throw new Error('Git configuration isolation requires a test context')
+      }
+      await isolateGitConfig(t)
+    })
 
     const setupRepositories = async (t: TestContext) => {
       const upstream = await setupEmptyRepository(t)
