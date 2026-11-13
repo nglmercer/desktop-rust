@@ -82,6 +82,24 @@ if (typeof window !== 'undefined' && !Reflect.get(window, '__desktop')) {
     },
     send: (channel: string, ...args: unknown[]) => {
       if (client.transportKind === 'ws') {
+        if (channel === 'select-all-window-contents') {
+          const active = document.activeElement
+          if (
+            active instanceof HTMLInputElement ||
+            active instanceof HTMLTextAreaElement
+          ) {
+            active.select()
+          } else {
+            const target =
+              active instanceof HTMLElement && active.isContentEditable
+                ? active
+                : document.body
+            if (target) {
+              window.getSelection()?.selectAllChildren(target)
+            }
+          }
+          return
+        }
         // Simplex over WS: fire-and-forget snapshot/preferences pushes are
         // server-driven; client sends are RPCs, so a stray `send` is a no-op.
         return

@@ -21,6 +21,7 @@ vi.mock('../../src/backend/client', () => ({
 
 interface IShim {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
+  send(channel: string, ...args: unknown[]): void
   on(event: string, listener: (...args: unknown[]) => void): IShim
   removeListener(event: string, listener: (...args: unknown[]) => void): IShim
   removeAllListeners(event?: string): IShim
@@ -139,5 +140,45 @@ describe('loopback bridge event shim', () => {
     await expect(
       shim.invoke('open-external', 'https://github.com/')
     ).resolves.toBe(false)
+  })
+  it.each(['input', 'textarea'] as const)(
+    'selects all text in a focused %s',
+    async tag => {
+      const input = document.createElement(tag)
+      input.value = 'hello world'
+      document.body.append(input)
+      input.focus()
+      await import('../../src/web/electron-shim-loader')
+      const shim = Reflect.get(window, '__desktop') as IShim
+      shim.send('select-all-window-contents')
+      expect(input.selectionStart).toBe(0)
+      expect(input.selectionEnd).toBe(input.value.length)
+      expect(request).not.toHaveBeenCalled()
+      input.remove()
+    }
+  )
+  it('selects the focused editable contents', async () => {
+    const editable = document.createElement('div')
+    editable.setAttribute('contenteditable', 'true')
+    editable.tabIndex = 0
+    editable.textContent = 'editable text'
+    Object.defineProperty(editable, 'isContentEditable', { value: true })
+    document.body.append(editable)
+    editable.focus()
+    await import('../../src/web/electron-shim-loader')
+    const shim = Reflect.get(window, '__desktop') as IShim
+    shim.send('select-all-window-contents')
+    expect(window.getSelection()?.toString()).toBe('editable text')
+    expect(request).not.toHaveBeenCalled()
+    editable.remove()
+  })
+  it('selects the document contents when no editable element is focused', async () => {
+    document.body.textContent = 'page text'
+    await import('../../src/web/electron-shim-loader')
+    const shim = Reflect.get(window, '__desktop') as IShim
+    shim.send('select-all-window-contents')
+    expect(window.getSelection()?.toString()).toBe('page text')
+    expect(request).not.toHaveBeenCalled()
+    document.body.textContent = ''
   })
 })
