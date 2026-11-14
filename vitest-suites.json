@@ -393,5 +393,9 @@
   "app/test/unit/release-changelog-routing-test.ts",
   "app/test/unit/release-changelog-client-test.ts",
   "script/build-rust-production.test.ts",
-  "script/start-rust-package.test.ts"
+  "script/start-rust-package.test.ts",
+  "script/webpack-koffi-test.ts",
+  "script/webpack-copilot-timers-test.ts",
+  "app/test/unit/repository-account-test.ts",
+  "app/test/unit/native-file-drop-test.ts"
 ]

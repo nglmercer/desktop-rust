@@ -1,11 +1,14 @@
+// @vitest-environment node
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import webpack from 'webpack'
 import merge from 'webpack-merge'
 import { createTempDirectory } from '../app/test/helpers/temp'
 import { getKoffiWebpackConfig } from './webpack-koffi'
+
+vi.setConfig({ testTimeout: 30_000 })
 
 const targets = (['darwin', 'win32', 'linux'] as const).flatMap(platform =>
   ['arm64', 'x64'].map(arch => ({
@@ -93,7 +96,7 @@ describe('Koffi webpack output', () => {
         merge(config, getKoffiWebpackConfig(nodeModules, platform, arch))
       )
       assert.ok(compiler)
-      t.after(
+      t.onTestFinished(
         () =>
           new Promise<void>((resolve, reject) =>
             compiler.close(error => (error ? reject(error) : resolve()))

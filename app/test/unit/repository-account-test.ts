@@ -1,5 +1,6 @@
+import 'fake-indexeddb/auto'
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { setImmediate } from 'node:timers/promises'
 import { Account } from '../../src/models/account'
 import { Repository } from '../../src/models/repository'
@@ -74,7 +75,7 @@ describe('Repository account persistence', () => {
 
   it('migrates legacy rows once, including unmatched repositories', async t => {
     const { db, store, github } = await setup()
-    t.after(async () => {
+    t.onTestFinished(async () => {
       await setImmediate()
       db.close()
     })
@@ -113,7 +114,7 @@ describe('Repository account persistence', () => {
 
   it('migrates to an account identity whose credentials did not load', async t => {
     const { db, store, github } = await setup()
-    t.after(async () => {
+    t.onTestFinished(async () => {
       await setImmediate()
       db.close()
     })
@@ -129,7 +130,7 @@ describe('Repository account persistence', () => {
 
   it('assigns an account together with its GitHub repository', async t => {
     const { db, store, apiRepository } = await setup()
-    t.after(async () => {
+    t.onTestFinished(async () => {
       await setImmediate()
       db.close()
     })
@@ -150,7 +151,7 @@ describe('Repository account persistence', () => {
 
   it('never migrates a newly added repository', async t => {
     const { db, store, github } = await setup()
-    t.after(async () => {
+    t.onTestFinished(async () => {
       await setImmediate()
       db.close()
     })
@@ -162,7 +163,7 @@ describe('Repository account persistence', () => {
 
   it('preserves assignment through repository and worktree updates', async t => {
     const { db, store, github, apiRepository } = await setup()
-    t.after(async () => {
+    t.onTestFinished(async () => {
       await setImmediate()
       db.close()
     })
@@ -201,7 +202,7 @@ describe('Repository account persistence', () => {
 
   it('clears only matching endpoint and login on explicit sign-out', async t => {
     const { db, store, github, apiRepository } = await setup()
-    t.after(async () => {
+    t.onTestFinished(async () => {
       await setImmediate()
       db.close()
     })
@@ -229,7 +230,7 @@ describe('Repository account persistence', () => {
 
   it('clears assignment when the endpoint changes', async t => {
     const { db, store, github, apiRepository } = await setup()
-    t.after(async () => {
+    t.onTestFinished(async () => {
       await setImmediate()
       db.close()
     })

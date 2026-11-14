@@ -1,5 +1,6 @@
+// @vitest-environment node
 import assert from 'node:assert/strict'
-import { it } from 'node:test'
+import { it } from 'vitest'
 import { readFile, writeFile } from 'fs/promises'
 import { createRequire } from 'module'
 import { join } from 'path'
@@ -68,7 +69,7 @@ it('handles Copilot runtime exit with browser timer globals', async t => {
     externals: ['koffi'],
   })
   assert.ok(compiler)
-  t.after(
+  t.onTestFinished(
     () =>
       new Promise<void>((resolve, reject) =>
         compiler.close(error => (error ? reject(error) : resolve()))
@@ -89,7 +90,7 @@ it('handles Copilot runtime exit with browser timer globals', async t => {
 
   const timers = new Map<number, NodeJS.Timeout>()
   let nextTimer = 0
-  t.after(() => timers.forEach(timer => clearTimeout(timer)))
+  t.onTestFinished(() => timers.forEach(timer => clearTimeout(timer)))
   const module: {
     exports: {
       browserTimer?: () => string
@@ -122,4 +123,4 @@ it('handles Copilot runtime exit with browser timer globals', async t => {
   assert.equal(context.module.exports.browserTimer(), 'number')
   await context.module.exports.checkRuntimeExit()
   assert.equal(timers.size, 0)
-})
+}, 30_000)
