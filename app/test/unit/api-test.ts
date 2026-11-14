@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import {
   API,
@@ -142,7 +142,7 @@ describe('API', () => {
     it('works when window is not defined (main process)', t => {
       const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
       Reflect.deleteProperty(globalThis, 'window')
-      t.after(() => {
+      t.onTestFinished(() => {
         if (descriptor !== undefined) {
           Object.defineProperty(globalThis, 'window', descriptor)
         }
