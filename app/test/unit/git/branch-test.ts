@@ -22,11 +22,22 @@ import {
   getBranches,
   git,
   checkoutBranch,
-  deleteLocalBranch,
+  deleteLocalBranch as deleteLocalBranchAtTip,
   deleteRemoteBranch,
 } from '../../../src/lib/git'
 import { assertNonNullable } from '../../../src/lib/fatal-error'
 import { TestStatsStore } from '../../helpers/test-stats-store'
+
+/**
+ * The app deletes a branch at the tip it has just shown; the Rust operation
+ * refuses to delete one that moved. Read the tip the way the app would.
+ */
+async function deleteLocalBranch(repository: Repository, branchName: string) {
+  const tip = (
+    await exec(['rev-parse', `refs/heads/${branchName}`], repository.path)
+  ).stdout.trim()
+  return deleteLocalBranchAtTip(repository, branchName, tip)
+}
 
 describe('git/branch', () => {
   describe('tip', () => {
