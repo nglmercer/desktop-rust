@@ -196,7 +196,8 @@ import { offsetFromNow } from '../lib/offset-from'
 import { getNumber } from '../lib/local-storage'
 import { IconPreviewDialog } from './octicons/icon-preview-dialog'
 import { isCertificateErrorSuppressedFor } from '../lib/suppress-certificate-error'
-import { webUtils } from 'electron'
+import { pathsForDroppedFiles } from '../lib/dropped-files'
+import { nativeFileDropPaths } from '../lib/native-file-drop'
 import { showTestUI } from './lib/test-ui-components/test-ui-components'
 import { ConfirmCommitFilteredChanges } from './changes/confirm-commit-filtered-changes-dialog'
 import { AboutTestDialog } from './about/about-test-dialog'
@@ -384,6 +385,7 @@ export class App extends React.Component<IAppProps, IAppState> {
 
   public componentWillUnmount() {
     window.clearInterval(this.updateIntervalHandle)
+    window.removeEventListener('desktop-native-file-drop', this.onNativeFileDrop)
 
     if (__DARWIN__) {
       window.removeEventListener('keydown', this.onMacOSWindowKeyDown)
@@ -1068,6 +1070,7 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   public componentDidMount() {
+    window.addEventListener('desktop-native-file-drop', this.onNativeFileDrop)
     document.ondragover = e => {
       if (e.dataTransfer != null) {
         if (this.isShowingModal) {
@@ -1090,7 +1093,7 @@ export class App extends React.Component<IAppProps, IAppState> {
       }
       if (e.dataTransfer != null) {
         const files = e.dataTransfer.files
-        this.handleDragAndDrop(files)
+        void this.handleDroppedPaths(pathsForDroppedFiles(files))
       }
       e.preventDefault()
     }
@@ -1246,8 +1249,17 @@ export class App extends React.Component<IAppProps, IAppState> {
     }
   }
 
-  private async handleDragAndDrop(fileList: FileList) {
-    const paths = Array.from(fileList, webUtils.getPathForFile)
+  private onNativeFileDrop = (event: Event) => {
+    if (this.isShowingModal) {
+      return
+    }
+    const paths = nativeFileDropPaths(event)
+    if (paths !== null) {
+      void this.handleDroppedPaths(paths)
+    }
+  }
+
+  private async handleDroppedPaths(paths: ReadonlyArray<string>) {
     const { dispatcher } = this.props
 
     // If they're bulk adding repositories then just blindly try to add them.

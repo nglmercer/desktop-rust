@@ -46,6 +46,9 @@ pub enum AppEvent {
     RpcProgress { id: u64, payload: Value },
     /// A native (muda) menu item was clicked.
     NativeMenu(String),
+    /// Paths selected by a native operating-system file drop.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    NativeFileDrop(Vec<String>),
     /// Completion of the explicit webview smoke test.
     SmokeResult(bool),
     /// Request a normal shutdown from the debug development supervisor.

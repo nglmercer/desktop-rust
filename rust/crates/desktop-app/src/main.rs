@@ -23,6 +23,8 @@ mod bridge;
 mod host;
 mod instance;
 mod menu;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod native_file_drop;
 mod navigation;
 mod protocol;
 mod shutdown;
@@ -368,6 +370,32 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .with_devtools(true)
         .with_url(APP_URL);
 
+    // Wry replaces WebView2's HTML drag-and-drop handler on Windows, which
+    // would break the renderer's internal commit and branch drag gestures.
+    // Keep that platform's existing behavior until it has a safe native path.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let proxy = proxy.clone();
+        let external_drag = std::cell::Cell::new(false);
+        builder = builder.with_drag_drop_handler(move |event| match event {
+            wry::DragDropEvent::Enter { paths, .. } => {
+                let is_file_drop = !paths.is_empty();
+                external_drag.set(is_file_drop);
+                is_file_drop
+            }
+            wry::DragDropEvent::Over { .. } => external_drag.get(),
+            wry::DragDropEvent::Leave => external_drag.replace(false),
+            wry::DragDropEvent::Drop { paths, .. } => {
+                let is_file_drop = external_drag.replace(false) || !paths.is_empty();
+                if let Some(paths) = native_file_drop::paths(paths) {
+                    let _ = proxy.send_event(AppEvent::NativeFileDrop(paths));
+                }
+                is_file_drop
+            }
+            _ => false,
+        });
+    }
+
     if smoke_test {
         builder = builder.with_initialization_script(SMOKE_SCRIPT);
         let proxy = proxy.clone();
@@ -490,6 +518,17 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         match event {
             Event::UserEvent(user) => match user {
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                AppEvent::NativeFileDrop(paths) => {
+                    if shutting_down { return; }
+                    let script = format!(
+                        "window.dispatchEvent(new CustomEvent('desktop-native-file-drop',{{detail:{}}}))",
+                        js_literal(&json!(paths))
+                    );
+                    if let Err(error) = webview.evaluate_script(&script) {
+                        tracing::warn!(%error, "failed to deliver native file drop");
+                    }
+                }
                 #[cfg(debug_assertions)]
                 AppEvent::DevelopmentShutdown => {
                     if !shutting_down {
