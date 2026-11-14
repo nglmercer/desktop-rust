@@ -180,7 +180,8 @@ beforeEach(() => {
     if (
       command === process.execPath &&
       values[0]?.endsWith('vite.js') &&
-      values.length === 2
+      // The renderer bundle build; the highlighter and IPC bootstrap pass -c.
+      !values.includes('-c')
     ) {
       const output = options.env?.DESKTOP_VITE_DIST
       if (!output) throw new Error('Missing isolated Vite output')

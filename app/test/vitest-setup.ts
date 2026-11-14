@@ -1,4 +1,4 @@
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { JSDOM } from 'jsdom'
 import packageInfo from '../package.json'
 
@@ -33,7 +33,16 @@ vi.stubGlobal(
 // its Rust code paths instead of the Node fallbacks (see rust/ROADMAP.md, R1).
 if (process.env.DESKTOP_TEST_RUST_BACKEND === '1') {
   const harness = await import('./helpers/rust-backend')
-  if (harness.rustBackendAvailable) {
+  // These tests install their own `window`, bridge or transport, which is what
+  // the harness does too, so they cannot share it.
+  const ownsItsBackend =
+    /(?:^|\/)(?:script\/|web-open-path-test|web-host-bridge-loader-test|web-fs-|backend-)/.test(
+      expect.getState().testPath ?? ''
+    )
+  if (harness.rustBackendAvailable && !ownsItsBackend) {
     harness.useRustBackend()
+  } else {
+    // Processes this test spawns must not start a backend either.
+    delete process.env.DESKTOP_TEST_RUST_BACKEND
   }
 }
