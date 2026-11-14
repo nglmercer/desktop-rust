@@ -1,5 +1,14 @@
 # Full migration and legacy-removal ledger
 
+The Rust shell now generates UUID v4 values for new application GUIDs while
+preserving existing values, including the earlier 32-character Rust IDs. GUID
+reads and writes serialize between storage instances in the same process;
+separate processes can still race while initializing a missing GUID. JSON
+storage uses a unique temporary file and never deletes the destination when
+publication fails. New files are owner-only on Unix. This is not a power-loss
+durability guarantee, and Windows and network filesystem behavior remain
+unverified.
+
 The desktop shell's Vite rebuild check now includes static resources, emoji,
 package metadata and license inputs. It also detects removed resources and
 missing required inputs rather than silently retaining a stale embedded bundle.
