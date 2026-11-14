@@ -27,6 +27,8 @@ export interface ICopilotSkippedFile {
 export interface IFileResolution {
   /** Repository-relative file path that was resolved. */
   readonly path: string
+  /** Local-only certificate of the conflict used to generate this suggestion. */
+  readonly conflictBasis?: string
   /** The fully resolved file content (all conflict markers removed). */
   readonly resolvedContent: string
   /** Human-readable explanation of how and why conflicts were resolved this way. */
@@ -38,6 +40,27 @@ export interface IFileResolution {
    * delete = deleted side).
    */
   readonly deleteConflictAction?: 'keep' | 'delete'
+}
+
+/** Recheck all automatic suggestions before the legacy write path starts. */
+export async function verifyCopilotConflictBases(
+  resolutions: ReadonlyArray<IFileResolution>,
+  overridden: ReadonlySet<string>,
+  readBasis: (resolution: IFileResolution) => Promise<string>
+): Promise<void> {
+  for (const resolution of resolutions) {
+    if (overridden.has(resolution.path)) continue
+    if (resolution.conflictBasis === undefined) {
+      throw new Error(
+        'Conflict review is unavailable; refresh and generate suggestions again'
+      )
+    }
+    if ((await readBasis(resolution)) !== resolution.conflictBasis) {
+      throw new Error(
+        'Conflict changed after suggestions were generated; refresh and review it again'
+      )
+    }
+  }
 }
 
 /** Resolution for a single conflict hunk as returned by the model. */
@@ -613,6 +636,7 @@ export function reassembleResolutions(
   const contextByPath = new Map(fileContexts.map(f => [f.path, f]))
 
   return rawResolutions.map(raw => {
+    const ctx = contextByPath.get(raw.path)
     // Delete-vs-modify resolutions carry an action, not hunk content.
     // Pass through without reassembly — the resolution is applied as a
     // ManualConflictResolution, not a file write.
@@ -622,10 +646,12 @@ export function reassembleResolutions(
         resolvedContent: '',
         reasoning: raw.reasoning,
         deleteConflictAction: raw.action,
+        ...(ctx?.conflictBasis === undefined
+          ? {}
+          : { conflictBasis: ctx.conflictBasis }),
       }
     }
 
-    const ctx = contextByPath.get(raw.path)
     if (ctx?.rawContent === undefined) {
       throw new CopilotValidationError(
         `Cannot reassemble resolution for "${raw.path}": original file content is unavailable`
@@ -637,6 +663,9 @@ export function reassembleResolutions(
       path: raw.path,
       resolvedContent,
       reasoning: raw.reasoning,
+      ...(ctx.conflictBasis === undefined
+        ? {}
+        : { conflictBasis: ctx.conflictBasis }),
     }
   })
 }

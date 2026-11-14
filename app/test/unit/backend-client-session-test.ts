@@ -198,6 +198,49 @@ describe('backend Copilot session cleanup', () => {
     await expect(client.repositoryReadSnapshot('/repo', 'renderer_working_file', { path: 'file', max_bytes: -1 })).rejects.toMatchObject({ code: 'invalid_request' })
   })
 
+  it('requires the Rust snapshot digest to match the reviewed working file', async () => {
+    const client = new BackendClient()
+    const id = '12345678-1234-4234-8234-123456789abc'
+    const expected = 'a'.repeat(64)
+    let actual = expected
+    const request = vi.spyOn(snapshotTransport(client), 'repositoryRendererRequest').mockImplementation(async (_path, method, _params) => {
+      if (method === 'renderer_working_file') return { kind: 'snapshot', id, size: 5, sha256: actual }
+      if (method === 'renderer_compare_diff_chunk') return { offset: 0, size: 5, data: 'aGVsbG8=' }
+      throw new Error(`Unexpected request: ${method}`)
+    })
+    const release = vi.spyOn(snapshotTransport(client), 'releaseComparisonSnapshot').mockResolvedValue(undefined)
+    const params = { path: 'file', max_bytes: 10 }
+    const result = await client.repositoryReadSnapshot('/repo', 'renderer_working_file', params, expected)
+    expect(Array.from(result ?? [])).toEqual([104, 101, 108, 108, 111])
+    expect(request).toHaveBeenCalledWith('/repo', 'renderer_working_file', { ...params, sha256: true })
+    actual = 'b'.repeat(64)
+    await expect(client.repositoryReadSnapshot('/repo', 'renderer_working_file', params, expected)).rejects.toMatchObject({ code: 'conflict_changed', retryable: false })
+    expect(release).toHaveBeenCalledTimes(2)
+    await expect(client.repositoryReadSnapshot('/repo', 'renderer_staged_diff', {}, expected)).rejects.toMatchObject({ code: 'invalid_request' })
+  })
+
+  it('requests bounded conflict certificates from the native host', async () => {
+    const detail = { basis: 'a'.repeat(64), stages: [{ stage: 1 }, { stage: 2 }, { stage: 3 }], working: { kind: 'regular', sha256: 'b'.repeat(64), size: 5 } }
+    const invoke = vi.fn().mockResolvedValueOnce(detail).mockResolvedValueOnce({ kind: 'too_large' }).mockResolvedValueOnce({ ...detail, stages: [{ stage: 2 }, { stage: 2 }] })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryCopilotConflictBasis('/repo', '[file]')).resolves.toEqual({ basis: detail.basis, sha256: detail.working.sha256, size: 5, ours: true, theirs: true })
+    expect(invoke).toHaveBeenCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'reviewed_discard', repository_path: '/repo', operation: { method: 'conflict_detail', path: '[file]', max_working_bytes: 10_485_760, certificate_only: true } } }))
+    await expect(client.repositoryCopilotConflictBasis('/repo', '[file]')).rejects.toMatchObject({ code: 'file_too_large' })
+    await expect(client.repositoryCopilotConflictBasis('/repo', '[file]')).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('accepts symlink and gitlink certificates only for delete conflicts', async () => {
+    const detail = { basis: 'a'.repeat(64), stages: [{ stage: 1 }, { stage: 2 }], working: { kind: 'symlink', sha256: 'b'.repeat(64), size: 7 } }
+    const invoke = vi.fn().mockResolvedValueOnce(detail).mockResolvedValueOnce({ ...detail, working: null }).mockResolvedValueOnce(detail).mockResolvedValueOnce({ ...detail, working: null })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.repositoryCopilotConflictBasis('/repo', 'link', null, true)).resolves.toMatchObject({ ours: true, theirs: false, sha256: detail.working.sha256 })
+    await expect(client.repositoryCopilotConflictBasis('/repo', 'nested', null, true)).resolves.toMatchObject({ ours: true, theirs: false, sha256: null, size: null })
+    await expect(client.repositoryCopilotConflictBasis('/repo', 'link')).rejects.toMatchObject({ code: 'unsupported' })
+    await expect(client.repositoryCopilotConflictBasis('/repo', 'nested')).rejects.toMatchObject({ code: 'unsupported' })
+  })
+
   it('reads and validates a repository last-fetch timestamp through Wry', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ kind: 'fetched', time: 1_700_000_000_000 }).mockResolvedValueOnce({ kind: 'empty' }).mockResolvedValueOnce({ kind: 'fetched', time: 'wrong' })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

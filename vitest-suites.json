@@ -1,4 +1,6 @@
 [
+  "app/test/unit/copilot-conflicts-dialog-apply-test.tsx",
+  "app/test/unit/copilot-conflict-invalidation-test.ts",
   "script/renderer-vite-native-addons.test.ts",
   "app/test/unit/api-test.ts",
   "app/test/unit/get-shell-env-test.ts",

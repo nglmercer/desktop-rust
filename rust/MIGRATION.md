@@ -2948,3 +2948,19 @@ update an unintended remote before reporting failure. Git 2.56 resets the
 same configuration. Compatibility with older Git requires preserving the
 original remote identity, hook arguments and credential scope without relying
 on that reset; the refusal must remain until a safe replacement is verified.
+
+Copilot conflict generation now retains a local Rust conflict certificate and
+rechecks it before the existing Node write. For text conflicts, a Rust snapshot
+digest is checked against the certificate, with a 10 MiB working-file limit.
+Delete-vs-modify suggestions retain support for regular files, symlinks and
+gitlinks; no file contents are sent to the model for those actions. A regular
+delete-vs-modify working file is hashed by streaming twice during generation
+and again before applying. The hash checks cancellation between 64 KiB reads,
+but a filesystem read already in progress cannot be interrupted by that check.
+Very large files or slow filesystems can still exceed the transport
+deadline and be skipped; this is not constant-time. Wry defaults to 60 seconds
+and WebSocket to 170 seconds per request. Only four conflict reviews run at a
+time. Tests cover Git conflicts with files above 10 MiB, symlinks and gitlinks.
+The existing Node write and staging are still not atomic with this recheck,
+and changes by another process after the check can still be overwritten. The
+native journaled publication and coordination across processes remain pending.

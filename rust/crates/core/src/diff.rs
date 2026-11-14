@@ -1564,6 +1564,20 @@ impl Repository {
     }
 
     pub(crate) async fn conflict_detail(&self, path: GitPath) -> Result<Value> {
+        self.conflict_detail_bounded(path, None, false).await
+    }
+
+    pub(crate) async fn conflict_detail_bounded(
+        &self,
+        path: GitPath,
+        max_working_bytes: Option<u64>,
+        certificate_only: bool,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            max_working_bytes
+                .is_none_or(|limit| limit <= crate::comparison_snapshots::MAX_BYTES as u64),
+            "Conflict file limit exceeds the supported size"
+        );
         let path = crate::discard_fs::checked_path(path)?;
         let mut command = args(&["ls-files", "--unmerged", "-z", "--"]);
         command.push(path.clone());
@@ -1580,7 +1594,13 @@ impl Repository {
         let working = if gitlink {
             None
         } else {
-            Some(self.conflict_working_state(&path).await?)
+            match self.conflict_working_state(&path, max_working_bytes).await {
+                Ok(state) => Some(state),
+                Err(error) if error.is::<crate::discard_fs::WorkingFileTooLarge>() => {
+                    return Ok(json!({"kind":"too_large"}));
+                }
+                Err(error) => return Err(error),
+            }
         };
         let context = self.conflict_context(&path).await?;
         digest.update(serde_json::to_vec(&working)?);
@@ -1599,6 +1619,10 @@ impl Repository {
             if fields.len() != 3 {
                 bail!("invalid unmerged index entry");
             }
+            if certificate_only {
+                stages.push(json!({"stage":fields[2].parse::<u8>()?}));
+                continue;
+            }
             let mut side = self
                 .blob_side(Some(Entry {
                     mode: fields[0].into(),
@@ -1616,12 +1640,19 @@ impl Repository {
         )
     }
 
-    async fn conflict_working_state(&self, path: &OsStr) -> Result<crate::discard_fs::FileState> {
+    async fn conflict_working_state(
+        &self,
+        path: &OsStr,
+        limit: Option<u64>,
+    ) -> Result<crate::discard_fs::FileState> {
         let root = self.path.clone();
         let path = path.to_owned();
         crate::cancellation::blocking(move || {
             let root = cap_std::fs::Dir::open_ambient_dir(root, cap_std::ambient_authority())?;
-            crate::discard_fs::capture(&root, Path::new(&path), None)
+            match limit {
+                Some(limit) => crate::discard_fs::capture_bounded(&root, Path::new(&path), limit),
+                None => crate::discard_fs::capture(&root, Path::new(&path), None),
+            }
         })
         .await
     }

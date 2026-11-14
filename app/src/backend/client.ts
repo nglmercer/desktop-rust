@@ -2198,6 +2198,72 @@ export class BackendClient {
     return this.repositoryRead(repositoryPath, method, params)
   }
 
+  /**
+   * Capture the conflict certificate used for a suggestion. Delete-vs-modify
+   * actions pass `null, true` to include large files, symlinks and gitlinks
+   * without loading their contents into the renderer.
+   */
+  async repositoryCopilotConflictBasis(
+    repositoryPath: string,
+    path: string,
+    maxWorkingBytes: number | null = 10_485_760,
+    allowNonRegular = false
+  ): Promise<{
+    readonly basis: string
+    readonly sha256: string | null
+    readonly size: number | null
+    readonly ours: boolean
+    readonly theirs: boolean
+  }> {
+    if (maxWorkingBytes !== null && (!Number.isSafeInteger(maxWorkingBytes) || maxWorkingBytes < 0 || maxWorkingBytes > 70_000_000)) {
+      throw new BackendError({ code: 'invalid_request', message: 'Invalid conflict file size limit', retryable: false })
+    }
+    const value = await this.repositoryRendererRequest(repositoryPath, 'conflict_detail', {
+      path,
+      ...(maxWorkingBytes === null ? {} : { max_working_bytes: maxWorkingBytes }),
+      certificate_only: true,
+    })
+    const invalid = () => new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid conflict review',
+      retryable: false,
+    })
+    if (isRecord(value) && value.kind === 'too_large') {
+      throw new BackendError({ code: 'file_too_large', message: 'Conflict file exceeds the supported size', retryable: false })
+    }
+    if (!isRecord(value) || typeof value.basis !== 'string' || !/^[a-f0-9]{64}$/.test(value.basis) || !Array.isArray(value.stages)) {
+      throw invalid()
+    }
+    const stages = new Set<number>()
+    for (const item of value.stages) {
+      if (!isRecord(item) || (item.stage !== 1 && item.stage !== 2 && item.stage !== 3) || stages.has(item.stage)) {
+        throw invalid()
+      }
+      stages.add(item.stage)
+    }
+    if (!stages.has(2) && !stages.has(3)) {
+      throw invalid()
+    }
+    const working = value.working
+    if (working === null && allowNonRegular) {
+      return { basis: value.basis, sha256: null, size: null, ours: stages.has(2), theirs: stages.has(3) }
+    }
+    if (!isRecord(working) || (working.kind !== 'regular' && working.kind !== 'absent' && !(allowNonRegular && working.kind === 'symlink'))) {
+      throw new BackendError({ code: 'unsupported', message: 'Conflict file type cannot be reviewed', retryable: false })
+    }
+    const hashed = working.kind === 'regular' || working.kind === 'symlink'
+    if (hashed && (typeof working.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(working.sha256) || typeof working.size !== 'number' || !Number.isSafeInteger(working.size) || working.size < 0)) {
+      throw invalid()
+    }
+    return {
+      basis: value.basis,
+      sha256: hashed && typeof working.sha256 === 'string' ? working.sha256 : null,
+      size: hashed && typeof working.size === 'number' ? working.size : null,
+      ours: stages.has(2),
+      theirs: stages.has(3),
+    }
+  }
+
   /** Recheck a conflicted path and resolve it with a journaled Rust operation. */
   async repositoryResolveManualConflict(repositoryPath: string, path: string, choice: 'ours' | 'theirs' | 'delete' | 'edited', expected: { readonly ours: boolean; readonly theirs: boolean }): Promise<void> {
     const detail = await this.repositoryRendererRequest(repositoryPath, 'conflict_detail', { path })
@@ -2287,7 +2353,10 @@ export class BackendClient {
     return this.decodeComparisonSnapshot(repositoryPath, value, !mergeBase)
   }
 
-  async repositoryReadSnapshot(repositoryPath: string, method: 'renderer_staged_diff' | 'renderer_working_file', params: Record<string, unknown>): Promise<Uint8Array | null> {
+  async repositoryReadSnapshot(repositoryPath: string, method: 'renderer_staged_diff' | 'renderer_working_file', params: Record<string, unknown>, expectedSha256?: string): Promise<Uint8Array | null> {
+    if (expectedSha256 !== undefined && (method !== 'renderer_working_file' || !/^[a-f0-9]{64}$/.test(expectedSha256))) {
+      throw new BackendError({ code: 'invalid_request', message: 'Invalid working file certificate', retryable: false })
+    }
     const requestedLimit = params.max_bytes
     if (requestedLimit !== undefined && (method !== 'renderer_working_file' || typeof requestedLimit !== 'number' || !Number.isSafeInteger(requestedLimit) || requestedLimit < 0 || requestedLimit > 70_000_000)) {
       throw new BackendError({ code: 'invalid_request', message: 'Invalid working file size limit', retryable: false })
@@ -2298,10 +2367,13 @@ export class BackendClient {
     this.comparisonTurn = new Promise(resolve => { releaseTurn = resolve })
     await previous
     try {
-      const value = await this.repositoryRendererRequest(repositoryPath, method, params)
+      const value = await this.repositoryRendererRequest(repositoryPath, method, expectedSha256 === undefined ? params : { ...params, sha256: true })
       if (method === 'renderer_working_file' && requestedLimit !== undefined && isRecord(value) && value.kind === 'too_large') throw new BackendError({ code: 'file_too_large', message: 'Working file exceeds the supported size', retryable: false })
       const result = await this.decodeComparisonSnapshot(repositoryPath, value, method === 'renderer_staged_diff', maxBytes)
       if (result !== null && !(result instanceof Uint8Array)) throw new BackendError({ code: 'invalid_response', message: 'Invalid comparison snapshot', retryable: false })
+      if (expectedSha256 !== undefined && (!isRecord(value) || value.sha256 !== expectedSha256)) {
+        throw new BackendError({ code: 'conflict_changed', message: 'Conflict file changed while reading', retryable: false })
+      }
       return result
     } finally { releaseTurn() }
   }

@@ -23,6 +23,11 @@ impl std::fmt::Display for WorkingFileTooLarge {
 
 impl std::error::Error for WorkingFileTooLarge {}
 
+#[cfg(test)]
+thread_local! {
+    static CAPTURE_TEST_AFTER_READ: std::cell::RefCell<Option<Box<dyn FnMut()>>> = std::cell::RefCell::new(None);
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Kind {
@@ -102,6 +107,10 @@ impl WorkingFile {
     }
 
     pub fn capture(&self, backup: Option<&Path>) -> Result<FileState> {
+        self.capture_with_limit(backup, None)
+    }
+
+    fn capture_with_limit(&self, backup: Option<&Path>, limit: Option<u64>) -> Result<FileState> {
         let metadata = match self.parent.symlink_metadata(&self.name) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -115,6 +124,9 @@ impl WorkingFile {
         if metadata.file_type().is_symlink() {
             let target = self.parent.read_link_contents(&self.name)?;
             let bytes = target.as_os_str().as_encoded_bytes();
+            if limit.is_some_and(|limit| bytes.len() as u64 > limit) {
+                return Err(WorkingFileTooLarge.into());
+            }
             if let Some(backup) = backup {
                 private_write(backup, bytes)?;
             }
@@ -136,7 +148,7 @@ impl WorkingFile {
             options.custom_flags(libc::O_NONBLOCK);
         }
         let file = self.parent.open_with(&self.name, &options)?.into_std();
-        copy_state(file, backup)
+        copy_state_with_limit(file, backup, limit)
     }
 
     /// Read a regular worktree file without following symlinks or special files.
@@ -298,10 +310,107 @@ pub(crate) fn capture(root: &Dir, path: &Path, backup: Option<&Path>) -> Result<
     }
 }
 
-pub(crate) fn copy_state(mut file: fs::File, backup: Option<&Path>) -> Result<FileState> {
+pub(crate) fn capture_bounded(root: &Dir, path: &Path, limit: u64) -> Result<FileState> {
+    match WorkingFile::open(root, path, false)? {
+        Some(file) => file.capture_with_limit(None, Some(limit)),
+        None => Ok(FileState::absent()),
+    }
+}
+
+pub(crate) fn copy_state(file: fs::File, backup: Option<&Path>) -> Result<FileState> {
+    copy_state_with_limit(file, backup, None)
+}
+
+#[cfg(test)]
+mod bounded_capture_tests {
+    use super::*;
+    use cap_std::ambient_authority;
+
+    #[test]
+    fn rejects_oversized_regular_files_before_reading() {
+        let directory =
+            std::env::temp_dir().join(format!("desktop-bounded-capture-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("conflict");
+        fs::write(&path, b"12345678").unwrap();
+        let root = Dir::open_ambient_dir(&directory, ambient_authority()).unwrap();
+        assert_eq!(
+            capture_bounded(&root, Path::new("conflict"), 8)
+                .unwrap()
+                .size,
+            8
+        );
+        assert!(
+            capture_bounded(&root, Path::new("conflict"), 7)
+                .unwrap_err()
+                .is::<WorkingFileTooLarge>()
+        );
+        assert_eq!(
+            capture_bounded(&root, Path::new("missing"), 0)
+                .unwrap()
+                .kind,
+            Kind::Absent
+        );
+        drop(root);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_hashing_after_the_current_chunk() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let directory =
+            std::env::temp_dir().join(format!("desktop-cancel-capture-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let file = fs::File::create(directory.join("conflict")).unwrap();
+        file.set_len(10_485_761).unwrap();
+        drop(file);
+        let root = Dir::open_ambient_dir(&directory, ambient_authority()).unwrap();
+        let token = Cancellation::default();
+        let chunks = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&chunks);
+        let result = token
+            .scope(async move {
+                crate::cancellation::blocking(move || {
+                    CAPTURE_TEST_AFTER_READ.with(|hook| {
+                        *hook.borrow_mut() = Some(Box::new(move || {
+                            observed.fetch_add(1, Ordering::SeqCst);
+                            Cancellation::current().cancel();
+                        }));
+                    });
+                    let result = capture(&root, Path::new("conflict"), None);
+                    CAPTURE_TEST_AFTER_READ.with(|hook| {
+                        hook.borrow_mut().take();
+                    });
+                    result
+                })
+                .await
+            })
+            .await;
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Operation cancelled")
+        );
+        assert_eq!(chunks.load(Ordering::SeqCst), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+fn copy_state_with_limit(
+    mut file: fs::File,
+    backup: Option<&Path>,
+    limit: Option<u64>,
+) -> Result<FileState> {
     let before = file.metadata()?;
     if !before.is_file() {
         bail!("expected a regular file");
+    }
+    if limit.is_some_and(|limit| before.len() > limit) {
+        return Err(WorkingFileTooLarge.into());
     }
     let mut output = backup.map(private_file).transpose()?;
     let mut digest = Sha256::new();
@@ -313,11 +422,20 @@ pub(crate) fn copy_state(mut file: fs::File, backup: Option<&Path>) -> Result<Fi
         if count == 0 {
             break;
         }
+        if limit.is_some_and(|limit| size + count as u64 > limit) {
+            return Err(WorkingFileTooLarge.into());
+        }
         if let Some(output) = &mut output {
             output.write_all(&buffer[..count])?;
         }
         digest.update(&buffer[..count]);
         size += count as u64;
+        #[cfg(test)]
+        CAPTURE_TEST_AFTER_READ.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook();
+            }
+        });
     }
     if let Some(output) = output {
         output.sync_all()?;

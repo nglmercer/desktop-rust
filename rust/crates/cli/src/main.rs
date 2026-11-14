@@ -993,7 +993,7 @@ async fn run(mut cli: Cli) -> Result<()> {
         },
         Action::BranchPolicy => run_operation(&cli.repo, &repository_scope,Operation::BranchPolicy,true).await,
         Action::BranchNameRules { name } => run_operation(&cli.repo, &repository_scope,Operation::BranchNameRules { name },true).await,
-        Action::Conflict { path } => run_operation(&cli.repo, &repository_scope,Operation::ConflictDetail{path:git_path(path)},true).await,
+        Action::Conflict { path } => run_operation(&cli.repo, &repository_scope,Operation::ConflictDetail{path:git_path(path),max_working_bytes:None,certificate_only:false},true).await,
         Action::ResolveConflict { path,choice,basis } => run_operation(&cli.repo, &repository_scope,serde_json::from_value(serde_json::json!({"method":"resolve_conflict","path":git_path(path),"choice":choice,"basis":basis}))?,true).await,
         Action::Merge { branch } => run_operation(&cli.repo, &repository_scope, Operation::Merge { branch }, true).await,
         Action::Rebase { branch } => run_operation(&cli.repo, &repository_scope, Operation::Rebase { branch }, true).await,

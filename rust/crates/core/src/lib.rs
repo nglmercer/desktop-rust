@@ -672,8 +672,14 @@ impl Repository {
             Operation::RendererStagedDiff { amend_head } => {
                 return self.renderer_staged_diff(amend_head.as_deref()).await;
             }
-            Operation::RendererWorkingFile { path, max_bytes } => {
-                return self.renderer_working_file(path, max_bytes).await;
+            Operation::RendererWorkingFile {
+                path,
+                max_bytes,
+                sha256,
+            } => {
+                return self
+                    .renderer_working_file_with_digest(path, max_bytes, sha256)
+                    .await;
             }
             Operation::RendererWorkingDiff {
                 path,
@@ -1139,7 +1145,15 @@ impl Repository {
             Operation::AcknowledgeBranchRename { receipt_id } => {
                 return self.acknowledge_branch_rename(&receipt_id).await;
             }
-            Operation::ConflictDetail { path } => return self.conflict_detail(path).await,
+            Operation::ConflictDetail {
+                path,
+                max_working_bytes,
+                certificate_only,
+            } => {
+                return self
+                    .conflict_detail_bounded(path, max_working_bytes, certificate_only)
+                    .await;
+            }
             Operation::StageConflict {
                 path,
                 basis,

@@ -5,10 +5,21 @@ use cap_std::{ambient_authority, fs::Dir};
 use std::path::Path;
 
 impl Repository {
+    #[cfg(test)]
     pub(crate) async fn renderer_working_file(
         &self,
         path: GitPath,
         max_bytes: Option<u64>,
+    ) -> Result<serde_json::Value> {
+        self.renderer_working_file_with_digest(path, max_bytes, false)
+            .await
+    }
+
+    pub(crate) async fn renderer_working_file_with_digest(
+        &self,
+        path: GitPath,
+        max_bytes: Option<u64>,
+        sha256: bool,
     ) -> Result<serde_json::Value> {
         let limit = max_bytes.unwrap_or(crate::comparison_snapshots::MAX_BYTES as u64);
         anyhow::ensure!(
@@ -55,15 +66,22 @@ impl Repository {
                     .is_ok_and(|current| current == resolved),
                 "Working image path changed while reading"
             );
-            Ok(Some(bytes))
+            let digest = sha256.then(|| {
+                use sha2::{Digest, Sha256};
+                format!("{:x}", Sha256::digest(&bytes))
+            });
+            Ok(Some((bytes, digest)))
         })
         .await?;
-        let Some(bytes) = bytes else {
+        let Some((bytes, digest)) = bytes else {
             return Ok(serde_json::json!({"kind":"too_large"}));
         };
         let cancellation = crate::cancellation::Cancellation::current();
         cancellation.check()?;
-        let snapshot = crate::comparison_snapshots::insert(&self.id(), bytes, permit)?;
+        let mut snapshot = crate::comparison_snapshots::insert(&self.id(), bytes, permit)?;
+        if let Some(digest) = digest {
+            snapshot["sha256"] = digest.into();
+        }
         if let Err(error) = cancellation.check() {
             if let Some(id) = snapshot["id"].as_str() {
                 let _ = crate::comparison_snapshots::release_owned(id);
@@ -114,6 +132,22 @@ mod tests {
                 .await
                 .unwrap();
             let id = uuid::Uuid::parse_str(snapshot["id"].as_str().unwrap()).unwrap();
+            let chunk = crate::comparison_snapshots::chunk(&repo.id(), id, 0, 100).unwrap();
+            assert_eq!(
+                STANDARD.decode(chunk["data"].as_str().unwrap()).unwrap(),
+                image
+            );
+            crate::comparison_snapshots::release(&repo.id(), id).unwrap();
+            let certified = repo
+                .renderer_working_file_with_digest(GitPath::Text("[a].png".into()), None, true)
+                .await
+                .unwrap();
+            use sha2::{Digest, Sha256};
+            assert_eq!(
+                certified["sha256"].as_str(),
+                Some(format!("{:x}", Sha256::digest(&image)).as_str())
+            );
+            let id = uuid::Uuid::parse_str(certified["id"].as_str().unwrap()).unwrap();
             let chunk = crate::comparison_snapshots::chunk(&repo.id(), id, 0, 100).unwrap();
             assert_eq!(
                 STANDARD.decode(chunk["data"].as_str().unwrap()).unwrap(),

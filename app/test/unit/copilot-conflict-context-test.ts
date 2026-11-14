@@ -369,6 +369,7 @@ describe('copilot-conflict-context', () => {
         files: [
           {
             path: 'src/app.ts',
+            conflictBasis: 'private-certificate-not-for-copilot',
             hunks: [
               {
                 oursContent: 'const x = 1',
@@ -396,6 +397,7 @@ describe('copilot-conflict-context', () => {
       assert.ok(result.includes('export default'))
       // Should not include base section for two-way conflict
       assert.ok(!result.includes('Base (common ancestor)'))
+      assert.ok(!result.includes('private-certificate-not-for-copilot'))
     })
 
     it('uses language from file extension in code fences', () => {

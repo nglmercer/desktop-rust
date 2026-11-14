@@ -36,8 +36,11 @@ import {
 import {
   AppFileStatusKind,
   FileChange,
+  GitStatusEntry,
   WorkingDirectoryFileChange,
 } from '../../src/models/status'
+import { ManualConflictResolution } from '../../src/models/manual-conflict-resolution'
+import { MultiCommitOperationStepKind } from '../../src/models/multi-commit-operation'
 
 const enabled = process.env.DESKTOP_TEST_BRIDGE === '1'
 const route = vi.hoisted(() => ({ client: undefined as BackendClient | undefined }))
@@ -365,17 +368,26 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const git = (...args: string[]) => execFileSync('git', ['-C', repository, '--literal-pathspecs', ...args], { encoding: 'utf8', env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory!, 'empty-global-config') }, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
       const conflictPath = '[conflict].txt'
       git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false')
-      await writeFile(path.join(repository, conflictPath), 'base\n'); git('add', '--', conflictPath); git('commit', '-qm', 'base')
-      git('switch', '-qc', 'topic'); await writeFile(path.join(repository, conflictPath), 'theirs\n'); git('commit', '-qam', 'topic')
-      git('switch', '-q', '-'); await writeFile(path.join(repository, conflictPath), 'ours\n'); git('commit', '-qam', 'ours')
+      git('commit', '--allow-empty', '-qm', 'seed'); const seed = git('rev-parse', 'HEAD')
+      await writeFile(path.join(repository, conflictPath), 'base\n'); await writeFile(path.join(repository, 'large-delete.txt'), 'base\n'); await symlink('old-target', path.join(repository, 'conflict-link'))
+      git('add', '--', conflictPath, 'large-delete.txt', 'conflict-link'); git('update-index', '--add', '--cacheinfo', '160000', seed, 'conflict-submodule'); git('commit', '-qm', 'base')
+      git('switch', '-qc', 'topic'); await writeFile(path.join(repository, conflictPath), 'theirs\n'); git('rm', '-q', '--', 'large-delete.txt', 'conflict-link'); git('update-index', '--force-remove', '--', 'conflict-submodule'); git('commit', '-qam', 'topic')
+      git('switch', '-q', '-'); await writeFile(path.join(repository, conflictPath), 'ours\n'); await writeFile(path.join(repository, 'large-delete.txt'), 'ours\n'); await unlink(path.join(repository, 'conflict-link')); await symlink('new-target', path.join(repository, 'conflict-link'))
+      git('add', '--', conflictPath, 'large-delete.txt', 'conflict-link'); git('update-index', '--cacheinfo', '160000', git('rev-parse', 'HEAD'), 'conflict-submodule'); git('commit', '-qm', 'ours')
       expect(() => git('merge', 'topic')).toThrow()
       const imagePath = path.join(repository, '[a].PNG')
       const bytes = Buffer.alloc(2 * 1024 * 1024 + 23, 0xab); bytes[0] = 0; bytes[1] = 255
       await writeFile(imagePath, bytes)
+      const binding = await client.request('repository_binding', { path: repository }) as { root_id: string }
+      const full = await client.request('conflict_detail', { path: conflictPath }, { repositoryId: binding.root_id }) as { basis: string }
+      const certificate = await client.request('conflict_detail', { path: conflictPath, max_working_bytes: 10_485_760, certificate_only: true }, { repositoryId: binding.root_id }) as { basis: string; stages: Array<Record<string, unknown>> }
+      expect(certificate.basis).toBe(full.basis)
+      expect(certificate.stages.every(stage => Object.keys(stage).join(',') === 'stage')).toBe(true)
       const { buildConflictContext } = await import('../../src/lib/copilot-conflict-context')
       const context = await buildConflictContext('ours', 'theirs', repository, [{ path: conflictPath }, { path: '[a].PNG' }])
       expect(context.files[0].hunks[0].oursContent).toBe('ours')
-      expect(context.files[1].skippedReason).toBe('No conflict markers found')
+      expect(context.files[0].conflictBasis).toMatch(/^[a-f0-9]{64}$/)
+      expect(context.files[1].skippedReason).toBe('Conflict changed or could not be read')
       await expect(client.repositoryReadSnapshot(repository, 'renderer_working_file', { path: conflictPath, max_bytes: 5 })).rejects.toThrow()
       const { getWorkingDirectoryImage } = await import('../../src/lib/git/diff')
       const model = { path: repository } as Repository
@@ -391,8 +403,53 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await expect(getWorkingDirectoryImage(model, new FileChange('outside.png', { kind: AppFileStatusKind.Modified }))).rejects.toThrow()
       const huge = await open(path.join(repository, 'huge.png'), 'w'); await huge.truncate(70_000_001); await huge.close()
       await expect(getWorkingDirectoryImage(model, new FileChange('huge.png', { kind: AppFileStatusKind.Modified }))).rejects.toThrow()
-      const hugeContext = await buildConflictContext('ours', 'theirs', repository, [{ path: 'huge.png' }])
+      const largeConflict = await open(path.join(repository, conflictPath), 'a'); await largeConflict.truncate(10_485_761); await largeConflict.close()
+      await expect(client.request('conflict_detail', { path: conflictPath, max_working_bytes: 10_485_760, certificate_only: true }, { repositoryId: binding.root_id })).resolves.toEqual({ kind: 'too_large' })
+      const hugeContext = await buildConflictContext('ours', 'theirs', repository, [{ path: conflictPath }])
       expect(hugeContext.files[0].skippedReason).toBe('File too large to resolve automatically')
+      const largeDelete = await open(path.join(repository, 'large-delete.txt'), 'a'); await largeDelete.truncate(10_485_761); await largeDelete.close()
+      const deletions = await buildConflictContext('ours', 'theirs', repository, [
+        { path: 'large-delete.txt', deletedSide: 'theirs' },
+        { path: 'conflict-link', deletedSide: 'theirs' },
+        { path: 'conflict-submodule', deletedSide: 'theirs' },
+      ])
+      for (const file of deletions.files) {
+        expect(file.deleteConflict).toEqual({ deletedSide: 'theirs' })
+        expect(file.conflictBasis).toMatch(/^[a-f0-9]{64}$/)
+        expect(file.rawContent).toBeUndefined()
+      }
+      const { reassembleResolutions } = await import('../../src/lib/copilot-conflict-resolution')
+      const suggestions = reassembleResolutions(deletions.files.map(file => ({
+        path: file.path,
+        hunks: [],
+        reasoning: 'reviewed',
+        action: file.path === 'conflict-submodule' ? 'delete' as const : 'keep' as const,
+      })), deletions.files)
+      const manual = new Map<string, ManualConflictResolution>()
+      const files = deletions.files.map(file => ({ path: file.path, status: { kind: AppFileStatusKind.Conflicted, entry: { us: GitStatusEntry.UpdatedButUnmerged, them: GitStatusEntry.Deleted } } } as WorkingDirectoryFileChange))
+      const { AppStore } = await import('../../src/lib/stores/app-store')
+      const store = Object.create(AppStore.prototype)
+      store.repositoryStateCache = { get: () => ({
+        multiCommitOperationState: { copilotResolutions: suggestions, step: { kind: MultiCommitOperationStepKind.ShowCopilotConflicts, conflictState: { manualResolutions: manual } } },
+        changesState: { workingDirectory: { files } },
+      }) }
+      store.statsStore = { increment: vi.fn() }
+      store._updateManualConflictResolution = (_repository: Repository, path: string, choice: ManualConflictResolution) => manual.set(path, choice)
+      await store.applyCopilotConflictResolutionsCore(model)
+      expect([...manual.entries()]).toEqual([
+        ['large-delete.txt', ManualConflictResolution.ours],
+        ['conflict-link', ManualConflictResolution.ours],
+        ['conflict-submodule', ManualConflictResolution.theirs],
+      ])
+      const { stageManualConflictResolution } = await import('../../src/lib/git/stage')
+      for (const file of files) {
+        const choice = manual.get(file.path)
+        if (choice === undefined) throw new Error('Missing manual conflict choice')
+        await stageManualConflictResolution(model, file, choice)
+        expect(git('ls-files', '--unmerged', '--', file.path)).toBe('')
+      }
+      expect(git('ls-files', '--stage', '--', 'conflict-link')).toMatch(/^120000 [a-f0-9]+ 0\t/)
+      expect(git('ls-files', '--stage', '--', 'conflict-submodule')).toBe('')
     }, 90_000)
 
     it('reviews worktree lifecycle and relocates the selected saved record', async () => {

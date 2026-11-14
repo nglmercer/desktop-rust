@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { join } from 'path'
-import { Dialog, DialogContent, DialogFooter } from '../../dialog'
+import { Dialog, DialogContent, DialogError, DialogFooter } from '../../dialog'
 import { DialogHeader } from '../../dialog/header'
 import { Dispatcher } from '../../dispatcher'
 import { Emoji } from '../../../lib/emoji'
@@ -78,6 +78,7 @@ enum CopilotConflictsTab {
 interface ICopilotConflictsDialogState {
   readonly isContinuing: boolean
   readonly selectedTab: CopilotConflictsTab
+  readonly resolutionError: string | null
 }
 
 const CopilotConflictsDialogTitleId = 'Dialog_Copilot_Conflicts'
@@ -102,6 +103,7 @@ export class CopilotConflictsDialog extends React.Component<
     this.state = {
       isContinuing: false,
       selectedTab: CopilotConflictsTab.Summary,
+      resolutionError: null,
     }
   }
 
@@ -126,6 +128,12 @@ export class CopilotConflictsDialog extends React.Component<
   }
 
   private onContinue = async () => {
+    if (
+      this.state.isContinuing ||
+      this.state.resolutionError !== null ||
+      this.props.copilotResolutions === null
+    )
+      return
     this.setState({ isContinuing: true })
     try {
       // Write Copilot resolutions to disk before continuing the operation.
@@ -135,8 +143,8 @@ export class CopilotConflictsDialog extends React.Component<
       )
       await this.props.onContinueAfterConflicts()
     } catch (e) {
-      this.setState({ isContinuing: false })
-      throw e
+      const message = e instanceof Error ? e.message : String(e)
+      this.setState({ isContinuing: false, resolutionError: message })
     }
   }
 
@@ -661,7 +669,8 @@ export class CopilotConflictsDialog extends React.Component<
 
   public render() {
     const { operationKind, workingDirectory, model } = this.props
-    const { isContinuing, selectedTab } = this.state
+    const { isContinuing, selectedTab, resolutionError } = this.state
+    const resolutionUnavailable = this.props.copilotResolutions === null
 
     const unmergedFiles = getUnmergedFiles(workingDirectory)
     const operation = __DARWIN__ ? operationKind : operationKind.toLowerCase()
@@ -683,6 +692,13 @@ export class CopilotConflictsDialog extends React.Component<
         loading={isContinuing}
         disabled={isContinuing}
       >
+        {(resolutionError !== null ||
+          (resolutionUnavailable && !isContinuing)) && (
+          <DialogError>
+            {resolutionError ??
+              'These suggestions are no longer available. Inspect the files and recovery history, refresh, and generate suggestions again.'}
+          </DialogError>
+        )}
         <DialogHeader
           title={`Resolve conflicts before ${operationKind}`}
           titleId={CopilotConflictsDialogTitleId}
@@ -720,9 +736,16 @@ export class CopilotConflictsDialog extends React.Component<
             </Button>
             <OkCancelButtonGroup
               okButtonText={`Continue ${operation}`}
-              okButtonDisabled={hasUnresolvedSkippedFiles || isContinuing}
+              okButtonDisabled={
+                hasUnresolvedSkippedFiles ||
+                isContinuing ||
+                resolutionError !== null ||
+                resolutionUnavailable
+              }
               okButtonTitle={
-                hasUnresolvedSkippedFiles
+                resolutionError !== null || resolutionUnavailable
+                  ? 'Refresh the repository and generate suggestions again.'
+                  : hasUnresolvedSkippedFiles
                   ? 'Some files were skipped by Copilot. Those need to be resolved manually.'
                   : undefined
               }

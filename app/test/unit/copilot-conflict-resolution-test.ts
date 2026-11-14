@@ -5,6 +5,7 @@ import {
   parseCopilotConflictResolution,
   reassembleResolvedFile,
   reassembleResolutions,
+  verifyCopilotConflictBases,
   validateResolutionPaths,
   extractSymbols,
   createDependencyAwareChunks,
@@ -704,6 +705,45 @@ describe('validateResolutionPaths', () => {
 // ---------------------------------------------------------------------------
 
 describe('reassembleResolutions', () => {
+  it('checks all automatic conflict certificates and ignores manual overrides', async () => {
+    const suggestions = [
+      {
+        path: 'first',
+        resolvedContent: 'one',
+        reasoning: '',
+        conflictBasis: 'a'.repeat(64),
+      },
+      {
+        path: 'second',
+        resolvedContent: 'two',
+        reasoning: '',
+        conflictBasis: 'b'.repeat(64),
+      },
+      { path: 'manual', resolvedContent: '', reasoning: '' },
+    ]
+    const seen: string[] = []
+    await verifyCopilotConflictBases(
+      suggestions,
+      new Set(['manual']),
+      async resolution => {
+        seen.push(resolution.path)
+        return resolution.path === 'first' ? 'a'.repeat(64) : 'b'.repeat(64)
+      }
+    )
+    assert.deepEqual(seen, ['first', 'second'])
+    await assert.rejects(
+      verifyCopilotConflictBases(suggestions, new Set(['manual']), async () =>
+        'a'.repeat(64)
+      ),
+      /Conflict changed/
+    )
+    await assert.rejects(
+      verifyCopilotConflictBases(suggestions.slice(2), new Set(), async () =>
+        'a'.repeat(64)
+      ),
+      /Conflict review/
+    )
+  })
   it('passes through action-based resolutions with deleteConflictAction', () => {
     const rawResolutions = [
       {
@@ -717,6 +757,7 @@ describe('reassembleResolutions', () => {
       {
         path: 'deleted.ts',
         hunks: [],
+        conflictBasis: 'a'.repeat(64),
         deleteConflict: { deletedSide: 'theirs' },
       },
     ]
@@ -726,6 +767,7 @@ describe('reassembleResolutions', () => {
     assert.equal(result[0].deleteConflictAction, 'delete')
     assert.equal(result[0].resolvedContent, '')
     assert.equal(result[0].reasoning, 'File is obsolete')
+    assert.equal(result[0].conflictBasis, 'a'.repeat(64))
   })
 
   it('handles mixed action and text resolutions', () => {
@@ -765,6 +807,7 @@ describe('reassembleResolutions', () => {
           },
         ],
         rawContent,
+        conflictBasis: 'b'.repeat(64),
       },
       {
         path: 'deleted.ts',
@@ -778,6 +821,7 @@ describe('reassembleResolutions', () => {
     // Text resolution was reassembled
     assert.equal(result[0].deleteConflictAction, undefined)
     assert.ok(result[0].resolvedContent.includes('merged'))
+    assert.equal(result[0].conflictBasis, 'b'.repeat(64))
 
     // Action resolution was passed through
     assert.equal(result[1].deleteConflictAction, 'keep')

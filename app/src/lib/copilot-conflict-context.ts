@@ -27,6 +27,8 @@ export interface IConflictHunk {
 export interface IFileConflictContext {
   /** Repository-relative file path */
   readonly path: string
+  /** Local-only certificate identifying the conflict used for the suggestion. */
+  readonly conflictBasis?: string
   /** All conflict hunks in the file (empty if skipped or delete-vs-modify) */
   readonly hunks: ReadonlyArray<IConflictHunk>
   /** If the file was skipped, the reason why (shown in prompt so Copilot knows) */
@@ -376,122 +378,190 @@ export async function buildConflictContext(
     readonly deletedSide?: 'ours' | 'theirs'
   }>
 ): Promise<ICopilotConflictContext> {
-  const results = await Promise.all(
-    files.map(async (file): Promise<IFileConflictContext> => {
-      // Delete-vs-modify conflicts have no text markers on disk. Include
-      // them in the context with metadata so the model can recommend
-      // keep or delete — no file content is needed.
-      if (file.deletedSide !== undefined) {
-        return {
-          path: file.path,
-          hunks: [],
-          deleteConflict: { deletedSide: file.deletedSide },
-        }
-      }
-
-      let content: string
-      if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-        // Rust confines the path to the selected repository and applies the
-        // size bound before reading, including when the file grows mid-read.
-        try {
-          const read = () =>
-            backend().repositoryReadSnapshot(
-              workingDirectory,
-              'renderer_working_file',
-              { path: file.path, max_bytes: MAX_CONFLICT_FILE_READ_SIZE }
-            )
-          const bytes =
-            backend().transportKind === 'wry'
-              ? await withRepositoryGitOperation(workingDirectory, 'read', read, true)
-              : await read()
-          if (bytes === null || bytes.byteLength > MAX_CONFLICT_FILE_READ_SIZE) {
-            throw new Error('Conflict file is unavailable')
+  // Each conflict requires several Rust requests. Keep the transport queue
+  // bounded even when a merge contains hundreds of files.
+  const results: IFileConflictContext[] = []
+  for (let offset = 0; offset < files.length; offset += 4) {
+    const batch = await Promise.all(
+      files
+        .slice(offset, offset + 4)
+        .map(async (file): Promise<IFileConflictContext> => {
+          const native =
+            typeof window !== 'undefined' && backend().transportKind !== 'none'
+          let conflictBasis: string | undefined
+          let nativeContent: string | undefined
+          if (native) {
+            try {
+              const capture = async () => {
+                const limit =
+                  file.deletedSide === undefined
+                    ? MAX_CONFLICT_FILE_READ_SIZE
+                    : null
+                const before = await backend().repositoryCopilotConflictBasis(
+                  workingDirectory,
+                  file.path,
+                  limit,
+                  file.deletedSide !== undefined
+                )
+                if (file.deletedSide === undefined) {
+                  if (!before.ours || !before.theirs)
+                    throw new Error('Conflict sides changed')
+                } else if (
+                  before.ours !== (file.deletedSide !== 'ours') ||
+                  before.theirs !== (file.deletedSide !== 'theirs')
+                ) {
+                  throw new Error('Conflict sides changed')
+                }
+                let bytes: Uint8Array | null = null
+                if (file.deletedSide === undefined) {
+                  if (before.sha256 === null)
+                    throw new Error('Conflict file changed')
+                  bytes = await backend().repositoryReadSnapshot(
+                    workingDirectory,
+                    'renderer_working_file',
+                    { path: file.path, max_bytes: MAX_CONFLICT_FILE_READ_SIZE },
+                    before.sha256
+                  )
+                  if (
+                    bytes === null ||
+                    bytes.byteLength > MAX_CONFLICT_FILE_READ_SIZE ||
+                    before.size !== bytes.byteLength
+                  )
+                    throw new Error('Conflict file changed')
+                }
+                const after = await backend().repositoryCopilotConflictBasis(
+                  workingDirectory,
+                  file.path,
+                  limit,
+                  file.deletedSide !== undefined
+                )
+                if (before.basis !== after.basis)
+                  throw new Error('Conflict changed while reading')
+                return { basis: before.basis, bytes }
+              }
+              const captured =
+                backend().transportKind === 'wry'
+                  ? await withRepositoryGitOperation(
+                      workingDirectory,
+                      'read',
+                      capture,
+                      true
+                    )
+                  : await capture()
+              conflictBasis = captured.basis
+              if (captured.bytes !== null)
+                nativeContent = new TextDecoder('utf-8', {
+                  ignoreBOM: true,
+                  fatal: true,
+                }).decode(captured.bytes)
+            } catch (error) {
+              return {
+                path: file.path,
+                hunks: [],
+                skippedReason:
+                  error instanceof BackendError &&
+                  error.code === 'file_too_large'
+                    ? 'File too large to resolve automatically'
+                    : 'Conflict changed or could not be read',
+              }
+            }
           }
-          content = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)
-        } catch (error) {
-          return {
-            path: file.path,
-            hunks: [],
-            skippedReason:
-              error instanceof BackendError && error.code === 'file_too_large'
-                ? 'File too large to resolve automatically'
-                : 'File could not be read',
-          }
-        }
-      } else {
-        // Guard against path traversal and symlink escapes (cross-platform)
-        let absolutePath: string | null
-        try {
-          absolutePath = await resolveWithin(workingDirectory, file.path)
-        } catch {
-          return {
-            path: file.path,
-            hunks: [],
-            skippedReason: 'File path could not be resolved safely',
-          }
-        }
-        if (absolutePath === null) {
-          return {
-            path: file.path,
-            hunks: [],
-            skippedReason: 'File path is outside the repository',
-          }
-        }
-
-        // Guard against reading pathologically large files into memory. This is
-        // a memory-safety bound only — resolvability is decided from the conflict
-        // hunks below, not the whole-file size.
-        try {
-          const fileStat = await stat(absolutePath)
-          if (fileStat.size > MAX_CONFLICT_FILE_READ_SIZE) {
+          // Delete-vs-modify conflicts have no text markers on disk. Include
+          // them in the context with metadata so the model can recommend
+          // keep or delete — no file content is needed.
+          if (file.deletedSide !== undefined) {
             return {
               path: file.path,
               hunks: [],
-              skippedReason: 'File too large to resolve automatically',
+              ...(conflictBasis === undefined ? {} : { conflictBasis }),
+              deleteConflict: { deletedSide: file.deletedSide },
             }
           }
-        } catch {
+
+          let content: string
+          if (nativeContent !== undefined) {
+            content = nativeContent
+          } else {
+            // Guard against path traversal and symlink escapes (cross-platform)
+            let absolutePath: string | null
+            try {
+              absolutePath = await resolveWithin(workingDirectory, file.path)
+            } catch {
+              return {
+                path: file.path,
+                hunks: [],
+                skippedReason: 'File path could not be resolved safely',
+              }
+            }
+            if (absolutePath === null) {
+              return {
+                path: file.path,
+                hunks: [],
+                skippedReason: 'File path is outside the repository',
+              }
+            }
+
+            // Guard against reading pathologically large files into memory. This is
+            // a memory-safety bound only — resolvability is decided from the conflict
+            // hunks below, not the whole-file size.
+            try {
+              const fileStat = await stat(absolutePath)
+              if (fileStat.size > MAX_CONFLICT_FILE_READ_SIZE) {
+                return {
+                  path: file.path,
+                  hunks: [],
+                  skippedReason: 'File too large to resolve automatically',
+                }
+              }
+            } catch {
+              return {
+                path: file.path,
+                hunks: [],
+                skippedReason: 'File could not be read',
+              }
+            }
+
+            try {
+              content = await readFile(absolutePath, 'utf8')
+            } catch {
+              return {
+                path: file.path,
+                hunks: [],
+                skippedReason: 'File could not be read',
+              }
+            }
+          }
+
+          const hunks = extractConflictHunks(content)
+          if (hunks.length === 0) {
+            return {
+              path: file.path,
+              hunks: [],
+              skippedReason: 'No conflict markers found',
+            }
+          }
+
+          // Gate on the size of the conflict content we'd actually send to the
+          // model, not the whole-file size.
+          const hunkSkipReason = getHunkSkipReason(hunks)
+          if (hunkSkipReason !== null) {
+            return {
+              path: file.path,
+              hunks: [],
+              skippedReason: hunkSkipReason,
+            }
+          }
+
           return {
             path: file.path,
-            hunks: [],
-            skippedReason: 'File could not be read',
+            hunks,
+            rawContent: content,
+            ...(conflictBasis === undefined ? {} : { conflictBasis }),
           }
-        }
-
-        try {
-          content = await readFile(absolutePath, 'utf8')
-        } catch {
-          return {
-            path: file.path,
-            hunks: [],
-            skippedReason: 'File could not be read',
-          }
-        }
-      }
-
-      const hunks = extractConflictHunks(content)
-      if (hunks.length === 0) {
-        return {
-          path: file.path,
-          hunks: [],
-          skippedReason: 'No conflict markers found',
-        }
-      }
-
-      // Gate on the size of the conflict content we'd actually send to the
-      // model, not the whole-file size.
-      const hunkSkipReason = getHunkSkipReason(hunks)
-      if (hunkSkipReason !== null) {
-        return {
-          path: file.path,
-          hunks: [],
-          skippedReason: hunkSkipReason,
-        }
-      }
-
-      return { path: file.path, hunks, rawContent: content }
-    })
-  )
+        })
+    )
+    results.push(...batch)
+  }
 
   return {
     ourLabel,

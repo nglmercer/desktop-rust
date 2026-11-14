@@ -266,6 +266,10 @@ pub enum Operation {
     },
     ConflictDetail {
         path: GitPath,
+        #[serde(default)]
+        max_working_bytes: Option<u64>,
+        #[serde(default)]
+        certificate_only: bool,
     },
     StageConflict {
         path: GitPath,
@@ -505,6 +509,8 @@ pub enum Operation {
         path: GitPath,
         #[serde(default)]
         max_bytes: Option<u64>,
+        #[serde(default)]
+        sha256: bool,
     },
     RendererBlobPrefix {
         revision: String,
@@ -1249,4 +1255,35 @@ pub enum ChangesStrategy {
     AskForConfirmation,
     StashOnCurrentBranch,
     MoveToNewBranch,
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn old_conflict_and_working_file_requests_keep_their_defaults() {
+        let conflict: Operation =
+            serde_json::from_value(json!({"method":"conflict_detail", "path":"file"})).unwrap();
+        assert!(matches!(
+            conflict,
+            Operation::ConflictDetail {
+                max_working_bytes: None,
+                certificate_only: false,
+                ..
+            }
+        ));
+        let working: Operation =
+            serde_json::from_value(json!({"method":"renderer_working_file", "path":"file"}))
+                .unwrap();
+        assert!(matches!(
+            working,
+            Operation::RendererWorkingFile {
+                max_bytes: None,
+                sha256: false,
+                ..
+            }
+        ));
+    }
 }

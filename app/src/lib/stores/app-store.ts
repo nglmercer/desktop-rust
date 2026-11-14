@@ -472,6 +472,7 @@ import { BypassReasonType } from '../../ui/secret-scanning/bypass-push-protectio
 import {
   selectReferencedContext,
   fallbackReferencedContext,
+  verifyCopilotConflictBases,
   IConflictResolutionProgress,
   ICopilotResolutionSummary,
   IFileResolution,
@@ -8897,8 +8898,26 @@ export class AppStore extends TypedBaseStore<IAppState> {
   ): Promise<void> {
     return this.withAssistedCommitMutationResources(repository, async () => {
       this.assistedCommits.state.assertAvailable(repository)
-      return withRepositoryGitOperation(repository.path, 'mutation', () =>
-        this.applyCopilotConflictResolutionsCore(repository)
+      return withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        async () => {
+          const original = this.repositoryStateCache.get(repository)
+            .multiCommitOperationState?.copilotResolutions
+          try {
+            await this.applyCopilotConflictResolutionsCore(repository)
+          } finally {
+            const current = this.repositoryStateCache.get(repository)
+              .multiCommitOperationState
+            if (original != null && current?.copilotResolutions === original) {
+              this.repositoryStateCache.updateMultiCommitOperationState(
+                repository,
+                () => ({ copilotResolutions: null })
+              )
+              this.emitUpdate()
+            }
+          }
+        }
       )
     })
   }
@@ -8926,6 +8945,23 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.statsStore.increment('copilotConflictResolutionAcceptedCount')
     if (manualResolutions.size > 0) {
       this.statsStore.increment('copilotConflictResolutionWithOverridesCount')
+    }
+
+    // A native certificate is captured from the conflict used for generation.
+    // Recheck every automatic suggestion before starting the legacy write path;
+    // this does not replace an atomic native publication.
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      await verifyCopilotConflictBases(
+        copilotResolutions,
+        new Set(manualResolutions.keys()),
+        async resolution =>
+          (await backend().repositoryCopilotConflictBasis(
+            repository.path,
+            resolution.path,
+            resolution.deleteConflictAction === undefined ? 10_485_760 : null,
+            resolution.deleteConflictAction !== undefined
+          )).basis
+      )
     }
 
     const pathsToStage: string[] = []
