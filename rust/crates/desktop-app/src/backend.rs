@@ -909,6 +909,8 @@ impl Backend {
                 operation,
                 Operation::RendererFetchPreview { .. }
                     | Operation::RendererFetch { .. }
+                    | Operation::RendererPullPreview { .. }
+                    | Operation::RendererPull { .. }
                     | Operation::RendererPushPreview { .. }
                     | Operation::RendererPush { .. }
                     | Operation::RendererRemoteHeadPreview { .. }
@@ -1057,6 +1059,7 @@ impl Backend {
             &request.operation,
             GitInfoOperation::FetchRemote {
                 operation: Operation::RendererFetch { .. }
+                    | Operation::RendererPull { .. }
                     | Operation::RendererPush { .. }
                     | Operation::RendererRemoteHead { .. },
                 ..
@@ -1679,7 +1682,9 @@ impl Backend {
                 operation: Operation::PublishSelectedCommit { .. },
                 ..
             }) | BackendOperation::GitInfo(GitInfoOperation::FetchRemote {
-                operation: Operation::RendererFetch { .. } | Operation::RendererPush { .. },
+                operation: Operation::RendererFetch { .. }
+                    | Operation::RendererPull { .. }
+                    | Operation::RendererPush { .. },
                 ..
             }) | BackendOperation::GitInfo(GitInfoOperation::CloneSelected { .. })
         ) {
@@ -1778,6 +1783,7 @@ impl Backend {
                     }
                     | GitInfoOperation::FetchRemote {
                         operation: Operation::RendererFetch { .. }
+                            | Operation::RendererPull { .. }
                             | Operation::RendererPush { .. }
                             | Operation::RendererRemoteHead { .. },
                         ..

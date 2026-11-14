@@ -1,4 +1,4 @@
-use crate::CreationFile;
+use crate::{CreationFile, RendererPullRequest};
 use serde::{Deserialize, Serialize};
 
 /// A literal repository-relative path, preserving Unix filename bytes when needed.
@@ -333,6 +333,13 @@ pub enum Operation {
     },
     RendererFetch {
         request: RendererFetchRequest,
+        basis: String,
+    },
+    RendererPullPreview {
+        request: RendererPullRequest,
+    },
+    RendererPull {
+        request: RendererPullRequest,
         basis: String,
     },
     RendererPushPreview {

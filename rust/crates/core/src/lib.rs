@@ -69,6 +69,8 @@ mod refs;
 mod renderer_cherry_pick;
 mod renderer_fast_forward;
 mod renderer_fetch;
+mod renderer_pull;
+pub use renderer_pull::RendererPullRequest;
 mod renderer_merge;
 mod renderer_push;
 mod renderer_rebase;
@@ -839,6 +841,12 @@ impl Repository {
             Operation::RendererFetch { request, basis } => {
                 return self.renderer_fetch(&request, &basis).await;
             }
+            Operation::RendererPullPreview { request } => {
+                return self.renderer_pull_preview(&request).await;
+            }
+            Operation::RendererPull { request, basis } => {
+                return self.renderer_pull(&request, &basis).await;
+            }
             Operation::RendererPushPreview { request } => {
                 return self.renderer_push_preview(&request).await;
             }
@@ -1525,6 +1533,8 @@ impl Repository {
             | RendererFastForwardPreview { .. }
             | RendererFetchPreview { .. }
             | RendererFetch { .. }
+            | RendererPullPreview { .. }
+            | RendererPull { .. }
             | RendererPushPreview { .. }
             | RendererPush { .. }
             | RendererRemoteHeadPreview { .. }

@@ -19,6 +19,20 @@ describe('backend Copilot session cleanup', () => {
     Reflect.deleteProperty(window, '__desktop')
   })
 
+  it('falls back on an older Wry host only when the pull preview is unsupported', async () => {
+    const invoke = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    const request = { remote: 'origin', expected_url: '/source', no_verify: false, report_progress: false, require_hook_callbacks: false }
+    invoke.mockRejectedValueOnce({ message: 'invalid ipc arguments: invalid Git identity request' })
+    await expect(client.pullRepositoryRemote('/repo', request)).rejects.toBeInstanceOf(FetchPreviewUnsupported)
+    expect(invoke).toHaveBeenCalledTimes(1)
+    invoke.mockResolvedValueOnce({ remote: 'origin', basis: 'a'.repeat(64) })
+      .mockRejectedValueOnce({ message: 'invalid ipc arguments: invalid Git identity request' })
+    await expect(client.pullRepositoryRemote('/repo', request)).rejects.toMatchObject({ message: expect.stringContaining('outcome is uncertain'), retryable: false })
+    expect(invoke).toHaveBeenCalledTimes(3)
+  })
+
   it('discovers terminals and requests a repository subdirectory through Wry', async () => {
     const invoke = vi.fn()
       .mockResolvedValueOnce({ terminals: [{ name: 'Konsole', path: '/usr/bin/konsole' }] })

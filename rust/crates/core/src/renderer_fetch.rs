@@ -243,7 +243,10 @@ impl Repository {
         Ok(json!({"code":output.code}))
     }
 
-    async fn renderer_fetch_review(&self, request: &RendererFetchRequest) -> Result<String> {
+    pub(crate) async fn renderer_fetch_review(
+        &self,
+        request: &RendererFetchRequest,
+    ) -> Result<String> {
         for variable in [
             "GIT_DIR",
             "GIT_WORK_TREE",

@@ -285,6 +285,10 @@ export interface FetchFailure {
   readonly exitCode: number
   readonly errorKind: FetchErrorKind | null
 }
+export interface PullFailure {
+  readonly exitCode: number
+  readonly errorKind: FetchErrorKind | 'merge_conflicts' | 'rebase_conflicts' | 'merge_local_changes' | 'rebase_local_changes' | 'local_changes_overwritten' | 'unrelated_histories' | 'config_lock_exists' | 'no_matching_remote_branch' | 'no_existing_remote_branch' | 'missing_upstream' | null
+}
 const pushErrorKinds = ['push_non_fast_forward', 'push_file_too_large', 'push_private_email', 'push_review_required', 'push_protected_force', 'push_required_status', 'push_force_rejected', 'push_protection'] as const
 export type PushErrorKind = typeof pushErrorKinds[number]
 export interface PushFailure {
@@ -426,7 +430,7 @@ class WryTransport {
       }
       const fetchMutation = method === 'git_info' && isRecord(params) &&
         isRecord(params.operation) && params.operation.type === 'fetch_remote' &&
-        isRecord(params.operation.operation) && (params.operation.operation.method === 'renderer_fetch' || params.operation.operation.method === 'renderer_remote_head' || params.operation.operation.method === 'renderer_push')
+        isRecord(params.operation.operation) && (params.operation.operation.method === 'renderer_fetch' || params.operation.operation.method === 'renderer_remote_head' || params.operation.operation.method === 'renderer_push' || params.operation.operation.method === 'renderer_pull')
       const cloneMutation = method === 'git_info' && isRecord(params) &&
         isRecord(params.operation) && (params.operation.type === 'clone_selected' || params.operation.type === 'recover_clone')
       const maximum = fetchMutation || cloneMutation ? 3_600_000 : method === 'copilot' ? 330_000 : 60_000
@@ -3105,6 +3109,58 @@ export class BackendClient {
       throw new BackendError({ code: cause.code, message: 'Remote HEAD outcome is uncertain; inspect the remote reference before retrying', retryable: false })
     }
     if (!isRecord(result) || !Number.isSafeInteger(result.code) || ![0, 1, 128].includes(result.code as number)) throw new BackendError({ code: 'git_error', message: 'Unable to update remote HEAD; inspect the remote reference before retrying', retryable: false })
+  }
+
+  /** Pull a reviewed remote once; a failed invocation must never be retried automatically. */
+  async pullRepositoryRemote(repositoryPath: string, request: {
+    readonly remote: string
+    readonly expected_url: string
+    readonly no_verify: boolean
+    readonly report_progress: boolean
+    readonly require_hook_callbacks: boolean
+    readonly expected_saml_owner?: string
+  }, onProgress?: (chunk: FetchProgressChunk) => void): Promise<PullFailure | undefined> {
+    if (onProgress && this.transport === 'wry' && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
+      throw new FetchPreviewUnsupported('Native pull progress is unavailable')
+    }
+    const call = (method: 'renderer_pull_preview' | 'renderer_pull', extra: Record<string, unknown> = {}) => {
+      const options = method === 'renderer_pull' ? { onProgress, deadlineMs: 3_600_000 } : {}
+      return this.transport === 'wry'
+        ? this.request('git_info', { operation: { type: 'fetch_remote', repository_path: repositoryPath, operation: { method, request, ...extra } } }, options)
+        : this.repositoryRead(repositoryPath, method, { request, ...extra }, options)
+    }
+    let preview: unknown
+    try {
+      preview = await call('renderer_pull_preview')
+    } catch (error) {
+      // Older Wry hosts reject an unknown operation while decoding this
+      // read-only preview. No Git mutation has been admitted at this point.
+      if (this.transport === 'wry' && toBackendError(error).message.endsWith('invalid Git identity request')) {
+        throw new FetchPreviewUnsupported('Native pull is unavailable in this host')
+      }
+      throw error
+    }
+    if (isRecord(preview) && ['unsupported', 'unsupported_hooks', 'unsupported_submodules'].includes(String(preview.kind))) {
+      throw new FetchPreviewUnsupported('Pull requires functionality not available in the native backend')
+    }
+    if (!isRecord(preview) || preview.remote !== request.remote || typeof preview.basis !== 'string' || !/^[a-f0-9]{64}$/.test(preview.basis)) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid pull review', retryable: false })
+    }
+    let result: unknown
+    try {
+      result = await call('renderer_pull', { basis: preview.basis })
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({ code: cause.code, message: 'Pull outcome is uncertain; inspect the repository before retrying', retryable: false })
+    }
+    if (!isRecord(result) || !Number.isSafeInteger(result.code) || (result.error_kind !== null && !(typeof result.error_kind === 'string' && (fetchErrorKinds.includes(result.error_kind as FetchErrorKind) || ['merge_conflicts', 'rebase_conflicts', 'merge_local_changes', 'rebase_local_changes', 'local_changes_overwritten', 'unrelated_histories', 'config_lock_exists', 'no_matching_remote_branch', 'no_existing_remote_branch', 'missing_upstream'].includes(result.error_kind))))) {
+      throw new BackendError({ code: 'invalid_response', message: 'Pull outcome is uncertain; inspect the repository', retryable: false })
+    }
+    if (result.code === 0) {
+      if (result.error_kind !== null) throw new BackendError({ code: 'invalid_response', message: 'Invalid pull result; inspect the repository', retryable: false })
+      return
+    }
+    return { exitCode: result.code as number, errorKind: result.error_kind as PullFailure['errorKind'] }
   }
 
   /** Fetch a named remote after reviewing its configuration and repository state. */

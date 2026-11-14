@@ -2851,6 +2851,27 @@ unreadable paths are skipped. Relative symlinks must remain inside the worktree
 and Git metadata is excluded. Applying Copilot's generated resolutions remains
 a separate legacy Node-backed workflow and has not been migrated by this read.
 
+Wry and browser WebSocket Pull use one reviewed Rust Git invocation when the
+hooks environment option is disabled. Git still runs ordinary hooks, and the
+selected-account broker scopes credentials to the reviewed remote. Progress is
+filtered and observer callbacks do not inherit the Git operation's ownership.
+When the hooks environment option is enabled, Wry retains its existing path
+and WebSocket reports the operation as unsupported before Git starts. This
+option defaults to enabled in development and beta builds; its configured
+shell and interactive hook callbacks have not yet been migrated. Terminal
+output observers and unsupported Wry proxy configurations likewise retain the
+existing Wry path before mutation. Once Git starts, an uncertain result is
+reported without retrying Pull.
+
+The reviewed path rejects existing or configured submodules before mutation,
+because recursive credentials are not yet proven isolated. A real Git test
+covers a newly introduced, uninitialized gitlink, but this does not establish
+coverage of every configuration or an HTTPS credential helper in an embedded
+submodule. The index scan has a 2 MiB output limit; larger repositories use
+the prior Wry path or receive an unsupported result over WebSocket. Independent
+writers and hooks can still change the repository or configuration between the
+last review and Git starting. Native platform parity remains to be verified.
+
 Assisted push still refuses to proceed when its isolated URL pin cannot be
 verified as a single destination. Git 2.45 retains earlier multi-valued push
 URLs despite an empty reset; a real local-repository test confirms that it can

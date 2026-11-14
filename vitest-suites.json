@@ -1,4 +1,8 @@
 [
+  "rust/tests/wry-pull.test.ts",
+  "app/test/unit/rust-pull-progress-ownership-test.ts",
+  "rust/tests/pull-websocket.test.ts",
+  "app/test/unit/rust-pull-routing-test.ts",
   "app/test/unit/clone-destination-browser-integration-test.tsx",
   "app/test/unit/clone-destination-websocket-test.tsx",
   "app/test/unit/ahead-behind-store-test.ts",

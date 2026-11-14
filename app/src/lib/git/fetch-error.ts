@@ -16,7 +16,8 @@ const errorKinds: Record<FetchErrorKind, DugiteError | null> = {
   lock_file_exists: DugiteError.LockFileAlreadyExists,
   bad_config_value: DugiteError.BadConfigValue,
   no_submodule_mapping: DugiteError.NoSubmoduleMapping,
-  submodule_repository_does_not_exist: DugiteError.SubmoduleRepositoryDoesNotExist,
+  submodule_repository_does_not_exist:
+    DugiteError.SubmoduleRepositoryDoesNotExist,
   invalid_submodule_sha: DugiteError.InvalidSubmoduleSHA,
   remote_repository_unavailable: null,
   remote_ref_not_found: null,
@@ -28,11 +29,14 @@ const errorKinds: Record<FetchErrorKind, DugiteError | null> = {
 // These fixed descriptions preserve useful fetch diagnostics without exposing
 // remote-controlled paths, URLs, or credentials to the renderer.
 const fetchDescriptions: Partial<Record<FetchErrorKind, string>> = {
-  remote_repository_unavailable: 'The remote repository could not be accessed. Check that it exists and that you have access.',
+  remote_repository_unavailable:
+    'The remote repository could not be accessed. Check that it exists and that you have access.',
   remote_ref_not_found: 'The requested reference was not found on the remote.',
-  fetch_non_fast_forward: 'The fetch would overwrite a local reference that cannot be fast-forwarded.',
+  fetch_non_fast_forward:
+    'The fetch would overwrite a local reference that cannot be fast-forwarded.',
   fetch_tag_clobber: 'The fetch would overwrite an existing local tag.',
-  host_resolution_failed: 'The remote host could not be resolved. Check your connection and remote URL.',
+  host_resolution_failed:
+    'The remote host could not be resolved. Check your connection and remote URL.',
 }
 
 // Keep the marker separate from the error's public diagnostics. Creating a
@@ -48,9 +52,11 @@ export function isNativeFetchSamlReauthError(error: GitError): boolean {
 export function fetchFailureToGitError(
   failure: FetchFailure,
   repositoryPath: string,
-  remote: string
+  remote: string,
+  operation: 'fetch' | 'pull' = 'fetch'
 ): GitError {
-  const gitError = failure.errorKind === null ? null : errorKinds[failure.errorKind]
+  const gitError =
+    failure.errorKind === null ? null : errorKinds[failure.errorKind]
   const error = new GitError(
     {
       exitCode: failure.exitCode,
@@ -58,13 +64,19 @@ export function fetchFailureToGitError(
       stderr: '',
       path: repositoryPath,
       gitError,
-      gitErrorDescription: failure.errorKind === null ? null :
-        fetchDescriptions[failure.errorKind] ?? (gitError === null ? null : getDescriptionForError(gitError, '')),
+      gitErrorDescription:
+        failure.errorKind === null
+          ? null
+          : fetchDescriptions[failure.errorKind] ??
+            (gitError === null ? null : getDescriptionForError(gitError, '')),
     },
-    ['fetch', '--', remote],
+    [operation, '--', remote],
     ''
   )
-  if (failure.errorKind === 'https_saml_reauth_required' || failure.errorKind === 'ssh_saml_reauth_required') {
+  if (
+    failure.errorKind === 'https_saml_reauth_required' ||
+    failure.errorKind === 'ssh_saml_reauth_required'
+  ) {
     samlReauthErrors.add(error)
   }
   return error

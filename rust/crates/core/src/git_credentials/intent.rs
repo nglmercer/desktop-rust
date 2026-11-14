@@ -63,6 +63,9 @@ async fn collect_operation(
         | Operation::RendererRemoteHead { request, .. } => {
             requests.push((request.remote.clone(), Direction::Fetch))
         }
+        Operation::RendererPull { request, .. } => {
+            requests.push((request.remote.clone(), Direction::Fetch))
+        }
         Operation::Push { remote, .. } => requests.push((remote.clone(), Direction::Push)),
         Operation::RendererPush { request, .. } => {
             requests.push((request.remote.clone(), Direction::Push))
