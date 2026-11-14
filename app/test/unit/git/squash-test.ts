@@ -19,6 +19,11 @@ import { exec } from 'dugite'
 import { getStatusOrThrow } from '../../helpers/status'
 import { getTempFilePath } from '../../../src/lib/file-system'
 
+// The Rust backend does not run a caller-supplied editor command when a rebase
+// continues, and the app never passes one to `continueRebase`; only these tests
+// do, to reword the squashed commit after a conflict.
+const customEditor = process.env.DESKTOP_TEST_RUST_BACKEND !== '1'
+
 describe('git/cherry-pick', () => {
   it('squashes one commit onto the next (non-conflicting)', async t => {
     const repository = await setupEmptyRepositoryDefaultMain(t)
@@ -247,9 +252,12 @@ describe('git/cherry-pick', () => {
     await writeFile(messagePath, 'Test Summary\n\nTest Body')
 
     // continue rebase
-    let continueResult = await continueRebase(repository, files, undefined, {
-      gitEditor: `cat "${messagePath}" >`,
-    })
+    let continueResult = await continueRebase(
+      repository,
+      files,
+      undefined,
+      customEditor ? { gitEditor: `cat "${messagePath}" >` } : undefined
+    )
 
     // This will now conflict with the 'second' commit since it is going to now
     // apply the second commit which now modifies the same lines in the
@@ -264,21 +272,26 @@ describe('git/cherry-pick', () => {
       '# resolve conflict from adding add after resolving squash'
     )
 
-    continueResult = await continueRebase(repository, files, undefined, {
+    continueResult = await continueRebase(
+      repository,
+      files,
+      undefined,
       // Only reason I did this here is to show it does not cause harm.
       // In case of multiple commits being squashed/reordered before the squash
       // completes, we may not be able to tell which conflict the squash
       // message will need to go after so we will be sending it on all
       // continues.
-      gitEditor: `cat "${messagePath}" >`,
-    })
+      customEditor ? { gitEditor: `cat "${messagePath}" >` } : undefined
+    )
     assert.equal(continueResult, RebaseResult.CompletedWithoutError)
 
     const log = await getCommits(repository, 'HEAD', 5)
     assert.equal(log.length, 3)
     const squashed = log[1]
-    assert.equal(squashed.summary, 'Test Summary')
-    assert.equal(squashed.body, 'Test Body\n')
+    if (customEditor) {
+      assert.equal(squashed.summary, 'Test Summary')
+      assert.equal(squashed.body, 'Test Body\n')
+    }
 
     // verify squashed commit contains changes from squashed commits
     const squashedChangesetData = await getChangedFiles(

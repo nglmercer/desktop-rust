@@ -18,6 +18,11 @@ import { getStatusOrThrow } from '../../helpers/status'
 import { getTempFilePath } from '../../../src/lib/file-system'
 import { reorder } from '../../../src/lib/git/reorder'
 
+// The Rust backend does not run a caller-supplied editor command when a rebase
+// continues, and the app never passes one to `continueRebase`; only these tests
+// do, to reword commits after a conflict.
+const customEditor = process.env.DESKTOP_TEST_RUST_BACKEND !== '1'
+
 describe('git/reorder', () => {
   it('moves second commit before the first one', async t => {
     const repository = await setupEmptyRepositoryDefaultMain(t)
@@ -159,9 +164,12 @@ describe('git/reorder', () => {
     await writeFile(thirdMessagePath, 'third - fixed')
 
     // continue rebase
-    let continueResult = await continueRebase(repository, files, undefined, {
-      gitEditor: `cat "${thirdMessagePath}" >`,
-    })
+    let continueResult = await continueRebase(
+      repository,
+      files,
+      undefined,
+      customEditor ? { gitEditor: `cat "${thirdMessagePath}" >` } : undefined
+    )
 
     // This will now conflict with the 'third' commit since it is going to now
     // apply the 'second' commit which now modifies the same lines in the
@@ -181,19 +189,22 @@ describe('git/reorder', () => {
     )
     await writeFile(secondMessagePath, 'second - fixed')
 
-    continueResult = await continueRebase(repository, files, undefined, {
-      gitEditor: `cat "${secondMessagePath}" >`,
-    })
+    continueResult = await continueRebase(
+      repository,
+      files,
+      undefined,
+      customEditor ? { gitEditor: `cat "${secondMessagePath}" >` } : undefined
+    )
     assert.equal(continueResult, RebaseResult.CompletedWithoutError)
 
     const log = await getCommits(repository, 'HEAD', 5)
     const summaries = log.map(c => c.summary)
-    assert.deepStrictEqual(summaries, [
-      'second - fixed',
-      'third - fixed',
-      'first',
-      'initialize',
-    ])
+    assert.deepStrictEqual(
+      summaries,
+      customEditor
+        ? ['second - fixed', 'third - fixed', 'first', 'initialize']
+        : ['second', 'third', 'first', 'initialize']
+    )
   })
 
   it('returns error on invalid lastRetainedCommitRef', async t => {
