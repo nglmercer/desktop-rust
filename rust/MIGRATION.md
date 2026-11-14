@@ -329,6 +329,12 @@ The legacy assisted-commit transaction now refuses to start or acquire a
 recovery lease in this runtime instead of assuming ownership survives an await.
 It remains available with native async hooks; a Rust transaction replacement
 is still required to restore this workflow in the web renderer.
+With Git 2.56, the legacy assisted-push destination check can reject a valid
+single remote because injected Git configuration adds URL values rather than
+resetting the original values. The check deliberately refuses the push before
+mutation when the resulting destination list is not exactly the reviewed URL;
+local commits are retained. A replacement must preserve the remote's hook and
+configuration semantics as well as the single-destination guarantee.
 Chromium checks exercise the guard and browserified crypto and stream APIs; an
 embedded frontend smoke test confirms the renderer still mounts against the
 authenticated bridge. This does not establish assisted-commit parity.
