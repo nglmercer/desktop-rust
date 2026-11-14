@@ -1,8 +1,8 @@
 import * as React from 'react'
 import * as Path from 'path'
 
-import { Repository } from '../../models/repository'
-import { Dispatcher } from '../dispatcher'
+import type { Repository } from '../../models/repository'
+import type { Dispatcher } from '../dispatcher'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { TextBox } from '../lib/text-box'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'

@@ -1,8 +1,8 @@
 import * as React from 'react'
 
-import { Branch, BranchType } from '../../models/branch'
-import { Repository } from '../../models/repository'
-import { Dispatcher } from '../dispatcher'
+import { type Branch, BranchType } from '../../models/branch'
+import type { Repository } from '../../models/repository'
+import type { Dispatcher } from '../dispatcher'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { RefNameTextBox } from '../lib/ref-name-text-box'
 import { Row } from '../lib/row'
@@ -96,8 +96,8 @@ export class AddWorktreeDialog extends React.Component<
             commitish: branch.ref,
           }
         : branch !== undefined
-        ? { commitish: branch.name }
-        : { createBranch: effectiveBranchName }
+          ? { commitish: branch.name }
+          : { createBranch: effectiveBranchName }
     const created = await this.props.dispatcher.addWorktreeAndSwitch(
       this.props.repository,
       fullPath,

@@ -4,8 +4,8 @@ import * as Path from 'path'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { Ref } from '../lib/ref'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
-import { Repository } from '../../models/repository'
-import { IDeleteWorktreeOptions } from '../../models/worktree'
+import type { Repository } from '../../models/repository'
+import type { IDeleteWorktreeOptions } from '../../models/worktree'
 import { Checkbox, CheckboxValue } from '../lib/checkbox'
 
 interface IDeleteWorktreeDialogProps {
@@ -49,8 +49,8 @@ export class DeleteWorktreeDialog extends React.Component<
         ? 'Remove Missing Worktree'
         : 'Remove missing worktree'
       : __DARWIN__
-      ? 'Delete Worktree'
-      : 'Delete worktree'
+        ? 'Delete Worktree'
+        : 'Delete worktree'
 
     return (
       <Dialog

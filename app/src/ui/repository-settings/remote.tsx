@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { IRemote } from '../../models/remote'
+import type { IRemote } from '../../models/remote'
 import { TextBox } from '../lib/text-box'
 
 interface IRemoteProps {

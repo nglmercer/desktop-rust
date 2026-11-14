@@ -5,15 +5,15 @@
 /* eslint-disable jsx-a11y/no-static-element-interactions */
 /* eslint-disable jsx-a11y/click-events-have-key-events */
 import * as React from 'react'
-import { Octicon, OcticonSymbol } from '../octicons'
+import { Octicon, type OcticonSymbol } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { assertNever } from '../../lib/fatal-error'
-import { ToolbarButton, ToolbarButtonStyle } from './button'
+import { ToolbarButton, type ToolbarButtonStyle } from './button'
 import { rectEquals } from '../lib/rect'
 import classNames from 'classnames'
 import FocusTrap from 'focus-trap-react'
-import { TooltipTarget } from '../lib/tooltip'
-import { AriaHasPopupType } from '../lib/aria-types'
+import type { TooltipTarget } from '../lib/tooltip'
+import type { AriaHasPopupType } from '../lib/aria-types'
 import { enableResizingToolbarButtons } from '../../lib/feature-flag'
 
 type FocusTrapOptions = NonNullable<
@@ -431,11 +431,14 @@ export class ToolbarDropdown extends React.Component<
         focusTrapOptions={this.focusTrapOptions}
       >
         <div id="foldout-container" style={this.getFoldoutContainerStyle()}>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: The backdrop is a pointer-only dismissal surface; keyboard dismissal is handled by the foldout. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: Keyboard focus remains in the foldout, which handles Escape. */}
           <div
             className="overlay"
             tabIndex={-1}
             onClick={this.handleOverlayClick}
           />
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: This container handles Escape bubbled from its focused children. */}
           <div
             className="foldout"
             style={this.getFoldoutStyle()}
@@ -470,6 +473,7 @@ export class ToolbarDropdown extends React.Component<
     )
 
     return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: This wrapper forwards keyboard and drag events to its owner.
       <div
         className={className}
         onKeyDown={this.props.onKeyDown}

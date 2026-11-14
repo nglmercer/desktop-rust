@@ -1,36 +1,36 @@
 import * as React from 'react'
 import { isAssistedCommitRepositoryLocked } from '../../models/assisted-commit-run'
 import { isRepositoryAffectedByAssistedCommit } from '../../lib/git/repository-operation'
-import { Dispatcher } from '../dispatcher'
+import type { Dispatcher } from '../dispatcher'
 import * as octicons from '../octicons/octicons.generated'
-import { OcticonSymbol, syncClockwise } from '../octicons'
+import { type OcticonSymbol, syncClockwise } from '../octicons'
 import {
   isRepositoryWithGitHubRepository,
-  Repository,
+  type Repository,
 } from '../../models/repository'
 import { Resizable } from '../resizable'
 import { TipState } from '../../models/tip'
-import { ToolbarDropdown, DropdownState } from './dropdown'
+import { ToolbarDropdown, type DropdownState } from './dropdown'
 import {
   FoldoutType,
-  IConstrainedValue,
-  IRepositoryState,
+  type IConstrainedValue,
+  type IRepositoryState,
   isRebaseConflictState,
 } from '../../lib/app-state'
 import { BranchesContainer, PullRequestBadge } from '../branches'
 import { assertNever } from '../../lib/fatal-error'
-import { BranchesTab } from '../../models/branches-tab'
-import { PullRequest } from '../../models/pull-request'
+import type { BranchesTab } from '../../models/branches-tab'
+import type { PullRequest } from '../../models/pull-request'
 import classNames from 'classnames'
 import { dragAndDropManager } from '../../lib/drag-and-drop-manager'
 import { DragType } from '../../models/drag-drop'
 import { CICheckRunPopover } from '../check-runs/ci-check-run-popover'
-import { TooltipTarget } from '../lib/tooltip'
-import { BranchType, Branch } from '../../models/branch'
+import type { TooltipTarget } from '../lib/tooltip'
+import { BranchType, type Branch } from '../../models/branch'
 import { PopupType } from '../../models/popup'
 import { generateBranchContextMenuItems } from '../branches/branch-list-item-context-menu'
 import { showContextualMenu } from '../../lib/menu-item'
-import { Emoji } from '../../lib/emoji'
+import type { Emoji } from '../../lib/emoji'
 import { enableResizingToolbarButtons } from '../../lib/feature-flag'
 
 interface IBranchDropdownProps {
@@ -154,7 +154,7 @@ export class BranchDropdown extends React.Component<IBranchDropdownProps> {
     const tipKind = tip.kind
 
     let icon: OcticonSymbol = octicons.gitBranch
-    let iconClassName: string | undefined = undefined
+    let iconClassName: string | undefined
     let title: string
     let description = __DARWIN__ ? 'Current Branch' : 'Current branch'
     let canOpen = true
@@ -187,7 +187,7 @@ export class BranchDropdown extends React.Component<IBranchDropdownProps> {
       return assertNever(tip, `Unknown tip state: ${tipKind}`)
     }
 
-    let progressValue: number | undefined = undefined
+    let progressValue: number | undefined
 
     if (checkoutProgress) {
       title = checkoutProgress.target
@@ -495,7 +495,7 @@ export class BranchDropdown extends React.Component<IBranchDropdownProps> {
     // items that are given for non-action checks.
     const currentBranchName =
       tip.kind === TipState.Valid
-        ? tip.branch.upstreamWithoutRemote ?? tip.branch.name
+        ? (tip.branch.upstreamWithoutRemote ?? tip.branch.name)
         : ''
 
     if (pr === null) {

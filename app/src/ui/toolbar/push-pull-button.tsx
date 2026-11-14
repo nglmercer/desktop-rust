@@ -1,17 +1,17 @@
 import * as React from 'react'
 
-import { Progress } from '../../models/progress'
-import { Repository } from '../../models/repository'
-import { IAheadBehind } from '../../models/branch'
+import type { Progress } from '../../models/progress'
+import type { Repository } from '../../models/repository'
+import type { IAheadBehind } from '../../models/branch'
 import { TipState } from '../../models/tip'
 import { FetchType } from '../../models/fetch'
 import { Resizable } from '../resizable'
 
-import { Dispatcher } from '../dispatcher'
+import type { Dispatcher } from '../dispatcher'
 import {
   Octicon,
-  OcticonSymbol,
-  OcticonSymbolVariant,
+  type OcticonSymbol,
+  type OcticonSymbolVariant,
   syncClockwise,
 } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
@@ -20,12 +20,12 @@ import { RelativeTime } from '../relative-time'
 import { ToolbarButton, ToolbarButtonStyle } from './button'
 import classNames from 'classnames'
 import {
-  DropdownState,
-  IToolbarDropdownProps,
+  type DropdownState,
+  type IToolbarDropdownProps,
   ToolbarDropdown,
   ToolbarDropdownStyle,
 } from './dropdown'
-import { FoldoutType, IConstrainedValue } from '../../lib/app-state'
+import { FoldoutType, type IConstrainedValue } from '../../lib/app-state'
 import { ForcePushBranchState } from '../../lib/rebase'
 import { PushPullButtonDropDown } from './push-pull-button-dropdown'
 import { AriaLiveContainer } from '../accessibility/aria-live-container'
@@ -136,7 +136,7 @@ function renderAheadBehind(aheadBehind: IAheadBehind, numTagsToPush: number) {
     return null
   }
 
-  const content = new Array<JSX.Element>()
+  const content: JSX.Element[] = []
   if (ahead > 0 || numTagsToPush > 0) {
     content.push(
       <span key="ahead">

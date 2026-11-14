@@ -78,6 +78,12 @@ app/src/ui/delete-branch/**
 app/src/ui/rename-branch/**
 app/src/ui/create-tag/**
 app/src/ui/delete-tag/**
+# Repository navigation, settings and worktree UI use Biome.
+app/src/ui/toolbar/**
+app/src/ui/repositories-list/**
+app/src/ui/repository-settings/**
+app/src/ui/repository-account/**
+app/src/ui/worktrees/**
 vite.cli.config.ts
 script/cli-build.test.ts
 vite.crash.config.ts

@@ -2,9 +2,9 @@ import {
   Repository,
   getRepositoryAccountIdentity,
 } from '../../models/repository'
-import { Account, isSameAccount } from '../../models/account'
-import { IMenuItem } from '../../lib/menu-item'
-import { Repositoryish } from './group-repositories'
+import { type Account, isSameAccount } from '../../models/account'
+import type { IMenuItem } from '../../lib/menu-item'
+import type { Repositoryish } from './group-repositories'
 import { writeClipboardText } from '../main-process-proxy'
 import {
   RevealInFileManagerLabel,

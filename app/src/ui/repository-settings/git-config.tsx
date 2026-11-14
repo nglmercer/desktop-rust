@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { DialogContent } from '../dialog'
-import { Account } from '../../models/account'
+import type { Account } from '../../models/account'
 import { GitConfigUserForm } from '../lib/git-config-user-form'
 import { Row } from '../lib/row'
 import { RadioGroup } from '../lib/radio-group'

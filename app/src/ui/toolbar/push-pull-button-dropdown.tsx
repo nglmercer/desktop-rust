@@ -2,7 +2,7 @@ import React from 'react'
 import { Button } from '../lib/button'
 import { Octicon, syncClockwise } from '../octicons'
 import {
-  DropdownItem,
+  type DropdownItem,
   DropdownItemClassName,
   DropdownItemType,
   forcePushIcon,

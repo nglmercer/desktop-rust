@@ -1,10 +1,10 @@
 import * as React from 'react'
 import {
-  WorktreeEntry,
+  type WorktreeEntry,
   getWorktreeDescription,
   getWorktreeDisplayName,
 } from '../../models/worktree'
-import { IMatches } from '../../lib/fuzzy-find'
+import type { IMatches } from '../../lib/fuzzy-find'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { HighlightText } from '../lib/highlight-text'
@@ -27,8 +27,8 @@ export class WorktreeListItem extends React.Component<IWorktreeListItemProps> {
     const icon = isCurrentWorktree
       ? octicons.check
       : isMissing
-      ? octicons.alert
-      : octicons.fileDirectory
+        ? octicons.alert
+        : octicons.fileDirectory
     const className = classNames('worktrees-list-item', {
       'current-worktree': isCurrentWorktree,
       'missing-worktree': isMissing,

@@ -1,6 +1,6 @@
 import * as Path from 'path'
 
-import { IMenuItem } from '../../lib/menu-item'
+import type { IMenuItem } from '../../lib/menu-item'
 import { writeClipboardText } from '../main-process-proxy'
 import { isRepositoryAffectedByAssistedCommit } from '../../lib/git/repository-operation'
 
@@ -20,7 +20,7 @@ export function generateWorktreeContextMenuItems(
   const name = Path.basename(path)
   const canMutate =
     !isMainWorktree && !isLocked && !isRepositoryAffectedByAssistedCommit(path)
-  const items = new Array<IMenuItem>()
+  const items: IMenuItem[] = []
 
   if (onRenameWorktree !== undefined) {
     items.push({

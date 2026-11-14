@@ -1,15 +1,15 @@
 import * as React from 'react'
 import {
-  WorktreeEntry,
+  type WorktreeEntry,
   getWorktreeAriaLabel,
   getWorktreeDisplayName,
 } from '../../models/worktree'
-import { IFilterListGroup, IFilterListItem } from '../lib/filter-list'
+import type { IFilterListGroup, IFilterListItem } from '../lib/filter-list'
 import { SectionFilterList } from '../lib/section-filter-list'
 import { WorktreeListItem } from './worktree-list-item'
 import { Button } from '../lib/button'
-import { IMatches } from '../../lib/fuzzy-find'
-import { ClickSource } from '../lib/list'
+import type { IMatches } from '../../lib/fuzzy-find'
+import type { ClickSource } from '../lib/list'
 import memoizeOne from 'memoize-one'
 
 const RowHeight = 30

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { DialogContent } from '../dialog'
 import { ForkContributionTarget } from '../../models/workflow-preferences'
-import { RepositoryWithForkedGitHubRepository } from '../../models/repository'
+import type { RepositoryWithForkedGitHubRepository } from '../../models/repository'
 import { ForkSettingsDescription } from './fork-contribution-target-description'
 import { RadioGroup } from '../lib/radio-group'
 import { assertNever } from '../../lib/fatal-error'

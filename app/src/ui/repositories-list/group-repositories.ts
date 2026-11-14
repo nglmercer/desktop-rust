@@ -1,18 +1,18 @@
 import {
   Repository,
-  ILocalRepositoryState,
+  type ILocalRepositoryState,
   nameOf,
   isRepositoryWithGitHubRepository,
-  RepositoryWithGitHubRepository,
+  type RepositoryWithGitHubRepository,
 } from '../../models/repository'
-import { CloningRepository } from '../../models/cloning-repository'
+import type { CloningRepository } from '../../models/cloning-repository'
 import { getHTMLURL } from '../../lib/api'
 import { caseInsensitiveCompare, compare } from '../../lib/compare'
-import { IFilterListGroup, IFilterListItem } from '../lib/filter-list'
-import { IAheadBehind } from '../../models/branch'
+import type { IFilterListGroup, IFilterListItem } from '../lib/filter-list'
+import type { IAheadBehind } from '../../models/branch'
 import { assertNever } from '../../lib/fatal-error'
 import { isDotCom } from '../../lib/endpoint-capabilities'
-import { Owner } from '../../models/owner'
+import type { Owner } from '../../models/owner'
 
 export type RepositoryListGroup =
   | {

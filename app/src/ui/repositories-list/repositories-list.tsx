@@ -3,21 +3,21 @@ import * as React from 'react'
 import { commitGrammar, RepositoryListItem } from './repository-list-item'
 import {
   groupRepositories,
-  IRepositoryListItem,
-  Repositoryish,
-  RepositoryListGroup,
+  type IRepositoryListItem,
+  type Repositoryish,
+  type RepositoryListGroup,
   getGroupKey,
 } from './group-repositories'
-import { IFilterListGroup } from '../lib/filter-list'
-import { IMatches } from '../../lib/fuzzy-find'
-import { ILocalRepositoryState, Repository } from '../../models/repository'
-import { Account } from '../../models/account'
-import { Dispatcher } from '../dispatcher'
+import type { IFilterListGroup } from '../lib/filter-list'
+import type { IMatches } from '../../lib/fuzzy-find'
+import { type ILocalRepositoryState, Repository } from '../../models/repository'
+import type { Account } from '../../models/account'
+import type { Dispatcher } from '../dispatcher'
 import { Button } from '../lib/button'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { showContextualMenu } from '../../lib/menu-item'
-import { IMenuItem } from '../../lib/menu-item'
+import type { IMenuItem } from '../../lib/menu-item'
 import { PopupType } from '../../models/popup'
 import { encodePathAsUrl } from '../../lib/path'
 import { TooltippedContent } from '../lib/tooltipped-content'
@@ -27,7 +27,7 @@ import { generateRepositoryListContextMenu } from '../repositories-list/reposito
 import { enableWorktreeSupport } from '../../lib/feature-flag'
 import { SectionFilterList } from '../lib/section-filter-list'
 import { assertNever } from '../../lib/fatal-error'
-import { IAheadBehind } from '../../models/branch'
+import type { IAheadBehind } from '../../models/branch'
 
 const BlankSlateImage = encodePathAsUrl(__dirname, 'static/empty-no-repo.svg')
 

@@ -3,11 +3,11 @@ import { TabBar, TabBarType } from '../tab-bar'
 import { Remote } from './remote'
 import { GitIgnore } from './git-ignore'
 import { assertNever } from '../../lib/fatal-error'
-import { IRemote } from '../../models/remote'
-import { Dispatcher } from '../dispatcher'
+import type { IRemote } from '../../models/remote'
+import type { Dispatcher } from '../dispatcher'
 import { PopupType } from '../../models/popup'
 import {
-  Repository,
+  type Repository,
   getForkContributionTarget,
   isRepositoryWithForkedGitHubRepository,
 } from '../../models/repository'
@@ -16,14 +16,14 @@ import { NoRemote } from './no-remote'
 import { readGitIgnoreAtRoot } from '../../lib/git'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 import { ForkSettings } from './fork-settings'
-import { ForkContributionTarget } from '../../models/workflow-preferences'
+import type { ForkContributionTarget } from '../../models/workflow-preferences'
 import { GitConfigLocation, GitConfig } from './git-config'
 import { getConfigValue, getGlobalConfigValue } from '../../lib/git/config'
 import {
   gitAuthorNameIsValid,
   InvalidGitAuthorNameMessage,
 } from '../lib/identifier-rules'
-import { Account, isSameAccount } from '../../models/account'
+import { type Account, isSameAccount } from '../../models/account'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { Select } from '../lib/select'
@@ -290,9 +290,9 @@ export class RepositorySettings extends React.Component<
     const login = this.selectedLogin
     return endpoint === undefined
       ? this.props.repositoryAccount
-      : this.props.accounts.find(
+      : (this.props.accounts.find(
           a => login !== null && isSameAccount(a, { endpoint, login })
-        ) ?? null
+        ) ?? null)
   }
 
   private renderAccount() {
@@ -349,7 +349,7 @@ export class RepositorySettings extends React.Component<
 
   private onSubmit = async () => {
     this.setState({ disabled: true, errors: undefined })
-    const errors = new Array<JSX.Element | string>()
+    const errors: (JSX.Element | string)[] = []
     // Changing the account replaces the repository, and setting the remote
     // URL must refresh the GitHub association for the replacement.
     let repository = this.props.repository
@@ -505,7 +505,7 @@ export class RepositorySettings extends React.Component<
   }
 
   private onCommitterNameChanged = (committerName: string) => {
-    const errors = new Array<JSX.Element | string>()
+    const errors: (JSX.Element | string)[] = []
 
     if (gitAuthorNameIsValid(committerName)) {
       this.setState({ saveDisabled: false })

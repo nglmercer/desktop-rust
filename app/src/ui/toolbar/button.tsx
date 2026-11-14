@@ -1,12 +1,12 @@
 import * as React from 'react'
-import { Octicon, OcticonSymbol } from '../octicons'
+import { Octicon, type OcticonSymbol } from '../octicons'
 import classNames from 'classnames'
 import { assertNever } from '../../lib/fatal-error'
 import { Button } from '../lib/button'
 import { clamp } from '../../lib/clamp'
 import { createObservableRef } from '../lib/observable-ref'
-import { Tooltip, TooltipDirection, TooltipTarget } from '../lib/tooltip'
-import { AriaHasPopupType } from '../lib/aria-types'
+import { Tooltip, TooltipDirection, type TooltipTarget } from '../lib/tooltip'
+import type { AriaHasPopupType } from '../lib/aria-types'
 import { enableResizingToolbarButtons } from '../../lib/feature-flag'
 
 /** The button style. */

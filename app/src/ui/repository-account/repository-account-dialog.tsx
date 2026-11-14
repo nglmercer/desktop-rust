@@ -1,15 +1,15 @@
 import * as React from 'react'
 import { getDotComAPIEndpoint } from '../../lib/api'
-import { SignInResult } from '../../lib/stores/sign-in-store'
-import { Account, isSameAccount } from '../../models/account'
+import type { SignInResult } from '../../lib/stores/sign-in-store'
+import { type Account, isSameAccount } from '../../models/account'
 import { PopupType } from '../../models/popup'
 import {
-  RepositoryWithGitHubRepository,
+  type RepositoryWithGitHubRepository,
   getRepositoryAccountIdentity,
 } from '../../models/repository'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
-import { Dispatcher } from '../dispatcher'
+import type { Dispatcher } from '../dispatcher'
 import { Button } from '../lib/button'
 import { Select } from '../lib/select'
 

@@ -4,10 +4,13 @@ import * as Path from 'path'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { Ref } from '../lib/ref'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import { getUnderlyingError, isRawGitError } from '../app-error'
 import { Terminal } from '../terminal'
-import { IDeleteWorktreeOptions, WorktreeEntry } from '../../models/worktree'
+import type {
+  IDeleteWorktreeOptions,
+  WorktreeEntry,
+} from '../../models/worktree'
 
 interface IDeleteWorktreeFailedDialogProps {
   readonly repository: Repository

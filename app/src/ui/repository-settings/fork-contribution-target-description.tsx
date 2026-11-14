@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { ForkContributionTarget } from '../../models/workflow-preferences'
-import { RepositoryWithForkedGitHubRepository } from '../../models/repository'
+import type { RepositoryWithForkedGitHubRepository } from '../../models/repository'
 
 interface IForkSettingsDescription {
   readonly repository: RepositoryWithForkedGitHubRepository
