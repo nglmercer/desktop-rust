@@ -120,6 +120,45 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it.each(['cancel', 'disconnect'])('stops a real clone child after %s', async action => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-clone-stop-'))
+      const marker = path.join(directory, 'started')
+      const late = path.join(directory, 'late')
+      await writeFile(path.join(directory, 'git'), '#!/bin/sh\ntrap "" INT\nprintf started > "$CLONE_STARTED"\nsleep 5\nprintf late > "$CLONE_LATE"\n')
+      await chmod(path.join(directory, 'git'), 0o700)
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], {
+        env: { ...process.env, HOME: directory, PATH: `${directory}${path.delimiter}${process.env.PATH}`, CLONE_STARTED: marker, CLONE_LATE: late },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      const sockets: WebSocket[] = []
+      const NativeSocket = dom.window.WebSocket
+      class TrackedSocket extends NativeSocket {
+        constructor(url: string | URL, protocols?: string | string[]) { super(url, protocols); sockets.push(this as unknown as WebSocket) }
+      }
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', TrackedSocket)
+      const client = new BackendClient()
+      clients.push(client)
+      await bounded(client.waitReady())
+      const controller = new AbortController()
+      const pending = client.request('clone_repository', { url: 'https://example.invalid/repo', path: path.join(directory, 'repo') }, { signal: controller.signal })
+      const settled = vi.fn()
+      void pending.catch(settled)
+      const result = expect(pending).rejects.toMatchObject({ code: action === 'cancel' ? 'cancelled' : 'disconnected', retryable: false })
+      await waitFor(() => existsSync(marker))
+      if (action === 'cancel') {
+        controller.abort()
+        await new Promise(resolve => setTimeout(resolve, 100))
+        expect(settled).not.toHaveBeenCalled()
+      }
+      else sockets[0].close()
+      await bounded(result)
+      await new Promise(resolve => setTimeout(resolve, 5_500))
+      expect(existsSync(late)).toBe(false)
+    }, 30_000)
+
     it('classifies clone destinations without selecting a repository', async () => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-clone-status-'))
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')))

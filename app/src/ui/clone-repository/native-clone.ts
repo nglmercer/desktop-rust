@@ -1,8 +1,9 @@
-import { backend, type FetchProgressChunk } from '../../backend/client'
+import { backend, BackendError, type FetchProgressChunk } from '../../backend/client'
 import { isRecord } from '../../lib/is-record'
 import { getHTMLURL } from '../../lib/api'
 import {
   canonicalMutationPath,
+  protectAssistedCommitResources,
   withRepositoryGitResourceMutation,
 } from '../../lib/git/repository-operation'
 
@@ -110,9 +111,26 @@ export async function nativeClone(
   return withRepositoryGitResourceMutation([path], async () => {
     const canonical = await canonicalMutationPath(path)
     return withRepositoryGitResourceMutation([canonical], async () => {
-      return nativeCloneReserved(url, path, account, defaultBranch, onProgress)
+      try {
+        return await nativeCloneReserved(url, path, account, defaultBranch, onProgress)
+      } catch (error) {
+        retainUncertainCloneResources(error, [path, canonical])
+        throw error
+      }
     })
   })
+}
+
+/** A lost transport cannot confirm that the host has stopped mutating files. */
+function retainUncertainCloneResources(error: unknown, paths: ReadonlyArray<string>): void {
+  if (error instanceof BackendError &&
+      (['disconnected', 'protocol', 'unauthorized', 'cancelled', 'ETIMEDOUT', 'timeout'].includes(error.code) ||
+        error.message.startsWith('IPC timeout:'))) {
+    protectAssistedCommitResources(paths[0], paths)
+    throw new Error(
+      'Clone completion could not be confirmed. The destination is protected only in this session, and recovery is unavailable in this session. Inspect the destination and any staging directories.'
+    )
+  }
 }
 
 async function nativeCloneReserved(
@@ -178,9 +196,14 @@ export async function recoverNativeClone(
       canonicalMutationPath(destination),
       canonicalMutationPath(stage),
     ])
-    return withRepositoryGitResourceMutation(canonical, () =>
-      recoverNativeCloneReserved(id)
-    )
+    return withRepositoryGitResourceMutation(canonical, async () => {
+      try {
+        return await recoverNativeCloneReserved(id)
+      } catch (error) {
+        retainUncertainCloneResources(error, [destination, stage, ...canonical])
+        throw error
+      }
+    })
   })
 }
 

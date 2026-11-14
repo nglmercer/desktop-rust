@@ -43,6 +43,9 @@ export interface FetchProgressChunk {
   readonly data: string
 }
 
+/** Keep destination reservations until the host replies or settlement becomes uncertain. */
+const cloneCancellationGraceMs = 5_000
+
 function isFetchProgressChunk(value: unknown): value is FetchProgressChunk {
   return isRecord(value) && (value.stream === 'stdout' || value.stream === 'stderr' || value.stream === 'lfs') &&
     typeof value.data === 'string' && value.data.length <= 1_400_000 &&
@@ -523,6 +526,7 @@ class WryTransport {
       }
       return new Promise((resolve, reject) => {
         let settled = false
+        let cloneCancellation: BackendError | undefined
         let timer: ReturnType<typeof setTimeout>
         const finish = (action: () => void) => {
           if (settled) return
@@ -531,7 +535,30 @@ class WryTransport {
           opts.signal?.removeEventListener('abort', abort)
           action()
         }
-        const cancel = (code: string, message: string) =>
+        const cancel = (code: string, message: string) => {
+          if (cloneMutation && !settled) {
+            if (cloneCancellation) return
+            cloneCancellation = new BackendError({ code, message, retryable: false })
+            clearTimeout(timer)
+            opts.signal?.removeEventListener('abort', abort)
+            timer = setTimeout(() => finish(() => reject(new BackendError({
+              code: 'disconnected',
+              message: 'Clone cancellation was not confirmed; inspect the destination',
+              retryable: false,
+            }))), cloneCancellationGraceMs)
+            if (this.capabilities().cancel) {
+              try {
+                this.cancel(requestId)
+              } catch {
+                finish(() => reject(new BackendError({
+                  code: 'disconnected',
+                  message: 'Clone cancellation could not be sent; inspect the destination and recovery history',
+                  retryable: false,
+                })))
+              }
+            }
+            return
+          }
           finish(() => {
             try {
               if (this.capabilities().cancel) this.cancel(requestId)
@@ -550,6 +577,7 @@ class WryTransport {
               )
             }
           })
+        }
         const abort = () =>
           cancel(
             'cancelled',
@@ -633,10 +661,17 @@ class WryTransport {
           call
             .then(
               value => finish(() => resolve(value)),
-              error => finish(() => reject(nativeError(error)))
+              error => finish(() => {
+                const backendError = nativeError(error)
+                reject(cloneCancellation && (backendError.code === 'cancelled' || backendError.code === 'ETIMEDOUT') ? cloneCancellation : backendError)
+              })
             )
         } catch (error) {
-          finish(() => reject(nativeError(error)))
+          finish(() => reject(cloneMutation ? new BackendError({
+            code: 'disconnected',
+            message: 'Clone submission could not be confirmed; inspect the destination',
+            retryable: false,
+          }) : nativeError(error)))
         }
       })
     }
@@ -1020,6 +1055,7 @@ class WebSocketTransport {
       })
     }
     const id = this.nextId++
+    const cloneMutation = method === 'recover_clone' || method === 'clone_repository'
     const payload: Record<string, unknown> = {
       ...(params as Record<string, unknown>),
       id,
@@ -1034,12 +1070,30 @@ class WebSocketTransport {
         if (onAbort) opts.signal?.removeEventListener('abort', onAbort)
       }
       const rejectAndCancel = (error: BackendError) => {
+        if (cloneMutation) {
+          if (cloneCancellation) return
+          cloneCancellation = error
+          clearTimeout(timer)
+          if (onAbort) opts.signal?.removeEventListener('abort', onAbort)
+          timer = setTimeout(() => {
+            if (!this.pending.delete(id)) return
+            cleanup()
+            reject(disconnectedInFlightError())
+          }, cloneCancellationGraceMs)
+          if (this.capabilities().cancel && !this.cancel(id)) {
+            this.pending.delete(id)
+            cleanup()
+            reject(disconnectedInFlightError())
+          }
+          return
+        }
         if (!this.pending.delete(id)) return
         cleanup()
         if (this.capabilities().cancel) this.cancel(id)
         reject(error)
       }
-      const timer = setTimeout(() => {
+      let cloneCancellation: BackendError | undefined
+      let timer = setTimeout(() => {
         rejectAndCancel(
           new BackendError({
             code: 'timeout',
@@ -1048,7 +1102,7 @@ class WebSocketTransport {
           })
         )
       }, Math.max(0, deadline - Date.now()))
-      this.pending.set(id, { resolve, reject, cleanup, onProgress: opts.onProgress, onCommitEvent: opts.onCommitEvent })
+      this.pending.set(id, { resolve, reject: error => reject(cloneCancellation && error instanceof BackendError && error.code === 'cancelled' ? cloneCancellation : error), cleanup, onProgress: opts.onProgress, onCommitEvent: opts.onCommitEvent })
       if (opts.signal) {
         onAbort = () =>
           rejectAndCancel(
@@ -1066,7 +1120,7 @@ class WebSocketTransport {
       } catch (error) {
         this.pending.delete(id)
         cleanup()
-        reject(toBackendError(error))
+        reject(cloneMutation ? disconnectedInFlightError() : toBackendError(error))
       }
       if (opts.signal?.aborted) onAbort?.()
     })
@@ -1116,16 +1170,18 @@ class WebSocketTransport {
     })
   }
 
-  cancel(requestId: string | number): void {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
+  cancel(requestId: string | number): boolean {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false
     const id = typeof requestId === 'string' ? Number(requestId) : requestId
-    if (!Number.isSafeInteger(id) || id < 1) return
+    if (!Number.isSafeInteger(id) || id < 1) return false
     try {
       this.socket.send(
         JSON.stringify({ id: this.nextId++, method: 'cancel', request_id: id })
       )
+      return true
     } catch {
       // The socket may close between the readiness check and send.
+      return false
     }
   }
 

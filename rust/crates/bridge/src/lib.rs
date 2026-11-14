@@ -1122,7 +1122,7 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
     let (hook_events, mut hook_events_rx) =
         mpsc::channel::<(u64, desktop_core::hook_progress::CommitEvent)>(64);
     let mut queue = VecDeque::<Rpc>::new();
-    loop {
+    'session: loop {
         if active.is_none()
             && let Some(rpc) = queue.pop_front()
         {
@@ -1144,7 +1144,7 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
             } => {
                 active.take();
                 while let Ok((request_id, event)) = hook_events_rx.try_recv() {
-                    if !send(&mut socket, commit_event_value(request_id, event), &state).await { return; }
+                    if !send(&mut socket, commit_event_value(request_id, event), &state).await { break 'session; }
                 }
                 if !send(&mut socket, result, &state).await {break;}
                 continue;
@@ -1239,7 +1239,13 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
     }
     if let Some(mut job) = active.take() {
         job.cancellation.cancel();
-        let _ = tokio::time::timeout(Duration::from_secs(3), job.future.as_mut()).await;
+        if job.clone_write {
+            // Keep polling blocking filesystem work after disconnect; dropping
+            // its future does not stop an already running spawn_blocking task.
+            let _ = job.future.as_mut().await;
+        } else {
+            let _ = tokio::time::timeout(Duration::from_secs(3), job.future.as_mut()).await;
+        }
     }
 }
 
@@ -1288,6 +1294,7 @@ fn commit_event_value(
 
 struct Active {
     id: u64,
+    clone_write: bool,
     cancellation: Cancellation,
     future: Pin<Box<dyn Future<Output = serde_json::Value> + Send>>,
 }
@@ -1298,6 +1305,12 @@ impl Active {
         events: mpsc::Sender<(u64, desktop_core::hook_progress::CommitEvent)>,
         comparison_owner: Arc<desktop_core::comparison_snapshots::Owner>,
     ) -> Self {
+        let clone_write = matches!(
+            &rpc.operation,
+            ApplicationOperation::Management(
+                ManagementOperation::CloneRepository { .. } | ManagementOperation::RecoverClone { .. }
+            )
+        );
         let cancellation = Cancellation::default();
         let request_cancellation = cancellation.clone();
         let request_id = rpc.id;
@@ -1325,6 +1338,7 @@ impl Active {
         ));
         Self {
             id: rpc.id,
+            clone_write,
             cancellation,
             future,
         }

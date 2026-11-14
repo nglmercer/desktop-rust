@@ -91,21 +91,97 @@ describe('backend Copilot session cleanup', () => {
     }
   })
 
-  it('reports cancellation of an in-flight Wry clone as uncertain', async () => {
-    const invoke = vi.fn(() => new Promise(() => {}))
-    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+  it('waits for a cancelled Wry clone to settle before rejecting', async () => {
+    let finish: (error: unknown) => void = () => {}
+    const invoke = vi.fn(() => new Promise((_, reject) => { finish = reject }))
+    const send = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send, on: vi.fn() } })
     const controller = new AbortController()
     const operation = { type: 'clone_selected', url: 'https://github.com/a/b', path: '/repo', account: { host: 'github.com', login: 'alice', id: 1 } }
     const result = new BackendClient().request('git_info', { operation }, { signal: controller.signal })
+    const settled = vi.fn()
+    void result.catch(settled)
     controller.abort()
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledOnce()
+    finish({ code: 'cancelled', message: 'backend settled' })
     await expect(result).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('recovery history') })
   })
 
-  it('reports a Wry clone timeout as uncertain', async () => {
-    const invoke = vi.fn(() => new Promise(() => {}))
+  it('waits for a timed out Wry clone to settle before rejecting', async () => {
+    let finish: (error: unknown) => void = () => {}
+    const invoke = vi.fn(() => new Promise((_, reject) => { finish = reject }))
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
     const operation = { type: 'clone_selected', url: 'https://github.com/a/b', path: '/repo', account: { host: 'github.com', login: 'alice', id: 1 } }
-    await expect(new BackendClient().request('git_info', { operation }, { deadlineMs: 1 })).rejects.toMatchObject({ code: 'ETIMEDOUT', retryable: false, message: expect.stringContaining('recovery history') })
+    const result = new BackendClient().request('git_info', { operation }, { deadlineMs: 1 })
+    const settled = vi.fn()
+    void result.catch(settled)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(settled).not.toHaveBeenCalled()
+    finish({ code: 'cancelled', message: 'backend settled' })
+    await expect(result).rejects.toMatchObject({ code: 'ETIMEDOUT', retryable: false, message: expect.stringContaining('recovery history') })
+  })
+
+  it('reports an unconfirmed clone if sending Wry cancellation fails', async () => {
+    const invoke = vi.fn(() => new Promise(() => {}))
+    const send = vi.fn(() => { throw new Error('IPC closed') })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send, on: vi.fn() } })
+    const controller = new AbortController()
+    const result = new BackendClient().request('git_info', { operation: { type: 'clone_selected' } }, { signal: controller.signal })
+    controller.abort()
+    await expect(result).rejects.toMatchObject({ code: 'disconnected', retryable: false, message: expect.stringContaining('could not be sent') })
+  })
+
+  it('reports an unconfirmed clone if Wry submission throws', async () => {
+    const invoke = vi.fn(() => { throw new Error('submission failed') })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    await expect(new BackendClient().request('git_info', { operation: { type: 'clone_selected' } })).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+  })
+
+  it('waits after a clone deadline even when Wry cannot cancel', async () => {
+    let finish: (error: unknown) => void = () => {}
+    const invoke = vi.fn(() => new Promise((_, reject) => { finish = reject }))
+    const send = vi.fn()
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send, on: vi.fn(), supportsCancellation: () => false } })
+    const result = new BackendClient().request('git_info', { operation: { type: 'clone_selected' } }, { deadlineMs: 1 })
+    const settled = vi.fn()
+    void result.catch(settled)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(settled).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    finish(new Error('IPC timeout: desktop.backend.git_info'))
+    await expect(result).rejects.toMatchObject({ code: 'internal', message: expect.stringContaining('IPC timeout') })
+  })
+
+  it('reports a shim timeout as unconfirmed after requesting cancellation', async () => {
+    let finish: (error: unknown) => void = () => {}
+    const invoke = vi.fn(() => new Promise((_, reject) => { finish = reject }))
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const controller = new AbortController()
+    const result = new BackendClient().request('git_info', { operation: { type: 'clone_selected' } }, { signal: controller.signal })
+    controller.abort()
+    finish(new Error('IPC timeout: desktop.backend.git_info'))
+    await expect(result).rejects.toMatchObject({ code: 'internal', message: expect.stringContaining('IPC timeout') })
+  })
+
+  it('bounds waiting for a Wry clone that never confirms cancellation', async () => {
+    vi.useFakeTimers()
+    try {
+      const invoke = vi.fn(() => new Promise(() => {}))
+      Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+      const controller = new AbortController()
+      const result = new BackendClient().request('git_info', { operation: { type: 'clone_selected' } }, { signal: controller.signal })
+      const settled = vi.fn()
+      void result.catch(settled)
+      controller.abort()
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(settled).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(result).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rejects oversized working-file snapshots before requesting chunks', async () => {

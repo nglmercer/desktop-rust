@@ -2223,7 +2223,13 @@ impl Backend {
                 result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if recovery_write { "Git operation cancelled; inspect the repository before retrying" } else if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if clone_write { "Clone cancelled; inspect the destination and recovery history before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
                     token.cancel();
-                    let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
+                    if clone_write {
+                        // Clone publication and its blocking filesystem work must
+                        // settle before the renderer releases its destination.
+                        let _ = (&mut work).await;
+                    } else {
+                        let _ = tokio::time::timeout(Duration::from_secs(3), &mut work).await;
+                    }
                     Err(AppError::Coded { code: "ETIMEDOUT".into(), message: if recovery_write { "Git operation timed out; inspect the repository before retrying" } else if identity_write { "Git identity update timed out; inspect Git settings before retrying" } else if settings_write { "Git setting update timed out; inspect Git settings before retrying" } else if config_path_write { "Git config preparation timed out; check the configuration file before retrying" } else if description_write { "Description update timed out; inspect the repository description before retrying" } else if creation_write { "Repository creation operation timed out; inspect the repository and index before retrying" } else if discard_write { "Discard operation timed out; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation timed out; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update timed out; inspect .gitignore before retrying" } else if remote_write { "Remote update timed out; inspect Git configuration before retrying" } else if clone_write { "Clone timed out; inspect the destination and recovery history before retrying" } else if initialization { "Repository initialization timed out; inspect the destination before retrying" } else if lfs_write { "Git LFS setup timed out; inspect Git settings and hooks before retrying" } else { "backend operation timed out" }.into() })
                 }
             }
@@ -3002,6 +3008,58 @@ mod tests {
             assert!(!root.join(".git/SQUASH_MSG").exists());
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wry_clone_cancel_timeout_and_host_close_wait_for_git() {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(root) = std::env::var_os("DESKTOP_WRY_CLONE_TEST_ROOT") {
+            let root = PathBuf::from(root);
+            for action in ["cancel", "timeout", "close"] {
+                let _ = std::fs::remove_file(root.join("started"));
+                let _ = std::fs::remove_file(root.join("late"));
+                let backend = Backend::new(16).unwrap().with_registry(desktop_backend::Registry::new(root.join("registry.json")));
+                let request_id = uuid::Uuid::new_v4();
+                let job = backend.admit_git_info(vec![json!({"request_id":request_id,"deadline_ms":if action == "timeout" { 1000 } else { 30000 },"operation":{"type":"clone_selected","url":"https://github.com/a/b","path":root.join("repo"),"account":{"host":"github.com","login":"alice","id":1}}})]).unwrap();
+                std::thread::scope(|scope| {
+                    let worker = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn_scoped(scope, || backend.read(job)).unwrap();
+                    let limit = std::time::Instant::now() + Duration::from_secs(5);
+                    while !root.join("started").exists() && !worker.is_finished() && std::time::Instant::now() < limit {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    assert!(root.join("started").exists(), "clone Git did not start");
+                    match action {
+                        "cancel" => backend.cancel(&[json!({"request_id":request_id})]).unwrap(),
+                        "close" => backend.cancel_all(),
+                        _ => std::thread::sleep(Duration::from_millis(1100)),
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    assert!(!worker.is_finished(), "clone returned while Git still ran");
+                    let result = worker.join().unwrap();
+                    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == if action == "timeout" { "ETIMEDOUT" } else { "cancelled" }));
+                });
+                std::thread::sleep(Duration::from_secs(4));
+                assert!(!root.join("late").exists(), "Git continued writing after the host returned");
+            }
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("desktop-wry-clone-stop-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let script = root.join("git");
+        std::fs::write(&script, "#!/bin/sh\ntrap '' INT\nprintf started > \"$DESKTOP_WRY_CLONE_TEST_ROOT/started\"\nsleep 5\nprintf late > \"$DESKTOP_WRY_CLONE_TEST_ROOT/late\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut paths = vec![root.clone()];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "backend::tests::wry_clone_cancel_timeout_and_host_close_wait_for_git", "--nocapture"])
+            .env("DESKTOP_WRY_CLONE_TEST_ROOT", &root)
+            .env("HOME", &root)
+            .env("PATH", std::env::join_paths(paths).unwrap())
+            .env_remove("GIT_SSL_NO_VERIFY")
+            .output().unwrap();
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

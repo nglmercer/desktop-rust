@@ -332,6 +332,77 @@ describe('WebSocket backend transport', () => {
     expect(socket.sent[4]).toEqual({ id: 4, method: 'cancel', request_id: 3 })
   })
 
+  it('keeps a cancelled clone pending until the bridge confirms settlement', async () => {
+    const { client: value, socket } = await connected()
+    const controller = new AbortController()
+    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { signal: controller.signal })
+    const settled = vi.fn()
+    void pending.catch(settled)
+    controller.abort()
+    await Promise.resolve()
+    expect(socket.sent[2]).toEqual({ id: 2, method: 'cancel', request_id: 1 })
+    expect(settled).not.toHaveBeenCalled()
+    socket.message({ id: 1, error: 'cancelled after cleanup', error_code: 'cancelled' })
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false })
+  })
+
+  it('reports a disconnected cancelled clone as unconfirmed', async () => {
+    const { client: value, socket } = await connected()
+    const controller = new AbortController()
+    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { signal: controller.signal })
+    controller.abort()
+    socket.disconnect()
+    await expect(pending).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+  })
+
+  it('reports an unconfirmed clone if the WebSocket cancel send fails', async () => {
+    const { client: value, socket } = await connected()
+    const controller = new AbortController()
+    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { signal: controller.signal })
+    vi.spyOn(socket, 'send').mockImplementation(() => { throw new Error('socket failed') })
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+  })
+
+  it('reports an unconfirmed clone if WebSocket submission throws', async () => {
+    const { client: value, socket } = await connected()
+    vi.spyOn(socket, 'send').mockImplementation(() => { throw new Error('socket failed') })
+    await expect(value.request('clone_repository', {}, {})).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+  })
+
+  it('waits for the bridge after a clone deadline expires', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { deadlineMs: 20 })
+    const settled = vi.fn()
+    void pending.catch(settled)
+    await vi.advanceTimersByTimeAsync(20)
+    expect(settled).not.toHaveBeenCalled()
+    expect(socket.sent[2]).toEqual({ id: 2, method: 'cancel', request_id: 1 })
+    socket.message({ id: 1, error: 'cancelled after cleanup', error_code: 'cancelled' })
+    await expect(pending).rejects.toMatchObject({ code: 'timeout', retryable: false })
+  })
+
+  it.each([true, false])('reports an unconfirmed clone when cancel capability is %s and the host does not settle', async cancel => {
+    const value = client()
+    const connecting = value.waitReady()
+    const socket = FakeSocket.instances.at(-1)!
+    socket.open()
+    socket.message({ ...ready, capabilities: { ...ready.capabilities, cancel } })
+    await connecting
+    const controller = new AbortController()
+    const pending = value.request('clone_repository', {}, { signal: controller.signal })
+    const settled = vi.fn()
+    void pending.catch(settled)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(settled).not.toHaveBeenCalled()
+    if (cancel) expect(socket.sent[2]).toEqual({ id: 2, method: 'cancel', request_id: 1 })
+    else expect(socket.sent).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(pending).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+    socket.message({ id: 1, result: { late: true } })
+  })
+
   it('does not start a request aborted or timed out during the handshake', async () => {
     const value = client()
     const controller = new AbortController()

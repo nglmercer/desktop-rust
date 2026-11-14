@@ -3,9 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const request = vi.hoisted(() => vi.fn())
 const route = vi.hoisted(() => ({ kind: 'ws' }))
 const reservations = vi.hoisted(() => ({ active: [] as string[] }))
-vi.mock('../../src/backend/client', () => ({ backend: () => ({ request, transportKind: route.kind }) }))
+const protections = vi.hoisted(() => vi.fn())
+vi.mock('../../src/backend/client', () => ({
+  backend: () => ({ request, transportKind: route.kind }),
+  BackendError: class BackendError extends Error {
+    readonly code: string
+    constructor(error: { code: string; message: string }) { super(error.message); this.code = error.code }
+  },
+}))
 vi.mock('../../src/lib/git/repository-operation', () => ({
   canonicalMutationPath: async (path: string) => `/canonical${path}`,
+  protectAssistedCommitResources: protections,
   withRepositoryGitResourceMutation: async (
     paths: string[],
     operation: () => Promise<unknown>
@@ -26,10 +34,12 @@ import {
   nativeCloneProgress,
   recoverNativeClone,
 } from '../../src/ui/clone-repository/native-clone'
+import { BackendError } from '../../src/backend/client'
 
 describe('native clone UI requests', () => {
   beforeEach(() => {
     request.mockReset()
+    protections.mockReset()
     route.kind = 'ws'
   })
 
@@ -188,5 +198,25 @@ describe('native clone UI requests', () => {
     })
     await result
     expect(reservations.active).toEqual([])
+  })
+
+  it('protects both destination aliases if the bridge disconnects', async () => {
+    request.mockRejectedValue(new BackendError({ code: 'disconnected', message: 'lost', retryable: false }))
+    await expect(nativeClone('https://github.com/a/b', '/repo', { host: 'github.com', login: 'alice', id: 12 }, undefined, () => {})).rejects.toThrow()
+    expect(protections).toHaveBeenCalledWith('/repo', ['/repo', '/canonical/repo'])
+    expect(reservations.active).toEqual([])
+  })
+
+  it('protects the destination when the native IPC shim expires', async () => {
+    route.kind = 'wry'
+    request.mockRejectedValue(new BackendError({ code: 'internal', message: 'IPC timeout: desktop.backend.git_info', retryable: false }))
+    await expect(nativeClone('https://github.com/a/b', '/repo', { host: 'github.com', login: 'alice', id: 12 }, undefined, () => {})).rejects.toThrow('protected only in this session')
+    expect(protections).toHaveBeenCalledWith('/repo', ['/repo', '/canonical/repo'])
+  })
+
+  it.each(['cancelled', 'ETIMEDOUT', 'timeout'])('keeps destinations protected after %s without assuming the host platform', async code => {
+    request.mockRejectedValue(new BackendError({ code, message: 'interrupted', retryable: false }))
+    await expect(nativeClone('https://github.com/a/b', '/repo', { host: 'github.com', login: 'alice', id: 12 }, undefined, () => {})).rejects.toThrow('protected only in this session')
+    expect(protections).toHaveBeenCalledWith('/repo', ['/repo', '/canonical/repo'])
   })
 })

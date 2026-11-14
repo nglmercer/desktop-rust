@@ -201,11 +201,13 @@ type NativeWindow = Window & {
       if (
         channel === 'desktop.backend.git_info' &&
         operation &&
-        operation.type === 'fetch_remote' &&
-        operation.operation &&
-        (operation.operation.method === 'renderer_fetch' ||
-          operation.operation.method === 'renderer_remote_head' ||
-          operation.operation.method === 'renderer_push') &&
+        ((operation.type === 'fetch_remote' &&
+          operation.operation &&
+          (operation.operation.method === 'renderer_fetch' ||
+            operation.operation.method === 'renderer_remote_head' ||
+            operation.operation.method === 'renderer_push')) ||
+          operation.type === 'clone_selected' ||
+          operation.type === 'recover_clone') &&
         request &&
         typeof request.deadline_ms === 'number' &&
         Number.isInteger(request.deadline_ms) &&
@@ -227,22 +229,30 @@ type NativeWindow = Window & {
         progress: onProgress,
       })
 
-      if (
-        !post({
+      var posted: boolean
+      try {
+        posted = post({
           __rpc: id,
           __progress: !!onProgress,
           channel: channel,
           args: args,
         })
-      ) {
+      } catch {
+        pending.delete(id)
+        clearTimeout(timer)
+        reject(Object.assign(new Error('Native IPC submission could not be confirmed'), { code: 'disconnected' }))
+        return
+      }
+      if (!posted) {
         // The HTTP fallback cannot deliver request-owned progress. Refuse
         // before submitting the operation instead of silently dropping it.
-        if (onProgress) {
+        if (onProgress || (channel === 'desktop.backend.git_info' && operation &&
+          (operation.type === 'clone_selected' || operation.type === 'recover_clone'))) {
           pending.delete(id)
           clearTimeout(timer)
           reject(
             Object.assign(
-              new Error('Request-owned progress requires native IPC'),
+              new Error('This operation requires native IPC'),
               { code: 'unsupported' }
             )
           )
@@ -300,6 +310,9 @@ type NativeWindow = Window & {
 
   function send(channel: string, ...args: unknown[]) {
     if (!post({ channel: channel, args: args })) {
+      if (channel === 'desktop.backend.cancel') {
+        throw new Error('Cancellation transport is unavailable')
+      }
       console.warn(
         '[desktop] dropping simplex message (no transport):',
         channel

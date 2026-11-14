@@ -2789,6 +2789,17 @@ yet use this route; recursive submodule account scopes and full clone error
 detail remain open. A real Wry WebKit integration test exercises HTTPS clone
 progress, preservation of an obstructing destination, and recovery.
 
+The renderer waits up to five seconds for clone cancellation to settle before
+reporting an uncertain result. After cancellation or an uncertain transport
+failure, it protects the destination and its canonical alias for the rest of
+that renderer session on all platforms. This protection is not persistent, does not cover the
+separate staging directory, and prevents renderer recovery for that destination
+during the session. Inspect both locations before taking further action. The
+native process runner does not yet guarantee termination of descendant
+processes on Windows, and the renderer cannot reliably infer the host platform
+from the bundle. The
+five-second shutdown limit can still expire before all host work has drained.
+
 The browser clone dialog validates ordinary destinations through a typed Rust
 WebSocket read rather than the unavailable renderer filesystem shim. It
 distinguishes empty or absent directories, files, nonempty directories,
