@@ -1,10 +1,12 @@
-import { describe, it } from 'node:test'
+import { beforeAll, describe, it } from 'vitest'
 import assert from 'node:assert'
 import { getShellEnv } from '../../src/lib/hooks/get-shell-env'
 import { SupportedHooksEnvShell } from '../../src/lib/hooks/config'
-import { getPrintenvzPath } from 'printenvz'
+import { buildPrintenvz, getPrintenvzPath } from 'printenvz'
 
 describe('getShellEnv', () => {
+  beforeAll(() => buildPrintenvz(), 120_000)
+
   const shellKinds: ReadonlyArray<SupportedHooksEnvShell | undefined> =
     __WIN32__ ? ['git-bash', 'pwsh', 'powershell', 'cmd'] : [undefined]
 
