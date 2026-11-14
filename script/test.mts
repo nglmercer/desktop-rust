@@ -1,9 +1,13 @@
 import { spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
+import { rmSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { parseEnv } from 'node:util'
 import { findTestFilesIn } from './test-discovery.mjs'
-import { filterByGitCapabilities } from './test-capabilities'
+import {
+  createCapableGitDirectory,
+  filterByGitCapabilities,
+} from './test-capabilities'
 
 function reporter(r: string): string[] {
   return ['--test-reporter', r, '--test-reporter-destination', 'stdout']
@@ -20,6 +24,19 @@ const discovered =
   fileArgs.length > 0
     ? await findTestFilesIn(fileArgs)
     : await findTestFilesIn([join(projectRoot, 'app', 'test', 'unit')])
+
+// Prefer a capable Git over skipping: when the configured one lacks behavior
+// the suites assert, run the whole run against the Git on PATH if it has it.
+const capableGit = createCapableGitDirectory()
+if (capableGit !== undefined) {
+  console.warn(
+    `Using ${capableGit.git} for tests: the configured Git (${process.env.LOCAL_GIT_DIRECTORY ?? 'dugite default'}) lacks required behavior`
+  )
+  process.env.LOCAL_GIT_DIRECTORY = capableGit.directory
+  process.on('exit', () => {
+    rmSync(capableGit.directory, { recursive: true, force: true })
+  })
+}
 
 // Some suites need Git behavior the installed Git may not have. Skip them
 // loudly rather than reporting failures that no code change can fix.

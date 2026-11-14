@@ -1,7 +1,14 @@
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /** Suites that assert behavior only some Git installations provide. */
 export interface IGitCapabilityRequirement {
@@ -111,4 +118,89 @@ export function filterByGitCapabilities(
     return false
   })
   return { files: kept, skipped }
+}
+
+/**
+ * When the configured Git lacks a capability the suites need but the Git on
+ * PATH has it, describe that Git in the layout dugite expects
+ * (`bin/git`, `libexec/git-core`, `share`) so the suites can run against it.
+ * Returns the directory to use as LOCAL_GIT_DIRECTORY, or undefined when the
+ * configured Git is already capable or no better Git exists. POSIX only.
+ */
+export function createCapableGitDirectory(
+  env: NodeJS.ProcessEnv = process.env
+): { directory: string; git: string } | undefined {
+  if (process.platform === 'win32') {
+    return undefined
+  }
+  if (gitHasCapability('remote-url-reset', env)) {
+    return undefined
+  }
+  const pathEnv = { ...env, LOCAL_GIT_DIRECTORY: '' }
+  let git: string
+  let execPath: string
+  try {
+    git = realpathSync(
+      execFileSync('which', ['git'], { encoding: 'utf8', env: pathEnv }).trim()
+    )
+    execPath = realpathSync(
+      execFileSync(git, ['--exec-path'], {
+        encoding: 'utf8',
+        env: pathEnv,
+      }).trim()
+    )
+  } catch {
+    return undefined
+  }
+  const prefix = dirname(dirname(git))
+  const directory = mkdtempSync(join(tmpdir(), 'desktop-test-git-'))
+  mkdirSync(join(directory, 'bin'))
+  mkdirSync(join(directory, 'libexec'))
+  symlinkSync(git, join(directory, 'bin', 'git'))
+  symlinkSync(execPath, join(directory, 'libexec', 'git-core'))
+  symlinkSync(join(prefix, 'share'), join(directory, 'share'))
+  if (
+    !gitHasCapability('remote-url-reset', {
+      ...env,
+      LOCAL_GIT_DIRECTORY: directory,
+    })
+  ) {
+    rmSync(directory, { recursive: true, force: true })
+    return undefined
+  }
+  return { directory, git }
+}
+
+/**
+ * Newer Git reports a missing alternate object directory as an error from
+ * `count-objects -v`, which the assisted-commit status load treats as fatal
+ * before any commit is made. The suites that expect that case to surface only
+ * at push time are marked `todo` on such a Git.
+ */
+export function gitReportsMissingAlternateAsError(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const git = testGitExecutable(env)
+  const directory = mkdtempSync(join(tmpdir(), 'desktop-git-probe-'))
+  try {
+    const run = (args: string[]) =>
+      spawnSync(git, args, {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { ...env, GIT_CONFIG_GLOBAL: '/dev/null', LC_ALL: 'C' },
+      })
+    run(['init', '-q', '.'])
+    mkdirSync(join(directory, '.git', 'objects', 'info'), { recursive: true })
+    writeFileSync(
+      join(directory, '.git', 'objects', 'info', 'alternates'),
+      `${join(directory, 'missing-objects')}\n`
+    )
+    return /^error: object directory .* does not exist/m.test(
+      run(['count-objects', '-v']).stderr
+    )
+  } catch {
+    return false
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 }

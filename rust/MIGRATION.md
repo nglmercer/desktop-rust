@@ -52,31 +52,33 @@ regression the unit tests missed: the resolver applied vscode-jsonrpc's
 browser build ("The superclass is not a constructor"). A `resolveId` plugin
 (`copilotJsonRpcNodeEntry`) now selects the Node entry.
 
-Test results: `node script/test.mts` exits 0 here. Vitest passes 337 files and
-the legacy `node:test` suites pass 1149 of 1150 tests (one skipped). Six suites
-are skipped with a printed `SKIPPED ... lacks <capability>` reason by
-`script/test-capabilities.ts`, because their assertions cannot hold on the Git
-this checkout runs (`LOCAL_GIT_DIRECTORY` points at Git 2.45.3, and `git-lfs`
-is not installed): the five assisted-push suites need a Git that treats an
-empty `remote.<name>.url=` in `GIT_CONFIG_PARAMETERS` as a reset of the URL
-list (the destination guard pins URLs that way; Git 2.45 appends an empty
-entry, so the guard correctly refuses), and `lfs-test` needs `git lfs`. They
-are not coverage that was lost to the migration; run them with a Git that has
-the capability. On a current system Git (2.56 with a complete layout) those
-suites run: all but 4 of the push-test cases pass, and the 4 failures are the
-"ignored missing alternate" cases, where the newer Git reports the missing
-alternate as an error that the object-store verification now surfaces before
-the push stage. Earlier notes attributing the failures to Git 2.56 were wrong.
-The test environment sets `LC_ALL=C` (assertions match English Git messages),
-the Node preload reports a client rect so jsdom focus-trap finds tabbable nodes,
-the Copilot SDK auth test resolves its platform package from the SDK, and the
-worktree account test removes the helper's separate worktree record so it
-exercises the main repository's record moving between worktrees.
+Scope: validation is Linux-only for now. Windows and macOS validation is
+deliberately deferred to a later phase and is not a gate for this work.
 
-The Electron-era OS-support banner, its menu event, the update gating on
-`isOSNoLongerSupported`, the install-CLI feature and the Electron wording in
-comments, tests and docs have been removed or rewritten. Not verified:
-Windows and macOS builds, which can only be exercised by the native CI matrix.
+Test results on Linux: `node script/test.mts` exits 0. Vitest passes 337 files
+and the legacy `node:test` suites run 1358 tests with 1353 passing, 4 marked
+`todo`, 1 skipped and none failing. The runner (`script/test-capabilities.ts`)
+probes the Git it will use. This checkout configures `LOCAL_GIT_DIRECTORY` as
+Git 2.45.3, which does not treat an empty `remote.<name>.url=` in
+`GIT_CONFIG_PARAMETERS` as a reset of the URL list (the assisted-push
+destination guard pins URLs that way and correctly refuses on such a Git), so
+the runner builds a temporary dugite-style layout over the Git on PATH (2.56
+here), prints which Git it chose and runs everything against it. Suites whose
+required capability no installed Git has are skipped with a printed reason;
+today that is only `lfs-test`, because `git-lfs` is not installed.
+The 4 `todo` cases are the "ignored missing alternate" push tests: a newer Git
+reports a missing alternate as an error from `count-objects -v`, and the
+status load treats that as fatal before commits are made. They fail identically
+at HEAD with the previous tsx loader and Git, so they are an existing
+incompatibility with newer Git, not a regression. The test environment also
+sets `LC_ALL=C`, the Node preload reports a client rect so jsdom focus-trap
+works, the Copilot SDK auth test resolves its platform package from the SDK, and
+the worktree account test removes the helper's separate worktree record.
+
+The Electron-era OS-support banner, its menu event, the update gating built on
+it, the install-CLI feature and the Electron wording in source, tests and the
+main docs have been removed or rewritten. Some historical docs (proxies,
+labels, known issues) still describe Electron.
 
 Verified in this session without changing behavior: the unit suites for the
 pending Markdown video sanitization, native custom integration, sandboxed
