@@ -1,5 +1,9 @@
 # Full migration and legacy-removal ledger
 
+The desktop shell's Vite rebuild check now includes static resources, emoji,
+package metadata and license inputs. It also detects removed resources and
+missing required inputs rather than silently retaining a stale embedded bundle.
+
 The offline GitHub CLI adapter integration suite now runs in Vitest using a
 TypeScript `gh` fixture. It retains the CLI and authenticated WebSocket checks,
 including request bodies, invalid input, process failures, and redaction. The
