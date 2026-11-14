@@ -84,7 +84,7 @@ Worklist (failing files, with the first cause each hits):
 - [x] `git/rebase/*`, `git/rebase-full-test` basis — 29 of 37 pass; remaining 8 are Contract ×4, Progress ×3, Error shape ×1
 - [x] `git/revert-test`, `git/merge-test` basis — 10 of 11 pass; remaining 1 is Error shape (`abortMerge` with no merge)
 - [ ] `git/commit-test` (20): Basis — needs the reviewed selection the app builds first
-- [ ] `git/rev-parse-test` (17): the unsafe-ownership cases set Git environment in the test process, which the separate server never sees — start the server with that environment (`startRustBackend({ env })`)
+- [~] `git/rev-parse-test` (16 of 17 left): the harness now restarts the server with the test's Git environment (ownership check, tracing, home) when it changes between requests, which fixed one case; the rest fail because the Rust `trust` operation answers "cannot add Git directory exception" for the paths these tests add — investigate the Rust side
 - [~] `git/remote-operations-test` (11 of 40 left): rebase/merge basis done; push needs its expected reference, and a remote literally named `--remote` is refused by Rust (Contract)
 - [ ] `git/pull/*` (25): Contract / Basis
 - [ ] `git/branch-test` (2): Basis — needs a reviewed branch tip

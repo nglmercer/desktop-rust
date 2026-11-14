@@ -53,40 +53,51 @@ async function bounded<T>(promise: Promise<T>, milliseconds = 15_000) {
 }
 
 /**
- * The server serves one selected repository, as the app does when the user
- * picks one. Tests build many repositories and ask about each in turn, so
- * select the repository a request is about just before binding to it.
+ * The Git settings a test changes in its own process to set up a scenario
+ * (ownership checks, tracing, an isolated home). The server is another process,
+ * so it has to be restarted with them to see the same thing.
  */
-function followRequestedRepository(client: BackendClient) {
-  const request = client.request.bind(client)
-  let selected: string | null = null
-  client.request = async (method: string, params: unknown, opts?: any) => {
-    const target = (params as { path?: unknown } | null)?.path
-    if (
-      method === 'repository_binding' &&
-      typeof target === 'string' &&
-      target !== selected
-    ) {
-      await client.selectBrowserRepository(target)
-      selected = target
-    }
-    return request(method, params, opts)
-  }
+const GIT_ENVIRONMENT_KEYS = [
+  'HOME',
+  'XDG_CONFIG_HOME',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_NOSYSTEM',
+  'GIT_TEST_ASSUME_DIFFERENT_OWNER',
+  'GIT_TRACE',
+  'GIT_TRACE2',
+  'GIT_TRACE2_EVENT',
+  'GIT_TRACE2_PERF',
+] as const
+
+const gitEnvironmentFingerprint = () =>
+  JSON.stringify(GIT_ENVIRONMENT_KEYS.map(key => process.env[key] ?? null))
+
+interface ISession {
+  readonly client: BackendClient
+  readonly directory: string
+  /** The Git environment the server was started with. */
+  readonly fingerprint: string
+  /** Unwrapped request of `client`, for forwarding after a restart. */
+  readonly rawRequest: BackendClient['request']
+  close(): Promise<void>
 }
 
-export async function startRustBackend(): Promise<IRustBackend> {
-  if (!rustBackendAvailable) {
-    throw new Error(`Build the bridge first: ${rustBackendBinary} is missing`)
-  }
-  const directory = await mkdtemp(path.join(tmpdir(), 'desktop-rust-backend-'))
+async function openSession(directory: string): Promise<ISession> {
   // Keep the caller's Git settings out of the server's environment, except the
-  // author and committer the test environment defines for its commits.
-  const env = Object.fromEntries(
+  // author and committer the test environment defines for its commits and the
+  // settings a test has changed for its scenario.
+  const env: Record<string, string> = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key]) =>
-        !key.startsWith('GIT_') ||
-        /^GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)$/.test(key)
-    )
+      ([key, value]) =>
+        value !== undefined &&
+        (!key.startsWith('GIT_') ||
+          /^GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)$/.test(key))
+    ) as Array<[string, string]>
+  )
+  const fingerprint = gitEnvironmentFingerprint()
+  const overlay = GIT_ENVIRONMENT_KEYS.filter(key => key in process.env)
+  const changedByTest = overlay.some(
+    key => process.env[key] !== undefined && key !== 'HOME'
   )
   const server: ChildProcess = spawn(
     rustBackendBinary,
@@ -99,7 +110,18 @@ export async function startRustBackend(): Promise<IRustBackend> {
       '0',
     ],
     {
-      env: { ...env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1' },
+      env: {
+        ...env,
+        ...(changedByTest
+          ? Object.fromEntries(
+              overlay.flatMap(key =>
+                process.env[key] === undefined
+                  ? []
+                  : [[key, process.env[key] as string]]
+              )
+            )
+          : { HOME: directory, GIT_CONFIG_NOSYSTEM: '1' }),
+      },
       stdio: ['ignore', 'ignore', 'pipe'],
     }
   )
@@ -118,7 +140,6 @@ export async function startRustBackend(): Promise<IRustBackend> {
     url = line.startsWith('Open ') ? line.slice(5) : ''
   } catch (error) {
     server.kill('SIGKILL')
-    await rm(directory, { recursive: true, force: true })
     throw error
   }
 
@@ -131,16 +152,17 @@ export async function startRustBackend(): Promise<IRustBackend> {
   vi.stubGlobal('WebSocket', dom.window.WebSocket)
   vi.stubGlobal('location', dom.window.location)
   const client = new BackendClient()
+  const rawRequest = client.request.bind(client)
   await bounded(client.waitReady())
-  followRequestedRepository(client)
 
   return {
     client,
     directory,
-    async stop() {
+    fingerprint,
+    rawRequest,
+    async close() {
       client.close()
       dom.window.close()
-      vi.unstubAllGlobals()
       if (server.exitCode === null && server.signalCode === null) {
         const exited = new Promise<void>(resolve =>
           server.once('exit', () => resolve())
@@ -152,6 +174,58 @@ export async function startRustBackend(): Promise<IRustBackend> {
           server.kill('SIGKILL')
         }
       }
+    },
+  }
+}
+
+export async function startRustBackend(): Promise<IRustBackend> {
+  if (!rustBackendAvailable) {
+    throw new Error(`Build the bridge first: ${rustBackendBinary} is missing`)
+  }
+  const directory = await mkdtemp(path.join(tmpdir(), 'desktop-rust-backend-'))
+  let active: ISession
+  try {
+    active = await openSession(directory)
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true })
+    throw error
+  }
+  // The first session's client is the stable handle tests hold. Its `request`
+  // follows the repository a call is about and, when the test changed the Git
+  // environment, forwards to a restarted session.
+  const handle = active.client
+  let selected: string | null = null
+  const original = active.rawRequest
+  handle.request = async (method: string, params: unknown, opts?: any) => {
+    if (gitEnvironmentFingerprint() !== active.fingerprint) {
+      const previous = active
+      active = await openSession(directory)
+      overrideBackendForTests(active.client)
+      selected = null
+      await previous.close()
+    }
+    const target = (params as { path?: unknown } | null)?.path
+    if (
+      method === 'repository_binding' &&
+      typeof target === 'string' &&
+      target !== selected
+    ) {
+      await active.client.selectBrowserRepository(target)
+      selected = target
+    }
+    return (active.client === handle ? original : active.rawRequest)(
+      method,
+      params,
+      opts
+    )
+  }
+
+  return {
+    client: handle,
+    directory,
+    async stop() {
+      vi.unstubAllGlobals()
+      await active.close()
       await rm(directory, { recursive: true, force: true })
     },
   }
