@@ -393,5 +393,7 @@
   "app/test/unit/native-custom-integration-test.ts",
   "app/test/unit/macos-version-from-darwin-test.ts",
   "script/test-capabilities.test.ts",
-  "app/test/unit/web-fs-watch-test.ts"
+  "app/test/unit/web-fs-watch-test.ts",
+  "app/test/unit/rust-backend-harness-test.ts",
+  "app/test/unit/ui/terminal-lazy-test.tsx"
 ]

@@ -1,3 +1,4 @@
+import { lazyComponent } from './lib/lazy-component'
 import type { HostCertificate } from '../lib/host-types'
 import * as React from 'react'
 import * as Path from 'path'
@@ -67,9 +68,15 @@ import { DiscardChanges } from './discard-changes'
 import { Welcome } from './welcome'
 import { AppMenuBar } from './app-menu'
 import { UpdateAvailable, renderBanner } from './banners'
-import { Preferences } from './preferences'
+const Preferences = lazyComponent(() =>
+  import('./preferences').then(m => ({ default: m.Preferences }))
+)
 import { CopilotSettingsDialog } from './preferences/copilot-settings-dialog'
-import { CopilotCustomProvidersDialog } from './preferences/copilot-custom-providers-dialog'
+const CopilotCustomProvidersDialog = lazyComponent(() =>
+  import('./preferences/copilot-custom-providers-dialog').then(m => ({
+    default: m.CopilotCustomProvidersDialog,
+  }))
+)
 import { EditCopilotBYOKProviderDialog } from './copilot/edit-byok-provider-dialog'
 import { EditCopilotBYOKModelDialog } from './copilot/edit-byok-model-dialog'
 import { ConfirmDeleteCopilotBYOKProviderDialog } from './copilot/confirm-delete-byok-provider-dialog'
@@ -88,9 +95,13 @@ import { SignIn } from './sign-in'
 import { InstallGit } from './install-git'
 import { EditorError } from './editor'
 import { CopilotAppNotFoundDialog } from './copilot-app/copilot-app-not-found-dialog'
-import { About } from './about'
+const About = lazyComponent(() =>
+  import('./about').then(m => ({ default: m.About }))
+)
 import { Publish } from './publish-repository'
-import { Acknowledgements } from './acknowledgements'
+const Acknowledgements = lazyComponent(() =>
+  import('./acknowledgements').then(m => ({ default: m.Acknowledgements }))
+)
 import { UntrustedCertificate } from './untrusted-certificate'
 import { NoRepositoriesView } from './no-repositories'
 import { ConfirmRemoveRepository } from './remove-repository'
@@ -100,7 +111,9 @@ import { GenericGitAuthentication } from './generic-git-auth'
 import { ShellError } from './shell'
 import { InitializeLFS, AttributeMismatch } from './lfs'
 import { UpstreamAlreadyExists } from './upstream-already-exists'
-import { ReleaseNotes } from './release-notes'
+const ReleaseNotes = lazyComponent(() =>
+  import('./release-notes').then(m => ({ default: m.ReleaseNotes }))
+)
 import { DeletePullRequest } from './delete-branch/delete-pull-request-dialog'
 import { CommitConflictsWarning } from './merge-conflicts'
 import { AppTheme } from './app-theme'

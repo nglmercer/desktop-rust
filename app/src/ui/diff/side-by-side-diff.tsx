@@ -273,6 +273,9 @@ export class SideBySideDiff extends React.Component<
     }
   }
 
+  /** Set on unmount so work that finishes afterwards does not set state. */
+  private unmounted = false
+
   public componentDidMount() {
     this.initDiffSyntaxMode()
 
@@ -413,6 +416,7 @@ export class SideBySideDiff extends React.Component<
   }
 
   public componentWillUnmount() {
+    this.unmounted = true
     window.removeEventListener('keydown', this.onWindowKeyDown)
     document.removeEventListener('mouseup', this.onEndSelection)
     document.removeEventListener('find-text', this.showSearch)
@@ -1000,6 +1004,10 @@ export class SideBySideDiff extends React.Component<
     const tabSize = 4
 
     const tokens = await highlightContents(contents, tabSize, lineFilters)
+
+    if (this.unmounted) {
+      return
+    }
 
     if (
       !highlightParametersEqual(

@@ -1,7 +1,6 @@
-import {
+import type {
   CopilotClient,
   CopilotSession,
-  RuntimeConnection,
   SessionConfig,
   ModelBillingTokenPrices,
   GitHubTokenProvider,
@@ -1017,8 +1016,10 @@ export class CopilotStore extends BaseStore {
       throw new Error('Cannot create Copilot client: Account has no token')
     }
 
-    const client = new CopilotClient({
-      connection: RuntimeConnection.forStdio({
+    // The SDK is large and only needed once a client is created.
+    const sdk = await import('@github/copilot-sdk')
+    const client = new sdk.CopilotClient({
+      connection: sdk.RuntimeConnection.forStdio({
         path: runtimePath,
       }),
       env: {

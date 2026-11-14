@@ -1,18 +1,11 @@
-import * as xterm from '@xterm/xterm'
 import type {
   ITerminalOptions,
   ITerminalInitOnlyOptions,
-  Terminal as XTermTerminalType,
+  Terminal as XTermTerminal,
 } from '@xterm/xterm'
 import React from 'react'
 import { getMonospaceFontFamily } from './get-monospace-font-family'
 import { TerminalOutput } from '../lib/git'
-
-// xterm ships a UMD bundle, so Node resolves its classes through `default`.
-const XTermTerminal: typeof XTermTerminalType =
-  xterm.Terminal ??
-  (xterm as unknown as { default: typeof xterm }).default.Terminal
-type XTermTerminal = XTermTerminalType
 
 export const defaultTerminalOptions: Readonly<ITerminalOptions> = {
   convertEol: true,
@@ -27,29 +20,59 @@ export type TerminalProps = ITerminalOptions &
     readonly hideCursor?: boolean
   }
 
+/**
+ * Load xterm on first use, in its own chunk. It ships a UMD bundle, so Node
+ * resolves its classes through `default`.
+ */
+async function loadXTermTerminal(): Promise<typeof XTermTerminal> {
+  const module = await import('@xterm/xterm')
+  return (
+    module.Terminal ??
+    (module as unknown as { default: typeof module }).default.Terminal
+  )
+}
+
 export class Terminal extends React.Component<TerminalProps> {
   private terminalRef = React.createRef<HTMLDivElement>()
   private terminal: XTermTerminal | null = null
+  private unmounted = false
+  /** Output written before xterm finished loading, replayed in order. */
+  private pending: TerminalOutput[] = []
 
   public get Terminal() {
     return this.terminal
   }
 
   public write(data: TerminalOutput) {
+    if (this.terminal === null) {
+      this.pending.push(data)
+      return
+    }
     if (Array.isArray(data)) {
       data.forEach(chunk => this.terminal?.write(chunk))
     } else {
-      this.terminal?.write(data)
+      this.terminal.write(data)
     }
   }
 
   public componentWillUnmount(): void {
+    this.unmounted = true
+    this.pending = []
     this.terminal?.dispose()
   }
 
   public componentDidMount() {
+    void this.start()
+  }
+
+  private async start() {
     const { terminalOutput, hideCursor, ...initOpts } = this.props
-    this.terminal = new XTermTerminal({
+    const XTerm = await loadXTermTerminal()
+    if (this.unmounted) {
+      return
+    }
+
+    const terminal = new XTerm({
       ...defaultTerminalOptions,
       ...initOpts,
 
@@ -57,7 +80,7 @@ export class Terminal extends React.Component<TerminalProps> {
       cols: this.props.cols ?? 80,
     })
 
-    this.terminal.attachCustomKeyEventHandler((key: KeyboardEvent) => {
+    terminal.attachCustomKeyEventHandler((key: KeyboardEvent) => {
       if (key.key === 'Tab') {
         // We don't want to handle tab key events in the terminal as it
         // breaks tab navigation in the app. The terminal is read only and
@@ -68,14 +91,23 @@ export class Terminal extends React.Component<TerminalProps> {
     })
 
     if (this.terminalRef.current) {
-      this.terminal.open(this.terminalRef.current)
+      terminal.open(this.terminalRef.current)
+      this.terminal = terminal
 
       if (hideCursor !== false) {
-        this.terminal.write('\x1b[?25l') // hide cursor
+        terminal.write('\x1b[?25l') // hide cursor
         if (terminalOutput) {
           this.write(terminalOutput)
         }
       }
+    } else {
+      this.terminal = terminal
+    }
+
+    const pending = this.pending
+    this.pending = []
+    for (const data of pending) {
+      this.write(data)
     }
   }
 

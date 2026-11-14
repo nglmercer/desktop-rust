@@ -4,7 +4,12 @@ import * as React from 'react'
 import { CopilotCommitPanel } from '../../../src/ui/changes/copilot-commit-panel'
 import { AssistedCommitRunState } from '../../../src/models/assisted-commit-run'
 import { ErrorWithMetadata } from '../../../src/lib/error-with-metadata'
-import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '../../helpers/ui/vitest-render'
 import { PushProgressParser } from '../../../src/lib/progress'
 
 describe('Copilot commit run panel', () => {
@@ -612,11 +617,15 @@ describe('Copilot commit run panel', () => {
     )
     assert.ok(screen.getByText('Create an empty commit'))
     assert.strictEqual(screen.queryByRole('button', { name: 'Cancel' }), null)
-    assert.strictEqual(
-      view.container
-        .querySelector('.copilot-animation')
-        ?.getAttribute('aria-hidden'),
-      'true'
+    // The animation is a lazily loaded chunk; once it arrives it stays hidden
+    // from assistive technology.
+    await waitFor(() =>
+      assert.strictEqual(
+        view.container
+          .querySelector('.copilot-animation')
+          ?.getAttribute('aria-hidden'),
+        'true'
+      )
     )
     assert.ok(screen.getByRole('button', { name: 'Animate Copilot' }))
   })

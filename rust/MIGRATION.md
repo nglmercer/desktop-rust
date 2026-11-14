@@ -1,5 +1,9 @@
 # Full migration and legacy-removal ledger
 
+The ordered task list for finishing the migration on Linux, with measured
+baselines, is in [`ROADMAP.md`](ROADMAP.md); `pnpm migration:status` re-measures
+it. This file stays the evidence ledger.
+
 Electron, Webpack and esbuild have been removed from the build, packages,
 lockfiles, CI and developer documentation. Deleted: `app/src/main-process`,
 the crash window, the legacy `github` launcher CLI, their Vite configs, the
@@ -37,6 +41,29 @@ Rust transport is attached. Deleting them requires moving those tests onto the
 Rust backend, which is the "Remove legacy source" gate below, not an Electron
 removal. The removed Electron IPC branch of `openPath` was the only
 Electron-specific one found.
+
+Removing the non-Rust paths: `app/test/helpers/rust-backend.ts` is the shared
+harness for it. `startRustBackend()` spawns `desktop-rs serve`, attaches a
+WebSocket `BackendClient` the way the browser renderer does and returns the
+client, so a test that routes `backend()` to it exercises the real Rust
+operation instead of a fallback (`rust-backend-harness-test.ts` proves this for
+`pathExists` and `directoryExists`; it skips when `desktop-cli` has not been
+built). The plan for deleting the roughly 240 `transportKind` fallbacks is: move
+a module's tests onto the harness, fix any place the Rust operation differs
+from the Node one, delete that module's fallback, repeat. No fallback has been
+deleted yet, so the "Remove legacy source" gate stays open.
+
+Lazy loading: the renderer bundle was one 4.7 MB file (1.35 MB gzip). The rare
+dialogs (Preferences, About, Acknowledgements, Release notes, custom Copilot
+providers) are now `lazyComponent` imports (`ui/lib/lazy-component.tsx`), the
+Copilot animation sprites load when the commit panel shows them, xterm loads
+when a terminal first mounts (`ui/terminal.tsx` buffers output written before it
+arrives, tested), and the Copilot SDK is imported when the first client is
+created. The entry chunk is now about 2.4 MB (0.66 MB gzip); the dialog, crypto,
+xterm and animation chunks load on demand. A Chromium test imports the split
+chunks from the embedded server, and the real Wry window still mounts. Not
+split yet: `re2js` (used synchronously by branch rules), the `crypto`
+polyfills, and the stores.
 
 Loaders: scripts run with oxc-node (`node --import @oxc-node/core/register`).
 The remaining `node:test` suites run with `script/ts-register.cjs`, a require

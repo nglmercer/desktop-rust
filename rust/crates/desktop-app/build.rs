@@ -60,18 +60,27 @@ fn newest(path: &Path) -> Option<SystemTime> {
 }
 
 fn bundle_is_stale(repo: &Path, dist: &Path) -> bool {
-    if !dist.join("highlighter.js").is_file()
-        || !dist.join("ipc-shim.js").is_file()
-        || !dist.join("desktop-auth-scheme").is_file()
-    {
-        return true;
+    stale_reason(repo, dist).is_some()
+}
+
+/// Why the bundle must be rebuilt, naming the input that changed after it was
+/// built when that is the cause.
+fn stale_reason(repo: &Path, dist: &Path) -> Option<String> {
+    for required in ["highlighter.js", "ipc-shim.js", "desktop-auth-scheme"] {
+        if !dist.join(required).is_file() {
+            return Some(format!("{} is missing", dist.join(required).display()));
+        }
     }
     let Ok(built) = std::fs::metadata(dist.join("index.html")).and_then(|m| m.modified()) else {
-        return true;
+        return Some(format!("{} is missing", dist.join("index.html").display()));
     };
-    INPUTS
-        .iter()
-        .any(|input| newest(&repo.join(input)).is_none_or(|time| time > built))
+    INPUTS.iter().find_map(|input| match newest(&repo.join(input)) {
+        None => Some(format!("input {input} is missing")),
+        Some(time) if time > built => Some(format!(
+            "input {input} changed after the bundle was built"
+        )),
+        Some(_) => None,
+    })
 }
 
 fn pnpm() -> &'static str {
@@ -172,10 +181,11 @@ fn main() {
             !force,
             "DESKTOP_VITE_FORCE cannot rebuild a supplied bundle"
         );
-        assert!(
-            !bundle_is_stale(&repo, &dist),
-            "DESKTOP_VITE_DIST is stale; rebuild the isolated Vite bundle"
-        );
+        if let Some(reason) = stale_reason(&repo, &dist) {
+            panic!(
+                "DESKTOP_VITE_DIST is stale ({reason}); rebuild the isolated Vite bundle and do not edit renderer inputs while a package build is running"
+            );
+        }
     } else if force || bundle_is_stale(&repo, &dist) {
         if let Err(cause) = build_bundle(&repo, &dist) {
             panic!("the renderer bundle could not be built: {cause}");
@@ -305,6 +315,21 @@ mod tests {
             assert!(bundle_is_stale(&fixture.0, &fixture.dist()), "{dir}");
             fs::remove_file(path).unwrap();
         }
+    }
+
+    #[test]
+    fn the_stale_reason_names_the_input_that_changed() {
+        let fixture = Fixture::new();
+        let now = SystemTime::now();
+        fixture.set_index_time(now + Duration::from_secs(60));
+        assert_eq!(stale_reason(&fixture.0, &fixture.dist()), None);
+        set_modified(
+            &fixture.0.join("package.json"),
+            now + Duration::from_secs(120),
+        );
+        let reason = stale_reason(&fixture.0, &fixture.dist()).unwrap();
+        assert!(reason.contains("package.json"), "{reason}");
+        assert!(reason.contains("changed after the bundle was built"), "{reason}");
     }
 
     #[test]

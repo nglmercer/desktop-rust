@@ -1,9 +1,14 @@
 import * as React from 'react'
 import classNames from 'classnames'
-import {
-  CopilotAnimation,
-  CopilotAnimationKind,
-} from '../copilot-animation/copilot-animation'
+import type { CopilotAnimationKind } from '../copilot-animation/copilot-animation'
+import { lazyComponent } from '../lib/lazy-component'
+
+// The sprite sheets are large and only play once the panel is on screen.
+const CopilotAnimation = lazyComponent(() =>
+  import('../copilot-animation/copilot-animation').then(m => ({
+    default: m.CopilotAnimation,
+  }))
+)
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { AriaLiveContainer } from '../accessibility/aria-live-container'
@@ -276,24 +281,26 @@ export class CopilotCommitPanel extends React.Component<
             </div>
           )}
           <div className="assisted-commit-actions">
-            {state.retry !== null && this.props.onRetryRecovery !== undefined && (
-              <Button
-                onClick={this.props.onRetryRecovery}
-                disabled={state.settling}
-              >
-                {state.retry === 'recovery'
-                  ? 'Retry rollback'
-                  : 'Retry refresh'}
-              </Button>
-            )}
-            {state.retry === null && this.props.onDismissError !== undefined && (
-              <Button
-                onClick={this.props.onDismissError}
-                disabled={state.settling}
-              >
-                Dismiss
-              </Button>
-            )}
+            {state.retry !== null &&
+              this.props.onRetryRecovery !== undefined && (
+                <Button
+                  onClick={this.props.onRetryRecovery}
+                  disabled={state.settling}
+                >
+                  {state.retry === 'recovery'
+                    ? 'Retry rollback'
+                    : 'Retry refresh'}
+                </Button>
+              )}
+            {state.retry === null &&
+              this.props.onDismissError !== undefined && (
+                <Button
+                  onClick={this.props.onDismissError}
+                  disabled={state.settling}
+                >
+                  Dismiss
+                </Button>
+              )}
             {this.props.onErrorDetails !== undefined && (
               <Button onClick={this.props.onErrorDetails}>Details</Button>
             )}

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import assert from 'node:assert/strict'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
@@ -139,12 +139,29 @@ describe.skipIf(process.env.DESKTOP_TEST_BROWSER_ENTRY !== '1')(
           error.replace(/#token=[^\s]+/g, '#token=[redacted]')
         )
         throw new Error(
-          `Browser frontend did not mount: ${diagnostics.join('; ') || 'no page error was reported'}`
+          `Browser frontend did not mount: ${
+            diagnostics.join('; ') || 'no page error was reported'
+          }`
         )
       }
       await page.waitForFunction(
         () => Reflect.get(window, '__desktop')?.__backendReady === true
       )
+      // Chunks split out for lazy loading must be served by the embedded
+      // renderer and run in the browser.
+      const lazyChunks = (await readdir('out/vite-dist/assets')).filter(file =>
+        /^(xterm|copilot-animation|preferences)-.*\.js$/.test(file)
+      )
+      assert.ok(lazyChunks.length >= 3, `missing lazy chunks: ${lazyChunks}`)
+      for (const chunk of lazyChunks) {
+        // A string, so the test runner does not rewrite the dynamic import.
+        const loaded = await page.evaluate<number>(
+          `import(${JSON.stringify(
+            new URL(`/assets/${chunk}`, session).href
+          )}).then(module => Object.keys(module).length)`
+        )
+        assert.ok(loaded >= 1, `${chunk} did not export anything`)
+      }
       const clipboard = await page.evaluate(async () => {
         await Reflect.get(window, '__desktop').invoke(
           'write-clipboard-text',
