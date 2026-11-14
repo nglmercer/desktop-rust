@@ -664,6 +664,9 @@ app.on('ready', () => {
   })
 
   ipcMain.handle('move-to-trash', (_, path) => shell.trashItem(path))
+  ipcMain.handle('desktop.io.open-path', (_, request) =>
+    shell.openPath(request.path)
+  )
   ipcMain.handle('show-item-in-folder', async (_, path) =>
     shell.showItemInFolder(path)
   )

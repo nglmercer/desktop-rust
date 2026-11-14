@@ -1,4 +1,3 @@
-import { shell as electronShell } from 'electron'
 import * as Path from 'path'
 
 import { Repository } from '../models/repository'
@@ -8,10 +7,10 @@ import {
   openExternal,
   moveItemToTrash,
 } from '../ui/main-process-proxy'
+import { openPath } from './open-path'
 
 export interface IAppShell {
   readonly moveItemToTrash: (path: string) => Promise<void>
-  readonly beep: () => void
   readonly openExternal: (path: string) => Promise<boolean>
   /**
    * Reveals the specified file using the operating
@@ -45,11 +44,10 @@ export const shell: IAppShell = {
   // on Windows. Therefore, we must invoke it from the main process. See
   // https://github.com/electron/electron/issues/29598
   moveItemToTrash,
-  beep: electronShell.beep,
   openExternal,
   showItemInFolder,
   showFolderContents,
-  openPath: electronShell.openPath,
+  openPath,
 }
 
 /**

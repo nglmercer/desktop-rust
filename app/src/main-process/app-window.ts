@@ -5,8 +5,8 @@ import {
   BrowserWindow,
   autoUpdater,
   nativeTheme,
+  shell,
 } from 'electron'
-import { shell } from '../lib/app-shell'
 import { Emitter, Disposable } from 'event-kit'
 import { encodePathAsUrl } from '../lib/path'
 import {

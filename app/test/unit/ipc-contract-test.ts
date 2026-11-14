@@ -86,6 +86,7 @@ describe('IPC channel contract', () => {
     'show-contextual-menu',
     'is-window-focused',
     'open-external',
+    'desktop.io.open-path',
     'is-in-application-folder',
     'move-to-applications-folder',
     'check-for-updates',
@@ -110,7 +111,7 @@ describe('IPC channel contract', () => {
         expectedRequestChannels
       const isExhaustive: AssertExactUnion<
         keyof RequestChannels,
-        typeof expectedRequestChannels[number]
+        (typeof expectedRequestChannels)[number]
       > = true
 
       assert.equal(isValid.length, expectedRequestChannels.length)
@@ -140,7 +141,7 @@ describe('IPC channel contract', () => {
         expectedResponseChannels
       const isExhaustive: AssertExactUnion<
         keyof RequestResponseChannels,
-        typeof expectedResponseChannels[number]
+        (typeof expectedResponseChannels)[number]
       > = true
 
       assert.equal(isValid.length, expectedResponseChannels.length)
