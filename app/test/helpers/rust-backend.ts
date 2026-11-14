@@ -182,3 +182,48 @@ export function useRustBackend(): { client: BackendClient; directory: string } {
   }, 60_000)
   return handle
 }
+
+/**
+ * The head and branch the app has just read when it starts an operation. The
+ * Rust operations take them as the basis the user acted on and refuse to run
+ * if the repository moved; tests that call the library directly supply them
+ * from the repository as it is.
+ */
+export async function currentBasis(repository: {
+  readonly path: string
+}): Promise<{ readonly head: string; readonly branch: string | null }> {
+  const { exec } = await import('dugite')
+  const head = (
+    await exec(['rev-parse', 'HEAD'], repository.path)
+  ).stdout.trim()
+  const symbolic = await exec(['symbolic-ref', '-q', 'HEAD'], repository.path)
+  const branch = symbolic.exitCode === 0 ? symbolic.stdout.trim() : null
+  return { head, branch }
+}
+
+/**
+ * The two branch tips the app has just read when it merges one branch into the
+ * current one; the Rust merge refuses to run if either has moved.
+ */
+export async function mergeBasis(
+  repository: { readonly path: string },
+  sourceBranch: string
+): Promise<{
+  readonly sourceRef: string
+  readonly sourceHead: string
+  readonly currentRef: string
+  readonly currentHead: string
+}> {
+  const { exec } = await import('dugite')
+  const read = async (args: string[]) =>
+    (await exec(args, repository.path)).stdout.trim()
+  const sourceRef =
+    (await read(['rev-parse', '--symbolic-full-name', sourceBranch])) ||
+    `refs/heads/${sourceBranch}`
+  return {
+    sourceRef,
+    sourceHead: await read(['rev-parse', sourceRef]),
+    currentRef: await read(['symbolic-ref', 'HEAD']),
+    currentHead: await read(['rev-parse', 'HEAD']),
+  }
+}
