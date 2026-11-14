@@ -31,11 +31,11 @@ $ export TARGET_ARCH=arm64
 
 ## Building
 
-After that, you should be able to build the development version of Desktop:
+The following commands build the legacy Electron development version of Desktop:
 
 ```shellsession
 $ npm run build:dev
-$ npm start
+$ npm run start:electron
 ```
 
 Or if you want to test the production build:

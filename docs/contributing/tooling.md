@@ -27,12 +27,13 @@ The Desktop repository includes a list of recommended extensions:
 
 ## Debugging
 
-When running the app in development mode, the Chrome Dev Tools are also launched, to assist with debugging and poking at the live application.
+For the legacy Electron development build, Chrome Dev Tools can assist with
+debugging and inspecting the live application.
 
 ```shellsession
 $ npm ci
 $ npm run build:dev
-$ npm start
+$ npm run start:electron
 ```
 
 At a basic level, the logs from the running app are displayed in the **Console** tab, but other features include:

@@ -14,8 +14,9 @@ Experimental support for building Desktop is also available for these platforms:
 
 ## Verification
 
-Node.js 22.12.0 or newer and npm 11.17.0 or newer are required. Use the
-recommended Node.js version in `.nvmrc` for development.
+Node.js 22.12.0 or newer, pnpm, and a Rust toolchain are required for the Rust
+development build. Use the recommended Node.js version in `.nvmrc` and the
+pnpm version pinned in `package.json`.
 
 Verify you have these commands available in your shell and that the found
 versions look similar to the below output:
@@ -24,11 +25,11 @@ versions look similar to the below output:
 $ node -v
 v24.19.0
 
-$ npm -v
+$ pnpm -v
 11.17.0
 
-$ python --version
-Python 3.9.x
+$ cargo --version
+cargo 1.x
 ```
 
 There are also [additional resources](tooling.md) to configure your favorite
@@ -38,17 +39,29 @@ editor to work nicely with the GitHub Desktop repository.
 
 First, create a fork of `desktop/desktop` and then clone the repository to your local machine. You'll need to be inside the repository in order to build the application locally.
 
-The typical workflow to get up running is as follows:
+For the Rust/Vite desktop, install the platform dependencies for Wry and run:
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm start
+```
+
+The launcher builds the Rust host and watches the renderer. After a successful
+rebuild, wait for any Git operation to finish and reload the app with
+<kbd>Ctrl/Command+Alt+R</kbd>. See the [migration README](../../README.md)
+for launcher limitations and the separate browser build.
+
+The legacy Electron workflow remains available while migration is incomplete:
 
 * Run `npm ci` to get all required dependencies on your machine.
 * Run `npm run build:dev` to create a development build of the app.
-* Run `npm start` to launch the application. Changes will be compiled in the
+* Run `npm run start:electron` to launch the application. Changes will be compiled in the
   background. The app can then be reloaded to see the changes (<kbd>Ctrl/Command+Alt+R</kbd>).
 
 **Optional Tip**: On macOS and Linux, you can use `screen` to avoid filling your terminal with logging output:
 
 ```shellsession
-$ screen -S "desktop" npm start # -S sets the name of the session; you can pick anything
+$ screen -S "desktop" npm run start:electron # -S sets the name of the session
 $ # Your screen clears and shows logs. Press Ctrl+A then D to exit.
 [detached]
 $ screen -R "desktop" # to reopen the session, read the logs, and exit (Ctrl+C)
@@ -56,7 +69,7 @@ $ screen -R "desktop" # to reopen the session, read the logs, and exit (Ctrl+C)
 ```
 
 If you've made changes in the `main-process` folder you need to run `npm run
-build:dev` to rebuild the package, and then `npm start` for these changes to be
+build:dev` to rebuild the package, and then `npm run start:electron` for these changes to be
 reflected in the running app.
 
 If you are using GitHub Enterprise with your development build of GitHub Desktop, you will need to follow a few extra steps to [authenticate properly](github-enterprise-auth-from-dev-build.md).
@@ -81,7 +94,7 @@ problems.
 Electron ships with Chrome Dev Tools to assist with debugging, profiling and
 other measurement tools.
 
-1. Run the command `npm start` to launch the app
+1. Run the command `npm run start:electron` to launch the legacy app
 2. Under the **View** menu, select **Toggle Developer Tools**
 
 When running the app in development mode,

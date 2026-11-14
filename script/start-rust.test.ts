@@ -23,7 +23,7 @@ const enabled =
   process.platform === 'linux' &&
   !!process.env.DISPLAY
 
-function startHost(args: ReadonlyArray<string> = []) {
+function startHost(args: ReadonlyArray<string> = [], useDefaultCommand = false) {
   const directory = mkdtempSync(path.join(tmpdir(), 'desktop-rust-dev-test-'))
   const runtime = path.join(directory, 'runtime')
   mkdirSync(runtime, { mode: 0o700 })
@@ -33,10 +33,13 @@ function startHost(args: ReadonlyArray<string> = []) {
     )
   )
   const child = spawn(
-    process.execPath,
-    ['--import', 'tsx', 'script/start-rust.ts', ...args],
+    useDefaultCommand ? 'pnpm' : process.execPath,
+    useDefaultCommand
+      ? ['start', ...args]
+      : ['--import', 'tsx', 'script/start-rust.ts', ...args],
     {
       cwd: process.cwd(),
+      detached: useDefaultCommand,
       env: {
         ...env,
         NODE_ENV: 'development',
@@ -638,24 +641,35 @@ async function waitForMessage(
 
 /** The host is detached from the supervisor's process group but remains its child. */
 function hostPid(supervisorPid: number): number {
-  const children = readFileSync(
-    `/proc/${supervisorPid}/task/${supervisorPid}/children`,
-    'utf8'
-  )
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  for (const child of children) {
+  const pending = [supervisorPid]
+  while (pending.length > 0) {
+    const parent = pending.shift()
+    if (parent === undefined) break
     try {
-      if (
-        path
-          .basename(readlinkSync(`/proc/${child}/exe`))
-          .replace(/ \(deleted\)$/, '') === 'github-desktop-rs'
-      ) {
-        return Number(child)
+      const children = readFileSync(
+        `/proc/${parent}/task/${parent}/children`,
+        'utf8'
+      )
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(Number)
+      for (const child of children) {
+        try {
+          if (
+            path
+              .basename(readlinkSync(`/proc/${child}/exe`))
+              .replace(/ \(deleted\)$/, '') === 'github-desktop-rs'
+          ) {
+            return child
+          }
+          pending.push(child)
+        } catch {
+          // Short-lived helper processes may disappear during inspection.
+        }
       }
     } catch {
-      // Short-lived helper processes may disappear while inspecting /proc.
+      // A process in the launcher tree may exit while inspecting its children.
     }
   }
   throw new Error('The development supervisor did not start the Rust host')
@@ -663,7 +677,16 @@ function hostPid(supervisorPid: number): number {
 
 describe.skipIf(!enabled)('Rust and Vite development launcher', () => {
   it('mounts the real renderer and stops its watchers when the window exits', async () => {
-    const run = startHost(['--smoke-test'])
+    const run = startHost(['--smoke-test'], true)
+    let closed = false
+    void run.closed.then(
+      () => {
+        closed = true
+      },
+      () => {
+        closed = true
+      }
+    )
     try {
       const result = await bounded(run.closed, 240_000)
       assert.equal(result.code, 0, run.output().slice(-5_000))
@@ -672,10 +695,61 @@ describe.skipIf(!enabled)('Rust and Vite development launcher', () => {
         /PASS: native webview mounted React and completed shell and backend RPC/
       )
     } finally {
-      if (run.child.exitCode === null && run.child.signalCode === null) {
-        run.child.kill('SIGTERM')
+      let nativePid: number | undefined
+      if (!closed && run.child.pid) {
+        try {
+          nativePid = hostPid(run.child.pid)
+        } catch {}
+        try {
+          process.kill(-run.child.pid, 'SIGTERM')
+        } catch {}
       }
       await bounded(run.closed, 15_000).catch(() => {})
+      if (nativePid && existsSync(`/proc/${nativePid}`)) {
+        try {
+          process.kill(nativePid, 'SIGKILL')
+        } catch {}
+      }
+      rmSync(run.directory, { recursive: true, force: true })
+    }
+  }, 260_000)
+
+  it('drains the host when Ctrl-C reaches the default pnpm command', async () => {
+    const run = startHost([], true)
+    let nativePid: number | undefined
+    let closed = false
+    void run.closed.then(
+      () => {
+        closed = true
+      },
+      () => {
+        closed = true
+      }
+    )
+    try {
+      await waitForMessage(
+        run.child,
+        run.output,
+        /webview ready; entering tao event loop/
+      )
+      assert.ok(run.child.pid)
+      nativePid = hostPid(run.child.pid)
+      process.kill(-run.child.pid, 'SIGINT')
+      await bounded(run.closed, 20_000)
+      assert.match(run.output(), /desktop-dev-shutdown:drained/)
+      assert.equal(existsSync(`/proc/${nativePid}`), false)
+    } finally {
+      if (!closed && run.child.pid) {
+        try {
+          process.kill(-run.child.pid, 'SIGTERM')
+        } catch {}
+      }
+      await bounded(run.closed, 15_000).catch(() => {})
+      if (nativePid && existsSync(`/proc/${nativePid}`)) {
+        try {
+          process.kill(nativePid, 'SIGKILL')
+        } catch {}
+      }
       rmSync(run.directory, { recursive: true, force: true })
     }
   }, 260_000)

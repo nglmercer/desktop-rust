@@ -98,12 +98,15 @@ through `npm run lint:security`.
 ### Development Workflow
 
 ```bash
-# Install dependencies
-npm ci
+# Install the Rust/Vite renderer dependencies
+pnpm install --frozen-lockfile --ignore-scripts
 
-# Development build
-npm run build:dev
+# Build and start the Rust desktop, watching the renderer
+pnpm start
 ```
+
+The legacy Electron development build still uses `npm ci`,
+`npm run build:dev`, and `npm run start:electron` during the migration.
 
 ### Testing
 
