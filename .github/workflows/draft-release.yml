@@ -58,6 +58,9 @@ jobs:
             app/package-lock.json
             vendor/*/package-lock.json
 
+      - name: Prepare Rust compiler
+        run: rustup default stable
+
       - name: Install dependencies
         run: npm ci
 

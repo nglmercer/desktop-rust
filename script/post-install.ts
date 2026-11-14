@@ -44,6 +44,21 @@ for (const args of getAppInstallCommands()) {
   }
 }
 
+// Build the Rust helper explicitly: npm and pnpm may suppress dependency
+// lifecycle scripts, while the Electron build still requires this executable.
+const printenvzInstallScript = require.resolve('printenvz')
+const printenvz = spawnSync(
+  process.execPath,
+  [printenvzInstallScript, '--build'],
+  options
+)
+if (printenvz.status !== 0) {
+  console.error(
+    printenvz.error ?? 'Failed to compile the printenvz Rust helper'
+  )
+  process.exit(printenvz.status || 1)
+}
+
 // Electron >= 42 no longer downloads its prebuilt binary in its own
 // postinstall; do it eagerly so scripts that read node_modules/electron/dist
 // (e.g. validate-macos-version) keep working without first requiring electron.

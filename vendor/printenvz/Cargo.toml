@@ -1,0 +1,13 @@
+[package]
+name = "desktop-printenvz"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+
+[[bin]]
+name = "printenvz"
+path = "src/main.rs"
+
+# This local package is also installed outside the repository workspace.
+[workspace]

@@ -1,4 +1,5 @@
 [
+  "script/printenvz-rust-build.test.ts",
   "app/test/unit/copilot-app-test.ts",
   "rust/tests/wry-pull.test.ts",
   "app/test/unit/rust-pull-progress-ownership-test.ts",

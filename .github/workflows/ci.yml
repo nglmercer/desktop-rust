@@ -69,6 +69,8 @@ jobs:
             package-lock.json
             app/package-lock.json
             vendor/*/package-lock.json
+      - name: Prepare Rust compiler
+        run: rustup default stable
       - run: npm ci
       - run: npm run validate-electron-version
       - run: npm run lint

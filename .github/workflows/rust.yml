@@ -35,6 +35,7 @@ on:
       - 'script/crash-build.test.ts'
       - 'eslint-rules/**'
       - 'vendor/desktop-trampoline/**'
+      - 'vendor/printenvz/**'
       - 'vendor/desktop-notifications/lib/**'
       - 'tsconfig.json'
       - 'tsconfig.notifications.json'
@@ -94,6 +95,7 @@ on:
       - 'script/crash-build.test.ts'
       - 'eslint-rules/**'
       - 'vendor/desktop-trampoline/**'
+      - 'vendor/printenvz/**'
       - 'vendor/desktop-notifications/lib/**'
       - 'tsconfig.json'
       - 'tsconfig.notifications.json'
@@ -235,6 +237,7 @@ jobs:
           pnpm vite:build
       - name: Compile native host (headless bridge)
         run: |
+          cargo test --manifest-path vendor/printenvz/Cargo.toml --locked
           cargo clippy -p desktop-native --features native --all-targets --locked -- -D warnings
           cargo test -p desktop-core -p desktop-native --features desktop-native/native --locked
           cargo build -p desktop-native --features native --locked

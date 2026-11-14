@@ -5,6 +5,19 @@ TypeScript `gh` fixture. It retains the CLI and authenticated WebSocket checks,
 including request bodies, invalid input, process failures, and redaction. The
 corresponding Python suite has been removed.
 
+The legacy hook environment printer now uses Rust instead of C and node-gyp,
+while retaining its existing package API and executable layout. Legacy npm setup
+and packaging explicitly compile the installed package with Cargo; the requested
+Rust target and any cross-linker must be available. On Linux x64, valid Unix
+environment name/value pairs matched the previous output byte for byte,
+including non-UTF-8 bytes; entries without a name are omitted. An npm file
+dependency was installed and built explicitly, and the actual shell environment
+loader was exercised with the resulting executable. A separate pnpm file
+dependency installation and explicit build also passed. Target selection has
+simulated coverage, but macOS, Windows and cross-architecture builds have not
+been validated. This replaces the legacy helper, not the remaining hook
+environment integration in the Rust host.
+
 The requested end state is a Rust implementation with a complete headless CLI,
 GitHub CLI integration, reusable web UI over localhost/WebSocket on Termux, and
 an optional Wry/Tao desktop host. Electron/Node backend code, bundled Git

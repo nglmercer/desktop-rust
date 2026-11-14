@@ -330,7 +330,9 @@ function copyDependencies() {
 
   const filterExternals = (dependencies: Record<string, string>) =>
     Object.fromEntries(
-      Object.entries(dependencies).filter(([k]) => packagedExternals.includes(k))
+      Object.entries(dependencies).filter(([k]) =>
+        packagedExternals.includes(k)
+      )
     )
 
   // The product name changes depending on whether it's a prod build or dev
@@ -458,6 +460,14 @@ function copyDependencies() {
   )
 
   console.log('  Copying printenvz binary')
+  // Installs with lifecycle scripts disabled may not have built this helper.
+  const buildPrintenvz: unknown = require('printenvz').buildPrintenvz
+  if (typeof buildPrintenvz !== 'function') {
+    throw new Error(
+      'The installed printenvz package is outdated; reinstall dependencies'
+    )
+  }
+  buildPrintenvz()
   cpSync(
     getPrintenvzPath(),
     path.resolve(

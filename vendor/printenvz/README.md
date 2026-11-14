@@ -1,87 +1,26 @@
 # printenvz
 
-A minimal Node.js native module that provides a compiled executable to output all environment variables to stdout, separated by null bytes (`\0`).
+This helper prints the current process environment using the marker and
+NUL-delimited format consumed by Desktop's hook environment loader. It is
+implemented in Rust and preserves bytes in valid environment name/value pairs on
+Unix, including values that are not UTF-8. Empty-name entries are omitted.
 
-## Features
+The package exports `getPrintenvzPath()`, which returns the installed executable
+at `build/Release/printenvz` (or `printenvz.exe` on Windows). Existing builds
+copy that executable into the application output directory.
 
-- **Native Executable**: Compiled C binary using node-gyp
-- **Environment Variable Output**: Prints all environment variables separated by null bytes
-- **JavaScript Interface**: Simple function to get the path to the compiled binary
-- **TypeScript Support**: Includes TypeScript declaration file
-- **Cross-platform**: Works on macOS, Linux, and Windows
+The Electron npm setup and build explicitly compile this helper using Cargo;
+dependency installation does not run an implicit build script. The installer
+uses npm's requested `cpu` or `arch` and the packaging `TARGET_ARCH` when
+provided, and fails if their values disagree, the target OS differs from the
+host, or the required Rust target is unavailable. It preserves the native host
+triple for native builds and supports only known cross-target combinations. A
+failed build leaves the existing executable untouched. A Rust toolchain and the
+requested target must be installed. On Windows and macOS, the new Rust build and
+cross-architecture installations still need native runtime verification.
 
-## Installation
+Run the Rust protocol tests with:
 
-```bash
-npm install
+```sh
+cargo test --manifest-path vendor/printenvz/Cargo.toml --locked
 ```
-
-This will automatically build the native executable using node-gyp.
-
-## Usage
-
-### JavaScript/Node.js
-
-```javascript
-const { getPrintenvzPath } = require('printenvz');
-
-// Get the path to the compiled native executable
-const executablePath = getPrintenvzPath();
-console.log(executablePath);
-// Output: /path/to/printenvz/build/Release/printenvz
-
-// Use with child_process to run the executable
-const { execSync } = require('child_process');
-const output = execSync(executablePath, { encoding: 'buffer' });
-
-// Parse environment variables (split by null bytes)
-const envVars = output.toString('utf8').split('\0').filter(s => s.length > 0);
-console.log(envVars);
-```
-
-### TypeScript
-
-```typescript
-import { getPrintenvzPath } from 'printenvz';
-
-const executablePath: string = getPrintenvzPath();
-```
-
-### Direct Executable Usage
-
-```bash
-./build/Release/printenvz | hexdump -C
-```
-
-## API
-
-### `getPrintenvzPath(): string`
-
-Returns the absolute path to the compiled native `printenvz` executable.
-
-**Returns:** `string` - The path to the executable
-
-## Build Commands
-
-- `npm run build` - Build the native module
-- `npm run rebuild` - Clean and rebuild the native module
-- `npm run clean` - Clean build artifacts
-
-## Files
-
-- `src/printenvz.c` - C source code for the native executable
-- `binding.gyp` - node-gyp build configuration
-- `index.js` - JavaScript module with `getPrintenvzPath` function
-- `index.d.ts` - TypeScript declaration file
-- `package.json` - npm package configuration
-
-## How it Works
-
-1. The C source (`src/printenvz.c`) iterates through the global `environ` variable
-2. Each environment variable is printed to stdout followed by a null byte (`\0`)
-3. node-gyp compiles this into a native executable during `npm install`
-4. The JavaScript module provides a helper function to locate the executable path
-
-## License
-
-MIT
