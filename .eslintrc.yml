@@ -21,7 +21,6 @@ rules:
   ##########
   # CUSTOM #
   ##########
-  react-proper-lifecycle-methods: error
 
   ###########
   # PLUGINS #

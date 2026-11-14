@@ -1,10 +1,11 @@
-# Custom ESLint rules for GitHub Desktop
+# Project-specific lint rules for GitHub Desktop
 
-This document outlines the rules we have added to the GitHub Desktop project and how to interact with them.
+This document describes the project-specific checks and how to run them.
 
 ## About
 
-This project uses rules from a number of sources, but sometimes we need specific rules that aren't available elsewhere. These are added to the `eslint-rules/` directory and are configured in the `.eslintrc.yml` file at the root of the project.
+This project uses rules from several sources. Checks specific to GitHub Desktop
+live in `biome-rules/` and are configured in `biome.security.json`.
 
 ## Adding rules
 
@@ -16,27 +17,22 @@ If you wish to add a new rule specific to the project, ensure that there isn't a
  - `eslint-plugin-json`
  - `eslint-plugin-react`
  
-This project supports two different kinds of ESLint plugins, based on what you are interested in linting:
-
- - Typescript-aware rules, that allow you to inspect the AST and relevant information of the source files - these leverage the `@typescript-eslint` parser
-    - example: `react-proper-lifecycle-methods` rule
- - Regular ESLint rules, that do not need to inspect the type information in the source files
-    - example: `no-unbound-dispatcher-props` rule
+Project-specific rules are now implemented as Biome plugins in `biome-rules/`.
+Run them with `npm run lint:security` and add regression tests in
+`eslint-rules/tests/` while the broader lint migration is in progress.
 
 How to write a plugin is out of scope for this documentation, but I've added some resources at the end of this page to help you get started.
 
 ## Checking locally
 
-The custom ESLint rules are annotated with TypeScript types wherever available, and can be checked through npm:
+The Biome plugins can be checked through npm:
 
 ```
-$ npm run check:eslint
+$ npm run lint:security
 ```
 
-The `eslint-rules/tsconfig.json` is setup to guide `tsc` to understand the environment for running the ESlint rules, and each rule is annotated
-with `@type` hints wherever possible to appease the typechecker. Rules and their
-tests are checked in strict mode. TypeScript-aware rules use the `TSESTree` and
-`TSESLint` types from `@typescript-eslint/utils`.
+The plugins are TypeScript and are checked in strict mode by
+`biome-rules/tsconfig.json`.
 
 ## Testing locally
 
@@ -49,16 +45,20 @@ $ npm run test:eslint
 Each test suite is designed to exercise the relevant rule against code snippets that illustrate both valid and invalid code, and indicate which messages should be reported in case of failure.
 
 Name test files `*-test.mts` and register migrated suites in
-`vitest-suites.json`. Use ESLint's `RuleTester` for JavaScript rules, or the
-typed `TSESLint.RuleTester` wrapper from `@typescript-eslint/utils` for
-TypeScript rules. Resolve the TypeScript parser with `createRequire`.
+`vitest-suites.json`. Run the pinned Biome CLI against temporary fixtures.
 
 The migrated `insecure-random`, `no-loosely-typed-webcontents-ipc`,
-`react-no-unbound-dispatcher-props` and `react-readonly-props-and-state`
+`react-no-unbound-dispatcher-props`, `react-readonly-props-and-state` and
+`react-proper-lifecycle-methods`
 checks live in `biome-rules/` and run
 through `npm run lint:security`. Their tests
 invoke the pinned Biome CLI against temporary fixtures. Suppressions must name
 the specific plugin rule so they do not hide other diagnostics.
+
+The lifecycle rule checks each component independently. Unlike the former
+ESLint implementation, it does not reuse a previous component's types when
+checking a later class. Unsupported parameter forms receive a diagnostic rather
+than causing the linter to throw.
 
 The recommended TypeScript lint preset remains enabled. When updating it,
 compare the effective configuration (`npm run eslint -- --print-config <file>`)

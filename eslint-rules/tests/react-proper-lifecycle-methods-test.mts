@@ -1,28 +1,91 @@
 // @vitest-environment node
-import { describe, it } from 'vitest'
-import { createRequire } from 'node:module'
-import { TSESLint } from '@typescript-eslint/utils'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
 
-const RuleTester = TSESLint.RuleTester
-import rule from '../react-proper-lifecycle-methods.js'
+interface Fixture {
+  filename: string
+  code: string
+  errors?: ReadonlyArray<{ messageId: string; data: Record<string, string> }>
+}
 
-// ------------------------------------------------------------------------------
-// Tests
-// ------------------------------------------------------------------------------
+function lint(fixture: Fixture) {
+  const root = resolve('.')
+  const dir = mkdtempSync(join(root, 'app/test/biome-lifecycle-'))
+  try {
+    const file = join(
+      dir,
+      fixture.filename.endsWith('.ts') ? 'input.ts' : 'input.tsx'
+    )
+    writeFileSync(file, fixture.code)
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve('node_modules/@biomejs/biome/bin/biome'),
+        'lint',
+        '--config-path=biome.security.json',
+        file,
+        '--reporter=json',
+      ],
+      { cwd: root, encoding: 'utf8' }
+    )
+    if (result.error) throw result.error
+    const report = JSON.parse(result.stdout) as {
+      diagnostics: Array<{ severity: string; message: string }>
+    }
+    return report.diagnostics
+      .filter(item => item.severity === 'error')
+      .map(item => item.message)
+      .sort()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
-const ruleTester = new RuleTester({
-  parser: createRequire(import.meta.url).resolve('@typescript-eslint/parser'),
-  parserOptions: {
-    ecmaVersion: 2015,
-    sourceType: 'module',
+function expected(error: NonNullable<Fixture['errors']>[number]): string {
+  const { methodName, parameterName, expectedName, expectedType } = error.data
+  switch (error.messageId) {
+    case 'emptyParametersExpected':
+      return `${methodName} should not accept any parameters`
+    case 'unknownParameter':
+      return `${methodName} has unknown parameter ${parameterName}`
+    case 'nameMismatch':
+      return `${methodName} has parameter ${parameterName} which does not match expected name ${expectedName}`
+    case 'typeMismatch':
+      return `${methodName} has parameter ${parameterName} which does not match expected type ${expectedType}`
+    case 'reservedMethodName':
+      return `Method name ${methodName} is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods`
+    default:
+      throw new Error(`Unknown legacy diagnostic: ${error.messageId}`)
+  }
+}
+
+// Retain the fixtures and diagnostics from the former ESLint rule.
+const ruleTester = {
+  run(
+    _name: string,
+    cases: { valid: ReadonlyArray<Fixture>; invalid: ReadonlyArray<Fixture> }
+  ) {
+    it.each(cases.valid.map((fixture, index) => [index, fixture] as const))(
+      'accepts valid fixture %s',
+      (_index, fixture) => {
+        expect(lint(fixture)).toEqual([])
+      }
+    )
+    it.each(cases.invalid.map((fixture, index) => [index, fixture] as const))(
+      'reports invalid fixture %s',
+      (_index, fixture) => {
+        expect(lint(fixture)).toEqual(
+          (fixture.errors ?? []).map(expected).sort()
+        )
+      }
+    )
   },
-})
-
-RuleTester.describe = describe
-RuleTester.it = it
+}
 
 describe('react-proper-lifecycle-methods', () => {
-  ruleTester.run('react-proper-lifecycle-methods', rule, {
+  ruleTester.run('react-proper-lifecycle-methods', {
     valid: [
       // component without lifecycle methods passes without errors
       {
@@ -545,5 +608,94 @@ export class CloningRepositoryView extends React.Component {
         ],
       },
     ],
+  })
+})
+
+describe('Biome lifecycle validation', () => {
+  it('checks parenthesized React bases and computed method names', () => {
+    for (const base of [
+      '(React.Component)',
+      '(React).Component',
+      'React[(Component)]',
+    ]) {
+      expect(
+        lint({
+          filename: 'component.tsx',
+          code: `class C extends ${base} { [(componentBogus)]() {} }`,
+        })
+      ).toEqual([
+        "Method name componentBogus is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods",
+      ])
+    }
+  })
+
+  it('checks getters, setters, overloads, computed names and Unicode', () => {
+    const diagnostics = lint({
+      filename: 'component.tsx',
+      code: `class Component extends React[Component] {
+        get componentBogus() { return 1 }
+        set componentDidMount(value: string) {}
+        [componentComputed]() {}
+        componentÉvil() {}
+        componentOverload(): void;
+        componentOverload() {}
+      }`,
+    })
+    expect(diagnostics).toEqual(
+      [
+        "Method name componentBogus is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods",
+        "Method name componentComputed is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods",
+        "Method name componentOverload is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods",
+        "Method name componentOverload is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods",
+        "Method name componentÉvil is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods",
+        'componentDidMount should not accept any parameters',
+      ].sort()
+    )
+  })
+
+  it('normalizes escaped component, method, parameter and type names', () => {
+    expect(
+      lint({
+        filename: 'component.tsx',
+        code: `class Component extends React.\\u0043omponent<P\\u0072ops> {
+        shouldComponentUpdate(next\\u0050rops: Props) {}
+        component\\u0042ogus() {}
+      }`,
+      })
+    ).toEqual([
+      "Method name componentBogus is prohibited as names starting with 'component' or 'shouldComponent' can be confused with React lifecycle methods",
+    ])
+  })
+
+  it('checks default-exported classes and reports unsupported parameter types', () => {
+    expect(
+      lint({
+        filename: 'component.tsx',
+        code: `export default class Component extends React.Component<Props> {
+        componentDidUpdate(prevProps) {}
+      }`,
+      })
+    ).toEqual([
+      'componentDidUpdate has a parameter with an unsupported or missing type annotation',
+    ])
+  })
+
+  it('does not apply component state to a subsequent unrelated class', () => {
+    expect(
+      lint({
+        filename: 'component.tsx',
+        code: `class Component extends React.Component<Props> {}
+        class Other { componentWillUpdate(value: string) {} }`,
+      })
+    ).toEqual([])
+  })
+
+  it('retains the original exclusion for .ts files', () => {
+    expect(
+      lint({
+        filename: 'component.ts',
+        code: 'class Component extends React.Component { componentInvalid() {} }',
+      })
+    ).toEqual([])
   })
 })

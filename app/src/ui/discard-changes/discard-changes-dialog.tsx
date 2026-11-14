@@ -74,11 +74,11 @@ export class DiscardChanges extends React.Component<
     if (this.useNative) void this.loadNativePreview()
   }
 
-  public componentDidUpdate(previous: IDiscardChangesProps) {
+  public componentDidUpdate(prevProps: IDiscardChangesProps) {
     if (
       this.useNative &&
-      (previous.repository.path !== this.props.repository.path ||
-        previous.files !== this.props.files)
+      (prevProps.repository.path !== this.props.repository.path ||
+        prevProps.files !== this.props.files)
     )
       void this.loadNativePreview()
   }
