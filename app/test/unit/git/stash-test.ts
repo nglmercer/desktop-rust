@@ -194,8 +194,8 @@ describe('git/stash', () => {
       const doesNotExist: IStashEntry = {
         name: 'refs/stash@{0}',
         branchName: 'master',
-        stashSha: 'xyz',
-        tree: 'xyz',
+        stashSha: 'f'.repeat(40),
+        tree: 'f'.repeat(40),
         parents: ['abc'],
         files: { kind: StashedChangesLoadStates.NotLoaded },
       }
@@ -210,8 +210,8 @@ describe('git/stash', () => {
       const doesNotExist: IStashEntry = {
         name: 'refs/stash@{4}',
         branchName: 'master',
-        stashSha: 'xyz',
-        tree: 'xyz',
+        stashSha: 'f'.repeat(40),
+        tree: 'f'.repeat(40),
         parents: ['abc'],
         files: { kind: StashedChangesLoadStates.NotLoaded },
       }

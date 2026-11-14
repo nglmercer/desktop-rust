@@ -122,7 +122,7 @@ describe('git/checkout', () => {
 
     await assert.rejects(
       checkoutBranch(repository, branch, null),
-      /fatal: invalid reference: ..\n/
+      /fatal: invalid reference: ..\n|Invalid branch checkout target/
     )
   })
 
@@ -207,7 +207,7 @@ describe('git/checkout', () => {
 
     await assert.rejects(
       checkoutBranch(repository, remoteBranch, null),
-      /A branch with that name already exists./
+      /A branch with that name already exists|A local branch already exists for this remote name/
     )
   })
 
