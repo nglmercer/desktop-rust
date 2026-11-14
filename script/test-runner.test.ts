@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { it } from 'node:test'
+import { it } from 'vitest'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
@@ -39,6 +39,7 @@ it('loads the actual Copilot SDK and test DOM', () => {
         '--import',
         'tsx',
         resolve('script/test.mts'),
+        '--',
         fixture,
         resolve('app/test/unit/commit-mode-storage-test.ts'),
       ],
@@ -52,4 +53,4 @@ it('loads the actual Copilot SDK and test DOM', () => {
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
-})
+}, 30000)

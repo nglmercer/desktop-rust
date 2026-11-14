@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { findIssueRef, findReleaseNote } from '../parser'
 import assert from 'node:assert'
 

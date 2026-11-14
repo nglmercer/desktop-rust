@@ -8,8 +8,11 @@ function reporter(r: string): string[] {
   return ['--test-reporter', r, '--test-reporter-destination', 'stdout']
 }
 
-const fileArgs = process.argv.slice(2).filter(a => !a.startsWith('--'))
-const switchArgs = process.argv.slice(2).filter(a => a.startsWith('--'))
+// pnpm forwards the conventional option separator, while npm removes it.
+// It must not be passed through as a Node runtime flag.
+const cliArgs = process.argv.slice(2).filter(a => a !== '--')
+const fileArgs = cliArgs.filter(a => !a.startsWith('--'))
+const switchArgs = cliArgs.filter(a => a.startsWith('--'))
 
 const projectRoot = join(import.meta.dirname, '..')
 const files =

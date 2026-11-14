@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import { join } from 'path'
 import { protectAssistedCommitResources } from '../../../src/lib/git/repository-operation'
 import { generateWorktreeContextMenuItems } from '../../../src/ui/worktrees/worktree-list-item-context-menu'
@@ -10,7 +10,7 @@ describe('assisted shared worktree UI protection', () => {
     const root = await createTempDirectory(t)
     const path = join(root, 'linked')
     const protection = protectAssistedCommitResources(path)
-    t.after(() => protection.release())
+    t.onTestFinished(() => protection.release())
     const items = generateWorktreeContextMenuItems({
       path,
       isMainWorktree: false,

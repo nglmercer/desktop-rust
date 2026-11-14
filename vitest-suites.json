@@ -1,4 +1,9 @@
 [
+  "app/test/unit/git/clone-fallback-account-test.ts",
+  "app/test/unit/ui/assisted-worktree-mutations-test.ts",
+  "app/test/unit/cygwin-test.ts",
+  "script/test-runner.test.ts",
+  "script/changelog/test/parser-test.ts",
   "script/start-rust.test.ts",
   "app/test/unit/copilot-conflicts-dialog-apply-test.tsx",
   "app/test/unit/copilot-conflict-invalidation-test.ts",

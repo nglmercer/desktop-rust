@@ -1,45 +1,51 @@
 import assert from 'node:assert/strict'
-import { after, before, describe, it, mock } from 'node:test'
+import { beforeEach, describe, it, vi } from 'vitest'
 import type { IGitStringExecutionOptions } from '../../../src/lib/git/core'
-import type { clone } from '../../../src/lib/git/clone'
+import { clone } from '../../../src/lib/git/clone'
+
+const observed = vi.hoisted(() => ({
+  executionOptions: undefined as IGitStringExecutionOptions | undefined,
+  calls: 0,
+}))
+
+vi.mock('../../../src/lib/git/core', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/lib/git/core')>()),
+  git: async (
+    _args: ReadonlyArray<string>,
+    _path: string,
+    _name: string,
+    options: IGitStringExecutionOptions
+  ) => {
+    observed.calls++
+    observed.executionOptions = options
+  },
+}))
+vi.mock('../../../src/lib/git/environment', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/lib/git/environment')>()),
+  envForRemoteOperation: async () => ({}),
+}))
 
 describe('clone fallback account', () => {
-  let cloneRepository: typeof clone
-  let executionOptions: IGitStringExecutionOptions | undefined
-
-  before(async () => {
-    mock.module('../../../src/lib/git/core', {
-      namedExports: {
-        git: async (
-          _args: ReadonlyArray<string>,
-          _path: string,
-          _name: string,
-          options: IGitStringExecutionOptions
-        ) => {
-          executionOptions = options
-        },
-      },
-    })
-    mock.module('../../../src/lib/git/environment', {
-      namedExports: { envForRemoteOperation: async () => ({}) },
-    })
-    cloneRepository = (await import('../../../src/lib/git/clone')).clone
+  beforeEach(() => {
+    observed.executionOptions = undefined
+    observed.calls = 0
   })
-  after(() => mock.restoreAll())
 
   it('passes the fallback account as an execution option', async () => {
     const account = { endpoint: 'https://api.github.com', login: 'bob' }
-    await cloneRepository('https://github.com/owner/repo', '/tmp/clone-test', {
+    await clone('https://github.com/owner/repo', '/tmp/clone-test', {
       defaultBranch: 'main',
       fallbackAccount: account,
     })
-    assert.deepStrictEqual(executionOptions?.fallbackAccount, account)
+    assert.strictEqual(observed.calls, 1)
+    assert.deepStrictEqual(observed.executionOptions?.fallbackAccount, account)
   })
 
   it('omits the fallback account for an unassigned clone', async () => {
-    await cloneRepository('https://github.com/owner/repo', '/tmp/clone-test', {
+    await clone('https://github.com/owner/repo', '/tmp/clone-test', {
       defaultBranch: 'main',
     })
-    assert.strictEqual(executionOptions?.fallbackAccount, undefined)
+    assert.strictEqual(observed.calls, 1)
+    assert.strictEqual(observed.executionOptions?.fallbackAccount, undefined)
   })
 })
