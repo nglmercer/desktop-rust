@@ -36,9 +36,9 @@ members build without GUI dependencies using `cargo build --locked`.
 Unit tests are moving from Node's test runner to Vitest. `npm test -- <path>`
 routes migrated suites through Vitest; `vitest-suites.json` lists those suites.
 Run them together with `node node_modules/vitest/vitest.mjs run --config vitest.config.ts`.
-Biome currently checks the test-runner tooling via
-`npm run lint:biome`; Prettier and ESLint still cover the remaining files and
-custom rules while their migration is in progress.
+Biome checks the test-runner tooling and project-specific rules via
+`npm run lint:biome` and `npm run lint:security`. Prettier and ESLint still
+cover other files while their migration is in progress.
 
 See [Rust development and commands](rust/README.md) and the
 [full migration ledger](rust/MIGRATION.md). The Electron-era `postinstall`
