@@ -43,17 +43,31 @@ bindings (oxc-node and swc-node both gave non-live copies or ES modules).
 (`compare-versions`, `fuzzaldrin-plus`, `@xterm/xterm`, `react-dom/test-utils`).
 
 Evidence: `check:types`, `compile:script` and the web/highlighter/IPC-shim Vite
-builds pass on Linux, `cargo check -p desktop-app -p desktop-cli` passes, and
-Vitest has 337 files passing, none failing. The `node:test` suites ran 1358
-tests: 1215 pass and 142 fail, 0 cancelled. Those failures were each compared
-with HEAD under tsx in a clean worktree and reproduce there with the same
-counts: the jsdom focus-trap error, a canvas `getContext` stub, the
-`copilot-sdk-auth`, `app-store-add-accounts`, `clone-repository` and
-`assisted-commit-push-destination` failures, and the assisted-push suites
-(boundary 96, push 17, lifecycle 7, hooks 4), which at HEAD can only run with a
-stubbed `fs-admin` and fail identically; they match the documented Git 2.56
-push-destination limitation. Not verified: Windows/macOS, and a launched Wry
-window from the final tree.
+builds pass on Linux, `cargo check -p desktop-app -p desktop-cli` and the
+`desktop-shell-core-legacy` tests pass, and the real Wry shell started from the
+final tree under Xvfb (`cargo test -p desktop-app --test app_smoke -- --ignored`)
+with the renderer mounted and no renderer errors. That run caught a Vite 8
+regression the unit tests missed: the resolver applied vscode-jsonrpc's
+`browser` field to the aliased Node entry, so the Copilot SDK received the
+browser build ("The superclass is not a constructor"). A `resolveId` plugin
+(`copilotJsonRpcNodeEntry`) now selects the Node entry.
+
+Test results depend on which Git the suites run. Vitest passes 338 files. The
+legacy `node:test` suites ran 1358 tests; in this checkout `LOCAL_GIT_DIRECTORY`
+points at Git 2.45.3, and with it 1225 pass and 132 fail: 131 in the
+assisted-push suites (the pinned-destination guard in `assisted-commit-push.ts`
+reads `remote.<name>.url=` as a reset, which that Git does not honor in
+`remote get-url`) plus one worktree account test that also failed at HEAD. With a
+current system Git (2.56, `LOCAL_GIT_DIRECTORY` pointing at a directory with
+`bin/git` and `libexec/git-core`) the same suites give 1337 passes and 20
+failures, and Vitest gains two failing files (`lfs-test`, `remote-operations-test`)
+that need further Git/LFS environment work. Earlier notes attributing the
+push-guard failures to Git 2.56 were wrong. The test environment now sets
+`LC_ALL=C`, because several assertions match English Git messages. The jsdom
+focus-trap failures were fixed by reporting a client rect in the Node preload,
+and the Copilot SDK auth test resolves its platform package from the SDK.
+Not verified: Windows/macOS builds and the Electron-era OS-support banners'
+intent under Wry.
 
 Verified in this session without changing behavior: the unit suites for the
 pending Markdown video sanitization, native custom integration, sandboxed

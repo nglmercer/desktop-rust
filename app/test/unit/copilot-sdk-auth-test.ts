@@ -24,8 +24,11 @@ async function createClient(
 ) {
   const directory = await createTempDirectory(t)
   const runtimeRoot = dirname(
+    // The platform package is the SDK's own dependency, so look it up from
+    // the SDK rather than from this file.
     require.resolve(
-      `@github/copilot-sdk-${process.platform}-${process.arch}/package.json`
+      `@github/copilot-sdk-${process.platform}-${process.arch}/package.json`,
+      { paths: [dirname(require.resolve('@github/copilot-sdk'))] }
     )
   )
   const client = new CopilotClient({

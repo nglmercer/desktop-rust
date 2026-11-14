@@ -123,3 +123,9 @@ Module.registerHooks({
     }
   },
 })
+
+// jsdom does no layout, so focus-trap's tabbable check (which treats elements
+// without client rects as hidden) finds no tabbable nodes. Report one rect.
+window.Element.prototype.getClientRects = function () {
+  return [{ x: 0, y: 0, width: 1, height: 1, top: 0, left: 0, right: 1, bottom: 1 }]
+}
