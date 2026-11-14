@@ -11,7 +11,7 @@ npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts
 npm test --prefix rust/tests/branch-rules-oracle
 ```
 
-The root install supplies Vite, TypeScript, tsx and Vitest. The isolated oracle
+The root install supplies Vite, TypeScript, oxc-node and Vitest. The isolated oracle
 install supplies RE2JS **2.0.1** and semver **5.7.2** with pinned registry
 integrity. The test also compares the installed renderer's RE2JS version to
 the frozen cases. No API, Git, authentication, or other network operation runs
@@ -43,10 +43,10 @@ oracle evidence rather than a claim that the gated check parsed those rules.
 native-engine differential tests.
 
 ```sh
-node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check
-node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check --current-re2js
-node --import tsx rust/tests/branch-rules-oracle/oracle.mts --json
-node --import tsx rust/tests/branch-rules-oracle/oracle.mts --evaluate < cases-to-evaluate.json
+node --import @oxc-node/core/register rust/tests/branch-rules-oracle/oracle.mts --check
+node --import @oxc-node/core/register rust/tests/branch-rules-oracle/oracle.mts --check --current-re2js
+node --import @oxc-node/core/register rust/tests/branch-rules-oracle/oracle.mts --json
+node --import @oxc-node/core/register rust/tests/branch-rules-oracle/oracle.mts --evaluate < cases-to-evaluate.json
 ```
 
 `--evaluate` accepts one case or an array of cases on stdin and prints the same
@@ -84,8 +84,8 @@ static ES2020 IIFE built by Vite from the production matcher and pinned RE2JS ES
 upstream MIT license retained in the banner and `RE2JS-LICENSE.txt`.
 
 ```sh
-node --import tsx rust/tests/branch-rules-oracle/build-engine.mts
-node --import tsx rust/tests/branch-rules-oracle/build-engine.mts --check
+node --import @oxc-node/core/register rust/tests/branch-rules-oracle/build-engine.mts
+node --import @oxc-node/core/register rust/tests/branch-rules-oracle/build-engine.mts --check
 ```
 
 The single exposed global is

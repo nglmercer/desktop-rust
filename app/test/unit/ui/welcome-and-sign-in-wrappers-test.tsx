@@ -193,7 +193,7 @@ describe('welcome and sign-in wrappers', () => {
   let restoreIpcSend: (() => void) | undefined
 
   beforeEach(async () => {
-    const electron = await import('electron')
+    const electron = await import('../../../src/web/host-bridge')
     const previousSend = electron.ipcRenderer.send
     electron.ipcRenderer.send = () => {}
     restoreIpcSend = () => {

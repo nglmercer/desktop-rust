@@ -274,7 +274,7 @@ it('commits files', async t => {
 
 ### Test Environment
 
-`app/test/globals.mts` mocks:
+`app/test/globals.cjs` mocks:
 - Electron's `shell` and `ipcRenderer` (not available in Node.js)
 - IndexedDB (via `fake-indexeddb`)
 - DOM globals (via `global-jsdom`)

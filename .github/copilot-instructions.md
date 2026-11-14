@@ -12,7 +12,7 @@ PR-preparation skill.
 - **Language**: TypeScript (strict mode enabled)
 - **UI Framework**: React 16.x
 - **Runtime**: Electron > 38.x (see `app/.npmrc` for specific version)
-- **Build Tools**: Vite for the web renderer and migrated Electron bundles, including the main process; Webpack remains for the Electron renderer; Cargo builds the Rust workspace
+- **Build Tools**: Vite for the web renderer and every Electron bundle (main, renderer, crash, CLI, highlighter); Cargo builds the Rust workspace
 - **Package Manager**: pnpm (see `packageManager` in `package.json`); existing scripts also use npm
 - **Node Version**: >= 22.12.0 (see `.nvmrc` for the recommended version)
 - **Testing**: Vitest for migrated TypeScript suites, the Node.js test runner for remaining legacy suites, and Cargo for Rust tests. `npm test -- <file>` routes registered Vitest suites via `vitest-suites.json`.
@@ -106,8 +106,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 pnpm start
 ```
 
-The legacy Electron development build still uses `npm ci`,
-`npm run build:electron:dev`, and `npm run start:electron` during the migration.
+The Electron development and production builds have been removed.
 
 ### Testing
 

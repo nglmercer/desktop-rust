@@ -3935,7 +3935,7 @@ describe('git/assisted-commit', () => {
       process.execPath,
       [
         '--import',
-        'tsx',
+        '@oxc-node/core/register',
         'script/test.mts',
         'app/test/unit/git/assisted-commit-test.ts',
         '--test-name-pattern=freezes inherited attribute source without remapping',

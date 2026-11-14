@@ -10,7 +10,6 @@ Refer to the specific instructions for each platform:
 
 Experimental support for building Desktop is also available for these platforms:
 
- - [ARM64](./building-arm64.md)
 
 ## Verification
 
@@ -55,27 +54,6 @@ for launcher limitations and the separate browser build.
 To build both the Rust desktop and browser-enabled CLI without starting them,
 run `pnpm build:dev`.
 
-The legacy Electron workflow remains available while migration is incomplete:
-
-* Run `npm ci` to get all required dependencies on your machine.
-* Run `npm run build:electron:dev` to create a development build of the app.
-* Run `npm run start:electron` to launch the application. Changes will be compiled in the
-  background. The app can then be reloaded to see the changes (<kbd>Ctrl/Command+Alt+R</kbd>).
-
-**Optional Tip**: On macOS and Linux, you can use `screen` to avoid filling your terminal with logging output:
-
-```shellsession
-$ screen -S "desktop" npm run start:electron # -S sets the name of the session
-$ # Your screen clears and shows logs. Press Ctrl+A then D to exit.
-[detached]
-$ screen -R "desktop" # to reopen the session, read the logs, and exit (Ctrl+C)
-[screen is terminating]
-```
-
-If you've made changes in the `main-process` folder you need to run `npm run
-build:electron:dev` to rebuild the package, and then `npm run start:electron` for these changes to be
-reflected in the running app.
-
 If you are using GitHub Enterprise with your development build of GitHub Desktop, you will need to follow a few extra steps to [authenticate properly](github-enterprise-auth-from-dev-build.md).
 
 If you're still encountering issues with building, refer to our
@@ -95,10 +73,10 @@ problems.
 
 ## Debugging
 
-Electron ships with Chrome Dev Tools to assist with debugging, profiling and
-other measurement tools.
+The webview ships with its engine's developer tools to assist with debugging,
+profiling and other measurement tools.
 
-1. Run the command `npm run start:electron` to launch the legacy app
+1. Run `pnpm start` to launch the Rust desktop
 2. Under the **View** menu, select **Toggle Developer Tools**
 
 When running the app in development mode,

@@ -5,6 +5,8 @@ import { PreferencesTab } from '../../src/models/preferences'
 const mocks = vi.hoisted(() => ({
   setConfig: vi.fn(),
   setBranch: vi.fn(),
+  isValidCustomIntegration: vi.fn(),
+  validateCustomIntegrationPath: vi.fn(),
 }))
 vi.mock('keytar', () => ({
   default: {},
@@ -14,7 +16,8 @@ vi.mock('keytar', () => ({
 }))
 vi.mock('../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
-  isValidCustomIntegration: vi.fn().mockResolvedValue(false),
+  isValidCustomIntegration: mocks.isValidCustomIntegration,
+  validateCustomIntegrationPath: mocks.validateCustomIntegrationPath,
 }))
 vi.mock('../../src/lib/notifications/show-notification', () => ({
   showNotification: vi.fn(),
@@ -47,7 +50,7 @@ import { Preferences } from '../../src/ui/preferences/preferences'
 
 function createPreferences() {
   const dispatcher = new Proxy(
-    { refreshAuthor: vi.fn() },
+    { refreshAuthor: vi.fn(), setCustomEditor: vi.fn(), setUseCustomEditor: vi.fn() },
     {
       get: (target, key) => Reflect.get(target, key) ?? vi.fn(),
     }
@@ -76,6 +79,8 @@ describe('preferences Git settings save', () => {
     vi.clearAllMocks()
     mocks.setConfig.mockResolvedValue(undefined)
     mocks.setBranch.mockResolvedValue(undefined)
+    mocks.isValidCustomIntegration.mockResolvedValue(false)
+    mocks.validateCustomIntegrationPath.mockResolvedValue({ isValid: false })
   })
 
   it('keeps preferences open after a partial identity write and permits retry', async () => {
@@ -153,5 +158,51 @@ describe('preferences Git settings save', () => {
     expect(instance.state.gitSaveError).toContain(
       'Some changes may already have been saved'
     )
+  })
+
+  it('keeps invalid visible integration settings open without saving an older value', async () => {
+    const { instance, dispatcher, onDismissed, save } = createPreferences()
+    Object.assign(instance.state, {
+      useCustomEditor: true,
+      customEditor: { path: '/invalid-visible', arguments: '%TARGET_PATH%' },
+      initialCommitterName: 'Before', committerName: 'After',
+      initialCommitterEmail: '', committerEmail: '',
+      initialDefaultBranch: 'main', defaultBranch: 'main',
+    })
+    await save()
+    expect(mocks.isValidCustomIntegration).toHaveBeenCalledWith({ path: '/invalid-visible', arguments: '%TARGET_PATH%' })
+    expect(instance.state.integrationSaveError).toContain('valid custom editor')
+    expect(instance.state.selectedIndex).toBe(PreferencesTab.Integrations)
+    expect(dispatcher.setCustomEditor).not.toHaveBeenCalled()
+    expect(mocks.setConfig).not.toHaveBeenCalled()
+    expect(onDismissed).not.toHaveBeenCalled()
+  })
+
+  it('does not save an editor changed while validation was pending', async () => {
+    const { instance, dispatcher, onDismissed, save } = createPreferences()
+    const previous = { path: '/old', arguments: '%TARGET_PATH%' }
+    Object.assign(instance.state, { useCustomEditor: true, customEditor: previous, useCustomShell: false })
+    let finish: (valid: boolean) => void = () => {}
+    mocks.isValidCustomIntegration.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    mocks.validateCustomIntegrationPath.mockResolvedValueOnce({ isValid: true })
+    const pending = save()
+    Object.assign(instance.state, { customEditor: { path: '/new', arguments: '%TARGET_PATH%' } })
+    finish(true)
+    await pending
+    expect(instance.state.integrationSaveError).toContain('changed while')
+    expect(dispatcher.setCustomEditor).not.toHaveBeenCalled()
+    expect(mocks.setConfig).not.toHaveBeenCalled()
+    expect(onDismissed).not.toHaveBeenCalled()
+  })
+
+  it('keeps the dialog open when integration validation fails unexpectedly', async () => {
+    const { instance, dispatcher, onDismissed, save } = createPreferences()
+    Object.assign(instance.state, { useCustomEditor: true, customEditor: { path: '/editor', arguments: '%TARGET_PATH%' }, useCustomShell: false })
+    mocks.isValidCustomIntegration.mockRejectedValueOnce(new Error('backend disconnected'))
+    await save()
+    expect(instance.state.integrationSaveError).toContain('Could not validate')
+    expect(dispatcher.setCustomEditor).not.toHaveBeenCalled()
+    expect(mocks.setConfig).not.toHaveBeenCalled()
+    expect(onDismissed).not.toHaveBeenCalled()
   })
 })

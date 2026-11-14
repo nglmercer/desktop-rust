@@ -234,7 +234,6 @@ pub const MENU_EVENTS: &[&str] = &[
     "show-about",
     "go-to-commit-message",
     "open-pull-request",
-    "install-darwin-cli",
     "install-windows-cli",
     "uninstall-windows-cli",
     "open-external-editor",

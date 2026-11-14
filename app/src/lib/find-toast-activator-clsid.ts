@@ -1,6 +1,6 @@
 import * as path from 'path'
 import * as os from 'os'
-import { shell } from 'electron'
+import { shell } from '../web/host-bridge'
 
 /**
  * Checks all Windows shortcuts created by Squirrel looking for the toast

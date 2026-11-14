@@ -1,3 +1,4 @@
+import type { HostMenu, HostMenuItem } from '../lib/host-types'
 import { assertNever } from '../lib/fatal-error'
 
 /** A type union of all possible types of menu items */
@@ -125,7 +126,7 @@ export interface IMenu {
  * the default accelerator (if any) for that particular role will be
  * returned.
  */
-function getAccelerator(menuItem: Electron.MenuItem): string | null {
+function getAccelerator(menuItem: HostMenuItem): string | null {
   if (menuItem.accelerator) {
     return menuItem.accelerator as string
   }
@@ -162,7 +163,7 @@ function getAccessKey(text: string): string | null {
   return m ? m[1] : null
 }
 
-/** Workaround for missing type information on Electron.MenuItem.type */
+/** Workaround for missing type information on HostMenuItem.type */
 function parseMenuItem(
   type: string
 ): 'normal' | 'separator' | 'submenu' | 'checkbox' | 'radio' {
@@ -185,8 +186,8 @@ function parseMenuItem(
  * on an Electron MenuItem instance. Will recurse through all sub menus and
  * convert each item.
  */
-function menuItemFromElectronMenuItem(menuItem: Electron.MenuItem): MenuItem {
-  // Our menu items always have ids and Electron.MenuItem takes on whatever
+function menuItemFromHostMenuItem(menuItem: HostMenuItem): MenuItem {
+  // Our menu items always have ids and HostMenuItem takes on whatever
   // properties was defined on the MenuItemOptions template used to create it
   // but doesn't surface those in the type declaration.
   const id: string | undefined = (menuItem as any).id
@@ -217,7 +218,7 @@ function menuItemFromElectronMenuItem(menuItem: Electron.MenuItem): MenuItem {
     case 'separator':
       return { id, type: 'separator', visible }
     case 'submenu': {
-      const menu = menuFromElectronMenu(menuItem.submenu as Electron.Menu, id)
+      const menu = menuFromHostMenu(menuItem.submenu as HostMenu, id)
       return {
         id,
         type: 'submenuItem',
@@ -257,7 +258,7 @@ function menuItemFromElectronMenuItem(menuItem: Electron.MenuItem): MenuItem {
 /**
  * Creates a IMenu instance based on an Electron Menu instance.
  * Will recurse through all sub menus and convert each item using
- * menuItemFromElectronMenuItem.
+ * menuItemFromHostMenuItem.
  *
  * @param menu - The electron menu instance to convert into an
  *               IMenu instance
@@ -265,8 +266,8 @@ function menuItemFromElectronMenuItem(menuItem: Electron.MenuItem): MenuItem {
  * @param id   - The id of the menu. Menus share their id with
  *               their parent item. The root menu id is undefined.
  */
-export function menuFromElectronMenu(menu: Electron.Menu, id?: string): IMenu {
-  const items = menu.items.map(menuItemFromElectronMenuItem)
+export function menuFromHostMenu(menu: HostMenu, id?: string): IMenu {
+  const items = menu.items.map(menuItemFromHostMenuItem)
 
   if (__DEV__) {
     const seenAccessKeys = new Set<string>()
@@ -388,7 +389,7 @@ export class AppMenu {
    *
    * @param menu  The menu that this instance operates on, taken from an
    *              electron Menu instance and converted into an IMenu model
-   *              by menuFromElectronMenu.
+   *              by menuFromHostMenu.
    * @param openMenus A list of currently open menus with their selected items
    *                  in the application menu.
    *

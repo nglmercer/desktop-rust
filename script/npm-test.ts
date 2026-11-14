@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { cp, mkdir, readFile, realpath, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
-import { execFile, spawnSync } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { createTempDirectory } from '../app/test/helpers/temp'
 import { getAppInstallCommands, getNpmCommand, isPnpmInstall } from './npm'
@@ -14,54 +14,6 @@ describe('npm commands', () => {
     assert.equal(isPnpmInstall('pnpm/11.17.0 npm/? node/v22'), true)
     assert.equal(isPnpmInstall('npm/11.17.0 node/v22'), false)
     assert.equal(isPnpmInstall(''), false)
-  })
-
-  it('skips Electron setup for pnpm before running any package manager', () => {
-    const root = resolve(__dirname, '..')
-    const result = spawnSync(
-      process.execPath,
-      ['--import', 'tsx', 'script/post-install.ts'],
-      {
-        cwd: root,
-        encoding: 'utf8',
-        timeout: 15_000,
-        env: {
-          ...process.env,
-          npm_config_user_agent: 'pnpm/11.17.0 npm/? node/v22',
-          npm_execpath: join(root, 'missing-package-manager'),
-        },
-      }
-    )
-    assert.equal(result.status, 0, result.stderr)
-    assert.match(result.stdout, /Skipping legacy Electron setup/)
-  })
-
-  it('keeps npm installs on the legacy setup path', async t => {
-    const root = resolve(__dirname, '..')
-    const directory = await createTempDirectory(t)
-    const fakeNpm = join(directory, 'fake-npm.js')
-    await writeFile(
-      fakeNpm,
-      'console.log(JSON.stringify(process.argv.slice(2))); process.exit(23)'
-    )
-    const result = spawnSync(
-      process.execPath,
-      ['--import', 'tsx', 'script/post-install.ts'],
-      {
-        cwd: root,
-        encoding: 'utf8',
-        timeout: 15_000,
-        env: {
-          ...process.env,
-          npm_config_user_agent: 'npm/11.17.0 node/v22',
-          npm_execpath: fakeNpm,
-          npm_command: 'ci',
-        },
-      }
-    )
-    assert.equal(result.status, 23, result.stderr)
-    assert.match(result.stdout, /"ci","--prefix","app"/)
-    assert.doesNotMatch(result.stdout, /Skipping legacy Electron setup/)
   })
 
   it('uses Node and preserves arguments without a shell', () => {
@@ -76,16 +28,6 @@ describe('npm commands', () => {
 
   it('fails explicitly when the npm CLI is missing', () => {
     assert.throws(() => getNpmCommand([], ''), /Cannot find the npm CLI/)
-  })
-
-  it('validates webpack loader options with compatible Ajv peers', async () => {
-    const { validate } = await import('schema-utils')
-    const schema: Parameters<typeof validate>[0] = {
-      type: 'object',
-      properties: { enabled: { type: 'boolean' } },
-    }
-    validate(schema, { enabled: true })
-    assert.throws(() => validate(schema, { enabled: 'invalid' }), /boolean/)
   })
 
   it('downloads legacy registry prebuilds without npm _from metadata', async t => {

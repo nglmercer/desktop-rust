@@ -1,11 +1,18 @@
-import {
+import * as xterm from '@xterm/xterm'
+import type {
   ITerminalOptions,
   ITerminalInitOnlyOptions,
-  Terminal as XTermTerminal,
+  Terminal as XTermTerminalType,
 } from '@xterm/xterm'
 import React from 'react'
 import { getMonospaceFontFamily } from './get-monospace-font-family'
 import { TerminalOutput } from '../lib/git'
+
+// xterm ships a UMD bundle, so Node resolves its classes through `default`.
+const XTermTerminal: typeof XTermTerminalType =
+  xterm.Terminal ??
+  (xterm as unknown as { default: typeof xterm }).default.Terminal
+type XTermTerminal = XTermTerminalType
 
 export const defaultTerminalOptions: Readonly<ITerminalOptions> = {
   convertEol: true,

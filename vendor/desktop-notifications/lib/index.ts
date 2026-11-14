@@ -11,5 +11,6 @@ export {
   supportsNotificationsPermissionRequest,
 } from './notification-support'
 export { getNotificationSettingsUrl } from './notification-settings-url'
-export { NotificationCallback, onNotificationEvent } from './notification-callback'
-export { DesktopNotificationPermission } from './notification-permission'
+export { onNotificationEvent } from './notification-callback'
+export type { NotificationCallback } from './notification-callback'
+export type { DesktopNotificationPermission } from './notification-permission'

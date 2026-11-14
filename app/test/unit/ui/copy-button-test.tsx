@@ -4,7 +4,7 @@ import * as React from 'react'
 import { act } from 'react-dom/test-utils'
 
 import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
-import { captureClipboardWrites } from '../../helpers/ui/electron'
+import { captureClipboardWrites } from '../../helpers/ui/host-ipc'
 import { CopyButton } from '../../../src/ui/copy-button'
 
 describe('CopyButton', () => {

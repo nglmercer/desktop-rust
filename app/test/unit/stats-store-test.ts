@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import assert from 'node:assert'
-import { ipcRenderer } from 'electron'
+import { ipcRenderer } from '../../src/web/host-bridge'
 import { TestStatsDatabase } from '../helpers/databases'
 import { mockNotification } from '../helpers/mock-notification'
 

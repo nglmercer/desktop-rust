@@ -88,6 +88,12 @@ enum GitInfoOperation {
     GlobalConfigPath {},
     AvailableEditors {},
     AvailableTerminals {},
+    ValidateCustomIntegration {
+        path: String,
+    },
+    ParseWindowsIntegrationArguments {
+        arguments: String,
+    },
     OpenTerminal {
         repository_path: String,
         name: String,
@@ -96,10 +102,18 @@ enum GitInfoOperation {
     OpenGlobalGitConfigEditor {
         name: String,
     },
+    OpenCustomGlobalGitConfigEditor {
+        editor: desktop_backend::DesktopCustomEditor,
+    },
     OpenNamedEditor {
         repository_path: String,
         path: Option<desktop_backend::GitPath>,
         name: String,
+    },
+    OpenCustomEditor {
+        repository_path: String,
+        path: Option<desktop_backend::GitPath>,
+        editor: desktop_backend::DesktopCustomEditor,
     },
     CloneSelected {
         url: String,
@@ -592,6 +606,9 @@ impl Backend {
             repository_path, ..
         }
         | GitInfoOperation::OpenNamedEditor {
+            repository_path, ..
+        }
+        | GitInfoOperation::OpenCustomEditor {
             repository_path, ..
         }
         | GitInfoOperation::OpenTerminal {
@@ -1876,6 +1893,8 @@ impl Backend {
                             GitInfoOperation::GlobalConfigPath {} => desktop_backend::git_global_config_path().await.map(serde_json::Value::String),
                             GitInfoOperation::AvailableEditors {} => desktop_backend::available_editors(desktop_backend::ExternalEditor::Automatic).await,
                             GitInfoOperation::AvailableTerminals {} => desktop_backend::available_terminals().await,
+                            GitInfoOperation::ValidateCustomIntegration { path } => desktop_backend::validate_custom_integration_path(path).await,
+                            GitInfoOperation::ParseWindowsIntegrationArguments { arguments } => desktop_backend::parse_windows_integration_arguments(arguments).await.map(|args| serde_json::json!(args)),
                             GitInfoOperation::OpenTerminal { repository_path, name, directory } => {
                                 let requested = PathBuf::from(repository_path);
                                 let canonical = desktop_backend::cancellation::blocking(move || Ok(requested.canonicalize()?)).await.map_err(|error| AppError::msg(error.to_string()))?;
@@ -1884,11 +1903,18 @@ impl Backend {
                                 repo.open_terminal(name, directory.into()).await
                             }
                             GitInfoOperation::OpenGlobalGitConfigEditor { name } => desktop_backend::open_global_git_config_editor(name).await,
+                            GitInfoOperation::OpenCustomGlobalGitConfigEditor { editor } => desktop_backend::open_global_git_config_custom_editor(editor).await,
                             GitInfoOperation::OpenNamedEditor { repository_path, path, name } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
                                 repo.open_editor(path, desktop_backend::ExternalEditor::Named { name }).await
+                            }
+                            GitInfoOperation::OpenCustomEditor { repository_path, path, editor } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                repo.open_desktop_custom_editor(path, editor).await
                             }
                             GitInfoOperation::CloneSelected { url, path, default_branch, account } => {
                                 return self.clone_selected(url, path, default_branch, account).await;
@@ -2291,6 +2317,8 @@ mod tests {
                 let backend = Backend::new(8).unwrap();
                 let invalid = backend.admit_git_info(vec![json!({"operation":{"type":"open_global_git_config_editor","name":"/bin/sh"}})]).unwrap();
                 assert!(backend.read(invalid).is_err());
+                let invalid_custom = backend.admit_git_info(vec![json!({"operation":{"type":"open_custom_global_git_config_editor","editor":{"program":root.join("missing"),"args":["%TARGET_PATH%"],"macos_app":false}}})]).unwrap();
+                assert!(backend.read(invalid_custom).is_err());
                 assert!(!root.join("git config").exists());
                 assert!(backend.admit_git_info(vec![json!({"operation":{"type":"open_global_git_config_editor","name":"Visual Studio Code","path":"/etc/passwd"}})]).is_err());
                 let global = backend.admit_git_info(vec![json!({"operation":{"type":"open_global_git_config_editor","name":"Visual Studio Code"}})]).unwrap();
@@ -2299,6 +2327,18 @@ mod tests {
                 let job = backend.admit_git_info(vec![json!({"operation":{"type":"open_named_editor","repository_path":repo,"path":"file with spaces","name":"Visual Studio Code"}})]).unwrap();
                 assert_eq!(backend.read(job).unwrap()["code"], 0);
                 assert_eq!(std::fs::read_to_string(root.join("capture")).unwrap(), format!("--\n{}\n", repo.join("file with spaces").display()));
+                let editor = json!({"program":root.join("bin/code"),"args":["literal {path}","--file=%TARGET_PATH%","$(touch injected)"],"macos_app":false});
+                let valid = backend.admit_git_info(vec![json!({"operation":{"type":"validate_custom_integration","path":root.join("bin/code")}})]).unwrap();
+                assert_eq!(backend.read(valid).unwrap()["is_valid"], true);
+                let global = backend.admit_git_info(vec![json!({"operation":{"type":"open_custom_global_git_config_editor","editor":editor}})]).unwrap();
+                assert_eq!(backend.read(global).unwrap()["code"], 0);
+                assert_eq!(std::fs::read_to_string(root.join("capture")).unwrap(), format!("literal {{path}}\n--file={}\n$(touch injected)\n", root.join("git config").display()));
+                let job = backend.admit_git_info(vec![json!({"operation":{"type":"open_custom_editor","repository_path":repo,"path":"file with spaces","editor":editor}})]).unwrap();
+                assert_eq!(backend.read(job).unwrap()["code"], 0);
+                assert_eq!(std::fs::read_to_string(root.join("capture")).unwrap(), format!("literal {{path}}\n--file={}\n$(touch injected)\n", repo.join("file with spaces").display()));
+                let escape = backend.admit_git_info(vec![json!({"operation":{"type":"open_custom_editor","repository_path":repo,"path":"../capture","editor":editor}})]).unwrap();
+                assert!(backend.read(escape).is_err());
+                assert!(!repo.join("injected").exists());
             }).unwrap().join().unwrap();
             return;
         }

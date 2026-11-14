@@ -1,6 +1,6 @@
 import { isElement } from './is-element'
 import type { INodeFilter } from './node-filter'
-import { githubAssetVideoRegex } from './video-url-regex'
+import { isGitHubAssetVideo } from './video-url'
 
 /**
  * The Video Link filter matches embedded video tags, like
@@ -17,7 +17,7 @@ export class VideoTagFilter implements INodeFilter {
   public createFilterTreeWalker(doc: Document): TreeWalker {
     return doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT, {
       acceptNode: (el: Element) =>
-        !isElement(el, 'video') || githubAssetVideoRegex.test(el.src)
+        !isElement(el, 'video') || isGitHubAssetVideo(el.src)
           ? NodeFilter.FILTER_SKIP
           : NodeFilter.FILTER_ACCEPT,
     })
@@ -27,7 +27,7 @@ export class VideoTagFilter implements INodeFilter {
    * Takes a video element who's src host is not a github user asset url and removes it.
    */
   public async filter(node: Node): Promise<ReadonlyArray<Node> | null> {
-    if (!isElement(node, 'video') || githubAssetVideoRegex.test(node.src)) {
+    if (!isElement(node, 'video') || isGitHubAssetVideo(node.src)) {
       // If it is video element with a valid source, we return null to leave it alone.
       // This is different than dotcom which regenerates a video tag because it
       // verifies through a db call that the assets exists

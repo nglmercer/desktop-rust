@@ -1,3 +1,4 @@
+import type { HostIpcEvent } from '../../lib/host-types'
 const lastSuccessfulCheckKey = 'last-successful-update-check'
 
 import { Emitter, Disposable } from 'event-kit'
@@ -96,7 +97,7 @@ class UpdateStore {
     setNumber(lastSuccessfulCheckKey, now.getTime())
   }
 
-  private onAutoUpdaterError = (e: Electron.IpcRendererEvent, error: Error) => {
+  private onAutoUpdaterError = (e: HostIpcEvent, error: Error) => {
     this.status = UpdateStatus.UpdateNotAvailable
 
     if (__WIN32__) {

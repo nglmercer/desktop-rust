@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --import tsx
+#!/usr/bin/env -S node --import @oxc-node/core/register
 
 import * as Path from 'path'
 import * as Fs from 'fs'

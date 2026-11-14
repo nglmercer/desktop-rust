@@ -316,7 +316,7 @@ describe.skipIf(process.platform === 'win32')(
           root
         )}).catch(() => { process.exitCode = 1 })\n`
       )
-      const child = spawn(process.execPath, ['--import', 'tsx', driver], {
+      const child = spawn(process.execPath, ['--import', '@oxc-node/core/register', driver], {
         cwd: process.cwd(),
         env: { ...env, WAIT_VITE: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],

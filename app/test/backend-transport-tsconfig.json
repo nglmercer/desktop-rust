@@ -17,10 +17,10 @@
     "../src/styles.d.ts",
     "../src/web/path-browserify.d.ts",
     "../src/backend/client.ts",
-    "../src/web/electron-shim-loader.ts",
+    "../src/web/host-bridge-loader.ts",
     "unit/backend-client-session-test.ts",
     "unit/backend-websocket-test.ts",
     "unit/backend-websocket-integration-test.ts",
-    "unit/web-electron-shim-loader-test.ts"
+    "unit/web-host-bridge-loader-test.ts"
   ]
 }

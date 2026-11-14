@@ -1,6 +1,6 @@
 import { isElement } from './is-element'
 import type { INodeFilter } from './node-filter'
-import { githubAssetVideoRegex } from './video-url-regex'
+import { isGitHubAssetVideo } from './video-url'
 
 /**
  * The Video Link filter matches a github-flavored markdown target of a link,
@@ -71,7 +71,7 @@ export class VideoLinkFilter implements INodeFilter {
       node.childElementCount === 1 &&
       node.firstChild &&
       isElement(node.firstChild, 'a') &&
-      githubAssetVideoRegex.test(node.firstChild.href)
+      isGitHubAssetVideo(node.firstChild.href)
     ) {
       return node.firstChild.href
     }

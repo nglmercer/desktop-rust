@@ -58,8 +58,10 @@ Object.assign(process.env, testEnv)
 const args = [
   '--disable-warning=ExperimentalWarning',
   '--experimental-test-module-mocks',
-  ...['--import', 'tsx'],
-  ...['--import', './app/test/globals.mts'],
+  // Compile to CommonJS like the previous loader: these suites patch built-in
+  // modules through their default export objects.
+  ...['--require', './script/ts-register.cjs'],
+  ...['--require', './app/test/globals.cjs'],
   ...switchArgs,
   '--test',
   ...reporter('spec'),

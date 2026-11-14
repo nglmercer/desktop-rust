@@ -84,8 +84,6 @@ app/src/ui/repositories-list/**
 app/src/ui/repository-settings/**
 app/src/ui/repository-account/**
 app/src/ui/worktrees/**
-vite.cli.config.ts
 script/cli-build.test.ts
-vite.crash.config.ts
 script/crash-build.test.ts
 script/test-discovery.mts

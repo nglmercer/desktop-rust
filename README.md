@@ -61,16 +61,15 @@ staged host is killed unexpectedly, a lock can remain: inspect its recorded
 owner and verify that no related host or build process is running before
 manually removing it. A force-killed packaging parent may leave its temporary
 Vite directory and child build process behind.
-The existing Electron production pipeline is available through
-`pnpm build:electron:prod` and `pnpm package:electron` until it is replaced.
+The Electron production pipeline has been removed; `pnpm package` is the only
+packaging path.
 
 For development, `pnpm start` builds and starts the Rust shell and watches the
 Vite renderer, highlighter and IPC bootstrap. After a successful rebuild and
 after Git operations finish, use View > Reload (`Ctrl`/`Cmd` + `Alt` + `R`) in
 the app to apply the changes.
 Close the window or press Ctrl-C in the terminal to stop the shell and watchers.
-The legacy Electron development launcher remains available as `pnpm start:electron`
-during migration. `pnpm start:rust` is an alias for the default launcher.
+`pnpm start:rust` is an alias for the default launcher.
 The Rust launcher and its shutdown path have been exercised
 on Linux; macOS and Windows still need native validation.
 If a copied static resource is removed, stop the launcher, run `pnpm vite:build`,

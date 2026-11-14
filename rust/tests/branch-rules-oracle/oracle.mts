@@ -406,5 +406,5 @@ if (mode === '--record') {
   process.stdout.write(`${JSON.stringify(output)}\n`)
 } else
   throw new Error(
-    'Usage: node --import tsx oracle.mts --check|--record|--json|--evaluate'
+    'Usage: node --import @oxc-node/core/register oracle.mts --check|--record|--json|--evaluate'
   )

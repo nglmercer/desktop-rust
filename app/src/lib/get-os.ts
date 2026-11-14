@@ -1,19 +1,33 @@
 import * as OS from 'os'
-import { compare } from 'compare-versions'
+import compareVersions from 'compare-versions'
 import memoizeOne from 'memoize-one'
 
-function getSystemVersionSafe() {
-  if (__DARWIN__) {
-    // getSystemVersion only exists when running under Electron, and not when
-    // running unit tests which frequently end up calling this. There are no
-    // other known reasons why getSystemVersion() would return anything other
-    // than a string
-    return 'getSystemVersion' in process
-      ? process.getSystemVersion()
-      : undefined
-  } else {
-    return OS.release()
+const { compare } = compareVersions
+
+/**
+ * The macOS product version for a Darwin kernel release (for example
+ * `23.4.0` is macOS 14.4). Darwin 20 started macOS 11 and Darwin 25 macOS 26;
+ * earlier releases are macOS 10.x.
+ */
+export function macOSVersionFromDarwinRelease(release: string): string | undefined {
+  const [major, minor = '0', patch = '0'] = release.split('.')
+  const darwin = parseInt(major, 10)
+  if (Number.isNaN(darwin)) {
+    return undefined
   }
+  if (darwin >= 25) {
+    return `${darwin + 1}.${minor}.${patch}`
+  }
+  if (darwin >= 20) {
+    return `${darwin - 9}.${minor}.${patch}`
+  }
+  return darwin >= 4 ? `10.${darwin - 4}.${minor}` : undefined
+}
+
+function getSystemVersionSafe() {
+  return __DARWIN__
+    ? macOSVersionFromDarwinRelease(OS.release())
+    : OS.release()
 }
 
 function systemVersionGreaterThanOrEqualTo(version: string) {
@@ -94,16 +108,16 @@ export const isWindows10And1809Preview17666OrLater = memoizeOne(
   () => __WIN32__ && systemVersionGreaterThanOrEqualTo('10.0.17666')
 )
 
-export const isWindowsAndNoLongerSupportedByElectron = memoizeOne(
+export const isWindowsAndNoLongerSupported = memoizeOne(
   () => __WIN32__ && systemVersionLessThan('10')
 )
 
-export const isMacOSAndNoLongerSupportedByElectron = memoizeOne(
+export const isMacOSAndNoLongerSupported = memoizeOne(
   () => __DARWIN__ && systemVersionLessThan('13.0')
 )
 
-export const isOSNoLongerSupportedByElectron = memoizeOne(
+export const isOSNoLongerSupported = memoizeOne(
   () =>
-    isMacOSAndNoLongerSupportedByElectron() ||
-    isWindowsAndNoLongerSupportedByElectron()
+    isMacOSAndNoLongerSupported() ||
+    isWindowsAndNoLongerSupported()
 )

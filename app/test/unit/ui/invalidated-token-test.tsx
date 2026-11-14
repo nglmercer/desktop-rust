@@ -11,7 +11,7 @@ describe('Session recovery dialog', () => {
   let view: ReturnType<typeof render> | undefined
   let restoreIpc: (() => void) | undefined
   beforeEach(async () => {
-    const electron = await import('electron')
+    const electron = await import('../../../src/web/host-bridge')
     const previousSend = electron.ipcRenderer.send
     electron.ipcRenderer.send = () => {}
     const showModal = Object.getOwnPropertyDescriptor(

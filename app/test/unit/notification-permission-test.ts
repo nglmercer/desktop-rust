@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { afterEach, describe, it, onTestFinished, vi } from 'vitest'
-import { ipcRenderer } from 'electron'
+import { ipcRenderer } from '../../src/web/host-bridge'
 import { MockIPC } from '../helpers/mock-ipc'
 
 let nativeNotificationsSupported = true

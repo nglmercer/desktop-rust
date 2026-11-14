@@ -5,6 +5,7 @@ import { execFile, spawn, SpawnOptions } from 'child_process'
 import { access, lstat } from 'fs/promises'
 import * as fs from 'fs'
 import { extname } from 'path'
+import { backend } from '../backend/client'
 
 const execFileAsync = promisify(execFile)
 
@@ -37,6 +38,29 @@ export function parseCustomIntegrationArguments(
   args: string
 ): ReadonlyArray<string> {
   return __WIN32__ ? parseCommandLineArgv(args) : stringArgv(args)
+}
+
+/** Parse Windows integration arguments on the native host when Electron is absent. */
+export async function parseCustomIntegrationArgumentsForRuntime(
+  args: string
+): Promise<ReadonlyArray<string>> {
+  if (__WIN32__ && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    return backend().parseWindowsIntegrationArguments(args)
+  }
+  return parseCustomIntegrationArguments(args)
+}
+
+/** Inspect a live input synchronously; the Windows host performs full parsing before save. */
+export function parseCustomIntegrationArgumentsForInput(args: string): ReadonlyArray<string> {
+  if (__WIN32__ && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+    if (args.includes('\0') || new TextEncoder().encode(args).length > 65536) {
+      throw new Error('Invalid integration arguments')
+    }
+    // CommandLineToArgvW does not alter this placeholder. Avoid a race where
+    // an asynchronous parse would leave the previous value in Preferences.
+    return [args]
+  }
+  return parseCustomIntegrationArguments(args)
 }
 
 // Function to retrieve, on macOS, the bundleId of an app given its path
@@ -123,6 +147,9 @@ export async function validateCustomIntegrationPath(
   let bundleID = undefined
 
   try {
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      return await backend().validateCustomIntegrationPath(path)
+    }
     const pathStat = await lstat(path)
     const canBeExecuted = await access(path, fs.constants.X_OK)
       .then(() => true)
@@ -171,7 +198,7 @@ export async function isValidCustomIntegration(
     const pathResult = await validateCustomIntegrationPath(
       customIntegration.path
     )
-    const argv = parseCustomIntegrationArguments(customIntegration.arguments)
+    const argv = await parseCustomIntegrationArgumentsForRuntime(customIntegration.arguments)
     const targetPathPresent = checkTargetPathArgument(argv)
     return pathResult.isValid && targetPathPresent
   } catch (e) {

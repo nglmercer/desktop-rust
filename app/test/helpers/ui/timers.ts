@@ -1,5 +1,5 @@
 import { mock } from 'node:test'
-import { act } from 'react-dom/test-utils'
+import { act } from '@testing-library/react'
 
 type TimerApi = 'Date' | 'setTimeout'
 

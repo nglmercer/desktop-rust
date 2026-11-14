@@ -1,3 +1,4 @@
+import type { HostCertificate } from '../lib/host-types'
 import * as React from 'react'
 import * as Path from 'path'
 
@@ -22,9 +23,9 @@ import { matchExistingRepository } from '../lib/repository-matching'
 import { getVersion, getName } from './lib/app-proxy'
 import {
   getOS,
-  isOSNoLongerSupportedByElectron,
-  isMacOSAndNoLongerSupportedByElectron,
-  isWindowsAndNoLongerSupportedByElectron,
+  isOSNoLongerSupported,
+  isMacOSAndNoLongerSupported,
+  isWindowsAndNoLongerSupported,
 } from '../lib/get-os'
 import { MenuEvent, isTestMenuEvent } from '../lib/menu-event'
 import {
@@ -100,7 +101,6 @@ import { NoRepositoriesView } from './no-repositories'
 import { ConfirmRemoveRepository } from './remove-repository'
 import { TermsAndConditions } from './terms-and-conditions'
 import { PushBranchCommits } from './branches'
-import { CLIInstalled } from './cli-installed'
 import { GenericGitAuthentication } from './generic-git-auth'
 import { ShellError } from './shell'
 import { InitializeLFS, AttributeMismatch } from './lfs'
@@ -444,7 +444,7 @@ export class App extends React.Component<IAppProps, IAppState> {
    * 3. Thank you banner
    */
   private setOnOpenBanner() {
-    if (isOSNoLongerSupportedByElectron()) {
+    if (isOSNoLongerSupported()) {
       const dismissedAt = getNumber(UnsupportedOSBannerDismissedAtKey, 0)
 
       // Remind the user that they're running an unsupported OS every 90 days
@@ -542,8 +542,6 @@ export class App extends React.Component<IAppProps, IAppState> {
         return this.openPullRequest()
       case 'preview-pull-request':
         return this.startPullRequest()
-      case 'install-darwin-cli':
-        return this.props.dispatcher.installDarwinCLI()
       case 'install-windows-cli':
         return installWindowsCLI()
       case 'uninstall-windows-cli':
@@ -671,14 +669,14 @@ export class App extends React.Component<IAppProps, IAppState> {
       return
     }
 
-    if (isWindowsAndNoLongerSupportedByElectron()) {
+    if (isWindowsAndNoLongerSupported()) {
       log.error(
         `Can't check for updates on Windows 8.1 or older. Next available update only supports Windows 10 and later`
       )
       return
     }
 
-    if (isMacOSAndNoLongerSupportedByElectron()) {
+    if (isMacOSAndNoLongerSupported()) {
       log.error(
         `Can't check for updates on macOS 12 or older. Next available update only supports macOS 13 and later`
       )
@@ -1557,7 +1555,7 @@ export class App extends React.Component<IAppProps, IAppState> {
   }
 
   private onContinueWithUntrustedCertificate = (
-    certificate: Electron.Certificate
+    certificate: HostCertificate
   ) => {
     showCertificateTrustDialog(
       certificate,
@@ -2092,10 +2090,6 @@ export class App extends React.Component<IAppProps, IAppState> {
             onConfirm={this.openCreatePullRequestInBrowser}
             onDismissed={onPopupDismissedFn}
           />
-        )
-      case PopupType.CLIInstalled:
-        return (
-          <CLIInstalled key="cli-installed" onDismissed={onPopupDismissedFn} />
         )
       case PopupType.GenericGitAuthentication:
         const onDismiss = () => {

@@ -316,6 +316,12 @@ enum ControlOperation {
 enum ManagementOperation {
     AvailableEditors,
     AvailableTerminals,
+    ValidateCustomIntegration {
+        path: String,
+    },
+    ParseWindowsIntegrationArguments {
+        arguments: String,
+    },
     ReleaseChangelog {
         #[serde(default)]
         channel: Option<changelog::Channel>,
@@ -333,12 +339,19 @@ enum ManagementOperation {
     OpenGlobalGitConfigEditor {
         editor_name: String,
     },
+    OpenCustomGlobalGitConfigEditor {
+        editor: desktop_core::DesktopCustomEditor,
+    },
     GitVersion,
     GitGlobalConfigPath,
     OpenEditor {
         path: Option<desktop_core::GitPath>,
         #[serde(default)]
         editor_name: Option<String>,
+    },
+    OpenCustomEditor {
+        path: Option<desktop_core::GitPath>,
+        editor: desktop_core::DesktopCustomEditor,
     },
     GetPreferences,
     UpdatePreferences {
@@ -591,6 +604,12 @@ async fn execute(
         ApplicationOperation::Management(AvailableTerminals) => {
             desktop_core::available_terminals().await
         }
+        ApplicationOperation::Management(ValidateCustomIntegration { path }) => {
+            desktop_core::validate_custom_integration_path(path).await
+        }
+        ApplicationOperation::Management(ParseWindowsIntegrationArguments { arguments }) => Ok(
+            json!(desktop_core::parse_windows_integration_arguments(arguments).await?),
+        ),
         ApplicationOperation::Management(ReleaseChangelog { channel, limit }) => {
             anyhow::ensure!(
                 expected_repository.is_none(),
@@ -624,6 +643,9 @@ async fn execute(
         }
         ApplicationOperation::Management(OpenGlobalGitConfigEditor { editor_name }) => {
             desktop_core::open_global_git_config_editor(editor_name).await
+        }
+        ApplicationOperation::Management(OpenCustomGlobalGitConfigEditor { editor }) => {
+            desktop_core::open_global_git_config_custom_editor(editor).await
         }
         ApplicationOperation::Management(GitVersion) => {
             Ok(json!(desktop_core::git_version().await?))
@@ -681,6 +703,20 @@ async fn execute(
                     .external_editor
             };
             repository.open_editor(path, editor).await
+        }
+        ApplicationOperation::Management(OpenCustomEditor { path, editor }) => {
+            let current = cancellation::wait(state.repo.lock()).await?;
+            let repository = current
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("open a repository before launching an editor"))?;
+            let expected = expected_repository.ok_or_else(|| {
+                anyhow::anyhow!("custom editor requests require a repository binding")
+            })?;
+            anyhow::ensure!(
+                repository.id() == expected,
+                "Repository selection changed; refresh before opening an editor"
+            );
+            repository.open_desktop_custom_editor(path, editor).await
         }
         ApplicationOperation::Management(GetPreferences) => {
             let store = registry.preferences();

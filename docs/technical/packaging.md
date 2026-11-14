@@ -3,36 +3,33 @@
 This document outlines how Desktop is currently packaged for all platforms -
 there are some parts in common but then each platform has it's own quirks.
 
-## `webpack`
+## Vite
 
-GitHub Desktop use webpack to transpile and bundle its application resources.
-The configuration files that webpack uses are found under `app/`:
+GitHub Desktop uses Vite to transpile and bundle its application resources.
+The configuration files are found at the repository root:
 
- - `app/webpack.common.ts` - base config and settings
- - `app/webpack.development.ts` - additional changes to base config for building
-    and running Desktop in development mode
- - `app/webpack.production.ts` - additional changes to base config for building
-    and running the app in production mode
+ - `vite.main.config.ts` - `main.js`, the Electron main process
+ - `vite.renderer.config.ts` - `renderer.js`, `renderer.css` and `index.html`
+   for the Electron renderer
+ - `vite.crash.config.ts` - `crash.js`, the UI shown when the app crashed
+ - `vite.highlighter.config.ts` - `highlighter.js`, the syntax-highlighting
+   worker
+ - `vite.cli.config.ts` - `cli.js`, the `github` command line interface
 
-The webpack configuration files organize the source files into these targets:
+Vite also handles these steps:
 
- - `main.js` - logic in the main process in Electron
- - `renderer.js` - logic in the renderer process in Electron
- - `crash.js` - specialised UI for displaying an error that crashed the app
- - `highlighter.js` - logic for syntax highlighting, which runs in a web worker
- - `cli.js` - logic for the `github` command line interface
-
-Webpack also handles these steps:
-
- - placeholders in source for platform-specific values are now replaced, using
+ - placeholders in source for platform-specific values are replaced, using
    `app/app-info.ts` and the values of the platform the build is being performed
    on
  - SCSS stylesheets under `app/styles/` are transpiled to CSS and emitted
  - source maps are generated to help with correlating runtime errors to the
    corresponding TypeScript source
 
-The output from webpack is stored in the `out` directory, and this folder is
-ignored in version control.
+Vite does not type-check, so `compile:dev` and `compile:prod` run
+`npm run check:types` before the renderer build.
+
+The output is stored in the `out` directory, which is ignored in version
+control.
 
 The renderer includes the Copilot SDK's native Koffi dependency. Only the
 `@koromix/koffi-<platform>-<architecture>` package matching the build target is
@@ -56,7 +53,7 @@ features.
 
 ## `script/build.ts`
 
-After webpack the next component in the pipeline is  `script/build.ts` which
+After the Vite build the next component in the pipeline is  `script/build.ts` which
 handles moving app resources into place and launching `electron-packager`, which
 merges the application resources and Electron runtime for the current
 platform into an executable program.

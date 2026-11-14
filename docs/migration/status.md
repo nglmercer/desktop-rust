@@ -73,7 +73,7 @@
 
 ## Construcción, paquetes, actualización (Fase 7)
 
-El empaquetador actual es `node --import tsx script/package-rust.ts`. Las
+El empaquetador actual es `node --import @oxc-node/core/register script/package-rust.ts`. Las
 comprobaciones de la tabla que mencionan `package-rust.sh` son históricas,
 corresponden a la versión anterior y no validan instaladores o licencias completos.
 

@@ -1,5 +1,5 @@
 # macOS bundle
-# node --import tsx script/package-rust.ts macos → dist/GitHub Desktop-macos-arm64/ (or x64)
+# node --import @oxc-node/core/register script/package-rust.ts macos → dist/GitHub Desktop-macos-arm64/ (or x64)
 # The .app bundle is created by `platforms` packaging from this staging dir.
 # Signing/notarisation uses the fork's own identity; upstream distribution
 # identities are not reused. Bundle identifier is the fork's (com.github.GitHubClient

@@ -25,7 +25,7 @@ const branchToCheckout = new Branch(
 )
 
 it('disables the switch button after clicking it', async () => {
-  const electron = await import('electron')
+  const electron = await import('../../../src/web/host-bridge')
   const previousSend = electron.ipcRenderer.send
   electron.ipcRenderer.send = () => {}
   onTestFinished(() => {

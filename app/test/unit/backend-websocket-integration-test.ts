@@ -443,6 +443,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
       const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
       await expect(client.openGlobalGitConfigEditor('/bin/sh')).rejects.toThrow()
+      await expect(client.openCustomGlobalGitConfigEditor({ program: path.join(bin, 'missing'), args: ['%TARGET_PATH%'], macosApp: false })).rejects.toThrow()
       await expect(readFile(globalConfig)).rejects.toMatchObject({ code: 'ENOENT' })
       await expect(client.request('open_global_git_config_editor', { editor_name: 'Visual Studio Code', path: '/etc/passwd' })).rejects.toThrow()
       await client.openGlobalGitConfigEditor('Visual Studio Code')
@@ -456,6 +457,16 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(await readFile(capture, 'utf8')).toBe(`--\n${path.join(repository, 'file with spaces.txt')}\n`)
       await expect(client.openNamedRepositoryEditor(repository, '../editor-args', 'Visual Studio Code')).rejects.toThrow()
       await expect(client.openNamedRepositoryEditor(repository, 'file with spaces.txt', '/bin/sh')).rejects.toThrow()
+
+      const custom = { program: path.join(bin, 'code'), args: ['literal {path}', '--file=%TARGET_PATH%', '$(touch injected)'], macosApp: false }
+      expect(await client.validateCustomIntegrationPath(custom.program)).toEqual({ isValid: true, bundleID: undefined })
+      await client.openCustomGlobalGitConfigEditor(custom)
+      expect(await readFile(capture, 'utf8')).toBe(`literal {path}\n--file=${globalConfig}\n$(touch injected)\n`)
+      await client.openCustomRepositoryEditor(repository, 'file with spaces.txt', custom)
+      expect(await readFile(capture, 'utf8')).toBe(`literal {path}\n--file=${path.join(repository, 'file with spaces.txt')}\n$(touch injected)\n`)
+      await expect(client.openCustomRepositoryEditor(repository, '../editor-args', custom)).rejects.toThrow()
+      await expect(client.request('open_custom_editor', { path: 'file with spaces.txt', editor: { program: custom.program, args: custom.args, macos_app: false } })).rejects.toThrow('require a repository binding')
+      expect(existsSync(path.join(repository, 'injected'))).toBe(false)
     }, 90_000)
 
     it('reads last fetch time from the selected repository', async () => {

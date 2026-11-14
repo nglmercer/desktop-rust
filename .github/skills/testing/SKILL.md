@@ -14,13 +14,16 @@ This document describes the three tiers of tests in GitHub Desktop, how to run
 them, and the patterns you should follow when writing new tests or updating
 existing ones as part of a feature or bugfix.
 
+> **Note:** the Electron-based E2E harness (`app/test/e2e/`, `npm run test:e2e:*`)
+> was removed with Electron. Sections below that describe it are historical.
+
 ## Overview
 
 | Tier | Purpose | Location | Runner |
 |------|---------|----------|--------|
 | Unit / integration (non-UI) | Pure logic, stores, models, git operations | `app/test/unit/` | `node:test` via `npm test` |
 | UI component | React components rendered in JSDOM | `app/test/unit/ui/` | `node:test` + React Testing Library via `npm test` |
-| E2E (ad-hoc) | Full app launched with Playwright + Electron | `app/test/e2e/` | Playwright via `npm run test:e2e:*` |
+| E2E | Removed with Electron; use the Chromium and Wry integration tests under `rust/tests/` | `rust/tests/` | Vitest |
 
 ### When to use each tier
 
@@ -647,7 +650,7 @@ After screenshots are captured, revert these two lines back to their originals.
 
 ## Test Helpers Reference
 
-### Global test environment (`app/test/globals.mts`)
+### Global test environment (`app/test/globals.cjs`)
 
 This file is loaded automatically by the test runner. It:
 

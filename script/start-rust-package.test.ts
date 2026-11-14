@@ -66,7 +66,7 @@ setInterval(() => {
   )
   const child = spawn(
     process.execPath,
-    ['--import', 'tsx', 'script/start-rust-package.ts', ...(argument ? [argument] : [])],
+    ['--import', '@oxc-node/core/register', 'script/start-rust-package.ts', ...(argument ? [argument] : [])],
     {
       cwd: process.cwd(),
       detached: true,
@@ -117,7 +117,7 @@ async function bounded<T>(value: Promise<T>, timeout: number): Promise<T> {
 }
 
 async function launchAgain(root: string) {
-  const child = spawn(process.execPath, ['--import', 'tsx', 'script/start-rust-package.ts'], {
+  const child = spawn(process.execPath, ['--import', '@oxc-node/core/register', 'script/start-rust-package.ts'], {
     cwd: process.cwd(),
     detached: true,
     env: { ...process.env, RELEASE_CHANNEL: 'production', DESKTOP_RUST_DIST_DIR: root },

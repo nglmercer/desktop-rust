@@ -36,7 +36,7 @@ function startHost(args: ReadonlyArray<string> = [], useDefaultCommand = false) 
     useDefaultCommand ? 'pnpm' : process.execPath,
     useDefaultCommand
       ? ['start', ...args]
-      : ['--import', 'tsx', 'script/start-rust.ts', ...args],
+      : ['--import', '@oxc-node/core/register', 'script/start-rust.ts', ...args],
     {
       cwd: process.cwd(),
       detached: useDefaultCommand,
@@ -577,7 +577,7 @@ describe.skipIf(process.platform === 'win32')(
       setInterval(() => {}, 1000)
     `
       )
-      const child = spawn(process.execPath, ['--import', 'tsx', script], {
+      const child = spawn(process.execPath, ['--import', '@oxc-node/core/register', script], {
         cwd: process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
       })

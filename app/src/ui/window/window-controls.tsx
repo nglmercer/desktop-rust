@@ -1,3 +1,4 @@
+import type { HostIpcEvent } from '../../lib/host-types'
 import * as React from 'react'
 import { WindowState } from '../../lib/window-state'
 import classNames from 'classnames'
@@ -82,7 +83,7 @@ export class WindowControls extends React.Component<{}, IWindowControlState> {
   }
 
   private onWindowStateChanged = (
-    _: Electron.IpcRendererEvent,
+    _: HostIpcEvent,
     windowState: WindowState
   ) => {
     this.setState({ windowState })

@@ -72,7 +72,7 @@ async function setup(
     Object.assign(window, { ResizeObserver: originalResizeObserver })
   })
 
-  const electron = await import('electron')
+  const electron = await import('../../../src/web/host-bridge')
   const originalSend = electron.ipcRenderer.send
   electron.ipcRenderer.send = () => {}
   t.after(() => {

@@ -8,8 +8,6 @@
       "script/highlighter-build.test.ts",
       "script/cli-build.test.ts",
       "script/crash-build.test.ts",
-      "vite.cli.config.ts",
-      "vite.crash.config.ts",
       "vitest.config.ts",
       "app/test/vitest-setup.ts",
       "app/test/unit/usage-data-test.ts",

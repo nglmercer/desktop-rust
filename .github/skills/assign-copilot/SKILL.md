@@ -16,7 +16,7 @@ bash <skill-directory>/assign.sh <issue-number> [custom-agent-name]
 ```
 
 - `issue-number` (required): The GitHub issue number to assign.
-- `custom-agent-name` (optional): The name of a custom agent to use (e.g., `deskocat`, `electron-upgrader`).
+- `custom-agent-name` (optional): The name of a custom agent to use (e.g., `deskocat`).
 
 ## Examples
 

@@ -24,6 +24,32 @@ pub enum ExternalEditor {
         terminal: bool,
     },
 }
+
+/// A custom integration selected through Desktop's editor preferences.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopCustomEditor {
+    pub program: String,
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub macos_app: bool,
+}
+
+impl DesktopCustomEditor {
+    fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.program.is_empty() && self.program.len() <= 4096 && !self.program.contains('\0'),
+            "custom editor program must be a nonempty path"
+        );
+        anyhow::ensure!(
+            self.args.len() <= 64
+                && self.args.iter().map(String::len).sum::<usize>() <= 65536
+                && self.args.iter().all(|arg| !arg.contains('\0')),
+            "custom editor arguments exceed limits or contain NUL"
+        );
+        Ok(())
+    }
+}
 impl ExternalEditor {
     pub(crate) fn validate(&self) -> Result<()> {
         if let Self::Named { name } = self {
@@ -103,6 +129,151 @@ fn locate(program: &OsStr) -> Option<PathBuf> {
     }
     None
 }
+
+/// Validate an editor/terminal selected in Desktop's integration preferences.
+pub async fn validate_custom_integration_path(path: String) -> Result<Value> {
+    anyhow::ensure!(
+        path.len() <= 4096 && !path.contains('\0'),
+        "invalid integration path"
+    );
+    if path.is_empty() {
+        return Ok(json!({"is_valid": false}));
+    }
+    let candidate = PathBuf::from(&path);
+    let is_file = cancellation::blocking({
+        let candidate = candidate.clone();
+        move || {
+            if !candidate
+                .metadata()
+                .is_ok_and(|metadata| metadata.is_file())
+            {
+                return Ok(false);
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::ffi::OsStrExt;
+                let path = std::ffi::CString::new(candidate.as_os_str().as_bytes())?;
+                // Match the real-user execute-access check used by Node's fs.access.
+                Ok(unsafe { libc::access(path.as_ptr(), libc::X_OK) } == 0)
+            }
+            #[cfg(windows)]
+            {
+                Ok(windows_direct_executable(&candidate))
+            }
+            #[cfg(not(any(unix, windows)))]
+            Ok(false)
+        }
+    })
+    .await?;
+    if is_file {
+        return Ok(json!({"is_valid": true}));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let is_app = candidate.extension() == Some(OsStr::new("app"))
+            && candidate
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_dir());
+        if is_app {
+            let mut command = tokio::process::Command::new("/usr/bin/mdls");
+            command
+                .args(["-name", "kMDItemCFBundleIdentifier", "-raw"])
+                .arg(&candidate)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true);
+            if let Ok(Ok(output)) =
+                tokio::time::timeout(std::time::Duration::from_secs(3), command.output()).await
+            {
+                if output.status.success() && output.stdout.len() <= 4096 {
+                    if let Ok(text) = String::from_utf8(output.stdout) {
+                        let bundle = text.trim();
+                        if !bundle.is_empty()
+                            && bundle != "(null)"
+                            && !bundle.chars().any(char::is_control)
+                        {
+                            return Ok(json!({"is_valid": true, "bundle_id": bundle}));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(json!({"is_valid": false}))
+}
+
+/// Parse a Windows command line using the API used by the legacy native addon.
+pub async fn parse_windows_integration_arguments(arguments: String) -> Result<Vec<String>> {
+    anyhow::ensure!(
+        arguments.len() <= 65536 && !arguments.contains('\0'),
+        "invalid integration arguments"
+    );
+    #[cfg(windows)]
+    {
+        return cancellation::blocking(move || {
+            use windows_sys::Win32::{Foundation::LocalFree, UI::Shell::CommandLineToArgvW};
+            if arguments.is_empty() {
+                return Ok(Vec::new());
+            }
+            let wide: Vec<u16> = arguments.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut count = 0;
+            let pointer = unsafe { CommandLineToArgvW(wide.as_ptr(), &mut count) };
+            anyhow::ensure!(
+                !pointer.is_null(),
+                "could not parse Windows integration arguments"
+            );
+            struct Arguments(*mut *mut u16);
+            impl Drop for Arguments {
+                fn drop(&mut self) {
+                    unsafe {
+                        LocalFree(self.0.cast());
+                    }
+                }
+            }
+            let guard = Arguments(pointer);
+            anyhow::ensure!((0..=64).contains(&count), "too many integration arguments");
+            let mut result = Vec::with_capacity(count as usize);
+            for index in 0..count as usize {
+                let value = unsafe { *guard.0.add(index) };
+                anyhow::ensure!(!value.is_null(), "invalid Windows integration argument");
+                let mut length = 0;
+                while unsafe { *value.add(length) } != 0 {
+                    length += 1;
+                }
+                let chars = unsafe { std::slice::from_raw_parts(value, length) };
+                result.push(String::from_utf16(chars)?);
+            }
+            Ok(result)
+        })
+        .await;
+    }
+    #[cfg(not(windows))]
+    anyhow::bail!("Windows integration arguments are only available on Windows")
+}
+/// Custom integrations resolve the exact name and never try shell wrappers.
+fn locate_custom_in(program: &OsStr, search: &OsStr) -> Option<PathBuf> {
+    let path = Path::new(program);
+    if path.components().count() > 1 || path.is_absolute() {
+        return executable(path)
+            .then(|| absolute_executable(path))
+            .flatten();
+    }
+    std::env::split_paths(search)
+        .map(|directory| directory.join(program))
+        .find_map(|candidate| {
+            executable(&candidate)
+                .then(|| absolute_executable(&candidate))
+                .flatten()
+        })
+}
+
+#[cfg(any(windows, test))]
+fn windows_direct_executable(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe") || ext.eq_ignore_ascii_case("com"))
+}
+
 fn discover() -> Vec<AvailableEditor> {
     let mut found = Vec::new();
     for (name, command, terminal, directories) in [
@@ -200,6 +371,28 @@ pub async fn open_global_git_config_editor(name: String) -> Result<Value> {
     .await?;
     launch_editor(plan).await
 }
+
+/// Open the host's Git configuration with an explicitly configured editor.
+pub async fn open_global_git_config_custom_editor(editor: DesktopCustomEditor) -> Result<Value> {
+    let (editor, invocation) = cancellation::blocking(move || {
+        let invocation = desktop_editor_invocation(&editor)?;
+        Ok((editor, invocation))
+    })
+    .await?;
+    let path = crate::git_global_config_path().await?;
+    let plan = cancellation::blocking(move || {
+        let target = PathBuf::from(path)
+            .canonicalize()
+            .context("global Git configuration does not exist")?;
+        anyhow::ensure!(target.is_file(), "global Git configuration must be a file");
+        let directory = target
+            .parent()
+            .context("global Git configuration has no parent")?;
+        Ok(desktop_editor_plan(editor, invocation, &target, directory))
+    })
+    .await?;
+    launch_editor(plan).await
+}
 fn substitute(template: &str, target: &Path, repository: &Path) -> OsString {
     let mut output = OsString::new();
     let mut remaining = template;
@@ -220,6 +413,115 @@ fn substitute(template: &str, target: &Path, repository: &Path) -> OsString {
     output.push(remaining);
     output
 }
+
+fn editor_target(repository: &Path, path: Option<GitPath>) -> Result<PathBuf> {
+    let Some(path) = path else {
+        return Ok(repository.to_owned());
+    };
+    let path = discard_fs::checked_path(path)?;
+    let canonical = repository
+        .join(path)
+        .canonicalize()
+        .context("editor target does not exist")?;
+    anyhow::ensure!(
+        canonical.starts_with(repository),
+        "editor target escapes the repository through a symlink"
+    );
+    anyhow::ensure!(
+        canonical.is_file(),
+        "editor target must be an existing file"
+    );
+    discard_fs::checked_path(GitPath::Bytes {
+        bytes: canonical
+            .strip_prefix(repository)?
+            .as_os_str()
+            .as_encoded_bytes()
+            .to_vec(),
+    })?;
+    Ok(canonical)
+}
+
+fn substitute_desktop_target(template: &str, target: &Path) -> OsString {
+    if matches!(template, "'%TARGET_PATH%'" | "\"%TARGET_PATH%\"") {
+        return target.as_os_str().to_owned();
+    }
+    let mut result = OsString::new();
+    let mut segments = template.split("%TARGET_PATH%").peekable();
+    while let Some(segment) = segments.next() {
+        result.push(segment);
+        if segments.peek().is_some() {
+            result.push(target.as_os_str());
+        }
+    }
+    result
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn resolved_macos_application(path: &Path) -> Result<PathBuf> {
+    anyhow::ensure!(
+        path.extension() == Some(OsStr::new("app"))
+            && path
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_dir()),
+        "configured editor application is not available"
+    );
+    path.canonicalize()
+        .context("could not resolve editor application")
+}
+
+fn desktop_editor_invocation(editor: &DesktopCustomEditor) -> Result<(PathBuf, Vec<OsString>)> {
+    editor.validate()?;
+    let invocation = if editor.macos_app {
+        #[cfg(target_os = "macos")]
+        {
+            let app = resolved_macos_application(Path::new(&editor.program))?;
+            (
+                PathBuf::from("/usr/bin/open"),
+                vec![OsString::from("-a"), app.into_os_string()],
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        anyhow::bail!("macOS applications can only be launched on macOS")
+    } else {
+        #[cfg(windows)]
+        anyhow::ensure!(
+            windows_direct_executable(Path::new(&editor.program)),
+            "custom editor must be an executable, not a shell script"
+        );
+        let program = locate_custom_in(
+            OsStr::new(&editor.program),
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )
+        .context("Configured editor executable was not found or is not executable")?;
+        #[cfg(windows)]
+        anyhow::ensure!(
+            windows_direct_executable(&program),
+            "resolved custom editor must be an executable, not a shell script"
+        );
+        (program, Vec::new())
+    };
+    Ok(invocation)
+}
+
+fn desktop_editor_plan(
+    editor: DesktopCustomEditor,
+    (program, mut args): (PathBuf, Vec<OsString>),
+    target: &Path,
+    directory: &Path,
+) -> EditorLaunch {
+    args.extend(
+        editor
+            .args
+            .iter()
+            .map(|arg| substitute_desktop_target(arg, target)),
+    );
+    EditorLaunch {
+        program,
+        args,
+        directory: directory.to_owned(),
+        terminal: false,
+    }
+}
 impl Repository {
     /// Resolve a repository-relative file, rejecting metadata and symlink traversal.
     pub async fn editor_launch(
@@ -230,17 +532,7 @@ impl Repository {
         configuration.validate()?;
         let repository = self.path().to_owned();
         cancellation::blocking(move || {
-            let target = if let Some(path) = path {
-                let path = discard_fs::checked_path(path)?;
-                let target = repository.join(path);
-                // Native canonical paths preserve filename bytes and avoid handing
-                // an unchecked symlink operand to the editor.
-                let canonical = target.canonicalize().context("editor target does not exist")?;
-                anyhow::ensure!(canonical.starts_with(&repository), "editor target escapes the repository through a symlink");
-                anyhow::ensure!(canonical.is_file(), "editor target must be an existing file");
-                discard_fs::checked_path(GitPath::Bytes { bytes: canonical.strip_prefix(&repository)?.as_os_str().as_encoded_bytes().to_vec() })?;
-                canonical
-            } else {repository.clone()};
+            let target = editor_target(&repository, path)?;
             let (program, templates, terminal) = match configuration {
                 ExternalEditor::Automatic | ExternalEditor::Named { .. } => {
                     let name = match &configuration {
@@ -273,6 +565,27 @@ impl Repository {
         configuration: ExternalEditor,
     ) -> Result<Value> {
         let plan = self.editor_launch(path, configuration).await?;
+        launch_editor(plan).await
+    }
+
+    /// Launch an explicitly selected custom editor for a confined repository target.
+    pub async fn open_desktop_custom_editor(
+        &self,
+        path: Option<GitPath>,
+        editor: DesktopCustomEditor,
+    ) -> Result<Value> {
+        let repository = self.path().to_owned();
+        let plan = cancellation::blocking(move || {
+            let target = editor_target(&repository, path)?;
+            let invocation = desktop_editor_invocation(&editor)?;
+            Ok(desktop_editor_plan(
+                editor,
+                invocation,
+                &target,
+                &repository,
+            ))
+        })
+        .await?;
         launch_editor(plan).await
     }
 }
@@ -322,6 +635,193 @@ async fn launch_editor(plan: EditorLaunch) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_editor_lookup_never_falls_back_to_shell_wrappers() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("desktop-custom-lookup-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        for name in ["editor.cmd", "editor.bat"] {
+            let path = root.join(name);
+            std::fs::write(&path, "fixture").unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let search = std::env::join_paths([&root]).unwrap();
+        assert!(locate_custom_in(OsStr::new("editor.exe"), &search).is_none());
+        assert!(!windows_direct_executable(Path::new("editor.cmd")));
+        assert!(!windows_direct_executable(Path::new("editor.bat")));
+        assert!(windows_direct_executable(Path::new("editor.EXE")));
+        let executable = root.join("editor.exe");
+        std::fs::write(&executable, "fixture").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            locate_custom_in(OsStr::new("editor.exe"), &search),
+            Some(executable)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn macos_application_is_resolved_before_the_launch_directory_changes() {
+        use std::path::Component;
+        let root =
+            std::env::temp_dir().join(format!("desktop-custom-app-{}", uuid::Uuid::new_v4()));
+        let app = root.join("Editor.app");
+        std::fs::create_dir_all(&app).unwrap();
+        let mut relative = PathBuf::new();
+        for component in std::env::current_dir().unwrap().components() {
+            if matches!(component, Component::Normal(_)) {
+                relative.push("..");
+            }
+        }
+        relative.push(app.strip_prefix("/").unwrap());
+        let resolved = resolved_macos_application(&relative).unwrap();
+        assert!(resolved.is_absolute());
+        assert_eq!(resolved, app.canonicalize().unwrap());
+        assert_eq!(
+            root.join("another-working-directory").join(&resolved),
+            resolved
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn desktop_custom_editor_preserves_arguments_without_a_shell() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("desktop-custom-editor-{}", uuid::Uuid::new_v4()));
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .arg(&root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let editor = root.join("editor script");
+        let output = root.join("arguments");
+        let marker = root.join("injected");
+        std::fs::write(
+            &editor,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
+                output.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let name = "target ;$() file.txt";
+        std::fs::write(root.join(name), "content").unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let command = DesktopCustomEditor {
+            program: editor.to_str().unwrap().to_owned(),
+            args: vec![
+                "literal {path}".into(),
+                "--open=%TARGET_PATH%".into(),
+                format!("$(touch {})", marker.display()),
+                "before%TARGET_PATH%after%TARGET_PATH%".into(),
+                "\"%TARGET_PATH%\"".into(),
+                "'%TARGET_PATH%'".into(),
+            ],
+            macos_app: false,
+        };
+        assert_eq!(
+            validate_custom_integration_path(command.program.clone())
+                .await
+                .unwrap()["is_valid"],
+            true
+        );
+        repo.open_desktop_custom_editor(Some(GitPath::Text(name.into())), command.clone())
+            .await
+            .unwrap();
+        let target = root.join(name).canonicalize().unwrap();
+        let target = target.to_str().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&output).unwrap(),
+            format!(
+                "literal {{path}}\n--open={target}\n$(touch {})\nbefore{target}after{target}\n{target}\n{target}\n",
+                marker.display()
+            )
+        );
+        assert!(!marker.exists());
+        assert!(
+            repo.open_desktop_custom_editor(
+                Some(GitPath::Text("../outside".into())),
+                command.clone()
+            )
+            .await
+            .is_err()
+        );
+        let mut invalid = command;
+        invalid.args = vec!["x".into(); 65];
+        assert!(
+            repo.open_desktop_custom_editor(None, invalid)
+                .await
+                .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn custom_integration_validation_checks_execute_access() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "desktop-custom-integration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("editor");
+        std::fs::write(&file, "fixture").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            validate_custom_integration_path(file.to_str().unwrap().into())
+                .await
+                .unwrap()["is_valid"],
+            false
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            validate_custom_integration_path(file.to_str().unwrap().into())
+                .await
+                .unwrap()["is_valid"],
+            true
+        );
+        assert_eq!(
+            validate_custom_integration_path(root.to_str().unwrap().into())
+                .await
+                .unwrap()["is_valid"],
+            false
+        );
+        assert!(
+            validate_custom_integration_path("bad\0path".into())
+                .await
+                .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_integration_arguments_use_native_quoting() {
+        assert_eq!(
+            parse_windows_integration_arguments(
+                r#""hello world" "--file=%TARGET_PATH%" "a\"b""#.into()
+            )
+            .await
+            .unwrap(),
+            vec!["hello world", "--file=%TARGET_PATH%", "a\"b"]
+        );
+        assert!(
+            parse_windows_integration_arguments("bad\0arguments".into())
+                .await
+                .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn named_editor_requires_a_known_editor_and_confined_file() {

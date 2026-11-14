@@ -20,6 +20,10 @@ vi.mock('../../src/backend/client', async importOriginal => ({
   backend: () => ({
     transportKind: mocks.transport,
     pathExists: mocks.pathExists,
+    // The WebSocket renderer asks the host for the destination's state; the
+    // fixture maps the same existence flag onto it.
+    cloneDestinationStatus: async (path: string) =>
+      (await mocks.pathExists(path)) ? 'not_empty' : 'missing',
   }),
 }))
 vi.mock('../../src/lib/git/repository-operation', async importOriginal => ({

@@ -20,7 +20,7 @@ This is intentionally not a Jest or Vitest migration guide.
 
 ## Running UI Tests
 
-- Run one file directly: `node --import tsx script/test.mts app/test/unit/ui/tab-bar-test.tsx`
+- Run one file directly: `node --import @oxc-node/core/register script/test.mts app/test/unit/ui/tab-bar-test.tsx`
 - Run the UI directory: `npm run test:unit -- app/test/unit/ui`
 - Run the full unit suite: `npm run test:unit`
 
@@ -100,7 +100,7 @@ afterEach(() => {
 })
 ```
 
-The global Electron mock in `app/test/globals.mts` should stay minimal. Add a
+The global Electron mock in `app/test/globals.cjs` should stay minimal. Add a
 new global stub only when multiple unrelated UI tests need the same default
 Electron surface.
 

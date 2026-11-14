@@ -27,7 +27,7 @@ async function renderCloneDialog(
   initialURL = 'https://example.com/owner/repository.git',
   darwin = true
 ) {
-  const electron = await import('electron')
+  const electron = await import('../../../src/web/host-bridge')
   const originalDarwin = __DARWIN__
   const originalSend = electron.ipcRenderer.send
   const originalDefaultDir = localStorage.getItem('last-clone-location')
@@ -164,7 +164,7 @@ describe('CloneRepository path validation', () => {
   it('validates a path chosen through the macOS directory picker', async t => {
     const { directory, pathInput, cloneButton } = await renderCloneDialog(t)
     const path = Path.join(directory, 'chosen.app')
-    const electron = await import('electron')
+    const electron = await import('../../../src/web/host-bridge')
     t.mock.method(electron.ipcRenderer, 'invoke', async (channel: string) => {
       assert.strictEqual(channel, 'show-save-dialog')
       return path
@@ -384,7 +384,7 @@ describe('CloneRepository GitHub tab account changes', () => {
   ) {
     const originalResizeObserver = window.ResizeObserver
     Object.assign(window, { ResizeObserver: SizedResizeObserver })
-    const electron = await import('electron')
+    const electron = await import('../../../src/web/host-bridge')
     const originalSend = electron.ipcRenderer.send
     electron.ipcRenderer.send = () => {}
     t.after(() => {

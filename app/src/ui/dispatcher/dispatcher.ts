@@ -102,7 +102,6 @@ import { TipState, IValidBranch } from '../../models/tip'
 import { Banner, BannerType } from '../../models/banner'
 
 import { ApplicationTheme } from '../lib/application-theme'
-import { installCLI } from '../lib/install-cli'
 import {
   executeMenuItem,
   moveToApplicationsFolder,
@@ -2446,23 +2445,6 @@ export class Dispatcher {
         path,
       })
     })
-  }
-
-  /**
-   * Install the CLI tool.
-   *
-   * This is used only on macOS.
-   */
-  public async installDarwinCLI() {
-    try {
-      await installCLI()
-
-      this.showPopup({ type: PopupType.CLIInstalled })
-    } catch (e) {
-      log.error('Error installing CLI', e)
-
-      this.postError(e)
-    }
   }
 
   /** Save the generic git credentials. */

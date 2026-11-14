@@ -1,5 +1,72 @@
 # Full migration and legacy-removal ledger
 
+Electron, Webpack and esbuild have been removed from the build, packages,
+lockfiles, CI and developer documentation. Deleted: `app/src/main-process`,
+the crash window, the legacy `github` launcher CLI, their Vite configs, the
+Electron renderer build (`vite.renderer.config.ts`), `script/build.ts`,
+`package.ts`, `start.ts`, `post-install.ts`, the version validators, the
+Playwright/Electron E2E harness, and the `electron`, `@electron/packager`,
+`electron-winstaller`, `electron-window-state` and
+`electron-devtools-installer` dependencies. The CI workflow now only lints and
+runs tests; the Electron build, package and E2E jobs are gone, so release
+artifacts come solely from the Rust packaging path (`pnpm package`).
+
+Vite is 8 (rolldown), Vitest 5.1 and `@vitejs/plugin-react` 6.3. `tsx` was
+replaced by `@oxc-node/core` (`node --import @oxc-node/core/register`) and
+`autoInstallPeers: false` stops Vite's optional peers from installing
+esbuild/tsx. Neither lockfile contains Electron, Webpack, esbuild, tsx or jiti
+(`electron-to-chromium` is browserslist data).
+
+What the renderer still carries: it keeps its Electron-shaped IPC vocabulary,
+served by `app/src/web/electron.ts` over the Rust bridge. The `electron`
+specifier is aliased to that shim in Vite and Vitest, redirected to it by
+`app/test/globals.cjs` for Node tests, and typed by `app/typings/electron.d.ts`.
+`keytar`, `fs-admin`, `registry-js`, `desktop-notifications` and
+`windows-argv-parser` are no longer dependencies either: Vite, Vitest, the Node
+tests and `tsconfig.notifications.json` resolve them to the web shims or the
+vendored TypeScript sources (`registry-js` now has a faithful typed shim; the
+`fs-admin` shim's elevated operations fail explicitly). `desktop-trampoline`
+and `dugite` remain real dependencies. The Electron IPC branch of `openPath`
+was removed. Names and comments still mention Electron in about 40 renderer
+files (types such as `Electron.Certificate`, the `*NoLongerSupportedByElectron`
+OS-support banners and update gating, install-CLI via `fs-admin`); these are
+cosmetic or Squirrel-era behavior and were not removed.
+
+Loaders: scripts run with oxc-node (`node --import @oxc-node/core/register`).
+The remaining `node:test` suites run with `script/ts-register.cjs`, a require
+hook that compiles TypeScript with the repository's own `typescript` package to
+CommonJS (`tsconfig.node-test.json`), because those suites patch built-in
+modules through default and namespace imports, which needs TypeScript's live
+bindings (oxc-node and swc-node both gave non-live copies or ES modules).
+`app/test/globals.cjs` is their preload; it also resolves extensionless
+`mock.module()` specifiers. A few CommonJS-only imports changed
+(`compare-versions`, `fuzzaldrin-plus`, `@xterm/xterm`, `react-dom/test-utils`).
+
+Evidence: `check:types`, `compile:script` and the web/highlighter/IPC-shim Vite
+builds pass on Linux, `cargo check -p desktop-app -p desktop-cli` passes, and
+Vitest has 337 files passing, none failing. The `node:test` suites ran 1358
+tests: 1215 pass and 142 fail, 0 cancelled. Those failures were each compared
+with HEAD under tsx in a clean worktree and reproduce there with the same
+counts: the jsdom focus-trap error, a canvas `getContext` stub, the
+`copilot-sdk-auth`, `app-store-add-accounts`, `clone-repository` and
+`assisted-commit-push-destination` failures, and the assisted-push suites
+(boundary 96, push 17, lifecycle 7, hooks 4), which at HEAD can only run with a
+stubbed `fs-admin` and fail identically; they match the documented Git 2.56
+push-destination limitation. Not verified: Windows/macOS, and a launched Wry
+window from the final tree.
+
+Verified in this session without changing behavior: the unit suites for the
+pending Markdown video sanitization, native custom integration, sandboxed
+Markdown and custom integration form changes pass in Vitest, and the
+`desktop-core` editor tests pass under Cargo.
+
+Notification preferences now offer the browser's permission request after a
+user click when the native notifications adapter is unavailable. State reads
+are refreshed on focus, duplicate requests are suppressed, and stale reads are
+ignored. The behavior is covered with mocked browser and native APIs; actual
+permission prompts and delivery in Wry and supported browsers remain to be
+verified.
+
 Biome now formats and checks the repository navigation, settings, account,
 toolbar and worktree UI directories. Their accessibility handling remains
 unchanged: the toolbar's pointer backdrop and keyboard event wrappers retain
@@ -22,6 +89,11 @@ their profiles and are left intact. Registration on
 macOS and Windows remains open; setting a default association is not atomic
 with other programs changing it concurrently. Electron and Webpack remain
 active in the legacy CI and release workflows.
+
+Linux CI builds a Rust development package in a separate job and runs its
+renderer and backend from a relocated copy with an isolated profile. That
+check does not hide the original checkout; the separate opt-in namespace test
+provides the stronger checkout-isolation check when namespaces are available.
 
 Wry now delivers native folder drops on Linux and macOS to the renderer. The
 Linux path was exercised with a real GTK drag into Wry under Xvfb, opening the
@@ -249,12 +321,16 @@ verified; the feature is an integration path, not a completed browser product.
 The loopback renderer now uses browser APIs for clipboard and external links;
 these were exercised in Chromium against the embedded UI and real bridge.
 Browser popup blocking remains controlled by the browser.
-An isolated Linux Wry probe of `SandboxedMarkdown` loaded its stylesheet but
-the iframe's `data:` navigation remained at `about:blank`; `srcdoc` was also
-rejected by the current navigation policy. An experiment writing to the
-sandboxed document rendered content but did not deliver the link listeners in
-WebKit, so it was discarded. Markdown iframe navigation and link handling
-still require a replacement that preserves isolation and is validated in Wry.
+On Linux Wry, `SandboxedMarkdown` fills an existing iframe instead of navigating
+to a blocked `data:` URL. WebKitGTK needs `allow-scripts` for parent-owned
+listeners; the iframe's early CSP forbids scripts and DOMPurify sanitizes its
+content. A Wry probe verified rendering, link interception and blocked inserted
+scripts and event attributes. Video elements are checked against the exact
+GitHub asset host before insertion into the live frame. A Chromium network test
+uses a positive control and observed no request for rejected video; equivalent
+network behavior in WebKitGTK remains to be verified. The native path is
+limited to Linux Wry, so WKWebView
+and WebView2 still need their own isolated implementation and validation.
 In an isolated browser probe, the Vite renderer mounted through a temporary
 asset proxy and an authenticated real bridge. Browser window state, focus,
 theme and app-resource path queries are now answered locally, and the welcome
@@ -2328,13 +2404,21 @@ exit status. GUI processes are reaped while the service runs, report immediate
 failure and remain independent on shutdown. Existing preference files migrate
 through a default field without being rewritten by reads.
 
-The shared renderer now uses Rust discovery and a named-editor launch for Wry
-and WebSocket. Repository targets remain confined to the selected repository;
-opening global Git configuration uses a separate operation whose path is
-resolved by the host. The renderer does not yet support custom editor commands,
-and Rust's PATH-based discovery does not cover all Electron-discovered Windows
-registry entries or macOS bundles. Tests exercise both transports with real Git
-and a controlled editor process; platform-specific catalogs remain unverified.
+The shared renderer uses Rust discovery and named or user-configured editor
+launches for Wry and WebSocket. Custom executable paths and argument vectors
+are sent separately; `%TARGET_PATH%` is replaced without a shell, and literal
+`{path}`/`{repo}` text is left untouched. Repository targets remain confined to
+the bound repository, while global Git configuration is selected by the host.
+The host resolves the editor before preparing the Git config file. Windows
+arguments are parsed by `CommandLineToArgvW`; macOS app bundles use
+`/usr/bin/open`, matching the existing custom integration behavior. Both paths
+still need native Windows and macOS validation. Browser clients may type a host
+executable path but do not yet have a native file picker. Rust's PATH-based
+discovery still misses some Electron-discovered Windows registry entries and
+macOS bundles. Launching an arbitrary user-configured executable is an explicit
+capability of an authenticated client. An external process can still replace a
+target or executable after validation and before launch. Custom terminals remain
+unsupported by the native Linux renderer path.
 
 The WebSocket renderer's repository context action can open a registered
 repository through a fixed host command, without changing the selected repository.

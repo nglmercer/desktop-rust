@@ -1,4 +1,4 @@
-import { App } from 'electron'
+import { App } from '../web/host-bridge'
 
 export type Architecture = 'x64' | 'arm64' | 'x64-emulated'
 

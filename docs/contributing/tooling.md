@@ -27,13 +27,12 @@ The Desktop repository includes a list of recommended extensions:
 
 ## Debugging
 
-For the legacy Electron development build, Chrome Dev Tools can assist with
+For the development build, the webview's developer tools can assist with
 debugging and inspecting the live application.
 
 ```shellsession
-$ npm ci
-$ npm run build:electron:dev
-$ npm run start:electron
+$ pnpm install --frozen-lockfile --ignore-scripts
+$ pnpm start
 ```
 
 At a basic level, the logs from the running app are displayed in the **Console** tab, but other features include:

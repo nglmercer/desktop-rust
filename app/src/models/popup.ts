@@ -1,3 +1,4 @@
+import type { HostCertificate } from '../lib/host-types'
 import {
   Repository,
   RepositoryWithGitHubRepository,
@@ -52,7 +53,6 @@ export enum PopupType {
   RemoveRepository = 'RemoveRepository',
   TermsAndConditions = 'TermsAndConditions',
   PushBranchCommits = 'PushBranchCommits',
-  CLIInstalled = 'CLIInstalled',
   GenericGitAuthentication = 'GenericGitAuthentication',
   ExternalEditorFailed = 'ExternalEditorFailed',
   CopilotAppNotFound = 'CopilotAppNotFound',
@@ -221,7 +221,7 @@ export type PopupDetail =
   | { type: PopupType.Acknowledgements }
   | {
       type: PopupType.UntrustedCertificate
-      certificate: Electron.Certificate
+      certificate: HostCertificate
       url: string
     }
   | { type: PopupType.RemoveRepository; repository: Repository }
@@ -232,7 +232,6 @@ export type PopupDetail =
       branch: Branch
       unPushedCommits?: number
     }
-  | { type: PopupType.CLIInstalled }
   | {
       type: PopupType.GenericGitAuthentication
       remoteUrl: string

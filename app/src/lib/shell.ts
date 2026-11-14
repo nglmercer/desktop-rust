@@ -1,6 +1,5 @@
 import { ExecFileOptions } from 'child_process'
 import { execFile } from './exec-file'
-import { isMacOSCatalinaOrEarlier } from './get-os'
 
 /**
  * The names of any env vars that we shouldn't copy from the shell environment.
@@ -18,15 +17,6 @@ const ExcludedEnvironmentVars = new Set(['LOCAL_GIT_DIRECTORY'])
  * @param process The process to inspect.
  */
 export function shellNeedsPatching(process: NodeJS.Process): boolean {
-  // We don't want to run this in the main process until the following issues
-  // are closed (and possibly not after they're closed either)
-  //
-  // See https://github.com/desktop/desktop/issues/13974
-  // See https://github.com/electron/electron/issues/32718
-  if (process.type === 'browser' && isMacOSCatalinaOrEarlier()) {
-    return false
-  }
-
   return __DARWIN__ && !process.env.PWD
 }
 

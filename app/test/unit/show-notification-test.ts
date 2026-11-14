@@ -8,7 +8,7 @@ import {
   onTestFinished,
   vi,
 } from 'vitest'
-import { ipcRenderer } from 'electron'
+import { ipcRenderer } from '../../src/web/host-bridge'
 import { MockIPC } from '../helpers/mock-ipc'
 import { notificationCallbacks } from '../../src/lib/notifications/notification-handler'
 

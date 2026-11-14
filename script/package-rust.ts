@@ -601,7 +601,7 @@ if (require.main === module) {
   const args = process.argv.slice(2)
   if (args.includes('--help')) {
     console.log(
-      'Usage: node --import tsx script/package-rust.ts [auto|linux|macos|windows]'
+      'Usage: node --import @oxc-node/core/register script/package-rust.ts [auto|linux|macos|windows]'
     )
     console.log(
       'Builds and stages the Rust desktop and embedded browser UI for this host.'

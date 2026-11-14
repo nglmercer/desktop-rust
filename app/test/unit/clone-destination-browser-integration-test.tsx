@@ -21,7 +21,7 @@ vi.mock('../../src/backend/client', async importOriginal => ({
     return route.client
   },
 }))
-vi.mock('electron', () => ({
+vi.mock('../../src/web/host-bridge', () => ({
   ipcRenderer: { send: vi.fn(), on: vi.fn(), invoke: vi.fn() },
   shell: { openPath: vi.fn(async () => '') },
 }))

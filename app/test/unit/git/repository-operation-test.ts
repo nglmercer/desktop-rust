@@ -5,7 +5,7 @@ import {
 } from '../../../src/models/status'
 import { DiffSelection, DiffSelectionType } from '../../../src/models/diff'
 import { TipState } from '../../../src/models/tip'
-import { ipcRenderer } from 'electron'
+import { ipcRenderer } from '../../../src/web/host-bridge'
 import { UncommittedChangesStrategy } from '../../../src/models/uncommitted-changes-strategy'
 import assert from 'node:assert'
 import { describe, it } from 'node:test'

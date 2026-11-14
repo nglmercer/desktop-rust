@@ -14,8 +14,13 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, it } from 'vitest'
 import { resolveRustTarget } from './printenvz'
+
+const oxcRegister = pathToFileURL(
+  path.join(path.dirname(require.resolve('@oxc-node/core')), 'register.mjs')
+).href
 
 const directories: string[] = []
 afterEach(() => {
@@ -28,7 +33,12 @@ function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), 'printenvz build '))
   directories.push(root)
   const driver = path.join(root, 'build.ts')
-  writeFileSync(driver, `import { buildPrintenvz } from ${JSON.stringify(path.resolve('script/printenvz.ts'))}\nbuildPrintenvz(${JSON.stringify(root)})\n`)
+  writeFileSync(
+    driver,
+    `import { buildPrintenvz } from ${JSON.stringify(
+      path.resolve('script/printenvz.ts')
+    )}\nbuildPrintenvz(${JSON.stringify(root)})\n`
+  )
   const rustc = path.join(root, 'fake rustc')
   const cargo = path.join(root, 'fake cargo')
   const capture = path.join(root, 'cargo-args')
@@ -52,7 +62,7 @@ function fixture() {
   mkdirSync(path.dirname(targetBinary), { recursive: true })
   writeFileSync(targetBinary, 'arm64 binary')
   const invoke = (extra: NodeJS.ProcessEnv = {}) =>
-    spawnSync(process.execPath, ['--import', require.resolve('tsx'), driver], {
+    spawnSync(process.execPath, ['--import', oxcRegister, driver], {
       cwd: root,
       env: {
         ...process.env,
@@ -107,9 +117,17 @@ describe.skipIf(process.platform !== 'linux')(
         const root = mkdtempSync(path.join(tmpdir(), "printenvz installed ' "))
         directories.push(root)
         const source = path.resolve('vendor/printenvz')
-        copyFileSync(path.join(source, 'Cargo.toml'), path.join(root, 'Cargo.toml'))
-        copyFileSync(path.join(source, 'Cargo.lock'), path.join(root, 'Cargo.lock'))
-        cpSync(path.join(source, 'src'), path.join(root, 'src'), { recursive: true })
+        copyFileSync(
+          path.join(source, 'Cargo.toml'),
+          path.join(root, 'Cargo.toml')
+        )
+        copyFileSync(
+          path.join(source, 'Cargo.lock'),
+          path.join(root, 'Cargo.lock')
+        )
+        cpSync(path.join(source, 'src'), path.join(root, 'src'), {
+          recursive: true,
+        })
         const env = { ...process.env }
         delete env.TARGET_ARCH
         for (const key of Object.keys(env)) {
@@ -120,10 +138,15 @@ describe.skipIf(process.platform !== 'linux')(
         const binary = path.join(root, 'build/Release/printenvz')
         assert.equal(existsSync(binary), false)
         const driver = path.join(root, 'build.ts')
-        writeFileSync(driver, `import { buildPrintenvz } from ${JSON.stringify(path.resolve('script/printenvz.ts'))}\nbuildPrintenvz(${JSON.stringify(root)})\n`)
+        writeFileSync(
+          driver,
+          `import { buildPrintenvz } from ${JSON.stringify(
+            path.resolve('script/printenvz.ts')
+          )}\nbuildPrintenvz(${JSON.stringify(root)})\n`
+        )
         const build = spawnSync(
           process.execPath,
-          ['--import', require.resolve('tsx'), driver],
+          ['--import', oxcRegister, driver],
           {
             cwd: root,
             env,

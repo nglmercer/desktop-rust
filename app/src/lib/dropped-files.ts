@@ -1,4 +1,4 @@
-import { webUtils } from 'electron'
+import { webUtils } from '../web/host-bridge'
 
 /** Translate DOM files for the legacy Electron shell. Web renderers cannot
  * reveal native paths and return no paths here. */

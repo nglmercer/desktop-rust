@@ -1,3 +1,4 @@
+import type { HostCertificate } from '../../lib/host-types'
 import * as React from 'react'
 import * as URL from 'url'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
@@ -5,7 +6,7 @@ import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 
 interface IUntrustedCertificateProps {
   /** The untrusted certificate. */
-  readonly certificate: Electron.Certificate
+  readonly certificate: HostCertificate
 
   /** The URL which was being accessed. */
   readonly url: string
@@ -17,7 +18,7 @@ interface IUntrustedCertificateProps {
    * The function to call when the user chooses to continue in the process of
    * trusting the certificate.
    */
-  readonly onContinue: (certificate: Electron.Certificate) => void
+  readonly onContinue: (certificate: HostCertificate) => void
 }
 
 /**

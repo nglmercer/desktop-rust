@@ -47,6 +47,24 @@ export function resolveCopilotJsonRpc(appDirectory: string): string {
   return sdkRequire.resolve('vscode-jsonrpc/lib/node/main.js')
 }
 
+/**
+ * The SDK speaks JSON-RPC over the Node stream classes, but vscode-jsonrpc maps
+ * its Node entry to a browser build through the package's `browser` field, and
+ * Vite 8's resolver applies that mapping even to an aliased absolute path. A
+ * query on the id keeps the exact file name from matching the mapping.
+ */
+export function copilotJsonRpcNodeEntry(appDirectory: string): Plugin {
+  return {
+    name: 'desktop-copilot-jsonrpc-node',
+    enforce: 'pre',
+    resolveId(source) {
+      return /^vscode-jsonrpc\/node(\.js)?$/.test(source)
+        ? `${resolveCopilotJsonRpc(appDirectory)}?desktop-node-entry`
+        : null
+    },
+  }
+}
+
 /** Sass imports resolve from the application regardless of package manager. */
 export function sassLoadPaths(root: string): string[] {
   return [
@@ -241,7 +259,7 @@ export function moveSourceMaps(): Plugin {
 }
 
 /**
- * Mirrors copyStaticResources() in script/build.ts for the files the renderer
+ * Mirrors copyStaticResources() (since removed with the Electron build) for the files the renderer
  * loads by URL (images, stylesheets). Directories under static/ are data the
  * renderer read through `fs`; those are served by the Rust backend instead.
  */
@@ -310,7 +328,7 @@ export function copyStaticResources(
       )
       const projectLicense = path.join(projectRoot, 'LICENSE')
       if (existsSync(projectLicense)) currentSources.add(projectLicense)
-      // copyEmoji() in script/build.ts: the database plus the images of
+      // copyEmoji() (since removed with the Electron build): the database plus the images of
       // GitHub's custom emoji (unicode ones render as text).
       const gemoji = path.resolve(projectRoot, 'gemoji')
       const emojiDatabase = path.join(gemoji, 'db/emoji.json')
@@ -322,7 +340,7 @@ export function copyStaticResources(
       const gitignores = path.resolve(projectRoot, 'app/static/common/gitignore')
       copyGitignoreTemplates(gitignores, path.join(destination, 'gitignore'), output, currentSources)
 
-      // generateLicenseMetadata() in script/build.ts.
+      // generateLicenseMetadata() (since removed with the Electron build).
       const chooseALicense = path.resolve(projectRoot, 'app/static/common/choosealicense.com')
       const licensesDir = path.join(chooseALicense, '_licenses')
       const licenses = readdirSync(licensesDir)
@@ -370,6 +388,7 @@ export default defineConfig({
   base: './',
   plugins: [
     react(),
+    copilotJsonRpcNodeEntry(path.resolve(__dirname, 'app')),
     requireSubmodules(),
     oauthCallbackMetadata(),
     copyStaticResources(),
@@ -419,14 +438,6 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@desktop-assets\//, replacement: path.resolve(__dirname, 'app/static/common') + '/' },
-      { find: /^electron$/, replacement: path.resolve(__dirname, 'app/src/web/electron.ts') },
-      // The SDK speaks JSON-RPC over the Node stream classes. Vite would pick
-      // the package's browser build (no stream classes) through its `browser`
-      // field, so the Node entry is named directly.
-      {
-        find: /^vscode-jsonrpc\/node(\.js)?$/,
-        replacement: resolveCopilotJsonRpc(path.resolve(__dirname, 'app')),
-      },
       { find: /^koffi$/, replacement: path.resolve(__dirname, 'app/src/web/koffi.ts') },
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
       { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
@@ -438,10 +449,8 @@ export default defineConfig({
       { find: /^desktop-notifications$/, replacement: path.resolve(__dirname, 'app/src/web/desktop-notifications.ts') },
       { find: /^desktop-trampoline$/, replacement: path.resolve(__dirname, 'app/src/web/desktop-trampoline.ts') },
       { find: /^windows-argv-parser$/, replacement: path.resolve(__dirname, 'app/src/web/windows-argv-parser.ts') },
-      { find: /^fs-admin$/, replacement: path.resolve(__dirname, 'app/src/web/fs-admin.ts') },
       { find: /^app-path$/, replacement: path.resolve(__dirname, 'app/src/web/app-path.ts') },
       { find: /^registry-js$/, replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts') },
-      { find: /^electron-window-state$/, replacement: path.resolve(__dirname, 'app/src/web/electron-window-state.ts') },
       { find: /^web-utils$/, replacement: path.resolve(__dirname, 'app/src/web/web-utils.ts') },
       { find: /^child_process$/, replacement: path.resolve(__dirname, 'app/src/web/child_process.ts') },
       { find: /^net$/, replacement: path.resolve(__dirname, 'app/src/web/net.ts') },

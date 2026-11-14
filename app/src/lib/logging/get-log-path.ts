@@ -1,5 +1,5 @@
 import * as Path from 'path'
-import { app } from 'electron'
+import { app } from '../../web/host-bridge'
 
 let logDirectoryPath: string | null = null
 

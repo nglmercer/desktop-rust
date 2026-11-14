@@ -8,8 +8,8 @@ import {
 import assert from 'node:assert'
 import { afterEach, describe, it, type TestContext } from 'node:test'
 import * as React from 'react'
-import { ipcRenderer } from 'electron'
-import { act } from 'react-dom/test-utils'
+import { ipcRenderer } from '../../../src/web/host-bridge'
+import { act } from '@testing-library/react'
 
 import { Account } from '../../../src/models/account'
 import { CommitMode } from '../../../src/models/commit-mode'

@@ -26,7 +26,7 @@ const runmodeEntry = createRequire(
  * `require.cache`, and its mode files ask for the full editor library, which
  * needs the DOM. In the worker, every request for `lib/codemirror` is answered
  * by the runmode module instead, and the cache lines are dropped. This is what
- * the webpack build's `common.highlighter` config did.
+ * the former Webpack build did.
  */
 const codeMirrorNodeRunmode: Plugin = {
   name: 'highlighter-codemirror-runmode',

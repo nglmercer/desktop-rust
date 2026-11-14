@@ -6,7 +6,7 @@ import { InputError } from '../lib/input-description/input-error'
 import {
   checkTargetPathArgument,
   validateCustomIntegrationPath,
-  parseCustomIntegrationArguments,
+  parseCustomIntegrationArgumentsForInput,
   TargetPathArgument,
   WindowsExecutableExtensions,
 } from '../../lib/custom-integration'
@@ -44,6 +44,7 @@ export class CustomIntegrationForm extends React.Component<
   ICustomIntegrationFormState
 > {
   private pathInputRef = React.createRef<TextBox>()
+  private pathValidation = 0
 
   public constructor(props: ICustomIntegrationFormProps) {
     super(props)
@@ -57,6 +58,10 @@ export class CustomIntegrationForm extends React.Component<
       showNonValidArgsError: false,
       showNoRepoPathArgError: false,
     }
+  }
+
+  public componentWillUnmount() {
+    this.pathValidation++
   }
 
   /** Focuses the path text box. */
@@ -163,9 +168,13 @@ export class CustomIntegrationForm extends React.Component<
   }
 
   private async updatePath(path: string) {
+    const validation = ++this.pathValidation
     this.setState({ path, isValidPath: false })
+    // Keep the parent draft in sync even while validation is pending or fails.
+    this.props.onPathChanged(path)
 
     const result = await validateCustomIntegrationPath(path)
+    if (validation !== this.pathValidation) return
 
     this.setState({
       isValidPath: result.isValid,
@@ -182,8 +191,9 @@ export class CustomIntegrationForm extends React.Component<
   }
 
   private updateArguments(args: string) {
+    this.props.onArgumentsChanged(args)
     try {
-      const argv = parseCustomIntegrationArguments(args)
+      const argv = parseCustomIntegrationArgumentsForInput(args)
 
       if (!checkTargetPathArgument(argv)) {
         this.setState({
@@ -202,7 +212,6 @@ export class CustomIntegrationForm extends React.Component<
         showNoRepoPathArgError: false,
       })
 
-      this.props.onArgumentsChanged(args)
     } catch (e) {
       log.error('Failed to parse custom integration arguments:', e)
 

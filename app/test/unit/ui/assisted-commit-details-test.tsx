@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import { describe, it } from 'node:test'
 import * as React from 'react'
-import { ipcRenderer } from 'electron'
+import { ipcRenderer } from '../../../src/web/host-bridge'
 import { RepositorySectionTab } from '../../../src/lib/app-state'
 import { ErrorWithMetadata } from '../../../src/lib/error-with-metadata'
 import { CopilotAssistedCommitError } from '../../../src/lib/copilot-assisted-commit'

@@ -10,9 +10,6 @@ on:
       - 'app/index.html'
       - 'app/styles/**'
       - '.test.env'
-      - 'app/webpack.common.ts'
-      - 'app/webpack.development.ts'
-      - 'app/webpack.production.ts'
       - 'app/build-externals.ts'
       - 'app/src/models/**'
       - 'app/src/lib/git/interpret-trailers.ts'
@@ -47,8 +44,6 @@ on:
       - 'vite.config.ts'
       - 'vite.highlighter.config.ts'
       - 'vite.ipc-shim.config.ts'
-      - 'vite.cli.config.ts'
-      - 'vite.crash.config.ts'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -70,9 +65,6 @@ on:
       - 'app/index.html'
       - 'app/styles/**'
       - '.test.env'
-      - 'app/webpack.common.ts'
-      - 'app/webpack.development.ts'
-      - 'app/webpack.production.ts'
       - 'app/build-externals.ts'
       - 'app/src/models/**'
       - 'app/src/lib/git/interpret-trailers.ts'
@@ -107,8 +99,6 @@ on:
       - 'vite.config.ts'
       - 'vite.highlighter.config.ts'
       - 'vite.ipc-shim.config.ts'
-      - 'vite.cli.config.ts'
-      - 'vite.crash.config.ts'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -168,9 +158,9 @@ jobs:
           node node_modules/vitest/vitest.mjs run --config vitest.config.ts
           npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts --no-audit --no-fund
           npm run typecheck --prefix rust/tests/branch-rules-oracle
-          node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check
-          node --import tsx rust/tests/branch-rules-oracle/oracle.mts --check --current-re2js
-          node --import tsx rust/tests/branch-rules-oracle/build-engine.mts --check
+          node --import @oxc-node/core/register rust/tests/branch-rules-oracle/oracle.mts --check
+          node --import @oxc-node/core/register rust/tests/branch-rules-oracle/oracle.mts --check --current-re2js
+          node --import @oxc-node/core/register rust/tests/branch-rules-oracle/build-engine.mts --check
       - name: Check Rust (headless workspace)
         env:
           DESKTOP_TEST_REQUIRE_LFS: '1'
@@ -203,6 +193,7 @@ jobs:
           cargo build -p desktop-cli --features embedded-ui --locked
           pnpm exec playwright install --with-deps --only-shell chromium
           DESKTOP_TEST_BROWSER_ENTRY=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts app/test/unit/backend-browser-entry-integration-test.ts
+          DESKTOP_TEST_MARKDOWN_MEDIA=1 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/markdown-media-browser.test.ts
       - name: Exercise the Git LFS pre-push hook
         run: |
           lfs_binary="$(command -v git-lfs)"
@@ -284,3 +275,32 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
           NO_AT_BRIDGE: '1'
         run: xvfb-run -a cargo test -p desktop-app --test app_smoke --locked -- --ignored
+  packaged-linux:
+    # Packaging uses its own Cargo target; isolate its disk usage from the
+    # native matrix and run this check concurrently with the other jobs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install Linux webview dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev libxdo-dev xvfb dbus-x11 xdg-desktop-portal xdg-desktop-portal-gtk at-spi2-core libgl1-mesa-dri mesa-utils libegl1-mesa libegl1 xauth
+      - name: Set up Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Install renderer dependencies
+        run: |
+          npm install --global pnpm@11.17.0
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build and exercise the relocated Rust package
+        run: |
+          package_root=$(mktemp -d "$RUNNER_TEMP/desktop-package-XXXXXXXX")
+          trap 'rm -rf "$package_root"' EXIT
+          export DESKTOP_RUST_DIST_DIR="$package_root/dist"
+          NODE_ENV=development RELEASE_CHANNEL=development DESKTOP_RUST_PACKAGE_PROFILE=debug pnpm package:rust
+          package_name=$(node -p "require('./app/package.json').productName")
+          export DESKTOP_RUST_PACKAGE="$DESKTOP_RUST_DIST_DIR/${package_name}-dev-linux-$(node -p 'process.arch')"
+          DESKTOP_WRY_RELOCATED_TEST=1 DESKTOP_WRY_PACKAGE_TEST=0 node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/wry-packaged.test.ts

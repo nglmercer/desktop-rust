@@ -10,7 +10,6 @@ import { DeleteWorktreeFailedDialog } from '../../../src/ui/worktrees/delete-wor
 import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
 
 vi.mock('keytar', () => ({ default: {} }))
-vi.mock('fs-admin', () => ({}))
 vi.mock('react-confetti', () => ({ default: () => null }))
 vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
 vi.mock('../../../src/lib/custom-integration', () => ({
@@ -54,7 +53,7 @@ function submit(view: ReturnType<typeof render>, label: string) {
 let restoreIpcSend = () => {}
 
 beforeAll(async () => {
-  const electron = await import('electron')
+  const electron = await import('../../../src/web/host-bridge')
   const previousSend = electron.ipcRenderer.send
   electron.ipcRenderer.send = () => {}
   restoreIpcSend = () => {

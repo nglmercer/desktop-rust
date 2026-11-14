@@ -1,11 +1,20 @@
+import type { DoubleClickAction, HostCertificate, HostOpenDialogOptions, HostSaveDialogOptions } from './host-types'
 import { IMenuItemState } from './menu-update'
 import { MenuIDs } from '../models/menu-ids'
 import { ISerializableMenuItem } from './menu-item'
 import { MenuLabelsEvent } from '../models/menu-labels'
 import { MenuEvent } from './menu-event'
 import { LogLevel } from './logging/log-level'
-import { ICrashDetails } from '../crash/shared'
 import { WindowState } from './window-state'
+
+/** Whether an error happened before or after the main window was usable. */
+export type ErrorType = 'launch' | 'generic'
+
+/** The nature of an error reported to the host. */
+export interface ICrashDetails {
+  readonly type: ErrorType
+  readonly error: Error
+}
 import { IMenu } from '../models/app-menu'
 import { ILaunchStats } from './stats'
 import { URLActionType } from './parse-app-url'
@@ -33,7 +42,7 @@ export type RequestChannels = {
   'renderer-ready': (time: number) => void
   'execute-menu-item-by-id': (id: string) => void
   'show-certificate-trust-dialog': (
-    certificate: Electron.Certificate,
+    certificate: HostCertificate,
     message: string
   ) => void
   'get-app-menu': () => void
@@ -60,7 +69,7 @@ export type RequestChannels = {
   'url-action': (action: URLActionType) => void
   'cli-action': (action: CLIAction) => void
   'certificate-error': (
-    certificate: Electron.Certificate,
+    certificate: HostCertificate,
     error: string,
     url: string
   ) => void
@@ -129,13 +138,13 @@ export type RequestResponseChannels = {
   'get-current-window-zoom-factor': () => Promise<number | undefined>
   'resolve-proxy': (url: string) => Promise<string>
   'show-save-dialog': (
-    options: Electron.SaveDialogOptions
+    options: HostSaveDialogOptions
   ) => Promise<string | null>
   'show-open-dialog': (
-    options: Electron.OpenDialogOptions
+    options: HostOpenDialogOptions
   ) => Promise<string | null>
   'is-window-maximized': () => Promise<boolean>
-  'get-apple-action-on-double-click': () => Promise<Electron.AppleActionOnDoubleClickPref>
+  'get-apple-action-on-double-click': () => Promise<DoubleClickAction>
   'should-use-dark-colors': () => Promise<boolean>
   'save-guid': (guid: string) => Promise<void>
   'get-guid': () => Promise<string>

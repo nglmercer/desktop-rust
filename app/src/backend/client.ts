@@ -60,6 +60,13 @@ function deliverFetchProgress(callback: ((chunk: FetchProgressChunk) => void) | 
 
 export type BackendGitPath = string | { readonly bytes: ReadonlyArray<number> }
 
+/** Explicit executable and arguments selected in Desktop's integration settings. */
+export interface ICustomEditorCommand {
+  readonly program: string
+  readonly args: ReadonlyArray<string>
+  readonly macosApp: boolean
+}
+
 /** A remote branch deletion reviewed against all configured push destinations. */
 export interface IRemoteBranchDeletionReview {
   readonly basis: string
@@ -1546,6 +1553,61 @@ export class BackendClient {
         await this.request('git_info', { operation: { type: 'open_named_editor', repository_path: repositoryPath, path, name: nativeName } })
       } else {
         await this.repositoryRead(repositoryPath, 'open_editor', { path, editor_name: nativeName })
+      }
+    } catch (error) {
+      const result = toBackendError(error)
+      if (!result.retryable && !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(result.code)) throw error
+      throw new BackendError({ code: result.code, message: `${result.message}. The editor may have launched; check before retrying.`, retryable: false })
+    }
+  }
+
+  /** Validate a user-selected executable or macOS application on the host. */
+  async validateCustomIntegrationPath(path: string): Promise<{ readonly isValid: boolean; readonly bundleID?: string }> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'validate_custom_integration', path } })
+      : await this.request('validate_custom_integration', { path })
+    if (!isRecord(value) || typeof value.is_valid !== 'boolean' ||
+        (value.bundle_id !== undefined && value.bundle_id !== null && typeof value.bundle_id !== 'string')) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid custom integration validation response', retryable: false })
+    }
+    return { isValid: value.is_valid, bundleID: typeof value.bundle_id === 'string' ? value.bundle_id : undefined }
+  }
+
+  /** Parse Windows arguments with the same operating-system API used by Electron. */
+  async parseWindowsIntegrationArguments(argumentsString: string): Promise<ReadonlyArray<string>> {
+    const value = this.transport === 'wry'
+      ? await this.request('git_info', { operation: { type: 'parse_windows_integration_arguments', arguments: argumentsString } })
+      : await this.request('parse_windows_integration_arguments', { arguments: argumentsString })
+    if (!Array.isArray(value) || value.length > 64 || !value.every(item => typeof item === 'string')) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid custom integration arguments', retryable: false })
+    }
+    return value
+  }
+
+  /** Launch the user-selected custom editor on the bound repository. */
+  async openCustomRepositoryEditor(repositoryPath: string, path: string | null, command: ICustomEditorCommand): Promise<void> {
+    const editor = { program: command.program, args: command.args, macos_app: command.macosApp }
+    try {
+      if (this.transport === 'wry') {
+        await this.request('git_info', { operation: { type: 'open_custom_editor', repository_path: repositoryPath, path, editor } })
+      } else {
+        await this.repositoryRead(repositoryPath, 'open_custom_editor', { path, editor })
+      }
+    } catch (error) {
+      const result = toBackendError(error)
+      if (!result.retryable && !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(result.code)) throw error
+      throw new BackendError({ code: result.code, message: `${result.message}. The editor may have launched; check before retrying.`, retryable: false })
+    }
+  }
+
+  /** Open only the host-selected global Git configuration with a custom editor. */
+  async openCustomGlobalGitConfigEditor(command: ICustomEditorCommand): Promise<void> {
+    const editor = { program: command.program, args: command.args, macos_app: command.macosApp }
+    try {
+      if (this.transport === 'wry') {
+        await this.request('git_info', { operation: { type: 'open_custom_global_git_config_editor', editor } })
+      } else {
+        await this.request('open_custom_global_git_config_editor', { editor })
       }
     } catch (error) {
       const result = toBackendError(error)

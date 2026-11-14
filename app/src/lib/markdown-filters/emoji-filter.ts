@@ -137,7 +137,7 @@ export class EmojiFilter implements INodeFilter {
       // from their own origin and must not turn an emoji URL into an
       // arbitrary filesystem read through the web filesystem shim.
       if (document.location.protocol !== 'file:') {
-        throw new Error('File emoji URLs require the Electron renderer')
+        throw new Error('File emoji URLs are not supported by the Rust renderers')
       }
       imageBuffer = await readFile(fileURLToPath(url))
     } else {

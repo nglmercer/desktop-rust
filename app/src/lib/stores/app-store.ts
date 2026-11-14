@@ -38,7 +38,7 @@ import {
   getCleanedEnforcedRuleDescriptions,
   migrateCopilotModelSelectionsToAccounts,
 } from './copilot-store'
-import { backend, BackendError, type IRemoteBranchDeletionReview, type IRemoteBranchDeletionResult } from '../../backend/client'
+import { backend, BackendError, type ICustomEditorCommand, type IRemoteBranchDeletionReview, type IRemoteBranchDeletionResult } from '../../backend/client'
 import { RepositorySelectionQueue } from '../../backend/repository-selection'
 import { discardBatchWithoutDialog, discardReviewedSelection } from '../git/reviewed-discard'
 import { reviewSelectedCommit } from '../git/selected-commit-review'
@@ -465,6 +465,7 @@ import { IOAuthAction } from '../parse-app-url'
 import {
   ICustomIntegration,
   migratedCustomIntegration,
+  parseCustomIntegrationArgumentsForRuntime,
 } from '../custom-integration'
 import { updateStore } from '../../ui/lib/update-store'
 import { startTimer } from '../../ui/lib/timing'
@@ -9485,7 +9486,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       try {
         const { selectedExternalEditor, useCustomEditor, customEditor } = this.getState()
         if (useCustomEditor && customEditor) {
-          throw new ExternalEditorError('Custom editors are not yet supported by the native backend.', { openPreferences: true })
+          await backend().openCustomGlobalGitConfigEditor(await this.nativeCustomEditorCommand(customEditor))
+          return
         }
         const match = await findEditorOrDefault(selectedExternalEditor)
         if (match === null) {
@@ -9510,9 +9512,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
     try {
       if (useCustomEditor && customEditor) {
         if (backend().transportKind !== 'none') {
-          throw new ExternalEditorError('Custom editors are not yet supported by the native backend.', { openPreferences: true })
+          await this.openInNativeCustomEditor(fullPath, customEditor)
+        } else {
+          await launchCustomExternalEditor(fullPath, customEditor)
         }
-        await launchCustomExternalEditor(fullPath, customEditor)
       } else {
         const match = await findEditorOrDefault(selectedExternalEditor)
         if (match === null) {
@@ -9588,9 +9591,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
     try {
       if (customEditor && customEditor.path) {
         if (backend().transportKind !== 'none') {
-          throw new ExternalEditorError('Custom editors are not yet supported by the native backend.', { openPreferences: true })
+          await this.openInNativeCustomEditor(fullPath, customEditor)
+        } else {
+          await launchCustomExternalEditor(fullPath, customEditor)
         }
-        await launchCustomExternalEditor(fullPath, customEditor)
         return
       }
 
@@ -9620,6 +9624,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   private async openInNativeEditor(fullPath: string, name: string): Promise<void> {
+    const { repositoryPath, path } = this.nativeEditorTarget(fullPath)
+    await backend().openNamedRepositoryEditor(repositoryPath, path, name)
+  }
+
+  private nativeEditorTarget(fullPath: string): { repositoryPath: string; path: string | null } {
     const repository = this.selectedRepository
     if (!(repository instanceof Repository) || !Path.isAbsolute(fullPath) || !Path.isAbsolute(repository.path)) {
       throw new Error('Select a repository before opening a file in an editor.')
@@ -9628,7 +9637,20 @@ export class AppStore extends TypedBaseStore<IAppState> {
     if (Path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${Path.sep}`)) {
       throw new Error('The native editor can only open files within the selected repository.')
     }
-    await backend().openNamedRepositoryEditor(repository.path, relative || null, name)
+    return { repositoryPath: repository.path, path: relative || null }
+  }
+
+  private async nativeCustomEditorCommand(editor: ICustomIntegration): Promise<ICustomEditorCommand> {
+    return {
+      program: editor.path,
+      args: await parseCustomIntegrationArgumentsForRuntime(editor.arguments),
+      macosApp: __DARWIN__ && editor.bundleID !== undefined,
+    }
+  }
+
+  private async openInNativeCustomEditor(fullPath: string, editor: ICustomIntegration): Promise<void> {
+    const { repositoryPath, path } = this.nativeEditorTarget(fullPath)
+    await backend().openCustomRepositoryEditor(repositoryPath, path, await this.nativeCustomEditorCommand(editor))
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */

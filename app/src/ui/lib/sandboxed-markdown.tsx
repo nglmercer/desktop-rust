@@ -12,7 +12,24 @@ import { getObjectId } from './object-id'
 import debounce from 'lodash/debounce'
 import { Emoji } from '../../lib/emoji'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeMarkdownBody } from './sanitize-markdown-body'
+
+/** Only WebKitGTK's native shell needs the non-navigating document path. */
+function useWebKitSandbox(): boolean {
+  if (!__LINUX__ || typeof window === 'undefined') {
+    return false
+  }
+  const bridge: unknown = Reflect.get(window, '__desktop')
+  return (
+    typeof bridge === 'object' &&
+    bridge !== null &&
+    'invoke' in bridge &&
+    typeof bridge.invoke === 'function' &&
+    'on' in bridge &&
+    typeof bridge.on === 'function' &&
+    (!('__transport' in bridge) || bridge.__transport === undefined)
+  )
+}
 
 interface ISandboxedMarkdownProps {
   /** A string of unparsed markdown to display */
@@ -78,6 +95,8 @@ export class SandboxedMarkdown extends React.PureComponent<
 > {
   private frameRef: HTMLIFrameElement | null = null
   private currentDocument: Document | null = null
+  private renderGeneration = 0
+  private readonly webKitSandbox = useWebKitSandbox()
   private frameContainingDivRef = React.createRef<HTMLDivElement>()
 
   private onDocumentScroll = debounce(() => {
@@ -131,9 +150,10 @@ export class SandboxedMarkdown extends React.PureComponent<
   }
 
   public renderMarkdown = async () => {
+    const generation = ++this.renderGeneration
     const { markdown } = this.props
 
-    const body = DOMPurify.sanitize(
+    const body = sanitizeMarkdownBody(
       marked(markdown, {
         // https://marked.js.org/using_advanced  If true, use approved GitHub
         // Flavored Markdown (GFM) specification.
@@ -142,20 +162,26 @@ export class SandboxedMarkdown extends React.PureComponent<
         // line break (copies GitHub behavior on comments, but not on rendered
         // markdown files). Requires gfm be true.
         breaks: true,
-      })
+      }),
+      this.props.baseHref
     )
 
     const styleSheet = await this.getInlineStyleSheet()
 
     // If component got unmounted while we were loading the style sheet
     // frameref will be null.
-    if (this.frameRef === null) {
+    if (this.frameRef === null || generation !== this.renderGeneration) {
       return
     }
 
     const src = `
       <html>
         <head>
+          ${
+            this.webKitSandbox
+              ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src http: https: data: blob: desktop:; media-src https:; font-src data:; form-action 'none'; object-src 'none'">`
+              : ''
+          }
           ${__DARWIN__ ? this.getTitleTag() : ''}
           ${this.getBaseTag(this.props.baseHref)}
           ${styleSheet}
@@ -168,45 +194,66 @@ export class SandboxedMarkdown extends React.PureComponent<
       </html>
     `
 
-    // We used this `Buffer.toString('base64')` approach because `btoa` could not
-    // convert non-latin strings that existed in the markedjs.
-    const b64src = Buffer.from(src, 'utf8').toString('base64')
-
-    // We are using `src` and data uri as opposed to an html string in the
-    // `srcdoc` property because the `srcdoc` property renders the html in the
-    // parent dom and we want all rendering to be isolated to our sandboxed iframe.
-    // -- https://csplite.com/csp/test188/
-    const oldDocument = this.frameRef.contentDocument
-    this.currentDocument = null
-    this.frameRef.src = `data:text/html;charset=utf-8;base64,${b64src}`
-
-    const waitForNewDocument = () => {
-      if (!this.frameRef) {
-        return
-      }
-      const doc = this.frameRef.contentDocument
-      if (doc === oldDocument) {
-        requestAnimationFrame(waitForNewDocument)
-      } else if (doc !== null) {
-        this.currentDocument = doc
-        if (doc.readyState === 'loading') {
-          doc.addEventListener('DOMContentLoaded', () =>
-            this.onDocumentDOMContentLoaded(doc)
-          )
-        } else {
-          this.onDocumentDOMContentLoaded(doc)
+    const frame = this.frameRef
+    if (!this.webKitSandbox) {
+      const oldDocument = frame.contentDocument
+      this.currentDocument = null
+      frame.src = `data:text/html;charset=utf-8;base64,${Buffer.from(
+        src,
+        'utf8'
+      ).toString('base64')}`
+      const waitForNewDocument = () => {
+        if (this.frameRef !== frame || generation !== this.renderGeneration) {
+          return
         }
-        return
+        const doc = frame.contentDocument
+        if (doc === oldDocument) {
+          requestAnimationFrame(waitForNewDocument)
+        } else if (doc !== null) {
+          this.currentDocument = doc
+          if (doc.readyState === 'loading') {
+            doc.addEventListener(
+              'DOMContentLoaded',
+              () => this.onDocumentDOMContentLoaded(doc, generation),
+              { once: true }
+            )
+          } else {
+            this.onDocumentDOMContentLoaded(doc, generation)
+          }
+        }
       }
+      requestAnimationFrame(waitForNewDocument)
+      return
     }
 
-    requestAnimationFrame(waitForNewDocument)
+    // Populate the existing sandboxed document without navigating it. Native
+    // hosts reject data: and srcdoc navigations to keep the privileged top
+    // level restricted to the application document. Its CSP blocks scripts
+    // even though WebKit needs allow-scripts to deliver parent-owned listeners;
+    // the markup has already passed through DOMPurify.
+    const doc = frame.contentDocument
+    if (doc === null) {
+      return
+    }
+    this.currentDocument = null
+    doc.open()
+    doc.write(src)
+    doc.close()
+    const rendered = frame.contentDocument
+    if (rendered !== null && generation === this.renderGeneration) {
+      this.currentDocument = rendered
+      this.onDocumentDOMContentLoaded(rendered, generation)
+    }
   }
 
   public async componentDidUpdate(prevProps: ISandboxedMarkdownProps) {
     // rerender iframe contents if provided markdown changes
     if (
       prevProps.markdown !== this.props.markdown ||
+      prevProps.baseHref !== this.props.baseHref ||
+      prevProps.customCSS !== this.props.customCSS ||
+      prevProps.title !== this.props.title ||
+      prevProps.underlineLinks !== this.props.underlineLinks ||
       this.props.emoji !== prevProps.emoji ||
       this.props.repository?.hash !== prevProps.repository?.hash ||
       this.props.markdownContext !== prevProps.markdownContext
@@ -216,7 +263,10 @@ export class SandboxedMarkdown extends React.PureComponent<
   }
 
   public componentWillUnmount() {
-    document.removeEventListener('scroll', this.onDocumentScroll)
+    this.renderGeneration++
+    this.currentDocument = null
+    this.onDocumentScroll.cancel()
+    document.removeEventListener('scroll', this.onDocumentScroll, true)
   }
 
   /**
@@ -297,12 +347,22 @@ export class SandboxedMarkdown extends React.PureComponent<
    * However, we want to intercept them an verify they are valid links first.
    */
   private setupLinkInterceptor(doc: Document): void {
+    const hasBaseHref = this.props.baseHref !== undefined
     doc.addEventListener('click', ev => {
       if (doc.defaultView && ev.target instanceof doc.defaultView.Element) {
         const a = ev.target.closest('a')
         if (a !== null) {
           ev.preventDefault()
 
+          // An about:blank document inherits the app's origin. A relative
+          // href without an explicit base must not become an app-local URL.
+          if (!hasBaseHref) {
+            try {
+              new URL(a.getAttribute('href') ?? '')
+            } catch {
+              return
+            }
+          }
           if (/^https?:/.test(a.protocol)) {
             this.props.onMarkdownLinkClicked?.(a.href)
           }
@@ -339,8 +399,8 @@ export class SandboxedMarkdown extends React.PureComponent<
     return title.outerHTML
   }
 
-  private onDocumentDOMContentLoaded = (doc: Document) => {
-    if (this.currentDocument !== doc) {
+  private onDocumentDOMContentLoaded = (doc: Document, generation: number) => {
+    if (this.currentDocument !== doc || this.renderGeneration !== generation) {
       return
     }
 
@@ -354,14 +414,14 @@ export class SandboxedMarkdown extends React.PureComponent<
       detail.addEventListener('toggle', this.refreshHeight)
     )
 
-    this.applyFilters(doc)
+    this.applyFilters(doc, generation)
     this.setupLinkInterceptor(doc)
     this.setupTooltips(doc)
 
     this.props.onMarkdownParsed?.()
   }
 
-  private async applyFilters(doc: Document) {
+  private async applyFilters(doc: Document, generation: number) {
     const { emoji, repository, markdownContext } = this.props
     const filters = buildCustomMarkDownNodeFilterPipe({
       emoji,
@@ -377,7 +437,10 @@ export class SandboxedMarkdown extends React.PureComponent<
       while (node !== null) {
         const replacementNodes = await nodeFilter.filter(node)
 
-        if (this.currentDocument !== doc) {
+        if (
+          this.currentDocument !== doc ||
+          this.renderGeneration !== generation
+        ) {
           // Abort, the document has changed
           return
         }
@@ -428,7 +491,11 @@ export class SandboxedMarkdown extends React.PureComponent<
           // jsx-a11y/iframe-has-title lint rule.
           title={this.props.title}
           className="sandboxed-markdown-component"
-          sandbox="allow-same-origin"
+          sandbox={
+            this.webKitSandbox
+              ? 'allow-same-origin allow-scripts'
+              : 'allow-same-origin'
+          }
           ref={this.onFrameRef}
           onLoad={this.refreshHeight}
         />

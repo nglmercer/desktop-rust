@@ -78,6 +78,31 @@ describe('backend Copilot session cleanup', () => {
     await expect(new BackendClient().openGlobalGitConfigEditor('Visual Studio Code')).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('may have launched') })
   })
 
+  it('uses typed Wry operations for custom editor configuration and launches', async () => {
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({ is_valid: true, bundle_id: null })
+      .mockResolvedValueOnce(['--line', '%TARGET_PATH%'])
+      .mockResolvedValueOnce({ code: 0 })
+      .mockResolvedValueOnce({ code: 0 })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const client = new BackendClient()
+    await expect(client.validateCustomIntegrationPath('/opt/editor')).resolves.toEqual({ isValid: true, bundleID: undefined })
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'validate_custom_integration', path: '/opt/editor' } }))
+    await expect(client.parseWindowsIntegrationArguments('--line %TARGET_PATH%')).resolves.toEqual(['--line', '%TARGET_PATH%'])
+    const editor = { program: '/opt/editor', args: ['--line', '%TARGET_PATH%'], macosApp: false }
+    await client.openCustomRepositoryEditor('/repo', 'file.txt', editor)
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'open_custom_editor', repository_path: '/repo', path: 'file.txt', editor: { program: '/opt/editor', args: ['--line', '%TARGET_PATH%'], macos_app: false } } }))
+    await client.openCustomGlobalGitConfigEditor(editor)
+    expect(invoke).toHaveBeenLastCalledWith('desktop.backend.git_info', expect.objectContaining({ operation: { type: 'open_custom_global_git_config_editor', editor: { program: '/opt/editor', args: ['--line', '%TARGET_PATH%'], macos_app: false } } }))
+  })
+
+  it('does not retry a custom editor launch when its outcome is uncertain', async () => {
+    const invoke = vi.fn().mockRejectedValue({ code: 'cancelled', message: 'interrupted', retryable: true })
+    Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })
+    const editor = { program: '/opt/editor', args: ['%TARGET_PATH%'], macosApp: false }
+    await expect(new BackendClient().openCustomRepositoryEditor('/repo', null, editor)).rejects.toMatchObject({ code: 'cancelled', retryable: false, message: expect.stringContaining('may have launched') })
+  })
+
   it('treats interrupted Wry clone and recovery mutations as non-retryable', async () => {
     const invoke = vi.fn().mockRejectedValue({ code: 'cancelled', message: 'interrupted', retryable: true })
     Object.defineProperty(window, '__desktop', { configurable: true, value: { invoke, send: vi.fn(), on: vi.fn() } })

@@ -5,7 +5,7 @@ import { PassThrough } from 'node:stream'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawnTraditionalHook } from '../../src/lib/hooks/traditional-hook'
@@ -56,7 +56,12 @@ describe.skipIf(process.platform === 'win32')('traditional Git hook execution', 
     const runner = join(root, 'runner.mjs')
     const helper = pathToFileURL(resolve('app/src/lib/hooks/traditional-hook.ts')).href
     writeFileSync(runner, `import { spawnTraditionalHook } from ${JSON.stringify(helper)};\nconst child = spawnTraditionalHook(process.argv[2], process.argv.slice(3), { stdio: 'inherit' });\nchild.on('close', code => process.exit(code ?? 1));\n`)
-    const loader = createRequire(import.meta.url).resolve('tsx')
+    const loader = pathToFileURL(
+      join(
+        dirname(createRequire(import.meta.url).resolve('@oxc-node/core')),
+        'register.mjs'
+      )
+    ).href
     const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`
     writeFileSync(join(proxy, 'pre-push'), `#!/bin/sh\nexec ${quote(process.execPath)} --import ${quote(loader)} ${quote(runner)} ${quote(traditional)} "$@"\n`, { mode: 0o755 })
     expect(git('config', 'hook.example.event', 'pre-push').status).toBe(0)

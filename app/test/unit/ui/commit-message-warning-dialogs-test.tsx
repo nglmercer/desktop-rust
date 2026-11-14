@@ -69,7 +69,7 @@ function toDispatcher(dispatcher: TestDispatcher): Dispatcher {
 }
 
 async function stubIpcSend() {
-  const electron = await import('electron')
+  const electron = await import('../../../src/web/host-bridge')
   const previousSend = electron.ipcRenderer.send
   electron.ipcRenderer.send = () => {}
   restoreIpcSend = () => {

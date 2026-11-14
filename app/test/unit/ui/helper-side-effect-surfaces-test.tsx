@@ -30,7 +30,7 @@ afterEach(async () => {
 
 describe('helper side-effect surfaces', () => {
   it('applies theme classes, updates color scheme, and clears theme classes on unmount', async () => {
-    const electron = await import('electron')
+    const electron = await import('../../../src/web/host-bridge')
     const previousSend = electron.ipcRenderer.send
     const sends: Array<[string, string]> = []
 

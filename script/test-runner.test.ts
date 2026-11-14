@@ -37,7 +37,7 @@ it('loads the actual Copilot SDK and test DOM', () => {
       process.execPath,
       [
         '--import',
-        'tsx',
+        '@oxc-node/core/register',
         resolve('script/test.mts'),
         '--',
         fixture,
@@ -49,7 +49,7 @@ it('loads the actual Copilot SDK and test DOM', () => {
       await readFile(join(directory, 'passed'), 'utf8'),
       'legacy passed'
     )
-    assert.match(stdout, /commit-mode-storage-test\.ts/)
+    assert.match(stdout, /Test Files\s+1 passed/)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

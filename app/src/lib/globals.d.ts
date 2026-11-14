@@ -133,8 +133,6 @@ interface IDesktopLogger {
 }
 
 declare const log: IDesktopLogger
-// these changes should be pushed into the Electron declarations
-
 declare namespace NodeJS {
   interface Process extends EventEmitter {
     on(
@@ -147,17 +145,11 @@ declare namespace NodeJS {
       context?: { [key: string]: string }
     ): this
     removeListener(event: 'exit', listener: (code: number) => void): this
-  }
-}
-
-declare namespace Electron {
-  type AppleActionOnDoubleClickPref = 'Maximize' | 'Minimize' | 'None'
-
-  interface SystemPreferences {
-    getUserDefault(
-      key: 'AppleActionOnDoubleClick',
-      type: 'string'
-    ): AppleActionOnDoubleClickPref
+    on(event: string | symbol, listener: (...args: any[]) => void): this
+    removeListener(
+      event: string | symbol,
+      listener: (...args: any[]) => void
+    ): this
   }
 }
 

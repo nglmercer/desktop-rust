@@ -1,3 +1,4 @@
+import type { HostMenuItemOptions } from './host-types'
 import { invokeContextualMenu } from '../ui/main-process-proxy'
 import { backend } from '../backend/client'
 import { showBrowserContextMenu } from '../ui/lib/browser-context-menu'
@@ -24,7 +25,7 @@ export interface IMenuItem {
    * When specified the click property will be ignored.
    * See https://electronjs.org/docs/api/menu-item#roles
    */
-  readonly role?: Electron.MenuItemConstructorOptions['role']
+  readonly role?: HostMenuItemOptions['role']
 
   /**
    * Submenu that will appear when hovering this menu item.

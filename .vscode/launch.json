@@ -10,7 +10,7 @@
         "--disable-warning=ExperimentalWarning",
         "--experimental-test-module-mocks",
         "--import",
-        "tsx",
+        "@oxc-node/core/register",
         "--import",
         "./app/test/globals.mts",
         "--test",

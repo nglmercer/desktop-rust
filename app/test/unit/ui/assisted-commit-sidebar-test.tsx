@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { before, describe, it } from 'node:test'
-import { ipcRenderer } from 'electron'
+import { ipcRenderer } from '../../../src/web/host-bridge'
 import * as React from 'react'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'

@@ -15,7 +15,7 @@ import { RelativeTime } from '../relative-time'
 import { assertNever } from '../../lib/fatal-error'
 import { ReleaseNotesUri } from '../lib/releases'
 import { encodePathAsUrl } from '../../lib/path'
-import { isOSNoLongerSupportedByElectron } from '../../lib/get-os'
+import { isOSNoLongerSupported } from '../../lib/get-os'
 import { AriaLiveContainer } from '../accessibility/aria-live-container'
 import { formatDate } from '../../lib/format-date'
 
@@ -119,7 +119,7 @@ export class About extends React.Component<IAboutProps> {
           ![
             UpdateStatus.UpdateNotChecked,
             UpdateStatus.UpdateNotAvailable,
-          ].includes(updateStatus) || isOSNoLongerSupportedByElectron()
+          ].includes(updateStatus) || isOSNoLongerSupported()
 
         const buttonTitle = 'Check for Updates'
 
@@ -205,7 +205,7 @@ export class About extends React.Component<IAboutProps> {
       return null
     }
 
-    if (isOSNoLongerSupportedByElectron()) {
+    if (isOSNoLongerSupported()) {
       return (
         <DialogError>
           This operating system is no longer supported. Software updates have

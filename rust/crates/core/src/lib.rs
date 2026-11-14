@@ -48,7 +48,11 @@ mod commit_ref_guard;
 pub use commit_ref_guard::CommitReferenceGuard;
 mod diff;
 mod editors;
-pub use editors::{EditorLaunch, ExternalEditor, available_editors, open_global_git_config_editor};
+pub use editors::{
+    DesktopCustomEditor, EditorLaunch, ExternalEditor, available_editors,
+    open_global_git_config_custom_editor, open_global_git_config_editor,
+    parse_windows_integration_arguments, validate_custom_integration_path,
+};
 mod discard;
 mod discard_fs;
 mod fetch_error;

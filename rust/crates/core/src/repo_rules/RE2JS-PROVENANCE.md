@@ -16,7 +16,7 @@ all possible patterns or versions.
 
 ```sh
 npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts
-node --import tsx rust/tests/branch-rules-oracle/build-engine.mts --check
+node --import @oxc-node/core/register rust/tests/branch-rules-oracle/build-engine.mts --check
 ```
 
 The bundle exposes only `__desktopMatchRules(patternsJSON, branch)`, which

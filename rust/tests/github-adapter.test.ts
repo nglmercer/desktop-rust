@@ -83,7 +83,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
           stub,
           `#!/bin/sh\nexec ${shellQuote(
             process.execPath
-          )} --import ${shellQuote(require.resolve('tsx'))} ${shellQuote(
+          )} --import ${shellQuote(require.resolve('@oxc-node/core/register'))} ${shellQuote(
             path.resolve('rust/tests/fixtures/gh.ts')
           )} "$@"\n`
         )

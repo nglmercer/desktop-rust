@@ -56,6 +56,7 @@ import {
   ICustomIntegration,
   TargetPathArgument,
   isValidCustomIntegration,
+  validateCustomIntegrationPath,
 } from '../../lib/custom-integration'
 import {
   defaultGitHookEnvShell,
@@ -139,6 +140,7 @@ interface IPreferencesState {
   readonly initialDefaultBranch: string | null
   readonly disallowedCharactersMessage: string | null
   readonly gitSaveError?: string
+  readonly integrationSaveError?: string
   readonly useWindowsOpenSSH: boolean
   readonly showCommitLengthWarning: boolean
   readonly notificationsEnabled: boolean
@@ -396,6 +398,11 @@ export class Preferences extends React.Component<
         {this.state.gitSaveError !== undefined && (
           <DialogError>
             <span role="alert">{this.state.gitSaveError}</span>
+          </DialogError>
+        )}
+        {this.state.integrationSaveError !== undefined && (
+          <DialogError>
+            <span role="alert">{this.state.integrationSaveError}</span>
           </DialogError>
         )}
         <div className="preferences-container">
@@ -914,19 +921,19 @@ export class Preferences extends React.Component<
   }
 
   private onUseCustomEditorChanged = (useCustomEditor: boolean) => {
-    this.setState({ useCustomEditor })
+    this.setState({ useCustomEditor, integrationSaveError: undefined })
   }
 
   private onCustomEditorChanged = (customEditor: ICustomIntegration) => {
-    this.setState({ customEditor })
+    this.setState({ customEditor, integrationSaveError: undefined })
   }
 
   private onUseCustomShellChanged = (useCustomShell: boolean) => {
-    this.setState({ useCustomShell })
+    this.setState({ useCustomShell, integrationSaveError: undefined })
   }
 
   private onCustomShellChanged = (customShell: ICustomIntegration) => {
-    this.setState({ customShell })
+    this.setState({ customShell, integrationSaveError: undefined })
   }
 
   private onCopilotAppPathChanged = (copilotAppPath: string) => {
@@ -1053,6 +1060,56 @@ export class Preferences extends React.Component<
       return
     }
 
+    // Validate exactly the visible integration drafts before changing any
+    // settings. A backend response can arrive after the user edits again.
+    const { useCustomEditor, customEditor, useCustomShell, customShell } = this.state
+    const integrationsChanged = () =>
+      this.state.useCustomEditor !== useCustomEditor ||
+      this.state.customEditor !== customEditor ||
+      this.state.useCustomShell !== useCustomShell ||
+      this.state.customShell !== customShell
+    const integrationError = (message: string) => this.setState({
+      selectedIndex: PreferencesTab.Integrations,
+      integrationSaveError: message,
+    })
+    let editorToSave = customEditor
+    let shellToSave = customShell
+    try {
+    if (useCustomEditor) {
+      const valid = await isValidCustomIntegration(customEditor)
+      const pathResult: { isValid: boolean; bundleID?: string } = valid ? await validateCustomIntegrationPath(customEditor.path) : { isValid: false }
+      if (integrationsChanged()) {
+        integrationError('Integration settings changed while they were being checked. Review them and save again.')
+        return
+      }
+      if (!valid || !pathResult.isValid) {
+        integrationError('Choose a valid custom editor and include the target path in its arguments.')
+        return
+      }
+      editorToSave = { ...customEditor, bundleID: pathResult.bundleID }
+    }
+    if (useCustomShell) {
+      const valid = await isValidCustomIntegration(customShell)
+      const pathResult: { isValid: boolean; bundleID?: string } = valid ? await validateCustomIntegrationPath(customShell.path) : { isValid: false }
+      if (integrationsChanged()) {
+        integrationError('Integration settings changed while they were being checked. Review them and save again.')
+        return
+      }
+      if (!valid || !pathResult.isValid) {
+        integrationError('Choose a valid custom shell and include the target path in its arguments.')
+        return
+      }
+      shellToSave = { ...customShell, bundleID: pathResult.bundleID }
+    }
+    } catch (error) {
+      log.error('Could not validate custom integration settings', error)
+      integrationError(integrationsChanged()
+        ? 'Integration settings changed while they were being checked. Review them and save again.'
+        : 'Could not validate the custom integration. Check its path and arguments, then try again.')
+      return
+    }
+    this.setState({ integrationSaveError: undefined })
+
     this.setState({ gitSaveError: undefined })
     let shouldRefreshAuthor = false
     let savingDefaultBranch = false
@@ -1151,21 +1208,17 @@ export class Preferences extends React.Component<
 
     await dispatcher.setStatsOptOut(this.state.optOutOfUsageTracking, false)
 
-    const { useCustomEditor, customEditor, useCustomShell, customShell } =
-      this.state
-
-    const isValidCustomEditor =
-      customEditor && (await isValidCustomIntegration(customEditor))
-    dispatcher.setUseCustomEditor(useCustomEditor && isValidCustomEditor)
-    if (isValidCustomEditor) {
-      dispatcher.setCustomEditor(customEditor)
+    if (integrationsChanged()) {
+      integrationError('Integration settings changed while saving. Some other settings may already have been saved; review and save again.')
+      return
     }
-
-    const isValidCustomShell =
-      customShell && (await isValidCustomIntegration(customShell))
-    dispatcher.setUseCustomShell(useCustomShell && isValidCustomShell)
-    if (isValidCustomShell) {
-      dispatcher.setCustomShell(customShell)
+    dispatcher.setUseCustomEditor(useCustomEditor)
+    if (useCustomEditor) {
+      dispatcher.setCustomEditor(editorToSave)
+    }
+    dispatcher.setUseCustomShell(useCustomShell)
+    if (useCustomShell) {
+      dispatcher.setCustomShell(shellToSave)
     }
 
     if (enableCopilotAppHandoff() && copilotAppPathChanged) {

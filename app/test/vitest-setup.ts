@@ -2,7 +2,7 @@ import { vi } from 'vitest'
 import { JSDOM } from 'jsdom'
 import packageInfo from '../package.json'
 
-vi.mock('electron', () => ({
+vi.mock('../src/web/host-bridge', () => ({
   shell: { openPath: vi.fn(async () => '') },
   ipcRenderer: { invoke: vi.fn(async () => {}), on: vi.fn() },
 }))

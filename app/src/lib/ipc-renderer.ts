@@ -1,6 +1,6 @@
 import { RequestResponseChannels, RequestChannels } from './ipc-shared'
 // eslint-disable-next-line no-restricted-imports
-import { ipcRenderer, IpcRendererEvent } from 'electron'
+import { ipcRenderer, IpcRendererEvent } from '../web/host-bridge'
 
 /**
  * Send a message to the main process via channel and expect a result

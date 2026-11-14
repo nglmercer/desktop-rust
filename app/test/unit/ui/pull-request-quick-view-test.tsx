@@ -14,7 +14,6 @@ vi.mock('../../../src/ui/lib/sandboxed-markdown.tsx', () => ({
   SandboxedMarkdown: () => null,
 }))
 vi.mock('keytar', () => ({ default: {} }))
-vi.mock('fs-admin', () => ({}))
 vi.mock('react-confetti', () => ({ default: () => null }))
 vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
 vi.mock('../../../src/lib/custom-integration', () => ({

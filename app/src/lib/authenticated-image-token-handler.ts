@@ -1,4 +1,4 @@
-import { IpcRendererEvent } from 'electron'
+import { IpcRendererEvent } from '../web/host-bridge'
 import * as ipcRenderer from './ipc-renderer'
 
 /**

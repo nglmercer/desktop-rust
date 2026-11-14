@@ -67,7 +67,7 @@ jobs:
       - name: Determine previous and next versions
         id: version
         run: >
-          node --import tsx script/draft-release/ci.ts
+          node --import @oxc-node/core/register script/draft-release/ci.ts
           version ${{ inputs.channel }}
 
       - name: Generate release notes (beta only)
@@ -95,7 +95,7 @@ jobs:
         run: |
           if [ "$CHANNEL" = "production" ]; then
             # Production: aggregate existing beta entries via shared script
-            ENTRIES=$(node --import tsx \
+            ENTRIES=$(node --import @oxc-node/core/register \
               script/draft-release/ci.ts changelog-entries "$PREVIOUS")
           else
             # Beta: extract descriptions from structured JSON output
@@ -178,11 +178,11 @@ jobs:
           fi
 
           # Bump app/package.json and its lockfile, and update changelog.json
-          node --import tsx \
+          node --import @oxc-node/core/register \
             script/draft-release/ci.ts prepare "$NEXT_VERSION" "$ENTRIES"
 
           # Format the changelog with the project formatter.
-          node --import tsx \
+          node --import @oxc-node/core/register \
             script/draft-release/format-json-cli.ts changelog.json
 
           git add app/package.json changelog.json
