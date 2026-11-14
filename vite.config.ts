@@ -1,9 +1,25 @@
 import { defineConfig, type Plugin } from 'vite'
-import { requireEmptyViteOutput, viteOutputDirectory } from './script/vite-output'
+import {
+  requireEmptyViteOutput,
+  viteOutputDirectory,
+} from './script/vite-output'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
-import { closeSync, existsSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import {
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { randomUUID } from 'node:crypto'
 import frontMatter from 'front-matter'
 import { createRequire } from 'module'
@@ -19,23 +35,39 @@ const appPackage = JSON.parse(
 const channel = process.env.RELEASE_CHANNEL || 'development'
 
 /** The renderer and native host must agree on the OAuth application's callback. */
-export function oauthCallbackScheme(channel: string, clientId: string | undefined, clientSecret: string | undefined): string {
+export function oauthCallbackScheme(
+  channel: string,
+  clientId: string | undefined,
+  clientSecret: string | undefined
+): string {
   if (Boolean(clientId) !== Boolean(clientSecret)) {
-    throw new Error('DESKTOP_OAUTH_CLIENT_ID and DESKTOP_OAUTH_CLIENT_SECRET must be provided together')
+    throw new Error(
+      'DESKTOP_OAUTH_CLIENT_ID and DESKTOP_OAUTH_CLIENT_SECRET must be provided together'
+    )
   }
-  return channel === 'development' || !clientSecret || clientId === '3a723b10ac5575cc5bb9'
+  return channel === 'development' ||
+    !clientSecret ||
+    clientId === '3a723b10ac5575cc5bb9'
     ? 'x-github-desktop-dev-auth'
     : 'x-github-desktop-auth'
 }
 
-const authScheme = oauthCallbackScheme(channel, process.env.DESKTOP_OAUTH_CLIENT_ID, process.env.DESKTOP_OAUTH_CLIENT_SECRET)
+const authScheme = oauthCallbackScheme(
+  channel,
+  process.env.DESKTOP_OAUTH_CLIENT_ID,
+  process.env.DESKTOP_OAUTH_CLIENT_SECRET
+)
 
 function oauthCallbackMetadata(): Plugin {
   return {
     name: 'desktop-oauth-callback-metadata',
     apply: 'build',
     generateBundle() {
-      this.emitFile({ type: 'asset', fileName: 'desktop-auth-scheme', source: authScheme })
+      this.emitFile({
+        type: 'asset',
+        fileName: 'desktop-auth-scheme',
+        source: authScheme,
+      })
     },
   }
 }
@@ -99,20 +131,30 @@ const staticDirName =
 
 function isInside(root: string, target: string): boolean {
   const relative = path.relative(root, target)
-  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  )
 }
 
 /** Create output directories without following links beneath the trusted root. */
 function ensureOutputDirectory(trustedRoot: string, destination: string) {
   const root = path.resolve(trustedRoot)
   const directory = path.resolve(destination)
-  if (!isInside(root, directory)) throw new Error('Output directory escapes its trusted root')
+  if (!isInside(root, directory))
+    throw new Error('Output directory escapes its trusted root')
   let current = root
-  for (const part of path.relative(root, directory).split(path.sep).filter(Boolean)) {
+  for (const part of path
+    .relative(root, directory)
+    .split(path.sep)
+    .filter(Boolean)) {
     current = path.join(current, part)
     try {
       const stat = lstatSync(current)
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe output directory: ${current}`)
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        throw new Error(`Unsafe output directory: ${current}`)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       mkdirSync(current)
@@ -121,13 +163,21 @@ function ensureOutputDirectory(trustedRoot: string, destination: string) {
 }
 
 /** Publish a file without opening any pre-existing output symlink. */
-function publishOutputFile(destination: string, contents: string | Buffer, mode?: number) {
-  const temporary = path.join(path.dirname(destination), `.desktop-${randomUUID()}.tmp`)
+function publishOutputFile(
+  destination: string,
+  contents: string | Buffer,
+  mode?: number
+) {
+  const temporary = path.join(
+    path.dirname(destination),
+    `.desktop-${randomUUID()}.tmp`
+  )
   const handle = openSync(temporary, 'wx')
   let closed = false
   try {
     writeFileSync(handle, contents)
-    if (mode !== undefined && process.platform !== 'win32') fchmodSync(handle, mode & 0o777)
+    if (mode !== undefined && process.platform !== 'win32')
+      fchmodSync(handle, mode & 0o777)
     closeSync(handle)
     closed = true
     renameSync(temporary, destination)
@@ -141,7 +191,8 @@ function copyOutputFile(source: string, destination: string) {
   const handle = openSync(source, 'r')
   try {
     const metadata = fstatSync(handle)
-    if (!metadata.isFile()) throw new Error(`Unsupported bundled resource: ${source}`)
+    if (!metadata.isFile())
+      throw new Error(`Unsupported bundled resource: ${source}`)
     publishOutputFile(destination, readFileSync(handle), metadata.mode)
   } finally {
     closeSync(handle)
@@ -153,7 +204,12 @@ function writeOutputFile(destination: string, contents: string) {
 }
 
 /** Copy bundled emoji while rejecting links and excluding Unicode images. */
-function copyEmojiImages(source: string, destination: string, output: string, sources?: Set<string>) {
+function copyEmojiImages(
+  source: string,
+  destination: string,
+  output: string,
+  sources?: Set<string>
+) {
   ensureOutputDirectory(output, destination)
   for (const entry of readdirSync(source, { withFileTypes: true })) {
     if (entry.name === 'unicode') continue
@@ -163,18 +219,26 @@ function copyEmojiImages(source: string, destination: string, output: string, so
     else if (entry.isFile()) {
       copyOutputFile(from, to)
       sources?.add(from)
-    }
-    else throw new Error(`Unsupported bundled emoji resource: ${from}`)
+    } else throw new Error(`Unsupported bundled emoji resource: ${from}`)
   }
 }
 
 /** Materialize template symlinks without following existing output links. */
-export function copyGitignoreTemplates(source: string, destination: string, trustedRoot = path.dirname(destination), sources?: Set<string>) {
+export function copyGitignoreTemplates(
+  source: string,
+  destination: string,
+  trustedRoot = path.dirname(destination),
+  sources?: Set<string>
+) {
   const root = realpathSync(source)
   const anchor = path.resolve(trustedRoot)
   const output = path.resolve(destination)
-  if (!isInside(anchor, output)) throw new Error('Output directory escapes its trusted root')
-  const canonicalOutput = path.resolve(realpathSync(anchor), path.relative(anchor, output))
+  if (!isInside(anchor, output))
+    throw new Error('Output directory escapes its trusted root')
+  const canonicalOutput = path.resolve(
+    realpathSync(anchor),
+    path.relative(anchor, output)
+  )
   if (isInside(root, canonicalOutput) || isInside(canonicalOutput, root)) {
     throw new Error('Gitignore source and output directories overlap')
   }
@@ -183,8 +247,14 @@ export function copyGitignoreTemplates(source: string, destination: string, trus
     if (!name.endsWith('.gitignore')) continue
     const resolved = realpathSync(path.join(source, name))
     const relative = path.relative(root, resolved)
-    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-      throw new Error(`Gitignore template escapes its source directory: ${name}`)
+    if (
+      relative === '..' ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    ) {
+      throw new Error(
+        `Gitignore template escapes its source directory: ${name}`
+      )
     }
     // A previous build may have left an absolute symlink in the output. Copy
     // into a new file and replace the directory entry so it is never followed.
@@ -279,14 +349,24 @@ export function copyStaticResources(
     buildStart() {
       for (const source of copiedSources) {
         if (!existsSync(source)) {
-          this.error(`A copied static resource was removed: ${source}. Stop the development launcher, run pnpm vite:build, then restart it to clear the old output.`)
+          this.error(
+            `A copied static resource was removed: ${source}. Stop the development launcher, run pnpm vite:build, then restart it to clear the old output.`
+          )
         }
       }
-      for (const input of ['LICENSE', 'gemoji/db/emoji.json', 'app/static/common/choosealicense.com/LICENSE.md']) {
+      for (const input of [
+        'LICENSE',
+        'gemoji/db/emoji.json',
+        'app/static/common/choosealicense.com/LICENSE.md',
+      ]) {
         const file = path.resolve(projectRoot, input)
         if (existsSync(file)) this.addWatchFile(file)
       }
-      const watchDirectory = (directory: string, recursive: boolean, links = false) => {
+      const watchDirectory = (
+        directory: string,
+        recursive: boolean,
+        links = false
+      ) => {
         if (!existsSync(directory)) return
         this.addWatchFile(directory)
         for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -300,7 +380,8 @@ export function copyStaticResources(
             this.addWatchFile(file)
             try {
               const resolved = realpathSync(file)
-              if (isInside(realpathSync(directory), resolved)) this.addWatchFile(resolved)
+              if (isInside(realpathSync(directory), resolved))
+                this.addWatchFile(resolved)
             } catch {
               // Copying reports a broken template link as a build error.
             }
@@ -309,9 +390,22 @@ export function copyStaticResources(
       }
       watchDirectory(path.resolve(projectRoot, 'gemoji/images/emoji'), true)
       watchDirectory(path.resolve(projectRoot, 'app/static/common'), false)
-      watchDirectory(path.resolve(projectRoot, 'app/static/common/gitignore'), false, true)
-      watchDirectory(path.resolve(projectRoot, 'app/static/common/choosealicense.com/_licenses'), false)
-      watchDirectory(path.resolve(projectRoot, `app/static/${platformDirectory}`), false)
+      watchDirectory(
+        path.resolve(projectRoot, 'app/static/common/gitignore'),
+        false,
+        true
+      )
+      watchDirectory(
+        path.resolve(
+          projectRoot,
+          'app/static/common/choosealicense.com/_licenses'
+        ),
+        false
+      )
+      watchDirectory(
+        path.resolve(projectRoot, `app/static/${platformDirectory}`),
+        false
+      )
     },
     async writeBundle() {
       const currentSources = new Set<string>()
@@ -334,17 +428,35 @@ export function copyStaticResources(
       const emojiDatabase = path.join(gemoji, 'db/emoji.json')
       copyOutputFile(emojiDatabase, path.join(output, 'emoji.json'))
       currentSources.add(emojiDatabase)
-      copyEmojiImages(path.join(gemoji, 'images/emoji'), path.join(output, 'emoji'), output, currentSources)
+      copyEmojiImages(
+        path.join(gemoji, 'images/emoji'),
+        path.join(output, 'emoji'),
+        output,
+        currentSources
+      )
 
       // The gitignore templates offered when creating a repository.
-      const gitignores = path.resolve(projectRoot, 'app/static/common/gitignore')
-      copyGitignoreTemplates(gitignores, path.join(destination, 'gitignore'), output, currentSources)
+      const gitignores = path.resolve(
+        projectRoot,
+        'app/static/common/gitignore'
+      )
+      copyGitignoreTemplates(
+        gitignores,
+        path.join(destination, 'gitignore'),
+        output,
+        currentSources
+      )
 
       // generateLicenseMetadata() (from the earlier build script).
-      const chooseALicense = path.resolve(projectRoot, 'app/static/common/choosealicense.com')
+      const chooseALicense = path.resolve(
+        projectRoot,
+        'app/static/common/choosealicense.com'
+      )
       const licensesDir = path.join(chooseALicense, '_licenses')
       const licenses = readdirSync(licensesDir)
-        .map(file => frontMatter<any>(readFileSync(path.join(licensesDir, file), 'utf8')))
+        .map(file =>
+          frontMatter<any>(readFileSync(path.join(licensesDir, file), 'utf8'))
+        )
         .map(({ attributes, body }) => ({
           name: attributes.nickname || attributes.title,
           featured: attributes.featured || false,
@@ -354,7 +466,10 @@ export function copyStaticResources(
           body: `${body.trim()}\n`,
         }))
         .filter(license => !license.hidden)
-      writeOutputFile(path.join(destination, 'available-licenses.json'), JSON.stringify(licenses))
+      writeOutputFile(
+        path.join(destination, 'available-licenses.json'),
+        JSON.stringify(licenses)
+      )
       writeOutputFile(
         path.join(destination, 'LICENSE.choosealicense.md'),
         'GitHub Desktop uses licensing information provided by choosealicense.com.\n\n' +
@@ -394,7 +509,16 @@ export default defineConfig({
     copyStaticResources(),
     moveSourceMaps(),
     nodePolyfills({
-      include: ['util','buffer','crypto','assert','events','querystring','timers','string_decoder'],
+      include: [
+        'util',
+        'buffer',
+        'crypto',
+        'assert',
+        'events',
+        'querystring',
+        'timers',
+        'string_decoder',
+      ],
       globals: { Buffer: true, global: true, process: true },
       protocolImports: true,
       // `crypto` is replaced for both import and require paths (the Copilot
@@ -404,7 +528,9 @@ export default defineConfig({
   ],
   define: {
     __PROCESS_KIND__: JSON.stringify('ui'),
-    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
+    'process.env.NODE_ENV': JSON.stringify(
+      process.env.NODE_ENV || 'production'
+    ),
     global: 'window',
     __APP_VERSION__: JSON.stringify(appPackage.version),
     __APP_NAME__: JSON.stringify(appPackage.productName),
@@ -437,42 +563,149 @@ export default defineConfig({
   },
   resolve: {
     alias: [
-      { find: /^@desktop-assets\//, replacement: path.resolve(__dirname, 'app/static/common') + '/' },
-      { find: /^koffi$/, replacement: path.resolve(__dirname, 'app/src/web/koffi.ts') },
+      {
+        find: /^@desktop-assets\//,
+        replacement: path.resolve(__dirname, 'app/static/common') + '/',
+      },
+      {
+        find: /^koffi$/,
+        replacement: path.resolve(__dirname, 'app/src/web/koffi.ts'),
+      },
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
       { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
       { find: /^desktop-stream-impl$/, replacement: legacyStreamPackage },
-      { find: /^(node:)?url$/, replacement: path.resolve(__dirname, 'app/src/web/url.ts') },
-      { find: /^keytar$/, replacement: path.resolve(__dirname, 'app/src/web/keytar.ts') },
-      { find: /^desktop-dugite\/(.+)$/, replacement: path.resolve(__dirname, 'app/node_modules/dugite/build/lib') + '/$1.js' },
-      { find: /^dugite$/, replacement: path.resolve(__dirname, 'app/src/web/dugite.ts') },
-      { find: /^desktop-notifications$/, replacement: path.resolve(__dirname, 'app/src/web/desktop-notifications.ts') },
-      { find: /^desktop-trampoline$/, replacement: path.resolve(__dirname, 'app/src/web/desktop-trampoline.ts') },
-      { find: /^windows-argv-parser$/, replacement: path.resolve(__dirname, 'app/src/web/windows-argv-parser.ts') },
-      { find: /^app-path$/, replacement: path.resolve(__dirname, 'app/src/web/app-path.ts') },
-      { find: /^registry-js$/, replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts') },
-      { find: /^web-utils$/, replacement: path.resolve(__dirname, 'app/src/web/web-utils.ts') },
-      { find: /^child_process$/, replacement: path.resolve(__dirname, 'app/src/web/child_process.ts') },
-      { find: /^net$/, replacement: path.resolve(__dirname, 'app/src/web/net.ts') },
-      { find: /^module$/, replacement: path.resolve(__dirname, 'app/src/web/module.ts') },
-      { find: /^os$/, replacement: path.resolve(__dirname, 'app/src/web/os.ts') },
-      { find: /^path$/, replacement: path.resolve(__dirname, 'app/src/web/path.ts') },
-      { find: /^async_hooks$/, replacement: path.resolve(__dirname, 'app/src/web/async_hooks.ts') },
-      { find: /^node:async_hooks$/, replacement: path.resolve(__dirname, 'app/src/web/async_hooks.ts') },
-      { find: 'node:module', replacement: path.resolve(__dirname, 'app/src/web/module.ts') },
-      { find: /^node:fs$/, replacement: path.resolve(__dirname, 'app/src/web/fs.ts') },
-      { find: /^node:fs\/promises$/, replacement: path.resolve(__dirname, 'app/src/web/fs-promises.ts') },
-      { find: 'node:os', replacement: path.resolve(__dirname, 'app/src/web/os.ts') },
-      { find: 'node:path', replacement: path.resolve(__dirname, 'app/src/web/path.ts') },
-      { find: 'node:net', replacement: path.resolve(__dirname, 'app/src/web/net.ts') },
-      { find: 'node:stream', replacement: path.resolve(__dirname, 'app/src/web/stream.ts') },
-      { find: 'node:stream/promises', replacement: path.resolve(__dirname, 'app/src/web/stream-promises.ts') },
-      { find: 'node:child_process', replacement: path.resolve(__dirname, 'app/src/web/child_process.ts') },
+      {
+        find: /^(node:)?url$/,
+        replacement: path.resolve(__dirname, 'app/src/web/url.ts'),
+      },
+      {
+        find: /^keytar$/,
+        replacement: path.resolve(__dirname, 'app/src/web/keytar.ts'),
+      },
+      {
+        find: /^desktop-dugite\/(.+)$/,
+        replacement:
+          path.resolve(__dirname, 'app/node_modules/dugite/build/lib') +
+          '/$1.js',
+      },
+      {
+        find: /^dugite$/,
+        replacement: path.resolve(__dirname, 'app/src/web/dugite.ts'),
+      },
+      {
+        find: /^desktop-notifications$/,
+        replacement: path.resolve(
+          __dirname,
+          'app/src/web/desktop-notifications.ts'
+        ),
+      },
+      {
+        find: /^desktop-trampoline$/,
+        replacement: path.resolve(
+          __dirname,
+          'app/src/web/desktop-trampoline.ts'
+        ),
+      },
+      {
+        find: /^windows-argv-parser$/,
+        replacement: path.resolve(
+          __dirname,
+          'app/src/web/windows-argv-parser.ts'
+        ),
+      },
+      {
+        find: /^app-path$/,
+        replacement: path.resolve(__dirname, 'app/src/web/app-path.ts'),
+      },
+      {
+        find: /^registry-js$/,
+        replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts'),
+      },
+      {
+        find: /^web-utils$/,
+        replacement: path.resolve(__dirname, 'app/src/web/web-utils.ts'),
+      },
+      {
+        find: /^child_process$/,
+        replacement: path.resolve(__dirname, 'app/src/web/child_process.ts'),
+      },
+      {
+        find: /^net$/,
+        replacement: path.resolve(__dirname, 'app/src/web/net.ts'),
+      },
+      {
+        find: /^module$/,
+        replacement: path.resolve(__dirname, 'app/src/web/module.ts'),
+      },
+      {
+        find: /^os$/,
+        replacement: path.resolve(__dirname, 'app/src/web/os.ts'),
+      },
+      {
+        find: /^path$/,
+        replacement: path.resolve(__dirname, 'app/src/web/path.ts'),
+      },
+      {
+        find: /^async_hooks$/,
+        replacement: path.resolve(__dirname, 'app/src/web/async_hooks.ts'),
+      },
+      {
+        find: /^node:async_hooks$/,
+        replacement: path.resolve(__dirname, 'app/src/web/async_hooks.ts'),
+      },
+      {
+        find: 'node:module',
+        replacement: path.resolve(__dirname, 'app/src/web/module.ts'),
+      },
+      {
+        find: /^node:fs$/,
+        replacement: path.resolve(__dirname, 'app/src/web/fs.ts'),
+      },
+      {
+        find: /^node:fs\/promises$/,
+        replacement: path.resolve(__dirname, 'app/src/web/fs-promises.ts'),
+      },
+      {
+        find: 'node:os',
+        replacement: path.resolve(__dirname, 'app/src/web/os.ts'),
+      },
+      {
+        find: 'node:path',
+        replacement: path.resolve(__dirname, 'app/src/web/path.ts'),
+      },
+      {
+        find: 'node:net',
+        replacement: path.resolve(__dirname, 'app/src/web/net.ts'),
+      },
+      {
+        find: 'node:stream',
+        replacement: path.resolve(__dirname, 'app/src/web/stream.ts'),
+      },
+      {
+        find: 'node:stream/promises',
+        replacement: path.resolve(__dirname, 'app/src/web/stream-promises.ts'),
+      },
+      {
+        find: 'node:child_process',
+        replacement: path.resolve(__dirname, 'app/src/web/child_process.ts'),
+      },
 
-      { find: /^fs$/u, replacement: path.resolve(__dirname, 'app/src/web/fs.ts') },
-      { find: /^fs\/promises$/, replacement: path.resolve(__dirname, 'app/src/web/fs-promises.ts') },
-      { find: /^stream\/promises$/, replacement: path.resolve(__dirname, 'app/src/web/stream-promises.ts') },
-      { find: /^stream$/u, replacement: path.resolve(__dirname, 'app/src/web/stream.ts') },
+      {
+        find: /^fs$/u,
+        replacement: path.resolve(__dirname, 'app/src/web/fs.ts'),
+      },
+      {
+        find: /^fs\/promises$/,
+        replacement: path.resolve(__dirname, 'app/src/web/fs-promises.ts'),
+      },
+      {
+        find: /^stream\/promises$/,
+        replacement: path.resolve(__dirname, 'app/src/web/stream-promises.ts'),
+      },
+      {
+        find: /^stream$/u,
+        replacement: path.resolve(__dirname, 'app/src/web/stream.ts'),
+      },
     ],
     extensions: ['.ts', '.tsx', '.js', '.jsx'],
   },
@@ -480,6 +713,15 @@ export default defineConfig({
     preprocessorOptions: {
       scss: {
         loadPaths: sassLoadPaths(__dirname),
+        // The stylesheets still use @import and the global colour functions;
+        // migrating them is a separate change, so keep the build output readable.
+        silenceDeprecations: [
+          'import',
+          'global-builtin',
+          'color-functions',
+          'slash-div',
+        ],
+        quietDeps: true,
       },
     },
   },
@@ -488,17 +730,20 @@ export default defineConfig({
     emptyOutDir: process.env.DESKTOP_VITE_DIST === undefined,
     // Off for the distributed bundle; see moveSourceMaps().
     sourcemap: process.env.DESKTOP_VITE_SOURCEMAP ? true : false,
-    chunkSizeWarningLimit: 2000,
+    // The renderer is a single bundle the desktop shell embeds.
+    chunkSizeWarningLimit: 6000,
     commonjsOptions: { transformMixedEsModules: true },
     rollupOptions: {
       input: path.resolve(__dirname, 'app/index.html'),
       onwarn: (warning, warn) => {
         if (warning.code === 'MISSING_EXPORT') return
+        // react-virtualized ships a Babel-plugin directive that means nothing here.
+        if (warning.code === 'MODULE_LEVEL_DIRECTIVE') return
         if (warning.message.includes('Module "')) return
         warn(warning)
       },
     },
   },
-  server: { host:'127.0.0.1', port:5173, strictPort:true },
-  preview: { host:'127.0.0.1', port:4173 },
+  server: { host: '127.0.0.1', port: 5173, strictPort: true },
+  preview: { host: '127.0.0.1', port: 4173 },
 })

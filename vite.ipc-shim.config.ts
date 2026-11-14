@@ -30,6 +30,5 @@ export default defineConfig({
       formats: ['iife'],
       fileName: () => 'ipc-shim.js',
     },
-    rollupOptions: { output: { inlineDynamicImports: true } },
   },
 })

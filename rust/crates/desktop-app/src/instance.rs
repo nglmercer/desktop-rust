@@ -265,7 +265,16 @@ mod imp {
                     ));
                 }
                 if marker != format!("{}:{}", metadata.dev(), metadata.ino()) {
-                    return Err(refused("refusing to remove an unrecognized socket"));
+                    // Only a socket this application recorded may be removed. A
+                    // stale one left by another build is reported with its
+                    // path so it can be deleted by hand when nothing runs.
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "refusing to remove an unrecognized socket; if no GitHub Desktop is running, delete {}",
+                            socket.display()
+                        ),
+                    ));
                 }
                 let current = std::fs::symlink_metadata(socket)?;
                 if current.dev() != metadata.dev() || current.ino() != metadata.ino() {

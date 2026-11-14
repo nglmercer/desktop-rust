@@ -13,6 +13,7 @@ export async function watchRustBundle(
   const result = await build({
     ...overrides,
     configFile,
+    configLoader: 'runner',
     mode: 'development',
     build: { ...overrides.build, watch: {}, emptyOutDir: false },
   })

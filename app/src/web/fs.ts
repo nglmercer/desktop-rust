@@ -6,12 +6,7 @@
 // them, so a handle does not pin an inode the way Node's does: code that
 // relies on that for locking gets best-effort behaviour here.
 
-import {
-  bundleUrl,
-  bundleEntry,
-  bundleEntrySync,
-  IBundleEntry,
-} from './bundle'
+import { bundleUrl, bundleEntry, bundleEntrySync, IBundleEntry } from './bundle'
 
 type Encoding = BufferEncoding | null | undefined
 type ReadOptions = Encoding | { encoding?: Encoding; flag?: string }
@@ -277,12 +272,15 @@ function readBundledSync(url: string, path: string): Buffer {
 }
 
 const missing = (path: string) =>
-  Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
-    code: 'ENOENT',
-    syscall: 'open',
-    errno: -2,
-    path,
-  })
+  Object.assign(
+    new Error(`ENOENT: no such file or directory, open '${path}'`),
+    {
+      code: 'ENOENT',
+      syscall: 'open',
+      errno: -2,
+      path,
+    }
+  )
 
 const isBundled = (path: PathLike) => bundleUrl(toPath(path)) !== null
 
@@ -306,7 +304,10 @@ function bundledStats(entry: IBundleEntry | null, path: string, options: any) {
   return new Stats(raw, statOptions(options))
 }
 
-function bundledListing(entry: IBundleEntry | null, path: string): IRawDirent[] {
+function bundledListing(
+  entry: IBundleEntry | null,
+  path: string
+): IRawDirent[] {
   if (entry === null || entry.entries === undefined) {
     throw missing(path)
   }
@@ -325,7 +326,12 @@ const withEncoding = (buffer: Buffer, options: ReadOptions) => {
 
 // --- shared argument builders ------------------------------------------------
 
-function writeArgs(path: PathLike, data: unknown, options: any, append: boolean) {
+function writeArgs(
+  path: PathLike,
+  data: unknown,
+  options: any,
+  append: boolean
+) {
   const encoding = typeof options === 'string' ? options : options?.encoding
   const flag: string = (typeof options === 'object' && options?.flag) || ''
   return {
@@ -365,7 +371,10 @@ export class FileHandle {
   ) {}
 
   public async stat(options?: any) {
-    return new Stats(await call('stat', { path: this.path }), statOptions(options))
+    return new Stats(
+      await call('stat', { path: this.path }),
+      statOptions(options)
+    )
   }
   public async readFile(options?: ReadOptions) {
     return decode(await call('read-file', { path: this.path }), options)
@@ -383,7 +392,10 @@ export class FileHandle {
     return { bytesRead: chunk.byteLength, buffer }
   }
   public async writeFile(data: unknown, options?: any) {
-    await call('write-file', writeArgs(this.path, data, options, this.mode.append))
+    await call(
+      'write-file',
+      writeArgs(this.path, data, options, this.mode.append)
+    )
   }
   public async appendFile(data: unknown, options?: any) {
     await call('write-file', writeArgs(this.path, data, options, true))
@@ -394,7 +406,10 @@ export class FileHandle {
     return { bytesWritten: bytes.byteLength, buffer: data }
   }
   public async truncate() {
-    await call('write-file', writeArgs(this.path, new Uint8Array(0), undefined, false))
+    await call(
+      'write-file',
+      writeArgs(this.path, new Uint8Array(0), undefined, false)
+    )
   }
   public async chmod(mode: number) {
     await call('chmod', { path: this.path, mode })
@@ -454,11 +469,17 @@ export const promises = {
   stat: async (path: PathLike, options?: any) =>
     isBundled(path)
       ? bundledStats(await bundleEntry(toPath(path)), toPath(path), options)
-      : new Stats(await call('stat', { path: toPath(path) }), statOptions(options)),
+      : new Stats(
+          await call('stat', { path: toPath(path) }),
+          statOptions(options)
+        ),
   lstat: async (path: PathLike, options?: any) =>
     isBundled(path)
       ? bundledStats(await bundleEntry(toPath(path)), toPath(path), options)
-      : new Stats(await call('lstat', { path: toPath(path) }), statOptions(options)),
+      : new Stats(
+          await call('lstat', { path: toPath(path) }),
+          statOptions(options)
+        ),
   access: async (path: PathLike, mode?: number) => {
     if (isBundled(path)) {
       bundledStats(await bundleEntry(toPath(path)), toPath(path), undefined)
@@ -516,9 +537,13 @@ export const promises = {
     await call('chmod', { path: toPath(path), mode })
   },
   truncate: async (path: PathLike) => {
-    await call('write-file', writeArgs(path, new Uint8Array(0), undefined, false))
+    await call(
+      'write-file',
+      writeArgs(path, new Uint8Array(0), undefined, false)
+    )
   },
-  opendir: async (path: PathLike) => new Dir(toPath(path), await call('readdir', { path: toPath(path) })),
+  opendir: async (path: PathLike) =>
+    new Dir(toPath(path), await call('readdir', { path: toPath(path) })),
 }
 
 // --- ranges --------------------------------------------------------------------
@@ -534,7 +559,8 @@ interface IFileIdentity {
 }
 
 /** The same file, not necessarily the same contents. */
-const sameFile = (a: IFileIdentity, b: IFileIdentity) => a.dev === b.dev && a.ino === b.ino
+const sameFile = (a: IFileIdentity, b: IFileIdentity) =>
+  a.dev === b.dev && a.ino === b.ino
 
 /** The same file and the same version of it. */
 const sameVersion = (a: IFileIdentity, b: IFileIdentity) =>
@@ -560,7 +586,8 @@ async function* readRangeBlocks(
   let offset = start
   let first: IFileIdentity | null = null
   while (!isDestroyed()) {
-    const length = end === undefined ? RangeBlock : Math.min(RangeBlock, end - offset)
+    const length =
+      end === undefined ? RangeBlock : Math.min(RangeBlock, end - offset)
     if (length <= 0) {
       return
     }
@@ -619,7 +646,11 @@ export const readFileSync = (path: PathLike, options?: ReadOptions): any => {
 export const writeFileSync = (path: PathLike, data: unknown, options?: any) => {
   writeSyncChunked(path, data, options, false)
 }
-export const appendFileSync = (path: PathLike, data: unknown, options?: any) => {
+export const appendFileSync = (
+  path: PathLike,
+  data: unknown,
+  options?: any
+) => {
   writeSyncChunked(path, data, options, true)
 }
 export const existsSync = (path: PathLike): boolean => {
@@ -732,7 +763,9 @@ let nextDescriptor = 3
 function descriptorState(fd: number): IDescriptor {
   const state = descriptors.get(fd)
   if (state === undefined) {
-    throw Object.assign(new Error('EBADF: bad file descriptor'), { code: 'EBADF' })
+    throw Object.assign(new Error('EBADF: bad file descriptor'), {
+      code: 'EBADF',
+    })
   }
   return state
 }
@@ -741,7 +774,11 @@ function descriptorPath(fd: number): string {
   return descriptorState(fd).path
 }
 
-export function openSync(path: PathLike, flags?: string | number, mode?: number) {
+export function openSync(
+  path: PathLike,
+  flags?: string | number,
+  mode?: number
+) {
   const target = toPath(path)
   const how = openMode(flags)
   if (how.create) {
@@ -859,6 +896,9 @@ export function mkdir(path: PathLike, ...args: unknown[]) {
 export function unlink(path: PathLike, ...args: unknown[]) {
   callbackify(promises.unlink(path), args)
 }
+export function rmdir(path: PathLike, ...args: unknown[]) {
+  callbackify(promises.rmdir(path), args)
+}
 export function access(path: PathLike, ...args: unknown[]) {
   callbackify(promises.access(path, optionsOf(args)), args)
 }
@@ -867,6 +907,76 @@ export function realpath(path: PathLike, ...args: unknown[]) {
 }
 
 type Listener = (...args: any[]) => void
+
+/**
+ * `fs.watch` for the webview. The host has no change notifications, so the
+ * path is polled and a `change` event is reported when its size or
+ * modification time moves. It stops on `close()`.
+ */
+export class FSWatcher {
+  private readonly listeners = new Map<string, Set<Listener>>()
+  private timer: ReturnType<typeof setInterval> | null = null
+  private last: string | null = null
+
+  public constructor(
+    private readonly path: PathLike,
+    listener?: (event: string, filename: string | null) => void
+  ) {
+    if (listener) {
+      this.on('change', listener)
+    }
+    const poll = async () => {
+      try {
+        const info = await promises.stat(this.path)
+        const signature = `${info.size}:${info.mtimeMs}`
+        if (this.last !== null && signature !== this.last) {
+          this.emit('change', 'change', null)
+        }
+        this.last = signature
+      } catch (error) {
+        if (this.timer !== null) {
+          this.close()
+          this.emit('error', error)
+        }
+      }
+    }
+    void poll()
+    this.timer = setInterval(poll, 250)
+  }
+
+  public on(event: string, listener: Listener) {
+    const set = this.listeners.get(event) ?? new Set<Listener>()
+    set.add(listener)
+    this.listeners.set(event, set)
+    return this
+  }
+
+  public removeListener(event: string, listener: Listener) {
+    this.listeners.get(event)?.delete(listener)
+    return this
+  }
+
+  public close() {
+    if (this.timer !== null) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  }
+
+  private emit(event: string, ...args: unknown[]) {
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(...args)
+    }
+  }
+}
+
+export function watch(path: PathLike, ...args: unknown[]): FSWatcher {
+  const listener = args.find(arg => typeof arg === 'function')
+  return new FSWatcher(
+    path,
+    listener as ((event: string, filename: string | null) => void) | undefined
+  )
+}
 
 /**
  * The part of a readable stream the renderer uses: `data`/`end`/`error`
@@ -887,7 +997,8 @@ export class ReadStream {
           }
           const start = options?.start ?? 0
           // Node's `end` is inclusive.
-          const end = options?.end === undefined ? bytes.byteLength : options.end + 1
+          const end =
+            options?.end === undefined ? bytes.byteLength : options.end + 1
           const chunk = bytes.subarray(start, end)
           if (chunk.byteLength > 0) {
             this.emit('data', encoding ? chunk.toString(encoding) : chunk)
@@ -904,9 +1015,15 @@ export class ReadStream {
     // Node's `end` is inclusive.
     const start = options?.start ?? 0
     const end = options?.end === undefined ? undefined : options.end + 1
-    const decoder = encoding && /^utf-?8$/i.test(encoding) ? new TextDecoder('utf-8') : null
+    const decoder =
+      encoding && /^utf-?8$/i.test(encoding) ? new TextDecoder('utf-8') : null
     ;(async () => {
-      for await (const bytes of readRangeBlocks(toPath(path), start, end, () => this.destroyed)) {
+      for await (const bytes of readRangeBlocks(
+        toPath(path),
+        start,
+        end,
+        () => this.destroyed
+      )) {
         if (this.destroyed) {
           return
         }
@@ -919,7 +1036,10 @@ export class ReadStream {
             this.emit('data', text)
           }
         } else {
-          this.emit('data', Buffer.from(bytes).toString(encoding as BufferEncoding))
+          this.emit(
+            'data',
+            Buffer.from(bytes).toString(encoding as BufferEncoding)
+          )
         }
       }
       if (this.destroyed) {
@@ -955,7 +1075,10 @@ export class ReadStream {
   }
   public off(event: string, listener: Listener) {
     const list = this.listeners.get(event) ?? []
-    this.listeners.set(event, list.filter(l => l !== listener))
+    this.listeners.set(
+      event,
+      list.filter(l => l !== listener)
+    )
     return this
   }
   public removeListener(event: string, listener: Listener) {
@@ -971,7 +1094,9 @@ export class ReadStream {
     }
     return true
   }
-  public pipe<T extends { write(chunk: any): any; end(): any }>(destination: T): T {
+  public pipe<T extends { write(chunk: any): any; end(): any }>(
+    destination: T
+  ): T {
     this.on('data', chunk => destination.write(chunk))
     this.on('end', () => destination.end())
     return destination
@@ -998,11 +1123,53 @@ export function createWriteStream(): WriteStream {
 }
 
 export default {
-  constants, promises, Stats, BigIntStats, Dirent, Dir, ReadStream, WriteStream,
-  readFileSync, writeFileSync, appendFileSync, existsSync, statSync, lstatSync,
-  accessSync, readdirSync, mkdirSync, mkdtempSync, rmSync, rmdirSync, unlinkSync,
-  renameSync, copyFileSync, chmodSync, readlinkSync, symlinkSync, realpathSync,
-  opendirSync, openSync, closeSync, fstatSync, readSync, writeSync, fsyncSync,
-  fdatasyncSync, readFile, writeFile, stat, lstat, readdir, mkdir, unlink,
-  access, realpath, createReadStream, createWriteStream,
+  constants,
+  promises,
+  Stats,
+  BigIntStats,
+  Dirent,
+  Dir,
+  ReadStream,
+  WriteStream,
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  existsSync,
+  statSync,
+  lstatSync,
+  accessSync,
+  readdirSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  rmdirSync,
+  unlinkSync,
+  renameSync,
+  copyFileSync,
+  chmodSync,
+  readlinkSync,
+  symlinkSync,
+  realpathSync,
+  opendirSync,
+  openSync,
+  closeSync,
+  fstatSync,
+  readSync,
+  writeSync,
+  fsyncSync,
+  fdatasyncSync,
+  readFile,
+  writeFile,
+  stat,
+  lstat,
+  readdir,
+  mkdir,
+  unlink,
+  rmdir,
+  watch,
+  FSWatcher,
+  access,
+  realpath,
+  createReadStream,
+  createWriteStream,
 }

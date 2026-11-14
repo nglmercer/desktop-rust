@@ -19,6 +19,9 @@ import { collectRustLicenseInventory } from './rust-license-inventory'
 import { createIsolatedViteOutput } from './vite-output'
 import { acquireRustPackageLock } from './rust-package-lock'
 
+/** Load the Vite configs with Vite's module runner, which understands the TypeScript config graph. */
+const LOADER = ['--configLoader', 'runner'] as const
+
 type Platform = 'linux' | 'macos' | 'windows'
 type Architecture = 'x64' | 'arm64'
 
@@ -351,9 +354,9 @@ function packageRustWithOutput(
   const vite = path.join(repo, 'node_modules/vite/bin/vite.js')
   requiredFile(vite)
   for (const args of [
-    ['build'],
-    ['build', '-c', 'vite.highlighter.config.ts'],
-    ['build', '-c', 'vite.ipc-shim.config.ts'],
+    ['build', ...LOADER],
+    ['build', ...LOADER, '-c', 'vite.highlighter.config.ts'],
+    ['build', ...LOADER, '-c', 'vite.ipc-shim.config.ts'],
   ]) {
     const result = spawnSync(process.execPath, [vite, ...args], {
       cwd: repo,

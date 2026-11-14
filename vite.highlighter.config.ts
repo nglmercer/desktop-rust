@@ -94,8 +94,5 @@ export default defineConfig({
       formats: ['iife'],
       fileName: () => 'highlighter.js',
     },
-    rollupOptions: {
-      output: { inlineDynamicImports: true },
-    },
   },
 })

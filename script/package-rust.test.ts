@@ -403,16 +403,25 @@ describe('Rust packaging', () => {
     })
     expect(spawn.mock.calls.map(call => call[1])).toEqual([
       ['-vV'],
-      [path.join(root, 'node_modules/vite/bin/vite.js'), 'build'],
       [
         path.join(root, 'node_modules/vite/bin/vite.js'),
         'build',
+        '--configLoader',
+        'runner',
+      ],
+      [
+        path.join(root, 'node_modules/vite/bin/vite.js'),
+        'build',
+        '--configLoader',
+        'runner',
         '-c',
         'vite.highlighter.config.ts',
       ],
       [
         path.join(root, 'node_modules/vite/bin/vite.js'),
         'build',
+        '--configLoader',
+        'runner',
         '-c',
         'vite.ipc-shim.config.ts',
       ],

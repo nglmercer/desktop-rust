@@ -43,9 +43,9 @@
     "draft-release:format": "node --require ./script/ts-register.cjs script/draft-release/format-json-cli.ts changelog.json app/package.json && npm run validate-changelog --",
     "draft-release:pr": "node --require ./script/ts-register.cjs script/draft-release/draft-pull-request.ts",
     "validate-changelog": "node --require ./script/ts-register.cjs script/validate-changelog.ts",
-    "vite:dev": "vite",
-    "vite:build": "vite build && vite build -c vite.highlighter.config.ts && vite build -c vite.ipc-shim.config.ts",
-    "vite:preview": "vite preview",
+    "vite:dev": "vite --configLoader runner",
+    "vite:build": "vite build --configLoader runner && vite build --configLoader runner -c vite.highlighter.config.ts && vite build --configLoader runner -c vite.ipc-shim.config.ts",
+    "vite:preview": "vite preview --configLoader runner",
     "pnpm:install": "pnpm install"
   },
   "author": {

@@ -4,6 +4,9 @@ import { stopDevelopmentBuild } from './rust-dev-process'
 import { installDevelopmentStopSignals } from './rust-dev-signals'
 import { createIsolatedViteOutput } from './vite-output'
 
+/** Load the Vite configs with Vite's module runner, which understands the TypeScript config graph. */
+const LOADER = ['--configLoader', 'runner'] as const
+
 /** Build a production renderer and both Rust hosts without touching the dev bundle. */
 export async function buildRustProduction(
   repo: string,
@@ -61,9 +64,9 @@ export async function buildRustProduction(
   try {
     const vite = path.join(repo, 'node_modules/vite/bin/vite.js')
     for (const args of [
-      ['build'],
-      ['build', '-c', 'vite.highlighter.config.ts'],
-      ['build', '-c', 'vite.ipc-shim.config.ts'],
+      ['build', ...LOADER],
+      ['build', ...LOADER, '-c', 'vite.highlighter.config.ts'],
+      ['build', ...LOADER, '-c', 'vite.ipc-shim.config.ts'],
     ]) {
       await run(process.execPath, [vite, ...args])
     }
