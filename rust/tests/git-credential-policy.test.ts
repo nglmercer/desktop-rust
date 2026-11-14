@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -54,6 +55,227 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
       suite.assertActor()
       assert.ok(!existsSync(suite.nativeLog))
       suite.assertPrivateStorage(repo)
+    }, 120_000)
+
+    it('scopes reviewed HTTPS pulls to the assigned account and fences a changed rewrite', () => {
+      // Keep this Git integration independent of the user's Git environment,
+      // template hooks, and proxy configuration. The service only binds loopback.
+      const savedEnv = { ...suite.env }
+      const templates = path.join(suite.root, 'pull-empty-templates')
+      mkdirSync(templates)
+      for (const key of Object.keys(suite.env)) {
+        if (
+          /^GIT_/i.test(key) ||
+          /^(https?_proxy|all_proxy|no_proxy)$/i.test(key)
+        ) {
+          delete suite.env[key]
+        }
+      }
+      Object.assign(suite.env, {
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: suite.globalConfig,
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_TEMPLATE_DIR: templates,
+        GIT_SSL_CAINFO: suite.service.cert,
+        GIT_ASKPASS: 'false',
+      })
+      try {
+        suite.configure({ host: suite.service.host })
+        const repo = suite.seed('reviewed-pull-credentials')
+        repo.git('config', 'branch.main.remote', 'origin')
+        repo.git('config', 'branch.main.merge', 'refs/heads/main')
+        suite.assign(repo)
+        const remote = path.join(suite.service.projects, 'fork/repo.git')
+        const writer = path.join(suite.root, 'reviewed-pull-writer')
+        const git = (...args: string[]): string => {
+          const result = spawnSync(suite.realGit, args, {
+            env: suite.env,
+            encoding: 'utf8',
+            timeout: 20_000,
+          })
+          assert.ifError(result.error)
+          assert.equal(result.status, 0, result.stderr)
+          return result.stdout.trim()
+        }
+        git('clone', '-q', '--', remote, writer)
+        git('-C', writer, 'config', 'user.name', 'HTTPS Writer')
+        git('-C', writer, 'config', 'user.email', 'writer@example.invalid')
+        git('-C', writer, 'config', 'commit.gpgsign', 'false')
+        const advance = (content: string): void => {
+          writeFileSync(path.join(writer, 'file'), content)
+          git('-C', writer, 'add', 'file')
+          git('-C', writer, 'commit', '-qm', 'update fixture')
+          git('-C', writer, 'push', '-q', 'origin', 'main')
+        }
+        const request = {
+          remote: 'origin',
+          expected_url: `${suite.service.url}/fork/repo.git`,
+          no_verify: false,
+          report_progress: false,
+          require_hook_callbacks: false,
+        }
+        advance('assigned Alice\n')
+        const hook = path.join(repo.root, '.git/hooks/post-merge')
+        const encoded = Buffer.from(`AliceCase:${ALICE}`).toString('base64')
+        const probeResult = path.join(
+          suite.root,
+          'pull-hook-credential-result.json'
+        )
+        Object.assign(suite.env, {
+          CREDENTIALS_PULL_ACCOUNT: 'AliceCase',
+          CREDENTIALS_PULL_HOST: suite.service.host,
+          CREDENTIALS_PULL_PROBE: path.resolve(
+            'rust/tests/fixtures/pull-credential-hook.ts'
+          ),
+          CREDENTIALS_PULL_PROBE_OUTPUT: probeResult,
+        })
+        mkdirSync(path.dirname(hook), { recursive: true })
+        writeFileSync(
+          hook,
+          `#!/bin/sh\nprintf '%s\\n' '${ALICE}' 'Basic ${encoded}' >&2\nexec "$ACCOUNT_NODE" "$CREDENTIALS_PULL_PROBE"\n`,
+          { mode: 0o700 }
+        )
+        const preview = suite.rpc(repo, 'renderer_pull_preview', { request })
+        suite.clearTransport()
+        const invocation = suite.execute(['-C', repo.root, 'repo', '-'], {
+          payload: JSON.stringify({
+            method: 'renderer_pull',
+            request,
+            basis: preview.basis,
+          }),
+        })
+        assert.ok(!invocation.stdout.includes(encoded))
+        assert.ok(!invocation.stderr.includes(encoded))
+        const result = object(JSON.parse(invocation.stdout))
+        assert.equal(result.code, 0)
+        assert.equal(result.error_kind, null)
+        assert.equal(
+          readFileSync(path.join(repo.root, 'file'), 'utf8'),
+          'assigned Alice\n'
+        )
+        suite.assertActor()
+        suite.assertPrivateStorage(repo)
+        assert.ok(
+          !JSON.stringify({
+            service: suite.service.records(),
+            helper: suite.records(suite.nativeLog),
+            git: suite.records(suite.gitLog),
+          }).includes(encoded)
+        )
+        assert.deepEqual(JSON.parse(readFileSync(probeResult, 'utf8')), {
+          ownToken: true,
+          deniedOther: true,
+          deniedPrefix: true,
+        })
+
+        // A rewrite changed after review cannot send Alice's grant to another
+        // repository or update the worktree using the stale decision.
+        const stale = suite.rpc(repo, 'renderer_pull_preview', { request })
+        const rewrite = `url.${suite.service.url}/other/.insteadOf`
+        repo.git('config', rewrite, `${suite.service.url}/fork/`)
+        const before = repo.git('rev-parse', 'HEAD').toString()
+        suite.clearTransport()
+        try {
+          suite.rpc(
+            repo,
+            'renderer_pull',
+            { request, basis: stale.basis },
+            { fail: true }
+          )
+          assert.equal(repo.git('rev-parse', 'HEAD').toString(), before)
+          assert.ok(!suite.service.records().some(row => row.actor !== null))
+          assert.ok(!existsSync(suite.nativeLog))
+        } finally {
+          repo.git('config', '--unset-all', rewrite)
+        }
+
+        // Switching the assignment changes the token used by the same route.
+        suite.assign(repo, OTHER)
+        suite.service.update({
+          allowed: {
+            ...suite.service.control.allowed,
+            '/fork/repo.git': 'bobcase',
+          },
+        })
+        suite.env.CREDENTIALS_PULL_ACCOUNT = 'BobCase'
+        advance('assigned Bob\n')
+        const bobPreview = suite.rpc(repo, 'renderer_pull_preview', { request })
+        rmSync(probeResult)
+        suite.clearTransport()
+        assert.equal(
+          suite.rpc(repo, 'renderer_pull', { request, basis: bobPreview.basis })
+            .code,
+          0
+        )
+        assert.equal(
+          readFileSync(path.join(repo.root, 'file'), 'utf8'),
+          'assigned Bob\n'
+        )
+        suite.assertActor('bobcase')
+        suite.assertPrivateStorage(repo)
+        assert.deepEqual(JSON.parse(readFileSync(probeResult, 'utf8')), {
+          ownToken: true,
+          deniedOther: true,
+          deniedPrefix: true,
+        })
+
+        suite.assign(repo, NONE)
+        const disabledPreview = suite.rpc(repo, 'renderer_pull_preview', {
+          request,
+        })
+        const disabledHead = repo.git('rev-parse', 'HEAD').toString()
+        suite.clearTransport()
+        suite.rpc(
+          repo,
+          'renderer_pull',
+          { request, basis: disabledPreview.basis },
+          { fail: true }
+        )
+        assert.equal(repo.git('rev-parse', 'HEAD').toString(), disabledHead)
+        assert.ok(!suite.service.records().some(row => row.actor !== null))
+        assert.ok(!existsSync(suite.nativeLog))
+
+        // A previously assigned but signed-out account must not fall back to
+        // the ambient user or a native helper.
+        suite.assign(repo)
+        suite.update({ signed_out: ['AliceCase'] })
+        const signedOutPreview = suite.rpc(repo, 'renderer_pull_preview', {
+          request,
+        })
+        const signedOutHead = repo.git('rev-parse', 'HEAD').toString()
+        suite.clearTransport()
+        suite.rpc(
+          repo,
+          'renderer_pull',
+          { request, basis: signedOutPreview.basis },
+          { fail: true }
+        )
+        assert.equal(repo.git('rev-parse', 'HEAD').toString(), signedOutHead)
+        assert.ok(!suite.service.records().some(row => row.actor !== null))
+        assert.ok(!existsSync(suite.nativeLog))
+        suite.update({ signed_out: [] })
+
+        // Current recursive Pull deliberately refuses existing gitlinks
+        // before any transfer; parent credentials must not reach a child.
+        const oid = repo.git('rev-parse', 'HEAD').toString().trim()
+        repo.git('update-index', '--add', '--cacheinfo', `160000,${oid},nested`)
+        const indexBefore = repo.git('ls-files', '--stage', '-z')
+        suite.clearTransport()
+        const blocked = suite.rpc(repo, 'renderer_pull_preview', { request })
+        assert.equal(blocked.kind, 'unsupported_submodules')
+        suite.rpc(
+          repo,
+          'renderer_pull',
+          { request, basis: 'unused' },
+          { fail: true }
+        )
+        assert.deepEqual(repo.git('ls-files', '--stage', '-z'), indexBefore)
+        assert.ok(!suite.service.records().some(row => row.actor !== null))
+        assert.ok(!existsSync(suite.nativeLog))
+      } finally {
+        for (const key of Object.keys(suite.env)) delete suite.env[key]
+        Object.assign(suite.env, savedEnv)
+      }
     }, 120_000)
 
     it('scopes assigned credentials to reviewed remote HEAD discovery', () => {

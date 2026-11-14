@@ -2863,6 +2863,14 @@ output observers and unsupported Wry proxy configurations likewise retain the
 existing Wry path before mutation. Once Git starts, an uncertain result is
 reported without retrying Pull.
 
+An isolated loopback HTTPS test exercises reviewed Pull through the Rust CLI
+with two assigned accounts. A real Git hook obtains credentials only for the
+reviewed repository, and a changed URL rewrite, a disabled or signed-out
+account, and an existing submodule do not transfer credentials. Synthetic
+secrets and their Basic encoding are checked against CLI output and fixture
+records. This test does not exercise HTTPS progress streaming through Wry or
+WebSocket, or an HTTPS helper inside a submodule.
+
 The reviewed path rejects existing or configured submodules before mutation,
 because recursive credentials are not yet proven isolated. A real Git test
 covers a newly introduced, uninitialized gitlink, but this does not establish
