@@ -44,7 +44,7 @@
     "lint": "npm run prettier && npm run lint:src && npm run lint:biome --",
     "lint:biome": "biome check .",
     "lint:fix": "npm run prettier -- --write && npm run lint:src:fix && biome check --write . --",
-    "markdownlint": "markdownlint **/*.{md,mdx} --config .markdownlint.json --rules .markdownlint-rules.js --ignore node_modules --ignore gemoji",
+    "markdownlint": "node --import tsx node_modules/markdownlint-cli/markdownlint.js **/*.{md,mdx} --config .markdownlint.json --rules .markdownlint-rules.ts --ignore node_modules --ignore gemoji",
     "prettier": "prettier --check \"./**/*.{ts,tsx,js,json,jsx,scss,html,yaml,yml}\" \"./eslint-rules/**/*.mts\"",
     "lint:src": "npm run lint:security && npm run eslint-check && npm run eslint --",
     "lint:src:fix": "npm run lint:security && npm run eslint -- --fix",
