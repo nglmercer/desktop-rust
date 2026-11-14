@@ -1,48 +1,50 @@
-const { execFileSync } = require('node:child_process')
-const fs = require('node:fs')
-const path = require('node:path')
+import { execFileSync } from 'node:child_process'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+
+const sourceDirectory = path.resolve(__dirname, '../vendor/printenvz')
 
 /** Return the path to the installed environment printer. */
-function getPrintenvzPath() {
+export function getPrintenvzPath(directory = sourceDirectory): string {
   return path.join(
-    __dirname,
+    directory,
     'build',
     'Release',
     process.platform === 'win32' ? 'printenvz.exe' : 'printenvz'
   )
 }
-
-function resolveRustTarget(host, platform, architecture) {
+export function resolveRustTarget(host: string, platform: string, architecture: string): string {
   if (!['x64', 'arm64', 'ia32', 'arm'].includes(architecture)) {
     throw new Error(
       `Unsupported printenvz cross target: ${host} to ${architecture}`
     )
   }
   const native = host.split('-', 1)[0]
-  const nativeArchitecture = {
+  const nativeArchitectures: Record<string, string> = {
     x86_64: 'x64',
     aarch64: 'arm64',
     i686: 'ia32',
     i586: 'ia32',
     arm: 'arm',
     armv7: 'arm',
-  }[native]
+  }
+  const nativeArchitecture = nativeArchitectures[native]
   if (architecture === nativeArchitecture) return host
 
   if (platform === 'darwin' && host.endsWith('-apple-darwin')) {
-    const target = {
+    const target: Record<string, string> = {
       x64: 'x86_64-apple-darwin',
       arm64: 'aarch64-apple-darwin',
-    }[architecture]
-    if (target) return target
+    }
+    if (target[architecture]) return target[architecture]
   }
   if (platform === 'win32' && host.endsWith('-pc-windows-msvc')) {
-    const target = {
+    const target: Record<string, string> = {
       x64: 'x86_64-pc-windows-msvc',
       arm64: 'aarch64-pc-windows-msvc',
       ia32: 'i686-pc-windows-msvc',
-    }[architecture]
-    if (target) return target
+    }
+    if (target[architecture]) return target[architecture]
   }
   if (platform === 'linux' && ['x86_64', 'aarch64'].includes(native)) {
     const suffix = host.endsWith('-unknown-linux-gnu')
@@ -50,24 +52,25 @@ function resolveRustTarget(host, platform, architecture) {
       : host.endsWith('-unknown-linux-musl')
       ? '-unknown-linux-musl'
       : undefined
-    const target = { x64: 'x86_64', arm64: 'aarch64' }[architecture]
+    const targets: Record<string, string> = { x64: 'x86_64', arm64: 'aarch64' }
+    const target = targets[architecture]
     if (suffix && target) return target + suffix
   }
   if (platform === 'android') {
-    const target = {
+    const target: Record<string, string> = {
       x64: 'x86_64-linux-android',
       arm64: 'aarch64-linux-android',
       ia32: 'i686-linux-android',
       arm: 'armv7-linux-androideabi',
-    }[architecture]
-    if (target) return target
+    }
+    if (target[architecture]) return target[architecture]
   }
   throw new Error(
     `Unsupported printenvz cross target: ${host} to ${architecture}`
   )
 }
 
-function build() {
+export function buildPrintenvz(directory = sourceDirectory): void {
   const rustc = process.env.RUSTC || 'rustc'
   const cargo = process.env.CARGO || 'cargo'
   const version = execFileSync(rustc, ['-vV'], { encoding: 'utf8' })
@@ -105,13 +108,13 @@ function build() {
   }
   const architecture = cpu || arch || targetArch || process.arch
   const target = resolveRustTarget(host, process.platform, architecture)
-  const targetDir = path.join(__dirname, 'build', 'cargo')
+  const targetDir = path.join(directory, 'build', 'cargo')
   execFileSync(
     cargo,
     [
       'build',
       '--manifest-path',
-      path.join(__dirname, 'Cargo.toml'),
+      path.join(directory, 'Cargo.toml'),
       '--locked',
       '--release',
       '--target',
@@ -119,7 +122,7 @@ function build() {
       '--target-dir',
       targetDir,
     ],
-    { cwd: __dirname, stdio: 'inherit' }
+    { cwd: directory, stdio: 'inherit' }
   )
   const executable = path.join(
     targetDir,
@@ -127,7 +130,7 @@ function build() {
     'release',
     process.platform === 'win32' ? 'printenvz.exe' : 'printenvz'
   )
-  const destination = getPrintenvzPath()
+  const destination = getPrintenvzPath(directory)
   fs.mkdirSync(path.dirname(destination), { recursive: true })
   const temporary = `${destination}.${process.pid}.tmp`
   try {
@@ -137,15 +140,3 @@ function build() {
     fs.rmSync(temporary, { force: true })
   }
 }
-
-if (require.main === module) {
-  if (process.argv[2] === '--build') {
-    build()
-  } else if (process.argv[2] === '--clean') {
-    fs.rmSync(path.join(__dirname, 'build'), { recursive: true, force: true })
-  } else {
-    throw new Error('Expected --build or --clean')
-  }
-}
-
-module.exports = { getPrintenvzPath, buildPrintenvz: build, resolveRustTarget }

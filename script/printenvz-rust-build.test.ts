@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
+  cpSync,
   copyFileSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -15,6 +15,7 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'vitest'
+import { resolveRustTarget } from './printenvz'
 
 const directories: string[] = []
 afterEach(() => {
@@ -26,10 +27,8 @@ afterEach(() => {
 function fixture() {
   const root = mkdtempSync(path.join(tmpdir(), 'printenvz build '))
   directories.push(root)
-  copyFileSync(
-    path.resolve('vendor/printenvz/index.js'),
-    path.join(root, 'index.js')
-  )
+  const driver = path.join(root, 'build.ts')
+  writeFileSync(driver, `import { buildPrintenvz } from ${JSON.stringify(path.resolve('script/printenvz.ts'))}\nbuildPrintenvz(${JSON.stringify(root)})\n`)
   const rustc = path.join(root, 'fake rustc')
   const cargo = path.join(root, 'fake cargo')
   const capture = path.join(root, 'cargo-args')
@@ -53,7 +52,7 @@ function fixture() {
   mkdirSync(path.dirname(targetBinary), { recursive: true })
   writeFileSync(targetBinary, 'arm64 binary')
   const invoke = (extra: NodeJS.ProcessEnv = {}) =>
-    spawnSync(process.execPath, [path.join(root, 'index.js'), '--build'], {
+    spawnSync(process.execPath, ['--import', require.resolve('tsx'), driver], {
       cwd: root,
       env: {
         ...process.env,
@@ -103,20 +102,14 @@ describe.skipIf(process.platform !== 'linux')(
       assert.equal(readFileSync(output, 'utf8'), 'previous binary')
     })
 
-    describe.skipIf(process.platform !== 'linux')('Installed printenvz', () => {
-      it('builds the copied file dependency explicitly and loads it through getShellEnv', async () => {
+    describe.skipIf(process.platform !== 'linux')('Copied Rust helper', () => {
+      it('builds the copied source explicitly and loads it through getShellEnv', async () => {
         const root = mkdtempSync(path.join(tmpdir(), "printenvz installed ' "))
         directories.push(root)
         const source = path.resolve('vendor/printenvz')
-        writeFileSync(
-          path.join(root, 'package.json'),
-          JSON.stringify({
-            name: 'printenvz-install-fixture',
-            version: '1.0.0',
-            private: true,
-            dependencies: { printenvz: `file:${source}` },
-          })
-        )
+        copyFileSync(path.join(source, 'Cargo.toml'), path.join(root, 'Cargo.toml'))
+        copyFileSync(path.join(source, 'Cargo.lock'), path.join(root, 'Cargo.lock'))
+        cpSync(path.join(source, 'src'), path.join(root, 'src'), { recursive: true })
         const env = { ...process.env }
         delete env.TARGET_ARCH
         for (const key of Object.keys(env)) {
@@ -124,36 +117,13 @@ describe.skipIf(process.platform !== 'linux')(
             delete env[key]
           }
         }
-        const npm = (...args: string[]) => {
-          const result = spawnSync('npm', args, {
-            cwd: root,
-            env,
-            encoding: 'utf8',
-            timeout: 30_000,
-          })
-          assert.equal(result.status, 0, result.stderr)
-        }
-        npm(
-          'install',
-          '--package-lock-only',
-          '--ignore-scripts',
-          '--offline',
-          '--no-audit',
-          '--no-fund',
-          '--install-links'
-        )
-        npm('ci', '--offline', '--no-audit', '--no-fund', '--install-links')
-        const installed = path.join(root, 'node_modules/printenvz')
-        assert.equal(lstatSync(installed).isSymbolicLink(), false)
-        const binary = path.join(installed, 'build/Release/printenvz')
-        assert.equal(
-          existsSync(binary),
-          false,
-          'npm ci must not implicitly build the dependency'
-        )
+        const binary = path.join(root, 'build/Release/printenvz')
+        assert.equal(existsSync(binary), false)
+        const driver = path.join(root, 'build.ts')
+        writeFileSync(driver, `import { buildPrintenvz } from ${JSON.stringify(path.resolve('script/printenvz.ts'))}\nbuildPrintenvz(${JSON.stringify(root)})\n`)
         const build = spawnSync(
           process.execPath,
-          [path.join(installed, 'index.js'), '--build'],
+          ['--import', require.resolve('tsx'), driver],
           {
             cwd: root,
             env,
@@ -239,8 +209,6 @@ describe.skipIf(process.platform !== 'linux')(
 )
 
 describe('Rust target selection', () => {
-  const { resolveRustTarget } = require('../vendor/printenvz')
-
   it('preserves native ARM ABI and rejects unsafe substitutions', () => {
     assert.equal(
       resolveRustTarget('arm-unknown-linux-gnueabihf', 'linux', 'arm'),

@@ -102,9 +102,6 @@ importers:
       prettier:
         specifier: ^2.6.0
         version: 2.8.8
-      printenvz:
-        specifier: file:vendor/printenvz
-        version: file:vendor/printenvz
       process-proxy:
         specifier: ^0.6.0
         version: 0.6.0
@@ -4505,9 +4502,6 @@ packages:
 
   primer-support@4.7.2:
     resolution: {integrity: sha512-WbfjjITtGV6iXQeaVPL+AzHj1Jv9RHJRp7kIu5ebFXwolWmCqTBpA/8VmWmssyeTfv8zR7iuCoT0UoBF+uGHww==}
-
-  printenvz@file:vendor/printenvz:
-    resolution: {directory: vendor/printenvz, type: directory}
 
   process-nextick-args@2.0.1:
     resolution: {integrity: sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==}
@@ -10072,8 +10066,6 @@ snapshots:
       react-is: 17.0.2
 
   primer-support@4.7.2: {}
-
-  printenvz@file:vendor/printenvz: {}
 
   process-nextick-args@2.0.1: {}
 

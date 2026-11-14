@@ -1,5 +1,12 @@
 # Full migration and legacy-removal ledger
 
+The legacy Electron packaging helper for `printenvz` now builds the checked-in
+Rust source directly through a TypeScript script. Its separate JavaScript npm
+package and local file dependency were removed. Native host and supported
+cross-target selection remain checked before building, and a failed build leaves
+the previous executable intact. The copied-source installer and shell loader
+are exercised on Linux; macOS and Windows builds remain unverified.
+
 Within one Rust host, state snapshots are published to disk and the renderer
 in order, and local-storage updates are serialized through their writes. This
 does not coordinate separate host processes sharing the same data directory.
@@ -22,15 +29,13 @@ TypeScript `gh` fixture. It retains the CLI and authenticated WebSocket checks,
 including request bodies, invalid input, process failures, and redaction. The
 corresponding Python suite has been removed.
 
-The legacy hook environment printer now uses Rust instead of C and node-gyp,
-while retaining its existing package API and executable layout. Legacy npm setup
-and packaging explicitly compile the installed package with Cargo; the requested
-Rust target and any cross-linker must be available. On Linux x64, valid Unix
+The legacy hook environment printer now uses Rust instead of C and node-gyp.
+Legacy npm setup and packaging explicitly compile the checked-in source with
+Cargo; the requested Rust target and any cross-linker must be available. On Linux x64, valid Unix
 environment name/value pairs matched the previous output byte for byte,
 including non-UTF-8 bytes; entries without a name are omitted. An npm file
 dependency was installed and built explicitly, and the actual shell environment
-loader was exercised with the resulting executable. A separate pnpm file
-dependency installation and explicit build also passed. Target selection has
+loader was exercised with the resulting executable. Target selection has
 simulated coverage, but macOS, Windows and cross-architecture builds have not
 been validated. This replaces the legacy helper, not the remaining hook
 environment integration in the Rust host.

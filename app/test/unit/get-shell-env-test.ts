@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getShellEnv } from '../../src/lib/hooks/get-shell-env'
 import { SupportedHooksEnvShell } from '../../src/lib/hooks/config'
-import { buildPrintenvz, getPrintenvzPath } from 'printenvz'
+import { buildPrintenvz, getPrintenvzPath } from '../../../script/printenvz'
 
 describe('getShellEnv', () => {
   beforeAll(() => buildPrintenvz(), 120_000)

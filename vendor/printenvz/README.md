@@ -5,9 +5,9 @@ NUL-delimited format consumed by Desktop's hook environment loader. It is
 implemented in Rust and preserves bytes in valid environment name/value pairs on
 Unix, including values that are not UTF-8. Empty-name entries are omitted.
 
-The package exports `getPrintenvzPath()`, which returns the installed executable
-at `build/Release/printenvz` (or `printenvz.exe` on Windows). Existing builds
-copy that executable into the application output directory.
+The TypeScript build helper in `script/printenvz.ts` builds the executable at
+`build/Release/printenvz` (or `printenvz.exe` on Windows). The legacy app build
+copies it into the application output directory.
 
 The Electron npm setup and build explicitly compile this helper using Cargo;
 dependency installation does not run an implicit build script. The installer

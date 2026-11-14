@@ -9,5 +9,5 @@ license = "MIT"
 name = "printenvz"
 path = "src/main.rs"
 
-# This local package is also installed outside the repository workspace.
+# Keep the helper independently buildable from the root Cargo workspace.
 [workspace]

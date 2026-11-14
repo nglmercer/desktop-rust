@@ -4,6 +4,7 @@ import * as Path from 'path'
 import { spawnSync, SpawnSyncOptions } from 'child_process'
 
 import { getAppInstallCommands, getNpmCommand, isPnpmInstall } from './npm'
+import { buildPrintenvz } from './printenvz'
 
 // pnpm owns both workspace projects. Its install is the Rust/Vite workflow;
 // the separate npm app install and Electron setup below are only for the
@@ -46,18 +47,7 @@ for (const args of getAppInstallCommands()) {
 
 // Build the Rust helper explicitly: npm and pnpm may suppress dependency
 // lifecycle scripts, while the Electron build still requires this executable.
-const printenvzInstallScript = require.resolve('printenvz')
-const printenvz = spawnSync(
-  process.execPath,
-  [printenvzInstallScript, '--build'],
-  options
-)
-if (printenvz.status !== 0) {
-  console.error(
-    printenvz.error ?? 'Failed to compile the printenvz Rust helper'
-  )
-  process.exit(printenvz.status || 1)
-}
+buildPrintenvz()
 
 // Electron >= 42 no longer downloads its prebuilt binary in its own
 // postinstall; do it eagerly so scripts that read node_modules/electron/dist

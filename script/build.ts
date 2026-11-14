@@ -5,7 +5,7 @@ import * as cp from 'child_process'
 import frontMatter from 'front-matter'
 import * as os from 'os'
 import * as path from 'path'
-import { getPrintenvzPath } from 'printenvz'
+import { buildPrintenvz, getPrintenvzPath } from './printenvz'
 import { getProxyCommandPath } from 'process-proxy'
 import { packagedExternals } from '../app/build-externals'
 
@@ -461,12 +461,6 @@ function copyDependencies() {
 
   console.log('  Copying printenvz binary')
   // Installs with lifecycle scripts disabled may not have built this helper.
-  const buildPrintenvz: unknown = require('printenvz').buildPrintenvz
-  if (typeof buildPrintenvz !== 'function') {
-    throw new Error(
-      'The installed printenvz package is outdated; reinstall dependencies'
-    )
-  }
   buildPrintenvz()
   cpSync(
     getPrintenvzPath(),
