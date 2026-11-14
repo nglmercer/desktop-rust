@@ -1,4 +1,5 @@
 [
+  "app/test/unit/copilot-app-test.ts",
   "rust/tests/wry-pull.test.ts",
   "app/test/unit/rust-pull-progress-ownership-test.ts",
   "rust/tests/pull-websocket.test.ts",
