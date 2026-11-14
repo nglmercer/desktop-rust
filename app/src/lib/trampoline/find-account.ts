@@ -1,9 +1,9 @@
 import memoizeOne from 'memoize-one'
 import { getHTMLURL } from '../api'
 import { getGenericPassword, getGenericUsername } from '../generic-git-auth'
-import { AccountsStore } from '../stores'
+import type { AccountsStore } from '../stores'
 import { urlWithoutCredentials } from './url-without-credentials'
-import { Account } from '../../models/account'
+import type { Account } from '../../models/account'
 
 /**
  * When we're asked for credentials we're typically first asked for the username

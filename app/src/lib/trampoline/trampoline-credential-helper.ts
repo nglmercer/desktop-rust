@@ -1,9 +1,9 @@
-import { AccountsStore, RepositoriesStore } from '../stores'
-import { Account, isSameAccount } from '../../models/account'
-import { Repository } from '../../models/repository'
+import type { AccountsStore, RepositoriesStore } from '../stores'
+import { type Account, isSameAccount } from '../../models/account'
+import type { Repository } from '../../models/repository'
 import { getAccountForRepository } from '../get-account-for-repository'
 import { matchExistingRepository } from '../repository-matching'
-import { TrampolineCommandHandler } from './trampoline-command'
+import type { TrampolineCommandHandler } from './trampoline-command'
 import { forceUnwrap } from '../fatal-error'
 import {
   approveCredential,
@@ -20,12 +20,12 @@ import {
   holdCredentialLease,
   setHasRejectedCredentialsForEndpoint,
 } from './trampoline-environment'
-import { useExternalCredentialHelper } from './use-external-credential-helper'
+import { useExternalCredentialHelper as externalCredentialHelperEnabled } from './use-external-credential-helper'
 import {
   findGenericTrampolineAccount,
   findGitHubTrampolineAccount,
 } from './find-account'
-import { IGitAccount } from '../../models/git-account'
+import type { IGitAccount } from '../../models/git-account'
 import {
   deleteGenericCredential,
   setGenericCredential,
@@ -192,7 +192,7 @@ async function getCredential(
     return undefined
   }
 
-  return useExternalCredentialHelper()
+  return externalCredentialHelperEnabled()
     ? getExternalCredential(cred, token)
     : getGenericCredential(cred, token)
 }
@@ -247,7 +247,7 @@ async function storeCredential(cred: Credential, store: Store, token: string) {
     return
   }
 
-  return useExternalCredentialHelper()
+  return externalCredentialHelperEnabled()
     ? storeExternalCredential(cred, token)
     : setGenericCredential(
         urlWithoutCredentials(getCredentialUrl(cred)),
@@ -267,7 +267,7 @@ async function eraseCredential(cred: Credential, store: Store, token: string) {
     return
   }
 
-  return useExternalCredentialHelper()
+  return externalCredentialHelperEnabled()
     ? eraseExternalCredential(cred, token)
     : deleteGenericCredential(
         urlWithoutCredentials(getCredentialUrl(cred)),

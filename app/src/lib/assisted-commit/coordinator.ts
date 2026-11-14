@@ -1,17 +1,17 @@
 import { randomUUID } from 'crypto'
 import {
-  AssistedCommitRunOutcome,
+  type AssistedCommitRunOutcome,
   isAssistedCommitRepositoryLocked,
 } from '../../models/assisted-commit-run'
-import { ICopilotAssistedCommitRequest } from '../../models/copilot-assisted-commit'
-import { Repository } from '../../models/repository'
+import type { ICopilotAssistedCommitRequest } from '../../models/copilot-assisted-commit'
+import type { Repository } from '../../models/repository'
 import { freezeAssistedCommitRequest } from '../assisted-commit-request'
 import {
   acceptVerifiedAssistedCommitTransaction,
   AssistedCommitError,
-  AssistedCommitProgress,
+  type AssistedCommitProgress,
   finalizeAssistedCommitTransaction,
-  IAssistedCommitResult,
+  type IAssistedCommitResult,
 } from '../git/assisted-commit'
 import {
   isRepositoryAffectedByAssistedCommit,
@@ -20,28 +20,28 @@ import {
   withoutRepositoryGitAccess,
   withRepositoryGitErrorPropagation,
 } from '../git/repository-operation'
-import { PopupManager } from '../popup-manager'
-import { AccountsStore } from '../stores/accounts-store'
-import { CopilotStore } from '../stores/copilot-store'
-import { RepositoryStateCache } from '../stores/repository-state-cache'
+import type { PopupManager } from '../popup-manager'
+import type { AccountsStore } from '../stores/accounts-store'
+import type { CopilotStore } from '../stores/copilot-store'
+import type { RepositoryStateCache } from '../stores/repository-state-cache'
 import { AssistedCommitContext } from './context'
 import { AssistedCommitDialogs } from './dialogs'
 import { executeAssistedCommitRun } from './execution'
 import { AssistedCommitReaders } from './readers'
 import {
-  AssistedCommitRecovery,
+  type AssistedCommitRecovery,
   createAssistedCommitRecovery,
 } from './recovery'
 import { AssistedCommitSelection } from './selection'
 import { AssistedCommitState } from './state'
 import { AssistedCommitPush } from './push'
 import {
-  AssistedCommitModelResolver,
+  type AssistedCommitModelResolver,
   createAssistedCommitSettlement,
-  IAssistedCommitConfiguration,
-  IAssistedCommitEvents,
-  IAssistedCommitRepository,
-  IAssistedCommitRun,
+  type IAssistedCommitConfiguration,
+  type IAssistedCommitEvents,
+  type IAssistedCommitRepository,
+  type IAssistedCommitRun,
 } from './types'
 
 /** One awaited request composes feature-owned execution, selection and recovery. */

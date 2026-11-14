@@ -1,5 +1,5 @@
 import { DiffSelectionType, DiffType } from '../../models/diff'
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import { WorkingDirectoryStatus } from '../../models/status'
 import { ChangesSelectionKind } from '../app-state'
 import { getAssistedCommitInputVersions } from '../assisted-commit-request'
@@ -9,9 +9,9 @@ import {
   AssistedCommitError,
   readAssistedCommitHead,
 } from '../git/assisted-commit'
-import { AssistedCommitSelection, sameSelectionDiff } from './selection'
-import { AssistedCommitState } from './state'
-import { IAssistedCommitRun } from './types'
+import { type AssistedCommitSelection, sameSelectionDiff } from './selection'
+import type { AssistedCommitState } from './state'
+import type { IAssistedCommitRun } from './types'
 import { verifyRepositoryGitSpawnFence } from '../git/repository-operation'
 
 /** Result of verifying and installing the current display diff. */

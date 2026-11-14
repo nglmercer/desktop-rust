@@ -3,8 +3,8 @@ import {
   setMostRecentSSHKeyPassphrase,
   setSSHKeyPassphrase,
 } from '../ssh/ssh-key-passphrase'
-import { AccountsStore } from '../stores/accounts-store'
-import { TrampolineCommandHandler } from './trampoline-command'
+import type { AccountsStore } from '../stores/accounts-store'
+import type { TrampolineCommandHandler } from './trampoline-command'
 import { trampolineUIHelper } from './trampoline-ui-helper'
 import { parseAddSSHHostPrompt } from '../ssh/ssh'
 import {

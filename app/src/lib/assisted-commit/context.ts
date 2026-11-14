@@ -1,12 +1,12 @@
 import {
-  Account,
+  type Account,
   CopilotLicenseTypeNoAccess,
   isSameAccount,
 } from '../../models/account'
 import { isAssistedCommitRunBusy } from '../../models/assisted-commit-run'
 import { DiffSelectionType } from '../../models/diff'
 import {
-  Repository,
+  type Repository,
   getRepositoryAccountIdentity,
 } from '../../models/repository'
 import { tipEquals } from '../../models/tip'
@@ -25,18 +25,18 @@ import {
 import { getAccountForCommitMessageGeneration } from '../get-account-for-repository'
 import {
   AssistedCommitError,
-  AssistedCommitProgress,
+  type AssistedCommitProgress,
   checkAssistedCommitCancellation,
 } from '../git/assisted-commit'
-import { AccountsStore } from '../stores/accounts-store'
+import type { AccountsStore } from '../stores/accounts-store'
 import {
-  CopilotModelRequest,
-  CopilotStore,
+  type CopilotModelRequest,
+  type CopilotStore,
   getCopilotAccountCacheKey,
 } from '../stores/copilot-store'
 import { assistedCommitHeadMatches } from './selection'
-import { AssistedCommitState } from './state'
-import {
+import type { AssistedCommitState } from './state'
+import type {
   AssistedCommitModelResolver,
   IAssistedCommitConfiguration,
   IAssistedCommitRun,
@@ -72,9 +72,9 @@ export class AssistedCommitContext {
       modelSelection:
         account === undefined
           ? null
-          : settings.models.get(getCopilotAccountCacheKey(account))?.[
+          : (settings.models.get(getCopilotAccountCacheKey(account))?.[
               'commit-message-generation'
-            ] ?? null,
+            ] ?? null),
     }
   }
 
@@ -302,7 +302,7 @@ export class AssistedCommitContext {
   public providerRevision(selection: string | null): number {
     const key = selection === null ? null : parseModelKey(selection)
     return key?.kind === 'byok'
-      ? this.providerRevisions.get(key.providerId) ?? 0
+      ? (this.providerRevisions.get(key.providerId) ?? 0)
       : 0
   }
 

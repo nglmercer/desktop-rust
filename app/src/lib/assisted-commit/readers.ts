@@ -7,11 +7,11 @@ import {
   withAcceptedAliasFence,
 } from './push-ownership'
 import { Repository } from '../../models/repository'
-import { WorkingDirectoryFileChange } from '../../models/status'
+import type { WorkingDirectoryFileChange } from '../../models/status'
 import { ChangesSelectionKind } from '../app-state'
 import { assistedCommitErrorCauses } from '../assisted-commit-run'
 import { ErrorWithMetadata } from '../error-with-metadata'
-import { IStatusResult } from '../git'
+import type { IStatusResult } from '../git'
 import { AssistedCommitError } from '../git/assisted-commit'
 import {
   getAssistedCommitProtectedPaths,
@@ -23,16 +23,16 @@ import {
   withRepositoryGitOperation,
 } from '../git/repository-operation'
 import { updateChangedFiles } from '../stores/updates/changes-state'
-import { AssistedCommitContext } from './context'
-import { AssistedCommitSelection } from './selection'
+import type { AssistedCommitContext } from './context'
+import type { AssistedCommitSelection } from './selection'
 import { updateWorkingDirectorySelectionDiff } from './selection-display'
-import { AssistedCommitState } from './state'
+import type { AssistedCommitState } from './state'
 import {
   createAssistedCommitSettlement,
-  IAssistedCommitConfiguration,
-  IAssistedCommitRepository,
-  IAssistedCommitRun,
-  IAssistedCommitSettlement,
+  type IAssistedCommitConfiguration,
+  type IAssistedCommitRepository,
+  type IAssistedCommitRun,
+  type IAssistedCommitSettlement,
 } from './types'
 
 /** Owns associated readers, deferred refresh delivery and manual selection consumption. */
@@ -290,8 +290,8 @@ export class AssistedCommitReaders {
       retainedRun.pushDestination?.kind === 'configured'
         ? retainedRun
         : assisted?.finalized && assisted.pushDestination?.kind === 'configured'
-        ? assisted
-        : undefined
+          ? assisted
+          : undefined
     if (
       deferred === undefined ||
       this.historyReaders.has(repository.id) ||
@@ -479,9 +479,11 @@ export class AssistedCommitReaders {
       await getAssistedCommitProtectedPaths(repository.path)
     } else if (
       assistedRun !== undefined ||
-      this.state.cache.get(repository).changesState.workingDirectory.files.some(file =>
-        this.selections.hasRestored(file.selection)
-      )
+      this.state.cache
+        .get(repository)
+        .changesState.workingDirectory.files.some(file =>
+          this.selections.hasRestored(file.selection)
+        )
     ) {
       requireRepositoryGitAsyncOwnership()
     }

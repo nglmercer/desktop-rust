@@ -1,7 +1,7 @@
-import { createServer, AddressInfo, Server, Socket } from 'net'
+import { createServer, type AddressInfo, type Server, type Socket } from 'net'
 import split2 from 'split2'
 import { sendNonFatalException } from '../helpers/non-fatal-exception'
-import {
+import type {
   ITrampolineCommand,
   TrampolineCommandHandler,
   TrampolineCommandIdentifier,

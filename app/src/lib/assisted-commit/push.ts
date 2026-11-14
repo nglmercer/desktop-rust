@@ -1,17 +1,17 @@
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import { Branch, BranchType } from '../../models/branch'
 import { TipState } from '../../models/tip'
-import { AssistedCommitRunOutcome } from '../../models/assisted-commit-run'
-import { IRepositoryState } from '../app-state'
+import type { AssistedCommitRunOutcome } from '../../models/assisted-commit-run'
+import type { IRepositoryState } from '../app-state'
 import { assistedCommitErrorCauses } from '../assisted-commit-run'
 import {
   AssistedCommitError,
-  IAssistedCommitResult,
+  type IAssistedCommitResult,
   acceptVerifiedAssistedCommitTransaction,
   prepareAssistedCommitTransactionForPush,
 } from '../git/assisted-commit'
 import {
-  AssistedCommitPushDestination,
+  type AssistedCommitPushDestination,
   AssistedCommitPushError,
   completeAssistedCommitPushPublication,
   prepareAssistedCommitPushDestination,
@@ -30,16 +30,16 @@ import {
   withRepositoryGitOperation,
   withRepositoryGitSpawnFence,
 } from '../git/repository-operation'
-import { AssistedCommitContext } from './context'
-import { AssistedCommitDialogs } from './dialogs'
-import { AssistedCommitReaders } from './readers'
-import { AssistedCommitRecovery } from './recovery'
-import { AssistedCommitState } from './state'
+import type { AssistedCommitContext } from './context'
+import type { AssistedCommitDialogs } from './dialogs'
+import type { AssistedCommitReaders } from './readers'
+import type { AssistedCommitRecovery } from './recovery'
+import type { AssistedCommitState } from './state'
 import {
   createAssistedCommitSettlement,
-  IAssistedCommitRun,
-  IAssistedCommitRepository,
-  AssistedCommitPushOutcome,
+  type IAssistedCommitRun,
+  type IAssistedCommitRepository,
+  type AssistedCommitPushOutcome,
 } from './types'
 import { withAcceptedAliasFence } from './push-ownership'
 
@@ -68,10 +68,10 @@ export class AssistedCommitPush {
       tip.kind === TipState.Valid
         ? tip.branch.ref
         : tip.kind === TipState.Unborn
-        ? tip.ref.startsWith('refs/heads/')
-          ? tip.ref
-          : `refs/heads/${tip.ref}`
-        : null
+          ? tip.ref.startsWith('refs/heads/')
+            ? tip.ref
+            : `refs/heads/${tip.ref}`
+          : null
     return readAssistedCommitPushDestination(repository, ref)
   }
 
@@ -527,6 +527,7 @@ export class AssistedCommitPush {
         run.lease = undefined
         await this.readers.finish(run)
         if (run.selectionReadError !== undefined) {
+          // biome-ignore lint/correctness/noUnsafeFinally: This error is caught by the enclosing cleanup try/catch.
           throw run.selectionReadError
         }
       } catch (error) {

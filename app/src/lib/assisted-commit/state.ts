@@ -1,11 +1,11 @@
 import { AssistedCommitPushError } from '../git/assisted-commit-push'
 import {
-  AssistedCommitRunState,
+  type AssistedCommitRunState,
   isAssistedCommitRepositoryLocked,
 } from '../../models/assisted-commit-run'
-import { CloningRepository } from '../../models/cloning-repository'
-import { IAssistedCommitIntent } from '../../models/copilot-assisted-commit'
-import { Repository } from '../../models/repository'
+import type { CloningRepository } from '../../models/cloning-repository'
+import type { IAssistedCommitIntent } from '../../models/copilot-assisted-commit'
+import type { Repository } from '../../models/repository'
 import { assistedCommitErrorCauses } from '../assisted-commit-run'
 import { ErrorWithMetadata } from '../error-with-metadata'
 import { AssistedCommitError } from '../git/assisted-commit'
@@ -19,8 +19,8 @@ import {
   repositoryPathsOverlap,
   withRepositoryGitDestruction,
 } from '../git/repository-operation'
-import { RepositoryStateCache } from '../stores/repository-state-cache'
-import {
+import type { RepositoryStateCache } from '../stores/repository-state-cache'
+import type {
   IAssistedCommitEvents,
   IAssistedCommitPreparedIntent,
   IAssistedCommitRun,
@@ -96,13 +96,13 @@ export class AssistedCommitState {
       existing.kind !== 'error'
         ? error
         : assistedCommitErrorCauses(error).includes(existing.error)
-        ? error
-        : assistedCommitErrorCauses(existing.error).includes(error)
-        ? existing.error
-        : new AggregateError(
-            [existing.error, error],
-            'Assisted commit run needs attention'
-          )
+          ? error
+          : assistedCommitErrorCauses(existing.error).includes(error)
+            ? existing.error
+            : new AggregateError(
+                [existing.error, error],
+                'Assisted commit run needs attention'
+              )
     const metadata = new ErrorWithMetadata(
       preserved instanceof Error
         ? preserved
@@ -122,12 +122,13 @@ export class AssistedCommitState {
       retry: run.pushPublicationPending
         ? 'refresh'
         : run.finalized &&
-          assistedCommitErrorCauses(error).some(
-            cause =>
-              cause instanceof AssistedCommitPushError && cause.publicationStale
-          )
-        ? null
-        : retry,
+            assistedCommitErrorCauses(error).some(
+              cause =>
+                cause instanceof AssistedCommitPushError &&
+                cause.publicationStale
+            )
+          ? null
+          : retry,
       selectionNeedsReview,
       settling: !run.finished,
     }

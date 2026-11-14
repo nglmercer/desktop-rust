@@ -67,6 +67,10 @@ app/src/lib/squash/**
 app/src/lib/ssh/**
 app/src/lib/stats/**
 app/src/lib/databases/**
+app/src/lib/copilot/**
+app/src/lib/copilot-app/**
+app/src/lib/trampoline/**
+app/src/lib/assisted-commit/**
 vite.cli.config.ts
 script/cli-build.test.ts
 vite.crash.config.ts

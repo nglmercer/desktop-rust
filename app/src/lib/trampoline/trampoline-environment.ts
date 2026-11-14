@@ -13,7 +13,7 @@ import { GitError as DugiteError, exec } from 'dugite'
 import memoizeOne from 'memoize-one'
 import { GitError, getDescriptionForError } from '../git/core'
 import { getDesktopAskpassTrampolineFilename } from 'desktop-trampoline'
-import { IAccountIdentity } from '../../models/account'
+import type { IAccountIdentity } from '../../models/account'
 import { backend } from '../../backend/client'
 
 const hasRejectedCredentialsForEndpoint = new Map<string, Set<string>>()
@@ -97,8 +97,10 @@ export const GitUserAgent = memoizeOne(() =>
   // Can't use git() as that will call withTrampolineEnv which calls this method
   (typeof window !== 'undefined' && backend().transportKind !== 'none'
     ? backend().gitVersion()
-    : exec(['--version'], process.cwd())
-        .then(r => /git version (.*)/.exec(r.stdout)?.at(1) ?? 'unknown'))
+    : exec(['--version'], process.cwd()).then(
+        r => /git version (.*)/.exec(r.stdout)?.at(1) ?? 'unknown'
+      )
+  )
     .catch(e => {
       log.warn(`Could not get git version information`, e)
       return 'unknown'
@@ -241,7 +243,9 @@ export async function withTrampolineEnv<T>(
       throw e
     } finally {
       removeMostRecentSSHCredential(token)
-      credentialLeases.get(token)?.forEach(release => release())
+      credentialLeases.get(token)?.forEach(release => {
+        release()
+      })
       credentialLeases.delete(token)
       isBackgroundTaskEnvironment.delete(token)
       hasRejectedCredentialsForEndpoint.delete(token)

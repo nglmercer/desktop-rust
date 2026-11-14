@@ -1,8 +1,8 @@
-import {
+import type {
   IAssistedCommitSnapshot,
   IValidatedAssistedCommitPlan,
 } from '../../models/assisted-commit'
-import { ICopilotAssistedCommitRequest } from '../../models/copilot-assisted-commit'
+import type { ICopilotAssistedCommitRequest } from '../../models/copilot-assisted-commit'
 import { DiffSelectionType } from '../../models/diff'
 import { planAssistedCommits } from '../assisted-commit-planning'
 import { assistedCommitRequestsEqual } from '../assisted-commit-request'
@@ -10,11 +10,11 @@ import { arrayEquals } from '../equality'
 import { getAccountForRepository } from '../get-account-for-repository'
 import {
   AssistedCommitError,
-  AssistedCommitProgress,
+  type AssistedCommitProgress,
   createSingleAssistedCommitPlan,
   executeAssistedCommitPlan,
   getAssistedCommitExecutionMetadata,
-  IAssistedCommitResult,
+  type IAssistedCommitResult,
   validateAssistedCommitPlan,
   withAssistedCommitSnapshot,
 } from '../git/assisted-commit'
@@ -25,15 +25,15 @@ import {
   requireRepositoryGitAsyncOwnership,
   withoutRepositoryGitAccess,
 } from '../git/repository-operation'
-import { useRepoRulesLogic } from '../helpers/repo-rules'
-import { AssistedCommitContext } from './context'
-import { AssistedCommitDialogs } from './dialogs'
-import { AssistedCommitReaders } from './readers'
-import { AssistedCommitSelection } from './selection'
-import { AssistedCommitState } from './state'
-import { AssistedCommitPush } from './push'
+import { useRepoRulesLogic as repoRulesEnabled } from '../helpers/repo-rules'
+import type { AssistedCommitContext } from './context'
+import type { AssistedCommitDialogs } from './dialogs'
+import type { AssistedCommitReaders } from './readers'
+import type { AssistedCommitSelection } from './selection'
+import type { AssistedCommitState } from './state'
+import type { AssistedCommitPush } from './push'
 import { verifyAcceptedOwner } from './push-ownership'
-import {
+import type {
   IAssistedCommitPreparedIntent,
   IAssistedCommitRepository,
   IAssistedCommitRun,
@@ -238,7 +238,7 @@ export async function executeAssistedCommitRun(
               )
             }
             if (
-              useRepoRulesLogic(
+              repoRulesEnabled(
                 getAccountForRepository(
                   context.configuration().accounts,
                   repository
@@ -306,7 +306,7 @@ async function validateAssistedCommitMessages(
     context.configuration().accounts,
     run.repository
   )
-  if (!useRepoRulesLogic(account, run.repository)) {
+  if (!repoRulesEnabled(account, run.repository)) {
     return
   }
   const rules = run.initialState.changesState.currentRepoRulesInfo

@@ -12,8 +12,8 @@ import {
   verifyAcceptedOwner,
 } from './push-ownership'
 import type { AssistedCommitPush } from './push'
-import { AssistedCommitRunOutcome } from '../../models/assisted-commit-run'
-import { Repository } from '../../models/repository'
+import type { AssistedCommitRunOutcome } from '../../models/assisted-commit-run'
+import type { Repository } from '../../models/repository'
 import {
   assistedCommitErrorCauses,
   getAssistedCommitCleanupToken,
@@ -32,15 +32,15 @@ import {
   withRepositoryGitErrorPropagation,
   withRepositoryGitOperation,
 } from '../git/repository-operation'
-import { AssistedCommitContext } from './context'
+import type { AssistedCommitContext } from './context'
 import { recordAssistedCommitStats } from './execution'
-import { AssistedCommitReaders } from './readers'
-import { AssistedCommitSelection } from './selection'
-import { AssistedCommitState } from './state'
+import type { AssistedCommitReaders } from './readers'
+import type { AssistedCommitSelection } from './selection'
+import type { AssistedCommitState } from './state'
 import {
   createAssistedCommitSettlement,
-  IAssistedCommitRepository,
-  IAssistedCommitRun,
+  type IAssistedCommitRepository,
+  type IAssistedCommitRun,
 } from './types'
 
 /** Compose recovery over existing owners; no second lifecycle or capability registry. */
@@ -250,7 +250,7 @@ export function createAssistedCommitRecovery(
                   host.refreshAll(
                     run.finalized
                       ? run.repository
-                      : deferredRepository ?? repository
+                      : (deferredRepository ?? repository)
                   )
               )
             }
@@ -328,12 +328,12 @@ export function createAssistedCommitRecovery(
         run.recoveryCapability !== undefined || run.cleanupPending
           ? 'recovery'
           : assistedCommitErrorCauses(error).some(
-              cause =>
-                cause instanceof AssistedCommitPushError &&
-                cause.publicationStale
-            )
-          ? null
-          : 'refresh',
+                cause =>
+                  cause instanceof AssistedCommitPushError &&
+                  cause.publicationStale
+              )
+            ? null
+            : 'refresh',
         state.selectionNeedsReview,
         false
       )
@@ -581,7 +581,7 @@ export function createAssistedCommitRecovery(
                     await host.refreshAll(
                       run.finalized
                         ? run.repository
-                        : deferredRepository ?? repository
+                        : (deferredRepository ?? repository)
                     )
                     await selections.verifyFence(run)
                   })

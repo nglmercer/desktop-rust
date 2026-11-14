@@ -75,9 +75,9 @@ export function getWindowsCopilotAppCandidates(
 ): ReadonlyArray<string> {
   const paths = new Set<string>()
   try {
-    getPaths(registry.readValues(copilotUninstallKey)).forEach(path =>
+    getPaths(registry.readValues(copilotUninstallKey)).forEach(path => {
       paths.add(path)
-    )
+    })
   } catch (error) {
     log.debug(`Could not read HKEY_CURRENT_USER\\${copilotUninstallKey}`, error)
   }

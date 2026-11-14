@@ -1,11 +1,11 @@
 import { PopupType } from '../../models/popup'
-import { Repository } from '../../models/repository'
-import { HookProgress, TerminalOutput } from '../git'
+import type { Repository } from '../../models/repository'
+import type { HookProgress, TerminalOutput } from '../git'
 import { getNumber, setNumber } from '../local-storage'
 import { offsetFromNow } from '../offset-from'
-import { PopupManager } from '../popup-manager'
-import { AssistedCommitState } from './state'
-import { IAssistedCommitHookFailure, IAssistedCommitRun } from './types'
+import type { PopupManager } from '../popup-manager'
+import type { AssistedCommitState } from './state'
+import type { IAssistedCommitHookFailure, IAssistedCommitRun } from './types'
 
 const assistedCommitDisclaimerLastSeenKey =
   'assisted-commit-disclaimer-last-seen'

@@ -1,7 +1,7 @@
-import { IGitAccount } from '../../models/git-account'
+import type { IGitAccount } from '../../models/git-account'
 import { PopupType } from '../../models/popup'
-import { Dispatcher } from '../../ui/dispatcher'
-import { Repository } from '../../models/repository'
+import type { Dispatcher } from '../../ui/dispatcher'
+import type { Repository } from '../../models/repository'
 
 type PromptSSHSecretResponse = {
   readonly secret: string | undefined

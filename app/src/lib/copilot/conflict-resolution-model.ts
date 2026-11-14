@@ -5,7 +5,7 @@ import {
   getSupportedReasoningEffort,
   type ReasoningEffort,
 } from '../stores/copilot-store'
-import { IBYOKProvider, parseModelKey } from './byok'
+import { type IBYOKProvider, parseModelKey } from './byok'
 
 /** Fallback name shown before the Copilot model list has loaded. */
 const DefaultCopilotModelName = 'Auto'
@@ -44,7 +44,7 @@ export function getConflictResolutionModelDisplay(
     key?.kind === 'copilot' && key.modelId !== '' ? key.modelId : null
   const models = copilotModels ?? []
   const resolvedModel = requestedModelId
-    ? models.find(m => m.id === requestedModelId) ?? null
+    ? (models.find(m => m.id === requestedModelId) ?? null)
     : getPreferredDefaultModel(models)
 
   if (resolvedModel !== null) {

@@ -1,23 +1,23 @@
-import {
+import type {
   IAssistedCommitHead,
   IAssistedCommitSnapshot,
 } from '../../models/assisted-commit'
-import { ICopilotAssistedCommitRequest } from '../../models/copilot-assisted-commit'
+import type { ICopilotAssistedCommitRequest } from '../../models/copilot-assisted-commit'
 import {
-  DiffSelection,
+  type DiffSelection,
   DiffSelectionType,
   DiffType,
-  IDiff,
-  ILargeTextDiff,
-  ITextDiff,
+  type IDiff,
+  type ILargeTextDiff,
+  type ITextDiff,
 } from '../../models/diff'
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import {
-  WorkingDirectoryFileChange,
+  type WorkingDirectoryFileChange,
   WorkingDirectoryStatus,
 } from '../../models/status'
 import { TipState } from '../../models/tip'
-import { ChangesSelectionKind, IRepositoryState } from '../app-state'
+import { ChangesSelectionKind, type IRepositoryState } from '../app-state'
 import {
   assistedCommitInputIdentityMatches,
   getAssistedCommitInputVersions,
@@ -27,8 +27,8 @@ import { arrayEquals } from '../equality'
 import { getWorkingDirectoryDiff } from '../git'
 import {
   AssistedCommitError,
-  IAssistedCommitRecovery,
-  IAssistedCommitResult,
+  type IAssistedCommitRecovery,
+  type IAssistedCommitResult,
   readAssistedCommitHead,
 } from '../git/assisted-commit'
 import {
@@ -36,7 +36,7 @@ import {
   withRepositoryGitErrorPropagation,
   withRepositoryGitOperation,
 } from '../git/repository-operation'
-import { RepositoryStateCache } from '../stores/repository-state-cache'
+import type { RepositoryStateCache } from '../stores/repository-state-cache'
 import { getTipSha } from '../tip'
 
 /** Frozen inputs and verified transaction history needed to restore selection. */
@@ -441,11 +441,11 @@ export class AssistedCommitSelection {
       snapshot === undefined
         ? assistedCommitHeadMatches(run.initialState.branchesState.tip, tip)
         : currentHead !== undefined
-        ? currentHead.ref === snapshot.originalHead.ref &&
-          currentHead.sha === snapshot.originalHead.sha
-        : snapshot.originalHead.sha === null
-        ? tip.kind === TipState.Unborn
-        : getTipSha(tip) === snapshot.originalHead.sha
+          ? currentHead.ref === snapshot.originalHead.ref &&
+            currentHead.sha === snapshot.originalHead.sha
+          : snapshot.originalHead.sha === null
+            ? tip.kind === TipState.Unborn
+            : getTipSha(tip) === snapshot.originalHead.sha
     const versions = await getAssistedCommitInputVersions(
       run.repository,
       run.request.files
@@ -653,8 +653,8 @@ export class AssistedCommitSelection {
         displayed.diff.kind === DiffType.LargeText)
         ? displayed.diff
         : current === null
-        ? undefined
-        : this.bases.get(current.selection)?.displayedDiff
+          ? undefined
+          : this.bases.get(current.selection)?.displayedDiff
     const basis =
       displayedDiff?.text ??
       (current === null ? undefined : this.bases.get(current.selection)?.text)
@@ -680,15 +680,15 @@ export class AssistedCommitSelection {
       tip.kind === TipState.Valid
         ? { ref: tip.branch.ref, sha: tip.branch.tip.sha }
         : tip.kind === TipState.Unborn
-        ? {
-            ref: tip.ref.startsWith('refs/heads/')
-              ? tip.ref
-              : `refs/heads/${tip.ref}`,
-            sha: null,
-          }
-        : tip.kind === TipState.Detached
-        ? { ref: null, sha: tip.currentSha }
-        : undefined
+          ? {
+              ref: tip.ref.startsWith('refs/heads/')
+                ? tip.ref
+                : `refs/heads/${tip.ref}`,
+              sha: null,
+            }
+          : tip.kind === TipState.Detached
+            ? { ref: null, sha: tip.currentSha }
+            : undefined
     if (
       expected === undefined ||
       expected.ref !== head.ref ||

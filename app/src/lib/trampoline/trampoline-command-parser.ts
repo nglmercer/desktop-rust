@@ -1,7 +1,7 @@
 import { parseEnumValue } from '../enum'
 import { assertNever } from '../fatal-error'
 import {
-  ITrampolineCommand,
+  type ITrampolineCommand,
   TrampolineCommandIdentifier,
 } from './trampoline-command'
 
@@ -70,7 +70,7 @@ export class TrampolineCommandParser {
 
         break
 
-      case TrampolineCommandParserState.EnvironmentVariables:
+      case TrampolineCommandParserState.EnvironmentVariables: {
         // Split after the first '='
         const match = /([^=]+)=(.*)/.exec(value)
 
@@ -91,6 +91,7 @@ export class TrampolineCommandParser {
           this.state = TrampolineCommandParserState.Stdin
         }
         break
+      }
       case TrampolineCommandParserState.Stdin:
         this.stdin = value
         this.state = TrampolineCommandParserState.Finished

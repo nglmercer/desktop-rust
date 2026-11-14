@@ -25,7 +25,7 @@ export async function withTrampolineToken<T>(
   fn: (token: string) => Promise<T>
 ): Promise<T> {
   const token = requestTrampolineToken()
-  let result
+  let result: T
 
   try {
     result = await fn(token)

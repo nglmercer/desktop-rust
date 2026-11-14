@@ -1,10 +1,10 @@
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import {
   prepareAssistedCommitPushOwner,
   verifyAssistedCommitPushOwner,
 } from '../git/assisted-commit-push'
 import { withRepositoryGitSpawnFence } from '../git/repository-operation'
-import { IAssistedCommitRun } from './types'
+import type { IAssistedCommitRun } from './types'
 /** Fence the original accepted repository before native access and publication. */
 export function verifyAcceptedOwner(run: IAssistedCommitRun | undefined): void {
   if (run?.finalized && run.pushDestination?.kind === 'configured') {
