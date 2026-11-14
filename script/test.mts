@@ -107,6 +107,28 @@ function run(command: string, commandArgs: readonly string[]): Promise<number> {
   })
 }
 
+// The Vitest suites run against the real Rust backend by default (see
+// rust/ROADMAP.md, R1/R2): build the server they start, unless the caller opted
+// out with DESKTOP_TEST_RUST_BACKEND=0 or this platform is not validated yet.
+if (vitestFiles.length > 0 && process.env.DESKTOP_TEST_RUST_BACKEND !== '0') {
+  if (process.platform === 'linux') {
+    const built = await run('cargo', [
+      'build',
+      '--manifest-path',
+      join(projectRoot, 'Cargo.toml'),
+      '-p',
+      'desktop-cli',
+    ]).catch(() => 1)
+    if (built === 0) {
+      process.env.DESKTOP_TEST_RUST_BACKEND = '1'
+    } else {
+      console.warn(
+        'Could not build the Rust backend (desktop-cli); running Vitest without it. Set DESKTOP_TEST_RUST_BACKEND=0 to silence this.'
+      )
+    }
+  }
+}
+
 const nodeResult = nodeFiles.length > 0 ? await run(process.execPath, args) : 0
 const vitestResult =
   vitestFiles.length > 0
