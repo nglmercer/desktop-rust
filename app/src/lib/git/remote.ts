@@ -217,9 +217,18 @@ export async function updateRemoteHEAD(
   isBackgroundTask: boolean
 ): Promise<void> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().refreshRepositoryRemoteHead(repository.path, remote.name, remote.url, isBackgroundTask), true)
-    if (result !== 'unsupported') return
+    try {
+      const result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+        backend().refreshRepositoryRemoteHead(repository.path, remote.name, remote.url, isBackgroundTask), true)
+      if (result !== 'unsupported') return
+    } catch (error) {
+      // A remote removed since the caller read it has no HEAD to refresh; the
+      // Git path treated that as success too.
+      if (error instanceof Error && error.message === 'Configured remote no longer exists') {
+        return
+      }
+      throw error
+    }
   }
   const options = {
     successExitCodes: new Set([0, 1, 128]),

@@ -190,35 +190,45 @@ export async function startRustBackend(): Promise<IRustBackend> {
     await rm(directory, { recursive: true, force: true })
     throw error
   }
-  // The first session's client is the stable handle tests hold. Its `request`
-  // follows the repository a call is about and, when the test changed the Git
-  // environment, forwards to a restarted session.
+  // Every session's client follows the repository a call is about, and when
+  // the test changed the Git environment, forwards to a restarted session. The
+  // first session's client is the stable handle tests hold; a restarted
+  // session's client is installed as `backend()` with the same behavior.
   const handle = active.client
   let selected: string | null = null
-  const original = active.rawRequest
-  handle.request = async (method: string, params: unknown, opts?: any) => {
-    if (gitEnvironmentFingerprint() !== active.fingerprint) {
-      const previous = active
-      active = await openSession(directory)
-      overrideBackendForTests(active.client)
-      selected = null
-      await previous.close()
+  const install = (session: ISession) => {
+    const original = session.rawRequest
+    session.client.request = async (
+      method: string,
+      params: unknown,
+      opts?: any
+    ) => {
+      if (gitEnvironmentFingerprint() !== active.fingerprint) {
+        const previous = active
+        active = await openSession(directory)
+        install(active)
+        overrideBackendForTests(active.client)
+        selected = null
+        await previous.close()
+        return active.client.request(method, params, opts)
+      }
+      const target = (params as { path?: unknown } | null)?.path
+      if (
+        method === 'repository_binding' &&
+        typeof target === 'string' &&
+        target !== selected
+      ) {
+        await active.client.selectBrowserRepository(target)
+        selected = target
+      }
+      return (active === session ? original : active.rawRequest)(
+        method,
+        params,
+        opts
+      )
     }
-    const target = (params as { path?: unknown } | null)?.path
-    if (
-      method === 'repository_binding' &&
-      typeof target === 'string' &&
-      target !== selected
-    ) {
-      await active.client.selectBrowserRepository(target)
-      selected = target
-    }
-    return (active.client === handle ? original : active.rawRequest)(
-      method,
-      params,
-      opts
-    )
   }
+  install(active)
 
   return {
     client: handle,
