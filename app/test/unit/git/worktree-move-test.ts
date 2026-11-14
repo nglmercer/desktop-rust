@@ -1,39 +1,36 @@
 import assert from 'node:assert'
 import * as Path from 'path'
 import { realpath } from 'fs/promises'
-import {
-  before,
-  beforeEach,
-  describe,
-  it,
-  mock,
-  type TestContext,
-} from 'node:test'
+import { beforeEach, describe, it, vi, type TestContext } from 'vitest'
 import * as dugite from 'dugite'
 import { pathExists } from '../../../src/lib/path-exists'
 import { Repository } from '../../../src/models/repository'
 
 type ExecArgs = Parameters<typeof dugite.exec>
 
-const execCalls = new Array<{ args: ReadonlyArray<string>; path: string }>()
+const execCalls = vi.hoisted(
+  () => new Array<{ args: ReadonlyArray<string>; path: string }>()
+)
 
 // Wrap dugite's exec so that we can record which working directory each git
 // invocation ran in while still running the real git command.
-const exec = (...[args, path, options]: ExecArgs) => {
-  execCalls.push({ args, path })
-  return dugite.exec(args, path, options)
-}
-
-let moveWorktree: typeof import('../../../src/lib/git/worktree').moveWorktree
-let setupEmptyRepository: typeof import('../../helpers/repositories').setupEmptyRepository
-let makeCommit: typeof import('../../helpers/repository-scaffolding').makeCommit
-
-before(async () => {
-  mock.module('dugite', { namedExports: { ...dugite, exec } })
-  ;({ moveWorktree } = await import('../../../src/lib/git/worktree'))
-  ;({ setupEmptyRepository } = await import('../../helpers/repositories'))
-  ;({ makeCommit } = await import('../../helpers/repository-scaffolding'))
+vi.mock('dugite', async importOriginal => {
+  const actual = await importOriginal<typeof import('dugite')>()
+  return {
+    ...actual,
+    exec: (...[args, path, options]: ExecArgs) => {
+      execCalls.push({ args, path })
+      return actual.exec(args, path, options)
+    },
+  }
 })
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../../src/lib/custom-integration', () => ({}))
+
+import { moveWorktree } from '../../../src/lib/git/worktree'
+import { setupEmptyRepository } from '../../helpers/repositories'
+import { makeCommit } from '../../helpers/repository-scaffolding'
+import { createTempDirectory } from '../../helpers/temp'
 
 beforeEach(() => {
   execCalls.length = 0
@@ -64,7 +61,10 @@ async function setupWorktree(t: TestContext) {
   await makeCommit(repo, { entries: [{ path: 'README', contents: 'hello' }] })
 
   const mainPath = await realpath(repo.path)
-  const worktreePath = `${mainPath}-wt-a`
+  // All linked worktrees live under a second managed temporary directory so
+  // cleanup still removes them if creation, movement, or an assertion fails.
+  const worktreeDirectory = await realpath(await createTempDirectory(t))
+  const worktreePath = Path.join(worktreeDirectory, 'wt-a')
   await dugite.exec(
     ['worktree', 'add', '-b', 'feature-a', '--', worktreePath],
     mainPath
@@ -87,7 +87,7 @@ async function listedWorktreePaths(repositoryPath: string) {
 describe('git/worktree moveWorktree', () => {
   it('renames the linked worktree the repository points to', async t => {
     const { mainPath, worktreePath } = await setupWorktree(t)
-    const newPath = `${mainPath}-wt-renamed`
+    const newPath = Path.join(Path.dirname(worktreePath), 'wt-renamed')
     const repository = new Repository(worktreePath, -1, null, false)
 
     await moveWorktree(repository, worktreePath, newPath)
@@ -103,7 +103,7 @@ describe('git/worktree moveWorktree', () => {
 
   it('renames another linked worktree from the main worktree', async t => {
     const { repo, mainPath, worktreePath } = await setupWorktree(t)
-    const newPath = `${mainPath}-wt-renamed`
+    const newPath = Path.join(Path.dirname(worktreePath), 'wt-renamed')
 
     await moveWorktree(repo, worktreePath, newPath)
 
@@ -118,12 +118,12 @@ describe('git/worktree moveWorktree', () => {
 
   it('renames a linked worktree from a sibling linked worktree', async t => {
     const { mainPath, worktreePath } = await setupWorktree(t)
-    const siblingPath = `${mainPath}-wt-b`
+    const siblingPath = Path.join(Path.dirname(worktreePath), 'wt-b')
     await dugite.exec(
       ['worktree', 'add', '-b', 'feature-b', '--', siblingPath],
       mainPath
     )
-    const newPath = `${mainPath}-wt-renamed`
+    const newPath = Path.join(Path.dirname(worktreePath), 'wt-renamed')
     const repository = new Repository(siblingPath, -1, null, false)
 
     await moveWorktree(repository, worktreePath, newPath)

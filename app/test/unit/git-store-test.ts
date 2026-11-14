@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, TestContext } from 'node:test'
+import { beforeEach, describe, it, vi, type TestContext } from 'vitest'
 import assert from 'node:assert'
 import { readFile, unlink, writeFile } from 'fs/promises'
 import * as Path from 'path'
@@ -23,6 +23,9 @@ import {
 import { BranchType } from '../../src/models/branch'
 import { TestStatsStore } from '../helpers/test-stats-store'
 import { isolateGitConfig } from '../helpers/git-config'
+
+vi.mock('keytar', () => ({ default: {} }))
+vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('GitStore', () => {
   describe('loadCommitBatch', () => {
@@ -250,9 +253,6 @@ describe('GitStore', () => {
 
   describe('loadBranches', () => {
     beforeEach(async t => {
-      if (!('after' in t)) {
-        throw new Error('Git configuration isolation requires a test context')
-      }
       await isolateGitConfig(t)
     })
 

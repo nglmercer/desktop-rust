@@ -1,4 +1,7 @@
 [
+  "app/test/unit/ui/repository-list-item-context-menu-test.ts",
+  "app/test/unit/git-store-test.ts",
+  "app/test/unit/git/worktree-move-test.ts",
   "app/test/unit/browser-creation-templates-integration-test.ts",
   "app/test/unit/bundled-creation-templates-test.ts",
   "app/test/unit/accounts-store-test.ts",

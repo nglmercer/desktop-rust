@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { before, describe, it, mock } from 'node:test'
+import { describe, it, vi } from 'vitest'
 import { Account } from '../../../src/models/account'
 import { GitHubRepository } from '../../../src/models/github-repository'
 import { Owner } from '../../../src/models/owner'
@@ -33,16 +33,11 @@ const repository = (
     login
   )
 
-let generateRepositoryListContextMenu: typeof import('../../../src/ui/repositories-list/repository-list-item-context-menu').generateRepositoryListContextMenu
+vi.mock('../../../src/ui/main-process-proxy', () => ({
+  writeClipboardText: () => {},
+}))
 
-before(async () => {
-  mock.module('../../../src/ui/main-process-proxy.ts', {
-    namedExports: { writeClipboardText: () => {} },
-  })
-  ;({ generateRepositoryListContextMenu } = await import(
-    '../../../src/ui/repositories-list/repository-list-item-context-menu'
-  ))
-})
+import { generateRepositoryListContextMenu } from '../../../src/ui/repositories-list/repository-list-item-context-menu'
 
 const getMenu = (
   repo: Repositoryish,
