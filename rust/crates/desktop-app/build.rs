@@ -60,7 +60,10 @@ fn newest(path: &Path) -> Option<SystemTime> {
 }
 
 fn bundle_is_stale(repo: &Path, dist: &Path) -> bool {
-    if !dist.join("highlighter.js").is_file() || !dist.join("ipc-shim.js").is_file() {
+    if !dist.join("highlighter.js").is_file()
+        || !dist.join("ipc-shim.js").is_file()
+        || !dist.join("desktop-auth-scheme").is_file()
+    {
         return true;
     }
     let Ok(built) = std::fs::metadata(dist.join("index.html")).and_then(|m| m.modified()) else {
@@ -102,6 +105,7 @@ fn build_bundle(repo: &Path, dist: &Path) -> Result<(), String> {
     if !dist.join("index.html").is_file()
         || !dist.join("highlighter.js").is_file()
         || !dist.join("ipc-shim.js").is_file()
+        || !dist.join("desktop-auth-scheme").is_file()
     {
         return Err(format!(
             "`pnpm vite:build` finished, but {} is incomplete",
@@ -155,6 +159,10 @@ fn main() {
         "cargo:rerun-if-changed={}",
         dist.join("ipc-shim.js").display()
     );
+    println!(
+        "cargo:rerun-if-changed={}",
+        dist.join("desktop-auth-scheme").display()
+    );
     println!("cargo:rerun-if-env-changed=DESKTOP_VITE_FORCE");
     println!("cargo:rerun-if-env-changed=DESKTOP_SERVE_FROM_DISK");
 
@@ -174,6 +182,15 @@ fn main() {
         }
     }
     let dist = dist.canonicalize().expect("renderer bundle must exist");
+    let scheme = std::fs::read_to_string(dist.join("desktop-auth-scheme"))
+        .expect("renderer callback scheme must be available");
+    assert!(
+        matches!(
+            scheme.as_str(),
+            "x-github-desktop-dev-auth" | "x-github-desktop-auth"
+        ),
+        "renderer callback scheme is invalid"
+    );
     vite_build::export_bundle(&dist);
 }
 
@@ -229,7 +246,12 @@ mod tests {
             }
             let dist = root.join("out/vite-dist");
             fs::create_dir_all(&dist).unwrap();
-            for file in ["index.html", "highlighter.js", "ipc-shim.js"] {
+            for file in [
+                "index.html",
+                "highlighter.js",
+                "ipc-shim.js",
+                "desktop-auth-scheme",
+            ] {
                 fs::write(dist.join(file), b"fixture").unwrap();
             }
             Self(root)
@@ -309,6 +331,11 @@ mod tests {
         let fixture = Fixture::new();
         fixture.set_index_time(SystemTime::now() + Duration::from_secs(60));
         fs::remove_file(fixture.dist().join("ipc-shim.js")).unwrap();
+        assert!(bundle_is_stale(&fixture.0, &fixture.dist()));
+
+        let fixture = Fixture::new();
+        fixture.set_index_time(SystemTime::now() + Duration::from_secs(60));
+        fs::remove_file(fixture.dist().join("desktop-auth-scheme")).unwrap();
         assert!(bundle_is_stale(&fixture.0, &fixture.dist()));
     }
 }

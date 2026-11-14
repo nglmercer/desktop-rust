@@ -152,6 +152,7 @@ jobs:
           test -f out/vite-dist/ipc-shim.js
           test -f out/vite-dist/index.html
           test -f out/vite-dist/highlighter.js
+          test -f out/vite-dist/desktop-auth-scheme
       - name: Check migrated frontend tooling and tests
         run: |
           npm run lint:biome

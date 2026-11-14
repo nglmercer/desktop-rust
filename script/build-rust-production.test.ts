@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, describe, it } from 'vitest'
 import { buildRustProduction } from './build-rust-production'
+import { oauthCallbackScheme } from '../vite.config'
 import {
   createIsolatedViteOutput,
   requireAbsentViteOutputFiles,
@@ -24,6 +25,18 @@ import {
 } from './vite-output'
 
 const directories: string[] = []
+
+describe('renderer OAuth callback scheme', () => {
+  it('matches the configured credential pair and rejects incomplete pairs', () => {
+    assert.equal(oauthCallbackScheme('production', undefined, undefined), 'x-github-desktop-dev-auth')
+    assert.equal(oauthCallbackScheme('production', '', ''), 'x-github-desktop-dev-auth')
+    assert.equal(oauthCallbackScheme('development', 'custom', 'secret'), 'x-github-desktop-dev-auth')
+    assert.equal(oauthCallbackScheme('production', 'custom', 'secret'), 'x-github-desktop-auth')
+    assert.equal(oauthCallbackScheme('production', '3a723b10ac5575cc5bb9', 'secret'), 'x-github-desktop-dev-auth')
+    assert.throws(() => oauthCallbackScheme('production', 'custom', undefined), /provided together/)
+    assert.throws(() => oauthCallbackScheme('production', undefined, 'secret'), /provided together/)
+  })
+})
 afterEach(() => {
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true })
@@ -52,6 +65,7 @@ function fixture() {
     fs.appendFileSync(process.env.CAPTURE, JSON.stringify({kind:'vite', directory, config, pid:process.pid, nodeEnv:process.env.NODE_ENV, channel:process.env.RELEASE_CHANNEL}) + '\\n');
     if (process.env.WAIT_VITE) { setInterval(() => {}, 1000); return; }
     fs.writeFileSync(path.join(directory, config), config);
+    if (config === 'index.html') fs.writeFileSync(path.join(directory, 'desktop-auth-scheme'), 'x-github-desktop-dev-auth');
     if (process.env.FAIL_VITE === config) process.exit(2);
   `
   )
@@ -62,7 +76,7 @@ function fixture() {
     const fs = require('node:fs');
     const path = require('node:path');
     const directory = process.env.DESKTOP_VITE_DIST;
-    for (const file of ['index.html', 'highlighter.js', 'ipc-shim.js']) {
+    for (const file of ['index.html', 'highlighter.js', 'ipc-shim.js', 'desktop-auth-scheme']) {
       if (!fs.existsSync(path.join(directory, file))) process.exit(3);
     }
     fs.appendFileSync(process.env.CAPTURE, JSON.stringify({kind:'cargo', directory, args:process.argv.slice(2), native:process.env.DESKTOP_REQUIRE_NATIVE_PLATFORM}) + '\\n');

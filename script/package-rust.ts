@@ -441,6 +441,7 @@ function packageRustWithOutput(
     path.join(ui, 'index.html'),
     path.join(ui, 'highlighter.js'),
     path.join(ui, 'ipc-shim.js'),
+    path.join(ui, 'desktop-auth-scheme'),
     path.join(ui, 'static/licenses.json'),
     path.join(ui, 'static/LICENSE.choosealicense.md'),
     path.join(repo, 'gemoji/db/emoji.json'),

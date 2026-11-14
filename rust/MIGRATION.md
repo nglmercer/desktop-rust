@@ -1,5 +1,12 @@
 # Full migration and legacy-removal ledger
 
+Biome now formats and checks the repository navigation, settings, account,
+toolbar and worktree UI directories. Their accessibility handling remains
+unchanged: the toolbar's pointer backdrop and keyboard event wrappers retain
+explicit, narrowly scoped Biome suppressions alongside the existing ESLint
+checks. ESLint still runs on these files, so this does not complete the lint
+migration.
+
 The default production build and package commands now produce the Rust desktop
 and browser-enabled CLI using isolated Vite assets. The package is a migration
 artifact: it is not a signed installer and does not establish release, update,
@@ -7,8 +14,24 @@ license or feature parity. On Linux, a staged package mounted React, completed
 backend RPC and drained on normal exit and Ctrl-C under Xvfb. Native macOS and
 Windows validation remains open. The staged launcher holds a cooperative
 package lock while the host is running; a second launcher cannot forward URLs
-to that instance, and production OAuth callback registration remains open.
-Electron and Webpack remain active in the legacy CI and release workflows.
+to that instance. On Linux, the renderer records its OAuth callback scheme in
+the bundle and the native host registers it without replacing an existing
+association. The generated entry retains the active data directory and refuses
+unrelated files or entries for other profiles. Earlier entries do not identify
+their profiles and are left intact. Registration on
+macOS and Windows remains open; setting a default association is not atomic
+with other programs changing it concurrently. Electron and Webpack remain
+active in the legacy CI and release workflows.
+
+Wry now delivers native folder drops on Linux and macOS to the renderer. The
+Linux path was exercised with a real GTK drag into Wry under Xvfb, opening the
+add-repository dialog with the dropped path. A drop is limited to 256 paths and
+64 KiB, and ambiguous U+FFFD paths are rejected because Wry can use that
+character when decoding invalid native bytes; valid names containing U+FFFD
+are also rejected. macOS has not had an equivalent native test. Windows keeps
+its previous behavior because Wry's handler would disable internal HTML drag
+gestures there; browser clients cannot obtain native filesystem paths from a
+drop. The legacy Electron adapter remains available during migration.
 
 The browser renderer reads Desktop release notes through the Rust bridge, using
 the official fixed endpoint and system TLS roots. Its temporary authenticated

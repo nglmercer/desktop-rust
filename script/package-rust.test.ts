@@ -72,6 +72,7 @@ function fixture(): string {
     'out/vite-dist/index.html',
     'out/vite-dist/highlighter.js',
     'out/vite-dist/ipc-shim.js',
+    'out/vite-dist/desktop-auth-scheme',
     'out/vite-dist/static/licenses.json',
     'out/vite-dist/static/LICENSE.choosealicense.md',
     'gemoji/db/emoji.json',
@@ -574,6 +575,13 @@ describe('Rust packaging', () => {
     rmSync(path.join(root, 'out/vite-dist/highlighter.js'))
     expect(() => packageRust(root)).toThrow('highlighter.js')
     expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
+  })
+
+  it('rejects a bundle without its OAuth callback metadata', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    const root = fixture()
+    rmSync(path.join(root, 'out/vite-dist/desktop-auth-scheme'))
+    expect(() => packageRust(root)).toThrow('desktop-auth-scheme')
   })
 
   it('preserves an existing package when the renderer notice list is invalid', () => {

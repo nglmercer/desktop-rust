@@ -32,7 +32,20 @@ After packaging, `pnpm start:prod` starts that staged desktop. Copilot uses its
 adjacent runtime when it is installed. Set `DESKTOP_RUST_DIST_DIR` to an
 absolute directory to stage and launch a package elsewhere. Close other Rust
 desktop instances first: state writes are not yet coordinated across processes.
-Production OAuth callbacks are not yet registered by the Rust shell. While
+On Linux, the Rust shell registers the callback scheme selected by the bundled
+OAuth credentials. Existing handlers are left unchanged. To select this
+installation for production credentials, run
+`xdg-mime default github-desktop-rs-production.desktop x-scheme-handler/x-github-desktop-auth`.
+For development credentials, select `github-desktop-rs-dev-v2.desktop` for
+`x-scheme-handler/x-github-desktop-dev-auth` instead. The older Rust desktop
+entry is retained because it does not identify its profile.
+The OAuth application must be configured for that callback; real production
+sign-in has not been verified. Custom builds must supply both
+`DESKTOP_OAUTH_CLIENT_ID` and `DESKTOP_OAUTH_CLIENT_SECRET`, or neither.
+The generated entry is tied to its executable
+and data directory. If either changes, the app refuses to overwrite the old
+entry: close the old instance and remove its entry before registering again.
+Registration on macOS and Windows remains pending. While
 `pnpm start:prod` is running, another invocation for the same staged package is
 blocked; it cannot forward URLs or launch actions to the open instance through
 that command.

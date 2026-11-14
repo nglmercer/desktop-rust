@@ -18,6 +18,28 @@ const appPackage = JSON.parse(
 ) as { version: string; productName: string }
 const channel = process.env.RELEASE_CHANNEL || 'development'
 
+/** The renderer and native host must agree on the OAuth application's callback. */
+export function oauthCallbackScheme(channel: string, clientId: string | undefined, clientSecret: string | undefined): string {
+  if (Boolean(clientId) !== Boolean(clientSecret)) {
+    throw new Error('DESKTOP_OAUTH_CLIENT_ID and DESKTOP_OAUTH_CLIENT_SECRET must be provided together')
+  }
+  return channel === 'development' || !clientSecret || clientId === '3a723b10ac5575cc5bb9'
+    ? 'x-github-desktop-dev-auth'
+    : 'x-github-desktop-auth'
+}
+
+const authScheme = oauthCallbackScheme(channel, process.env.DESKTOP_OAUTH_CLIENT_ID, process.env.DESKTOP_OAUTH_CLIENT_SECRET)
+
+function oauthCallbackMetadata(): Plugin {
+  return {
+    name: 'desktop-oauth-callback-metadata',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'desktop-auth-scheme', source: authScheme })
+    },
+  }
+}
+
 /** Resolve the SDK's Node transport using its own dependency lookup. */
 export function resolveCopilotJsonRpc(appDirectory: string): string {
   const appRequire = createRequire(path.join(appDirectory, 'package.json'))
@@ -349,6 +371,7 @@ export default defineConfig({
   plugins: [
     react(),
     requireSubmodules(),
+    oauthCallbackMetadata(),
     copyStaticResources(),
     moveSourceMaps(),
     nodePolyfills({
@@ -374,8 +397,7 @@ export default defineConfig({
     __WIN32__: process.platform === 'win32',
     __LINUX__: process.platform === 'linux',
     __DEV__: channel === 'development',
-    __DEV_SECRETS__:
-      channel === 'development' || !process.env.DESKTOP_OAUTH_CLIENT_SECRET,
+    __DEV_SECRETS__: authScheme === 'x-github-desktop-dev-auth',
     __OAUTH_CLIENT_ID__: JSON.stringify(
       process.env.DESKTOP_OAUTH_CLIENT_ID || '3a723b10ac5575cc5bb9'
     ),
