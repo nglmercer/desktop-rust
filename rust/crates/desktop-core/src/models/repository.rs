@@ -1,7 +1,7 @@
 //! Port of `app/src/models/repository.ts`, `github-repository.ts`, `owner.ts`,
 //! `remote.ts`, `worktree.ts` and `workflow-preferences.ts`.
 //!
-//! Electron persisted these through Dexie `IDatabase*` DTOs. Rust persists
+//! The legacy shell persisted these through Dexie `IDatabase*` DTOs. Rust persists
 //! `Repository` directly (see `storage::json_store`), keeping the same JSON
 //! field names so existing user data can be imported.
 

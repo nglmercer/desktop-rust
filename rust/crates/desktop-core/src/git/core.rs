@@ -33,7 +33,7 @@ impl GitOutput {
 
 #[derive(Debug, Clone, Default)]
 pub struct GitOptions {
-    /// Exit codes that should not throw. Electron defaults to `Set([0])`.
+    /// Exit codes that should not throw. The legacy shell defaults to `Set([0])`.
     pub success_exit_codes: Vec<i32>,
     /// Classified errors treated as expected results rather than exceptions.
     pub expected_errors: Vec<GitErrorKind>,

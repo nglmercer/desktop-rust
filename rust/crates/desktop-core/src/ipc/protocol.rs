@@ -1,15 +1,15 @@
 //! Wire protocol for the wry bridge.
 //!
-//! Electron used `ipcRenderer.invoke` for duplex calls and `ipcRenderer.send`
+//! The legacy shell used `ipcRenderer.invoke` for duplex calls and `ipcRenderer.send`
 //! for fire-and-forget. wry exposes two primitives that map cleanly onto them:
 //!
-//! | Electron            | wry transport                                   |
+//! | the legacy shell            | wry transport                                   |
 //! |---------------------|-------------------------------------------------|
 //! | `ipcRenderer.invoke`| `fetch("desktop://localhost/__invoke", POST)`   |
 //! | `ipcRenderer.send`  | `window.ipc.postMessage(json)`                   |
 //! | `webContents.send`  | `WebView::evaluate_script("__desktop.emit(…)")` |
 //!
-//! The custom scheme matters: Electron loaded `file://index.html` with
+//! The custom scheme matters: the legacy shell loaded `file://index.html` with
 //! `nodeIntegration: true`. wry has no Node, so we serve the web layer from a
 //! `desktop://` custom protocol and inject the bridge with an initialization
 //! script, which also gives us a safe same-origin boundary.
@@ -20,7 +20,7 @@ use serde_json::Value;
 use crate::error::{AppError, Result, RpcError};
 use crate::models::{ThemeSource, WindowState};
 
-/// Payload of both `send` and `invoke`. `args` is an array because Electron's
+/// Payload of both `send` and `invoke`. `args` is an array because the legacy shell's
 /// `ipcRenderer.send(channel, ...args)` is variadic and the typed wrappers in
 /// `ipc-renderer.ts` simply forward it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,7 +113,7 @@ pub struct OpenDialogOptions {
     pub button_label: Option<String>,
     #[serde(default)]
     pub filters: Vec<FileFilter>,
-    /// Electron "properties": openDirectory, openFile, multiSelections,
+    /// The legacy shell "properties": openDirectory, openFile, multiSelections,
     /// createDirectory, showHiddenFiles, …
     #[serde(default)]
     pub properties: Vec<String>,
@@ -134,14 +134,14 @@ pub struct SaveDialogOptions {
 
 /// One entry of the application menu, shaped like the renderer's `IMenuItem`
 /// (`app/src/models/app-menu.ts`): `type` selects the variant, and a submenu
-/// carries its children as `menu.items`, as Electron's serialized menu does.
+/// carries its children as `menu.items`, as the legacy shell's serialized menu does.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializableMenuItem {
     pub id: String,
     #[serde(default)]
     pub label: String,
-    // Electron sends `null`, not an absent key, when there is no shortcut.
+    // The legacy shell sends `null`, not an absent key, when there is no shortcut.
     #[serde(default)]
     pub accelerator: Option<String>,
     #[serde(default)]

@@ -1,6 +1,6 @@
 [package]
 name = "desktop-app"
-description = "GitHub Desktop application shell built directly on tao + wry (no Tauri, no Electron)."
+description = "GitHub Desktop application shell built directly on tao + wry (no Tauri)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

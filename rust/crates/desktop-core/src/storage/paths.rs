@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use crate::models::misc::PathType;
 
-/// Deliberately not Electron's "GitHub Desktop": an installed GitHub Desktop
+/// Deliberately not the legacy shell's "GitHub Desktop": an installed GitHub Desktop
 /// keeps its own state there, and the two must not write over each other.
 const APP_DATA_DIR: &str = "GitHub Desktop Rust";
 

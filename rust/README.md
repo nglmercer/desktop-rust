@@ -9,7 +9,7 @@
 > implementation and validation status.
 
 Rust replacement for GitHub Desktop's backend, CLI, and platform transports. The
-full migration is active. The original Electron app remains until the
+full migration is active. The original app remains until the
 replacement passes the removal gates in [MIGRATION.md](MIGRATION.md). Remaining
 headless and platform work is tracked in [TODO.md](TODO.md). Upstream
 is https://github.com/desktop/desktop at
@@ -20,7 +20,7 @@ Embedded branch-rule matcher notices are in `THIRD_PARTY_NOTICES.txt`.
 
 If needed: `pkg install git gh rust clang make`. Install `git-lfs` as well for
 repositories that use Git LFS. Keep repositories under Termux home so executable
-files and permissions work. Rust development needs neither Electron nor the
+files and permissions work. Rust development needs neither a Node runtime nor the
 upstream Node dependencies.
 
 ```sh
@@ -1397,7 +1397,7 @@ one. Interactive login remains `desktop-rs gh auth login` in Termux.
 
 Row, Form, HorizontalRule, and HighlightText were moved from upstream into
 `web/src/upstream/`. Original app entrypoints re-export these implementations.
-The GitHub panel reuses them in a standalone React bundle, with no Electron or
+The GitHub panel reuses them in a standalone React bundle, with no Node or
 Node dependencies. The rest of the old React UI is still being migrated. The
 former browser bundle is no longer built. After renderer source changes, run from the repository root:
 
@@ -1408,7 +1408,7 @@ pnpm vite:build                                   # the renderer that is shipped
 ```
 
 The root Cargo workspace and `.github/workflows/rust.yml` build and validate the
-new implementation independently of the legacy npm/Electron pipeline. Build
+new implementation independently of the legacy npm pipeline. Build
 artifacts remain under `rust/target` during the source migration.
 
 ## Architecture and protocol

@@ -1,6 +1,6 @@
 //! Host services for the legacy renderer.
 //!
-//! Electron's renderer ran with Node integration and called `dugite`, `fs`,
+//! The legacy shell's renderer ran with Node integration and called `dugite`, `fs`,
 //! `keytar` and an unrestricted `fetch` directly. A webview has none of
 //! those, so the web build's shims (`app/src/web/*`) forward each call to a
 //! `desktop.io.*` command implemented here.
@@ -593,7 +593,7 @@ fn git_environment(env: Option<&Value>) -> Vec<(String, Option<String>)> {
         match key.as_str() {
             // These only make sense with the trampoline server running.
             "DESKTOP_PORT" | "DESKTOP_TRAMPOLINE_TOKEN" | "GIT_ASKPASS" | "SSH_ASKPASS" => {}
-            // Bundled-git locations inside the Electron app directory.
+            // Bundled-git locations inside the the legacy shell app directory.
             "LOCAL_GIT_DIRECTORY" | "GIT_EXEC_PATH" | "GIT_TEMPLATE_DIR" => {}
             "GIT_CONFIG_PARAMETERS" => {
                 let cleaned = value
@@ -633,7 +633,7 @@ fn http_client(follow_redirects: bool) -> &'static reqwest::blocking::Client {
 
 /// `fetch` for cross-origin requests. The page's origin is `desktop://`, so
 /// the webview's own network stack applies CORS to every GitHub request;
-/// Electron's renderer was exempt from it.
+/// The legacy shell's renderer was exempt from it.
 fn http_fetch(resources: &Resources, o: &Value) -> Result<Value> {
     let url = string(o, "url")?;
     if !(url.starts_with("https://") || url.starts_with("http://")) {

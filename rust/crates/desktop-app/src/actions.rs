@@ -172,7 +172,7 @@ fn query(query: WindowQuery, info: &Arc<Mutex<WindowInfo>>) -> Value {
 
 // ---------------------------------------------------------------------------
 // Dialogs (rfd). Results have the shape the renderer's IPC contract expects
-// (`app/src/lib/ipc-shared.ts`), not Electron's raw `dialog` results.
+// (`app/src/lib/ipc-shared.ts`), not the legacy shell's raw `dialog` results.
 // ---------------------------------------------------------------------------
 
 fn apply_filters(
@@ -344,7 +344,7 @@ fn parse_color(value: &str) -> Option<(u8, u8, u8, u8)> {
     }
 }
 
-/// Run a text editing command in the web view, as Electron's Edit menu
+/// Run a text editing command in the web view, as the legacy shell's Edit menu
 /// roles did.
 pub fn edit(webview: &WebView, command: desktop_core::menu::EditCommand) {
     use desktop_core::menu::EditCommand;

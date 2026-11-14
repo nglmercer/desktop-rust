@@ -1,7 +1,7 @@
 //! Port of `IAppState` (`app/src/lib/app-state.ts`) and the ~40 localStorage
 //! preference keys in `app/src/lib/stores/app-store.ts`.
 //!
-//! In Electron this state lived in the renderer and was rebuilt on every
+//! In the legacy shell this state lived in the renderer and was rebuilt on every
 //! launch from localStorage + Dexie. Here it is owned by Rust and pushed to
 //! the webview as an immutable snapshot via the `state-changed` event, which
 //! mirrors `AppStore.emitUpdate(state)`.

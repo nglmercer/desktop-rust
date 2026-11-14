@@ -1,4 +1,4 @@
-//! The Electron IPC contract, reimplemented for wry.
+//! The the legacy shell IPC contract, reimplemented for wry.
 //!
 //! `channels` is a literal transcription of `ipc-shared.ts`; `protocol`
 //! defines the wire frames and the [`Host`](protocol::Host) seam that keeps

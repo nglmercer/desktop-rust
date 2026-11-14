@@ -1,7 +1,7 @@
 # Remaining migration work
 
 The Termux target is the headless Rust core, CLI and localhost/WebSocket base.
-The original Electron implementation remains until the relevant behavior has
+The original implementation remains until the relevant behavior has
 been replaced and verified. Items below are open work, not completed features.
 
 ## Core and CLI

@@ -1,9 +1,8 @@
 /*
  * Injected by wry as an initialization script (before any page script).
  *
- * Electron used to give the renderer Node integration, so it could call
- * `require('electron').ipcRenderer` directly. This shim restores that surface
- * on top of wry's `window.ipc.postMessage` + `evaluate_script` primitives.
+ * Gives the renderer an IPC bridge (`window.__desktop`) on top of wry's
+ * `window.ipc.postMessage` + `evaluate_script` primitives.
  * No Node, no `file://`, no remote module loading.
  */
 type IpcListener = (event: { sender: null }, ...args: unknown[]) => void
@@ -171,7 +170,7 @@ type NativeWindow = Window & {
     onProgress: IpcProgress | null,
     args: unknown[]
   ) {
-    // Electron drew a native popup for this request. The page draws the same
+    // The legacy shell drew a native popup for this request. The page draws the same
     // menu instead; see showContextMenu below.
     if (channel === 'show-contextual-menu') {
       return showContextMenu((args[0] || []) as MenuItem[])
@@ -377,7 +376,7 @@ type NativeWindow = Window & {
       )
     },
     pendingPromises: PENDING_LIMIT,
-    // Electron's three synchronous channels have no wry equivalent. They now
+    // The legacy shell's three synchronous channels have no wry equivalent. They now
     // return a promise and callers must await them explicitly.
     sendSync: function (channel: string, ...args: unknown[]) {
       console.warn(
@@ -402,7 +401,6 @@ type NativeWindow = Window & {
     state: null,
     platform: 'wry',
     runtime: 'tao + wry',
-    isElectron: false,
   }
 
   nativeWindow.__desktop = bridge
@@ -420,34 +418,6 @@ type NativeWindow = Window & {
     runtime: 'tao + wry',
   }
 
-  // Minimal compatibility surface for a browser build of the legacy React
-  // renderer. TypeScript modules that reached into Node (`fs`, `path`,
-  // `dugite`, `api.ts`) must use the explicit `desktop.*` Rust commands.
-  var electronShim = {
-    ipcRenderer: bridge,
-    clipboard: {
-      writeText: function (text: string) {
-        return invoke('write-clipboard-text', text)
-      },
-    },
-    shell: {
-      openExternal: function (url: string) {
-        return invoke('open-external', url)
-      },
-      showItemInFolder: function (path: string) {
-        return invoke('show-item-in-folder', path)
-      },
-      moveItemToTrash: function (path: string) {
-        return invoke('move-to-trash', path)
-      },
-    },
-    webFrame: {
-      setZoomFactor: function (factor: number) {
-        send('set-window-zoom-factor', factor)
-      },
-    },
-  }
-
   if (!nativeWindow.process) {
     nativeWindow.process = {
       platform: 'win32',
@@ -458,9 +428,6 @@ type NativeWindow = Window & {
   }
   if (!nativeWindow.require) {
     nativeWindow.require = function (name: string) {
-      if (name === 'electron') {
-        return electronShim
-      }
       throw new Error(
         '[desktop] Node module "' +
           name +
@@ -470,7 +437,7 @@ type NativeWindow = Window & {
   }
 
   // --- context menu -----------------------------------------------------------
-  // Electron resolved `show-contextual-menu` with the index path of the clicked
+  // The legacy shell resolved `show-contextual-menu` with the index path of the clicked
   // item (for example [2, 0]), or null when the menu was dismissed. The same
   // contract is served here, drawn in the page, so the renderer's callers are
   // unchanged.
@@ -483,7 +450,7 @@ type NativeWindow = Window & {
   document.addEventListener('contextmenu', rememberPointer, true)
   document.addEventListener('mousedown', rememberPointer, true)
 
-  // The Edit menu Electron builds for `{ role: 'editMenu' }`.
+  // The Edit menu the legacy shell builds for `{ role: 'editMenu' }`.
   var editMenuRows: Array<{
     label?: string
     command?: string
@@ -714,7 +681,7 @@ type NativeWindow = Window & {
   }
 
   // --- fetch ---------------------------------------------------------------
-  // Electron's renderer was exempt from CORS; a page served from desktop://
+  // The legacy shell's renderer was exempt from CORS; a page served from desktop://
   // is not, and GitHub's OAuth token endpoint sends no CORS headers at all.
   // Requests to other origins are performed by Rust instead.
   function toBase64(bytes: Uint8Array) {
@@ -868,7 +835,7 @@ type NativeWindow = Window & {
     }
   }
 
-  // Electron showed renderer failures in DevTools and the main-process log.
+  // The legacy shell showed renderer failures in DevTools and the main-process log.
   // A wry window has neither by default, so a failed boot is a silent blank
   // page. Forward uncaught errors to the Rust log.
   function report(kind: string, detail: string) {

@@ -1,6 +1,6 @@
 //! Error model.
 //!
-//! Electron's `getIpcFriendlyError` flattens `Error` into `{ message, name, stack }`
+//! The legacy shell's `getIpcFriendlyError` flattens `Error` into `{ message, name, stack }`
 //! because `Error` does not survive structured clone. Our bridge does the same with
 //! [`RpcError`] so the web layer keeps the exact same shape it already understands.
 

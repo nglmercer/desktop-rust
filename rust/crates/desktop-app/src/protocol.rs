@@ -1,5 +1,5 @@
 //! Registers this binary as the OS handler for the OAuth callback scheme,
-//! the equivalent of Electron's `app.setAsDefaultProtocolClient`.
+//! the equivalent of the legacy shell's `app.setAsDefaultProtocolClient`.
 //!
 //! GitHub redirects a finished sign-in to the callback URL registered for the
 //! OAuth app, so the scheme is not ours to choose: the development client id

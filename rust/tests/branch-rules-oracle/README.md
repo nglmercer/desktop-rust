@@ -2,7 +2,7 @@
 
 This tests-only package executes the current legacy `checkBranchNameRules`,
 `parseRepoRules`, rule models, account matching, and endpoint capability code.
-It does not install or run Electron. The matcher is extracted directly from
+It does not install or run any desktop shell. The matcher is extracted directly from
 the renderer's current `app/src/lib/helpers/repo-rules.ts` implementation.
 
 ```sh

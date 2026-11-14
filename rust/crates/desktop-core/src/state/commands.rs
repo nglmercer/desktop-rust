@@ -1,10 +1,10 @@
 //! Domain commands introduced by the Rust port.
 //!
-//! In Electron the renderer imported `fs`, `path`, `dugite` and `api.ts`
+//! In the legacy shell the renderer imported `fs`, `path`, `dugite` and `api.ts`
 //! directly thanks to `nodeIntegration: true`. wry has no Node runtime, so
 //! every one of those capabilities must become an explicit Rust command.
 //! These are namespaced `desktop.*` to distinguish them from the 79 legacy
-//! Electron channels handled in [`super::dispatcher`].
+//! The legacy shell channels handled in [`super::dispatcher`].
 //!
 //! Convention: the first argument is an options object. `repositoryPath` may
 //! be omitted, in which case the selected repository is used.

@@ -93,7 +93,7 @@ impl Diff {
 #[serde(rename_all = "camelCase")]
 pub struct Image {
     pub media_type: String,
-    pub bytes: String, // base64, as Electron carried it over the bridge
+    pub bytes: String, // base64, as the legacy shell carried it over the bridge
     pub width: u32,
     pub height: u32,
 }

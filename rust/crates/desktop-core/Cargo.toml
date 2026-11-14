@@ -1,6 +1,6 @@
 [package]
 name = "desktop-shell-core-legacy"
-description = "GitHub Desktop domain, git, storage, API and IPC logic. Electron-free, GUI-free."
+description = "GitHub Desktop domain, git, storage, API and IPC logic. GUI-free."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

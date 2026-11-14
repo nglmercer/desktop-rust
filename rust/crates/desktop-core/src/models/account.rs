@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct Account {
     pub login: String,
     pub endpoint: String,
-    /// Always empty in any state sent to the webview. Electron stripped tokens
+    /// Always empty in any state sent to the webview. The legacy shell stripped tokens
     /// before writing `localStorage.setItem('users', …)`; we do the same.
     #[serde(default)]
     pub token: String,

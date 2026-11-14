@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct CommitIdentity {
     pub name: String,
     pub email: String,
-    /// ISO-8601. Electron used `Date`; the wire format is a string.
+    /// ISO-8601. The legacy shell used `Date`; the wire format is a string.
     pub date: String,
     #[serde(default)]
     pub tz_offset: i32,

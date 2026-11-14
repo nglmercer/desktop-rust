@@ -1,4 +1,4 @@
-//! The complete Electron IPC channel contract, transcribed from
+//! The complete the legacy shell IPC channel contract, transcribed from
 //! `app/src/lib/ipc-shared.ts` and `app/src/main-process/main.ts`.
 //!
 //! 28 duplex (`invoke`/`handle`) channels, 51 simplex (`send`/`on`) channels.
@@ -141,7 +141,7 @@ pub mod send {
 }
 
 /// Push-only channels: Rust -> webview. These have no `ipcMain.on` handler in
-/// Electron; they are emitted with `ipcWebContents.send`.
+/// The legacy shell; they are emitted with `ipcWebContents.send`.
 pub mod event {
     pub const MENU_EVENT: &str = "menu-event";
     pub const URL_ACTION: &str = "url-action";
@@ -188,7 +188,7 @@ pub mod event {
     ];
 }
 
-/// The three channels that Electron implements with `sendSync` + `returnValue`.
+/// The three channels that the legacy shell implements with `sendSync` + `returnValue`.
 /// wry has no synchronous IPC, so the JS bridge awaits them explicitly.
 pub const SYNCHRONOUS_CHANNELS: &[&str] = &[
     send::WILL_QUIT,

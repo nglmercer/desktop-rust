@@ -1,7 +1,7 @@
 //! # github-desktop-rs
 //!
 //! The application shell. Built directly on `tao` (event loop, window, native
-//! menu) and `wry` (WebView2 / WKWebView / WebKitGTK). No Tauri, no Electron,
+//! menu) and `wry` (WebView2 / WKWebView / WebKitGTK). No Tauri,
 //! no Node runtime, and no TypeScript in the backend: everything below the web
 //! layer lives in the GUI-free `desktop-core` crate.
 //!
@@ -725,7 +725,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 ..
             } => match window_event {
                 WindowEvent::CloseRequested => {
-                    // Electron's AppWindow emitted `will-quit` first. Keep that
+                    // The legacy shell's AppWindow emitted `will-quit` first. Keep that
                     // contract so a renderer can veto / persist on shutdown.
                     if !shutting_down {
                         app_loop.emit("will-quit", vec![]);
@@ -800,7 +800,7 @@ fn host_env_script() -> String {
 
 fn print_help() {
     println!(
-        "github-desktop-rs {} — GitHub Desktop on tao + wry (no Tauri, no Electron)\n\n\
+        "github-desktop-rs {} — GitHub Desktop on tao + wry (no Tauri)\n\n\
          Options:\n  \
          --version            print the version\n  \
          --help               print this help\n  \

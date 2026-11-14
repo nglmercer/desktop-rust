@@ -1,9 +1,9 @@
-//! OS integrations that Electron previously supplied from the main process:
+//! OS integrations that the legacy shell previously supplied from the main process:
 //! `shell.openExternal`, `shell.trashItem`, `nativeTheme`, `clipboard`,
 //! `session.resolveProxy`, `desktop-notifications` and the Squirrel updater.
 //!
 //! Everything here is plain `std::process::Command` (or the file system) — no
-//! Electron APIs and no Node modules.
+//! The legacy shell APIs and no Node modules.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -47,7 +47,7 @@ impl Drop for OpenPathLease {
 }
 
 /// Open a local file or directory with its default application. The result
-/// follows Electron's `shell.openPath`: empty on success, an error otherwise.
+/// follows the legacy shell's `shell.openPath`: empty on success, an error otherwise.
 /// A long-lived opener may already have launched an application before the
 /// request returns, so callers must not retry automatically after cancellation.
 pub fn open_path(path: &str) -> String {
@@ -564,7 +564,7 @@ pub fn show_notification(title: &str, body: &str, user_info: &serde_json::Value)
 
 #[cfg(target_os = "windows")]
 pub fn is_running_under_arm64_translation() -> bool {
-    // Electron used `app.runningUnderARM64Translation`. A Rust binary compiled
+    // The legacy shell used `app.runningUnderARM64Translation`. A Rust binary compiled
     // for x86_64 running on ARM64 Windows is the equivalent check; the OS does
     // not expose it to a native process without GetMachineTypeAttributes, so
     // honour the documented env override and default to false.

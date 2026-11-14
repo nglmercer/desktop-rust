@@ -128,7 +128,7 @@ describe.skipIf(
 import { BackendClient } from ${JSON.stringify(
           path.resolve('app/src/backend/client')
         )}
-import { shell } from ${JSON.stringify(path.resolve('app/src/web/electron'))}
+import { openPath } from ${JSON.stringify(path.resolve('app/src/lib/open-path'))}
 ;(window as any).runProbe = async () => {
   const client = new BackendClient()
   const available = await client.availableRustTerminals()
@@ -148,13 +148,13 @@ import { shell } from ${JSON.stringify(path.resolve('app/src/web/electron'))}
     repository
   )}, 'Konsole', ${JSON.stringify(directory)})
   for (const target of ${JSON.stringify([file, directory])}) {
-    const result = await shell.openPath(target)
+    const result = await openPath(target)
     if (result !== '') throw new Error('opening a file or folder failed: ' + result)
   }
   for (const target of ['-relative', ${JSON.stringify(
     path.join(root, 'missing')
   )}]) {
-    if (await shell.openPath(target) === '') throw new Error('invalid path was opened')
+    if (await openPath(target) === '') throw new Error('invalid path was opened')
   }
   return 'opened'
 }

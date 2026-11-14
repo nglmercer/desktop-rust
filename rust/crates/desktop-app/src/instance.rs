@@ -3,7 +3,7 @@
 //! The OAuth callback and "Open in Desktop" links arrive as a *new* process
 //! launched by the OS with the URL as an argument. That process must hand the
 //! URL to the window that is already running (it holds the pending sign-in)
-//! and exit, as Electron's `requestSingleInstanceLock` did.
+//! and exit, as the legacy shell's `requestSingleInstanceLock` did.
 
 use std::path::Path;
 

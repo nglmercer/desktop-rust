@@ -1,4 +1,4 @@
-//! Persistent repository selection, independent of Electron and browser storage.
+//! Persistent repository selection, independent of the legacy shell and browser storage.
 use crate::{Repository, accounts::StoredAccount, args, process};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -2530,7 +2530,7 @@ fn prepare_destination(path: &Path) -> Result<PathBuf> {
     Ok(parent.canonicalize()?.join(name))
 }
 
-/// Keep native configuration independent of Electron and available without HOME on Windows.
+/// Keep native configuration independent of the legacy shell and available without HOME on Windows.
 fn config_directory(mut env: impl FnMut(&str) -> Option<std::ffi::OsString>) -> Result<PathBuf> {
     let mut nonempty = |key: &str| env(key).filter(|value| !value.is_empty());
     let base = match nonempty("XDG_CONFIG_HOME") {

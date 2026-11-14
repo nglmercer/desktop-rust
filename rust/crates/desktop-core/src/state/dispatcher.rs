@@ -37,7 +37,7 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
     let value = match channel {
         ch::GET_PATH => json!(app.paths.get_path_by_name(&msg.string(0)?)),
         ch::GET_APP_ARCHITECTURE => serde_json::to_value(Architecture::current())?,
-        // Electron's `app.getAppPath()` was the directory the renderer loaded
+        // The legacy shell's `app.getAppPath()` was the directory the renderer loaded
         // its resources from, i.e. its `__dirname`. The web build's resources
         // are served from the page origin under this virtual root instead.
         ch::GET_APP_PATH => json!(crate::io::BUNDLE_ROOT),
@@ -230,7 +230,7 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
             // Only send the menu back when something actually changed. The
             // renderer re-sends its menu state on every store update, so an
             // unconditional reply is a never-ending loop between the two
-            // (the Electron main process guarded against the same thing).
+            // (the the legacy shell main process guarded against the same thing).
             if !apply_menu_state(&mut state.app_menu.items, &updates) {
                 return Ok(false);
             }

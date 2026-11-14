@@ -14,7 +14,7 @@ use crate::models::app_state::AppState;
 use crate::state::dispatcher;
 use crate::storage::{AppPaths, SecureStore, Storage};
 
-/// A new channel introduced by the Rust port. Electron's renderer read
+/// A new channel introduced by the Rust port. The legacy shell's renderer read
 /// `AppStore` state in-process; wry has no shared memory, so Rust pushes a
 /// sanitized immutable snapshot on every mutation.
 pub const STATE_CHANGED: &str = "state-changed";

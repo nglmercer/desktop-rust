@@ -4,7 +4,7 @@
 //! The menu is plain data here. The shell builds a native menu from it and
 //! asks [`action`] what a clicked item does; the renderer enables and
 //! disables items by id through `update-menu-state`, exactly as it did with
-//! Electron's menu.
+//! The legacy shell's menu.
 //!
 //! Labels use the Windows/Linux wording (with `&` mnemonics). The macOS
 //! application menu and its title-case labels are not ported yet.
@@ -347,7 +347,7 @@ pub fn build(labels: &MenuLabels) -> Vec<SerializableMenuItem> {
         ),
         separator("view-separator-3"),
     ];
-    // Electron showed Reload only on the development channel.
+    // The legacy shell showed Reload only on the development channel.
     if cfg!(debug_assertions) {
         view.push(item("reload-window", "&Reload", Some("CmdOrCtrl+Alt+R")));
     }

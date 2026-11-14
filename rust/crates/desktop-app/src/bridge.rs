@@ -1,6 +1,6 @@
 //! The wry <-> Rust transport.
 //!
-//! Three pieces replace Electron's `nodeIntegration: true` renderer:
+//! Three pieces replace the legacy shell's `nodeIntegration: true` renderer:
 //!
 //! * a `desktop://` custom protocol serving the web layer (no `file://`, no
 //!   Node filesystem access from JavaScript),
@@ -40,7 +40,7 @@ const DEV_VITE_DIST: &str = env!("DESKTOP_EMBEDDED_UI_DIR");
 
 /// Injected before any page script runs. It defines `window.__desktop`,
 /// `window.desktop` and an `ipcRenderer`-shaped object so the web frontend (or
-/// a browser build of the legacy React renderer) needs no Electron globals.
+/// a browser build of the legacy React renderer) needs no the legacy shell globals.
 pub const INIT_SCRIPT: &str =
     include_str!(concat!(env!("DESKTOP_EMBEDDED_UI_DIR"), "/ipc-shim.js"));
 

@@ -21,7 +21,7 @@
 //!
 //! This migration uses `tao` (event loop / windows / menus) and `wry`
 //! (WebView2 / WKWebView / WebKitGTK) directly. There is no Tauri runtime, no
-//! `tauri.conf.json`, no Tauri command macro and no Node/Electron process.
+//! `tauri.conf.json`, no Tauri command macro and no Node process.
 //! The web layer is plain HTML/CSS/JS served from a `desktop://` custom
 //! protocol and talks to Rust through a small `ipcRenderer`-compatible shim.
 
