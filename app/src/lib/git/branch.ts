@@ -1,4 +1,4 @@
-import { git, isGitError } from './core'
+import { git } from './core'
 import { Repository } from '../../models/repository'
 import { Branch } from '../../models/branch'
 import { formatAsLocalRef } from './refs'
@@ -7,7 +7,6 @@ import { GitError as DugiteError } from 'dugite'
 import { envForRemoteOperation } from './environment'
 import { createForEachRefParser } from './git-delimiter-parser'
 import { IRemote } from '../../models/remote'
-import { coerceToString } from './coerce-to-string'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -26,6 +25,8 @@ export async function createBranch(
   startPoint: string | null,
   noTrack?: boolean
 ): Promise<void> {
+  // Still needed by the `node:test` suites, which run without a Rust backend;
+  // it goes when they move to Vitest (rust/ROADMAP.md, R2).
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     return withRepositoryGitOperation(
       repository.path,
@@ -65,57 +66,13 @@ export async function renameBranch(
   newName: string,
   force?: boolean
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    if (branch.ref !== `refs/heads/${branch.name}`) throw new Error('Only local branches can be renamed')
-    return withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () => backend().renameRepositoryBranch(repository.path, branch.name, newName, branch.tip.sha),
-      true
-    )
-  }
-  try {
-    await git(
-      ['branch', force ? '-M' : '-m', branch.nameWithoutRemote, newName],
-      repository.path,
-      'renameBranch'
-    )
-  } catch (error) {
-    // If we failed to rename and the branch name only differs by case, we
-    // we'll try again with the -M flag to force the rename. See
-    // https://github.com/desktop/desktop/issues/21320
-    if (
-      // Only retry if the caller hasn't explicitly asked us to force the rename
-      force === undefined &&
-      isGitError(error) &&
-      error.result.gitError === DugiteError.BranchAlreadyExists
-    ) {
-      const stderr = coerceToString(error.result.stderr)
-      const m = /fatal: a branch named '(.+?)' already exists/.exec(stderr)
-
-      if (m && m[1].toLowerCase() === newName.toLowerCase()) {
-        // At this point we're almost certain that we are dealing with a
-        // case-only rename on a case insensitive filesystem, but we can't
-        // be 100% sure, NTFS can be configured to be case sensitive and macOS
-        // might have case sensitive file systems mounted so we have to list
-        // all branches and check the names.
-        return (
-          getBranchNames(repository)
-            // Throw the original error if we fail to get the branch names
-            .catch(() => Promise.reject(error))
-            .then(names =>
-              // If we find the new name in the list of branches we can't
-              // safely assume it's a case-only rename and have to
-              // propagate the original error, otherwise try again with -M
-              names.includes(newName)
-                ? Promise.reject(error)
-                : renameBranch(repository, branch, newName, true)
-            )
-        )
-      }
-    }
-    throw error
-  }
+  if (branch.ref !== `refs/heads/${branch.name}`) throw new Error('Only local branches can be renamed')
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().renameRepositoryBranch(repository.path, branch.name, newName, branch.tip.sha),
+    true
+  )
 }
 
 /**
@@ -126,17 +83,13 @@ export async function deleteLocalBranch(
   branchName: string,
   expectedTip?: string
 ): Promise<true> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    if (expectedTip === undefined) throw new Error('A reviewed branch tip is required')
-    await withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () => backend().deleteRepositoryBranch(repository.path, branchName, expectedTip),
-      true
-    )
-    return true
-  }
-  await git(['branch', '-D', branchName], repository.path, 'deleteLocalBranch')
+  if (expectedTip === undefined) throw new Error('A reviewed branch tip is required')
+  await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().deleteRepositoryBranch(repository.path, branchName, expectedTip),
+    true
+  )
   return true
 }
 
