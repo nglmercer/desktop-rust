@@ -192,6 +192,12 @@ verified; the feature is an integration path, not a completed browser product.
 The loopback renderer now uses browser APIs for clipboard and external links;
 these were exercised in Chromium against the embedded UI and real bridge.
 Browser popup blocking remains controlled by the browser.
+An isolated Linux Wry probe of `SandboxedMarkdown` loaded its stylesheet but
+the iframe's `data:` navigation remained at `about:blank`; `srcdoc` was also
+rejected by the current navigation policy. An experiment writing to the
+sandboxed document rendered content but did not deliver the link listeners in
+WebKit, so it was discarded. Markdown iframe navigation and link handling
+still require a replacement that preserves isolation and is validated in Wry.
 In an isolated browser probe, the Vite renderer mounted through a temporary
 asset proxy and an authenticated real bridge. Browser window state, focus,
 theme and app-resource path queries are now answered locally, and the welcome
