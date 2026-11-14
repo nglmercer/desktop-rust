@@ -1,4 +1,4 @@
-import Dexie from 'dexie'
+import type Dexie from 'dexie'
 import { BaseDatabase } from './base-database'
 
 export interface IMentionableUser {
@@ -60,8 +60,8 @@ export interface IMentionableCacheEntry {
 }
 
 export class GitHubUserDatabase extends BaseDatabase {
-  public declare mentionables: Dexie.Table<IDBMentionableUser, number>
-  public declare mentionableCache: Dexie.Table<IMentionableCacheEntry, number>
+  declare public mentionables: Dexie.Table<IDBMentionableUser, number>
+  declare public mentionableCache: Dexie.Table<IMentionableCacheEntry, number>
 
   public constructor(name: string, schemaVersion?: number) {
     super(name, schemaVersion)

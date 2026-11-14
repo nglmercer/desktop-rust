@@ -2,7 +2,7 @@ import { pathExists } from '../path-exists'
 import { join } from 'path'
 import which from 'which'
 import { bash, cmd, powershell } from './shell-escape'
-import { SupportedHooksEnvShell } from './config'
+import type { SupportedHooksEnvShell } from './config'
 import { assertNever } from '../fatal-error'
 import { enumerateValues, HKEY, RegistryValueType } from 'registry-js'
 

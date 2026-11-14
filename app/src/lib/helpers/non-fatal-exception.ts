@@ -21,7 +21,7 @@
 
 import { getHasOptedOutOfStats } from '../stats/stats-store'
 
-let lastNonFatalException: number | undefined = undefined
+let lastNonFatalException: number | undefined
 
 /** Max one non fatal exeception per minute */
 const minIntervalBetweenNonFatalExceptions = 60 * 1000

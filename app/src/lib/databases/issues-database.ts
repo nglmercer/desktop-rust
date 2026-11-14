@@ -1,4 +1,5 @@
-import Dexie, { Transaction } from 'dexie'
+import type Dexie from 'dexie'
+import type { Transaction } from 'dexie'
 import { BaseDatabase } from './base-database'
 
 export interface IIssue {
@@ -10,7 +11,7 @@ export interface IIssue {
 }
 
 export class IssuesDatabase extends BaseDatabase {
-  public declare issues: Dexie.Table<IIssue, number>
+  declare public issues: Dexie.Table<IIssue, number>
 
   public constructor(name: string, schemaVersion?: number) {
     super(name, schemaVersion)
@@ -60,5 +61,7 @@ function clearIssues(transaction: Transaction) {
 function clearDeprecatedKeys() {
   Object.keys(localStorage)
     .filter(key => /^IssuesStore\/\d+\/lastFetch$/.test(key))
-    .forEach(key => localStorage.removeItem(key))
+    .forEach(key => {
+      localStorage.removeItem(key)
+    })
 }

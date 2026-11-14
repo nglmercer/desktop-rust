@@ -1,4 +1,4 @@
-import { LogLevel } from '../log-level'
+import type { LogLevel } from '../log-level'
 import { formatLogMessage } from '../format-log-message'
 import { sendProxy } from '../../../ui/main-process-proxy'
 

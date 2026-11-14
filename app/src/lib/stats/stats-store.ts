@@ -1,19 +1,23 @@
 import { buildStatsPayload } from './stats-payload'
 export { buildStatsPayload } from './stats-payload'
-import { StatsDatabase, ILaunchStats, IDailyMeasures } from './stats-database'
+import type {
+  StatsDatabase,
+  ILaunchStats,
+  IDailyMeasures,
+} from './stats-database'
 import { getVersion } from '../../ui/lib/app-proxy'
 import { hasShownWelcomeFlow } from '../welcome'
 import {
-  Account,
+  type Account,
   isDotComAccount,
   isEnterpriseAccount,
 } from '../../models/account'
 import { getOS } from '../get-os'
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import { merge } from '../../lib/merge'
 import { getPersistedThemeName } from '../../ui/lib/application-theme'
-import { IUiActivityMonitor } from '../../ui/lib/ui-activity-monitor'
-import { Disposable } from 'event-kit'
+import type { IUiActivityMonitor } from '../../ui/lib/ui-activity-monitor'
+import type { Disposable } from 'event-kit'
 import {
   showChangesFilterDefault,
   showChangesFilterKey,
@@ -33,15 +37,15 @@ import {
   getNumberArray,
   setNumberArray,
 } from '../local-storage'
-import { PushOptions } from '../git'
+import type { PushOptions } from '../git'
 import { getShowSideBySideDiff } from '../../ui/lib/diff-mode'
 import { getAppArchitecture } from '../../ui/main-process-proxy'
-import { Architecture } from '../get-architecture'
+import type { Architecture } from '../get-architecture'
 import { MultiCommitOperationKind } from '../../models/multi-commit-operation'
 import { getNotificationsEnabled } from '../stores/notifications-store'
 import { isInApplicationFolder } from '../../ui/main-process-proxy'
 import { getRendererGUID } from '../get-renderer-guid'
-import { ValidNotificationPullRequestReviewState } from '../valid-notification-pull-request-review'
+import type { ValidNotificationPullRequestReviewState } from '../valid-notification-pull-request-review'
 import { useExternalCredentialHelperKey } from '../trampoline/use-external-credential-helper'
 import { getUserAgent } from '../http'
 import { getHooksEnvEnabled } from '../hooks/config'
@@ -49,7 +53,7 @@ import { enableNewStatsEndpoint } from '../feature-flag'
 import { parseModelKey } from '../copilot/byok'
 import { DefaultCopilotModel } from '../stores/copilot-store'
 import { getSystemNotificationsPermission } from '../notifications/notification-permission'
-import { TokenRefreshEvent } from '../credential-sessions'
+import type { TokenRefreshEvent } from '../credential-sessions'
 
 type PullRequestReviewStatFieldInfix =
   | 'Approved'
@@ -1309,7 +1313,7 @@ export class StatsStore implements IStatsStore {
 
   public increment = (k: keyof NumericMeasures, n = 1) =>
     this.updateDailyMeasures(
-      m => ({ [k]: m[k] + n } as Pick<IDailyMeasures, keyof NumericMeasures>)
+      m => ({ [k]: m[k] + n }) as Pick<IDailyMeasures, keyof NumericMeasures>
     )
 
   /**

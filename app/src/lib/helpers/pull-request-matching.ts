@@ -1,7 +1,7 @@
-import { IRemote } from '../../models/remote'
+import type { IRemote } from '../../models/remote'
 import { repositoryMatchesRemote } from '../repository-matching'
-import { Branch } from '../../models/branch'
-import { PullRequest } from '../../models/pull-request'
+import type { Branch } from '../../models/branch'
+import type { PullRequest } from '../../models/pull-request'
 
 /**
  * Find the pull request for this branch.

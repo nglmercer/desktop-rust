@@ -1,7 +1,7 @@
-import { ITokens, IHighlightRequest } from './types'
+import type { ITokens, IHighlightRequest } from './types'
 import { encodePathAsUrl } from '../../lib/path'
 
-const highlightWorkers = new Array<Worker>()
+const highlightWorkers: Worker[] = []
 const maxIdlingWorkers = 2
 const workerMaxRunDuration = 5 * 1000
 const workerUri = encodePathAsUrl(__dirname, 'highlighter.js')

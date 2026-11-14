@@ -1,4 +1,4 @@
-import { Commit } from '../../models/commit'
+import type { Commit } from '../../models/commit'
 
 export function getSquashedCommitDescription(
   commits: ReadonlyArray<Commit>,

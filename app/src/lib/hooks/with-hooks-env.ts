@@ -1,5 +1,5 @@
 import { cp, mkdtemp, rm } from 'fs/promises'
-import { AddressInfo } from 'net'
+import type { AddressInfo } from 'net'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createProxyProcessServer } from 'process-proxy'
@@ -13,7 +13,7 @@ import {
   getCacheHooksEnv,
   getGitHookEnvShell,
   getHooksEnvEnabled,
-  SupportedHooksEnvShell,
+  type SupportedHooksEnvShell,
 } from './config'
 
 const memoizedGetShellEnv = memoizeOne(

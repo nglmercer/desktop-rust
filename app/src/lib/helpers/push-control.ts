@@ -1,4 +1,4 @@
-import { IAPIPushControl } from '../api'
+import type { IAPIPushControl } from '../api'
 
 /**
  * Determine if branch can be pushed to by user based on results from

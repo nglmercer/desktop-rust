@@ -1,21 +1,21 @@
 import { RE2JS } from 're2js'
 import {
   RepoRulesInfo,
-  IRepoRulesMetadataRule,
-  RepoRulesMetadataMatcher,
-  RepoRuleEnforced,
+  type IRepoRulesMetadataRule,
+  type RepoRulesMetadataMatcher,
+  type RepoRuleEnforced,
 } from '../../models/repo-rules'
 import {
   APIRepoRuleMetadataOperator,
   APIRepoRuleType,
-  IAPIRepoRule,
-  IAPIRepoRuleMetadataParameters,
-  IAPIRepoRuleset,
+  type IAPIRepoRule,
+  type IAPIRepoRuleMetadataParameters,
+  type IAPIRepoRuleset,
 } from '../api'
 import { supportsRepoRules } from '../endpoint-capabilities'
-import { Account } from '../../models/account'
+import type { Account } from '../../models/account'
 import {
-  Repository,
+  type Repository,
   isRepositoryWithGitHubRepository,
 } from '../../models/repository'
 import { getBooleanConfigValue } from '../git'
@@ -69,7 +69,7 @@ export async function parseRepoRules(
   repository: Repository
 ): Promise<RepoRulesInfo> {
   const info = new RepoRulesInfo()
-  let gpgSignEnabled: boolean | undefined = undefined
+  let gpgSignEnabled: boolean | undefined
 
   for (const rule of rules) {
     // if a ruleset is null/undefined, then act as if the rule doesn't exist because

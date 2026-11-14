@@ -1,4 +1,4 @@
-import Dexie, { Transaction } from 'dexie'
+import Dexie, { type Transaction } from 'dexie'
 
 export abstract class BaseDatabase extends Dexie {
   private schemaVersion: number | undefined

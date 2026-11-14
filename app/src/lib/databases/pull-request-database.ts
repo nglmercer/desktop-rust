@@ -1,6 +1,6 @@
-import Dexie from 'dexie'
+import type Dexie from 'dexie'
 import { BaseDatabase } from './base-database'
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 
 export interface IPullRequestRef {
   /**
@@ -77,8 +77,8 @@ interface IPullRequestsLastUpdated {
 export type PullRequestKey = [number, number]
 
 export class PullRequestDatabase extends BaseDatabase {
-  public declare pullRequests: Dexie.Table<IPullRequest, PullRequestKey>
-  public declare pullRequestsLastUpdated: Dexie.Table<
+  declare public pullRequests: Dexie.Table<IPullRequest, PullRequestKey>
+  declare public pullRequestsLastUpdated: Dexie.Table<
     IPullRequestsLastUpdated,
     number
   >

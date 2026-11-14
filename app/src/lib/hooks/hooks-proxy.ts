@@ -1,11 +1,11 @@
 import { execFile, spawn } from 'child_process'
 import { basename, join, resolve } from 'path'
-import { ProcessProxyConnection as Connection } from 'process-proxy'
+import type { ProcessProxyConnection as Connection } from 'process-proxy'
 import type { HookCallbackOptions } from '../git'
 import { resolveGitBinary } from 'dugite'
-import { ShellEnvResult } from './get-shell-env'
+import type { ShellEnvResult } from './get-shell-env'
 import { shellFriendlyNames } from './config'
-import { Writable } from 'stream'
+import type { Writable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { promisify } from 'util'
 import memoizeOne from 'memoize-one'
@@ -264,9 +264,14 @@ export const createHooksProxy = (
         },
         signal: abortController.signal,
       }
-      const child = !__WIN32__ && originalHooksPath !== undefined
-        ? spawnTraditionalHook(join(originalHooksPath, hookName), proxyArgs.slice(1), options)
-        : spawn(gitPath, args, options)
+      const child =
+        !__WIN32__ && originalHooksPath !== undefined
+          ? spawnTraditionalHook(
+              join(originalHooksPath, hookName),
+              proxyArgs.slice(1),
+              options
+            )
+          : spawn(gitPath, args, options)
       child.on('close', (code, signal) => resolve({ code, signal }))
       child.on('error', err => reject(err))
 
@@ -274,9 +279,17 @@ export const createHooksProxy = (
       child.stderr.pipe(conn.stderr, { end: false }).on('error', reject)
       child.stderr.on('data', data => terminalOutput.push(data))
       child.stdin.on('error', error => {
-        if (!('code' in error) || (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED')) reject(error)
+        if (
+          !('code' in error) ||
+          (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED')
+        )
+          reject(error)
       })
-      if (!__WIN32__ && originalHooksPath !== undefined && stdinPath !== undefined) {
+      if (
+        !__WIN32__ &&
+        originalHooksPath !== undefined &&
+        stdinPath !== undefined
+      ) {
         const input = createReadStream(stdinPath).on('error', reject)
         child.stdin.on('close', () => input.destroy())
         input.pipe(child.stdin)
@@ -320,10 +333,13 @@ export const createHooksProxy = (
       await writeline(conn.stderr, `${hookName} hook failure ignored by user`)
     }
 
-    const signalNumber = signal === null
-      ? undefined
-      : (osConstants.signals as Record<string, number | undefined>)[signal]
-    const exitCode = ignoreError ? 0 : code ?? (signalNumber === undefined ? 1 : 128 + signalNumber)
+    const signalNumber =
+      signal === null
+        ? undefined
+        : (osConstants.signals as Record<string, number | undefined>)[signal]
+    const exitCode = ignoreError
+      ? 0
+      : (code ?? (signalNumber === undefined ? 1 : 128 + signalNumber))
 
     await tryExit(conn, exitCode)
 

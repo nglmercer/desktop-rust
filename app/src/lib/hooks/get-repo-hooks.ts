@@ -77,8 +77,13 @@ const getConfigValue = (
 export const getRepoHooksPath = async (
   path: string,
   env?: Record<string, string | undefined>
-) => resolve(path, await getConfigValue(path, 'core.hooksPath', env)
-  .catch(() => getHooksPath(path, env)))
+) =>
+  resolve(
+    path,
+    await getConfigValue(path, 'core.hooksPath', env).catch(() =>
+      getHooksPath(path, env)
+    )
+  )
 
 /**
  * Returns the names of executable Git hooks found in the given repository.
@@ -97,7 +102,9 @@ export async function* getRepoHooks(
   const hooksPath = await getRepoHooksPath(path, env)
 
   const files = await readdir(hooksPath, { withFileTypes: true })
-    .then(entries => entries.filter(x => x.isFile() || (!__WIN32__ && x.isSymbolicLink())))
+    .then(entries =>
+      entries.filter(x => x.isFile() || (!__WIN32__ && x.isSymbolicLink()))
+    )
     .catch(() => [])
 
   const matchAll = filter?.includes('*')
@@ -113,7 +120,12 @@ export async function* getRepoHooks(
       continue
     }
 
-    if (file.isSymbolicLink() && !(await stat(join(file.parentPath, file.name)).then(x => x.isFile()).catch(() => false))) {
+    if (
+      file.isSymbolicLink() &&
+      !(await stat(join(file.parentPath, file.name))
+        .then(x => x.isFile())
+        .catch(() => false))
+    ) {
       continue
     }
 

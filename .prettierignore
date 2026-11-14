@@ -56,6 +56,17 @@ app/src/lib/ci-checks/**
 # External editor and shell integrations are checked and formatted by Biome.
 app/src/lib/editors/**
 app/src/lib/shells/**
+# These application helpers are checked and formatted by Biome.
+app/src/lib/helpers/**
+app/src/lib/highlighter/**
+app/src/lib/hooks/**
+app/src/lib/logging/**
+app/src/lib/notifications/**
+app/src/lib/process/**
+app/src/lib/squash/**
+app/src/lib/ssh/**
+app/src/lib/stats/**
+app/src/lib/databases/**
 vite.cli.config.ts
 script/cli-build.test.ts
 vite.crash.config.ts
