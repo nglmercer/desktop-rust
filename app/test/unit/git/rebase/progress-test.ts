@@ -2,7 +2,7 @@ import { describe, it, type TestContext } from 'vitest'
 import assert from 'node:assert'
 import { continueRebase, getStatus } from '../../../../src/lib/git'
 import {
-  rebase,
+  rebase as rebaseInRepository,
   RebaseResult,
   getRebaseSnapshot,
 } from '../../../../src/lib/git'
@@ -15,6 +15,24 @@ import { IMultiCommitOperationProgress } from '../../../../src/models/progress'
 import { isConflictedFile } from '../../../../src/lib/status'
 import { ManualConflictResolution } from '../../../../src/models/manual-conflict-resolution'
 import { Repository } from '../../../../src/models/repository'
+
+import { currentBasis } from '../../../helpers/rust-backend'
+
+/** Start a rebase the way the app does, from the repository's current basis. */
+const rebase: typeof rebaseInRepository = async (
+  repository,
+  baseBranch,
+  targetBranch,
+  progress,
+  expected
+) =>
+  rebaseInRepository(
+    repository,
+    baseBranch,
+    targetBranch,
+    progress,
+    expected ?? (await currentBasis(repository))
+  )
 
 const baseBranchName = 'base-branch'
 const featureBranchName = 'this-is-a-feature'

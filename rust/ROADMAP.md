@@ -52,22 +52,49 @@ Effort: S = a day or less, M = a few days, L = a week or more.
 
 ### R0 — Guardrails (S)
 - [x] `pnpm migration:status` prints the baseline above (`script/migration-metrics.ts`).
-- [ ] Add the baseline to CI output and fail the job if any number increases.
+- [x] `pnpm migration:check` fails CI if any number increases; `pnpm migration:baseline` lowers it.
 - [ ] Record the numbers after each merged slice in the table above.
 
 ### R1 — Make tests drive the Rust backend (M, blocks R2–R5)
 - [x] Shared harness `app/test/helpers/rust-backend.ts` (real `desktop-rs serve`, WebSocket client). Proven on `pathExists` / `directoryExists`.
+- [x] `DESKTOP_TEST_RUST_BACKEND=1` runs every Vitest file against a real Rust server.
 - [ ] Build `desktop-cli` before Vitest in the default test script so the harness never skips locally (today it skips when the binary is missing).
-- [ ] Add a per-file switch (`useRustBackend()` helper) that routes `backend()` to the harness for a test file.
+- [x] `useRustBackend()` routes `backend()` to the harness for a test file (and selects the repository each request is about).
 - [ ] Add a reusable Rust-backed repository fixture (replaces `setupEmptyRepository`/`makeCommit` for tests that need a repository registered with the server).
 - [ ] Decide server lifetime: one server per test file (simple) vs a shared worker (fast). Measure; target < 1 s overhead per file.
 - [ ] Move the 63 Node-runner test files to Vitest (needed anyway so there is one runner). By folder: `stores` 21, `ui` 17, top level 15, `git` 10. Drop `script/ts-register.cjs` and `app/test/globals.cjs` when the last one moves.
 
 ### R2 — Retire fallbacks, module by module (L; the bulk of the work)
-Repeat per module: move its tests to the harness → fix every place the Rust op
-differs from the Node one → delete the `transportKind` branch and the `git(` call
-→ run `pnpm migration:status` and record the drop. Order is lowest risk first.
-Counts are `legacy git calls / transport checks / test files`.
+
+**How to measure it.** `DESKTOP_TEST_RUST_BACKEND=1 pnpm exec vitest run` runs
+every Vitest file against a real Rust server (about 5 minutes). First
+measurement: **332 of 396 files pass, 34 fail (198 tests)**. Each failing file
+is one of four kinds, and the fix for each kind is different:
+
+| Kind | Meaning | Fix |
+|---|---|---|
+| Basis | The Rust operation takes the head/branch the app just read (`expected`) and refuses without it. | Wrap the call in the test with `currentBasis` / `mergeBasis` (`app/test/helpers/rust-backend.ts`). Mechanical; done for cherry-pick, rebase, revert, merge. |
+| Contract | The Rust operation deliberately refuses what the old path allowed (continue with unstaged conflicts, pull without terminal output, custom rebase editors, unsupported history options). | Decide the contract; update the test, or add the capability in Rust. |
+| Progress | Callers pass a progress callback; the Rust path emits none. | Stream progress events from the Rust operation. Blocks the cherry-pick and rebase progress tests. |
+| Error shape | The Rust path fails differently on a non-repository or a symlinked `.gitignore` than the Node path. | Match the error text/type, or change the assertion. |
+
+Worklist (failing files, with the first cause each hits):
+- [x] `git/cherry-pick-test` basis, merge basis — 16 of 20 pass; remaining 4 are Progress ×3 and Contract ×1
+- [x] `git/rebase/*`, `git/rebase-full-test` basis — 29 of 37 pass; remaining 8 are Contract ×4, Progress ×3, Error shape ×1
+- [x] `git/revert-test`, `git/merge-test` basis — 10 of 11 pass; remaining 1 is Error shape (`abortMerge` with no merge)
+- [ ] `git/commit-test` (27): Basis — needs the reviewed selection the app builds first
+- [ ] `git/rev-parse-test` (17), `git/remote-operations-test` (15), `git/pull/*` (25): Contract / Basis
+- [ ] `git/branch-test` (2): Basis — needs a reviewed branch tip
+- [ ] `git/gitignore-test` (4), `git/remote-discovery-test` (4), `git/description-test` (3), `git/worktree-move-test` (3), `git/revision-consumers-test` (3): Error shape
+- [ ] `git/stash-test` (2), `git/remote-management-test` (2), `git/checkout-test` (2), `git/lfs-test` (2), `git/status-test`, `git/squash-test`, `git/reorder-test`, `git/for-each-ref-test`, `git/log-revision-exclusions-test`: Contract
+- [ ] `pull-hook-callbacks-test`, `write-default-readme-test`: Contract
+- [ ] `web-open-path-test`, `web-host-bridge-loader-test`, `script/*`: not backend work — they stub `window`, which the harness also does; make them opt out of the harness
+- [ ] When the flag-on run is green, make it the default, then delete the fallbacks below.
+
+Then, per module: delete the `transportKind` branch and the `git(` call, run
+`pnpm migration:status` and lower the baseline with `pnpm migration:baseline`.
+Order is lowest risk first. Counts are `legacy git calls / transport checks /
+test files`.
 
 **Wave 1 — small, mostly reads (S each)**
 - [ ] `description` 0/2/2 · `init` 1/1/2 · `var` 1/1/1 · `revert` 1/1/1 · `rev-parse` 1/1/3 · `add` 1/0/2 · `clone` 1/0/2 · `stage` 0/1/7 · `checkout-index` 1/1/1 · `merge-tree` 0/1/1 · `diff-check` 1/0/2 · `gitignore` 0/3/1 · `refs` 1/2/4 · `pull` 1/1/4 · `push` 1/2/5 · `status` 1/3/4 · `update-index` 1/3/9

@@ -2,7 +2,7 @@ import { describe, it } from 'vitest'
 import assert from 'node:assert'
 
 import {
-  rebase,
+  rebase as rebaseInRepository,
   abortRebase,
   getRebaseInternalState,
   RebaseResult,
@@ -16,6 +16,24 @@ import {
 } from '../../helpers/repository-scaffolding'
 import { Branch } from '../../../src/models/branch'
 import { getStatusOrThrow } from '../../helpers/status'
+
+import { currentBasis } from '../../helpers/rust-backend'
+
+/** Start a rebase the way the app does, from the repository's current basis. */
+const rebase: typeof rebaseInRepository = async (
+  repository,
+  baseBranch,
+  targetBranch,
+  progress,
+  expected
+) =>
+  rebaseInRepository(
+    repository,
+    baseBranch,
+    targetBranch,
+    progress,
+    expected ?? (await currentBasis(repository))
+  )
 
 async function findBranch(
   repo: import('../../../src/models/repository').Repository,

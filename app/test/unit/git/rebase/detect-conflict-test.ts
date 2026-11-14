@@ -8,13 +8,31 @@ import { getChangedFiles } from '../../../../src/lib/git'
 import {
   abortRebase,
   continueRebase,
-  rebase,
+  rebase as rebaseInRepository,
   RebaseResult,
 } from '../../../../src/lib/git/rebase'
 import { AppFileStatusKind } from '../../../../src/models/status'
 import { createRepository } from '../../../helpers/repository-builder-rebase-test'
 import { getStatusOrThrow } from '../../../helpers/status'
 import { getBranchOrError } from '../../../helpers/git'
+
+import { currentBasis } from '../../../helpers/rust-backend'
+
+/** Start a rebase the way the app does, from the repository's current basis. */
+const rebase: typeof rebaseInRepository = async (
+  repository,
+  baseBranch,
+  targetBranch,
+  progress,
+  expected
+) =>
+  rebaseInRepository(
+    repository,
+    baseBranch,
+    targetBranch,
+    progress,
+    expected ?? (await currentBasis(repository))
+  )
 
 const baseBranchName = 'base-branch'
 const featureBranchName = 'this-is-a-feature'

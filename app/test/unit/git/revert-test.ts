@@ -3,11 +3,29 @@ import assert from 'node:assert'
 import { existsSync } from 'fs'
 import { readFile } from 'fs/promises'
 
-import { revertCommit } from '../../../src/lib/git/revert'
+import { revertCommit as revertCommitInRepository } from '../../../src/lib/git/revert'
 import { getCommits } from '../../../src/lib/git'
 import { setupEmptyRepository } from '../../helpers/repositories'
 import { makeCommit } from '../../helpers/repository-scaffolding'
 import { getTipOrError } from '../../helpers/git'
+
+import { currentBasis } from '../../helpers/rust-backend'
+
+/** Revert the way the app does, from the repository's current basis. */
+const revertCommit: typeof revertCommitInRepository = async (
+  repository,
+  commit,
+  remote,
+  progress,
+  expected
+) =>
+  revertCommitInRepository(
+    repository,
+    commit,
+    remote,
+    progress,
+    expected ?? (await currentBasis(repository))
+  )
 
 describe('git/revert', () => {
   describe('revertCommit', () => {

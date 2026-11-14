@@ -4,7 +4,7 @@ import {
   abortMerge,
   getMergeBase,
   getBranches,
-  merge,
+  merge as mergeInRepository,
   MergeResult,
 } from '../../../src/lib/git'
 import {
@@ -15,6 +15,22 @@ import {
 import { exec } from 'dugite'
 import { Repository } from '../../../src/models/repository'
 import { git } from '../../../src/lib/git/core'
+
+import { mergeBasis } from '../../helpers/rust-backend'
+
+/** Merge the way the app does, from the branch tips as they are. */
+const merge: typeof mergeInRepository = async (
+  repository,
+  branch,
+  options,
+  expected
+) =>
+  mergeInRepository(
+    repository,
+    branch,
+    options,
+    expected ?? (await mergeBasis(repository, branch))
+  )
 
 describe('git/merge', () => {
   describe('merge', () => {
