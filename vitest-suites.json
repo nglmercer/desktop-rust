@@ -397,5 +397,6 @@
   "script/webpack-koffi-test.ts",
   "script/webpack-copilot-timers-test.ts",
   "app/test/unit/repository-account-test.ts",
-  "app/test/unit/native-file-drop-test.ts"
+  "app/test/unit/native-file-drop-test.ts",
+  "app/test/unit/notification-preferences-web-test.tsx"
 ]

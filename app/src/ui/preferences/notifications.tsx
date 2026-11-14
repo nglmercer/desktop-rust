@@ -3,14 +3,10 @@ import { DialogContent } from '../dialog'
 import { Checkbox, CheckboxValue } from '../lib/checkbox'
 import { LinkButton } from '../lib/link-button'
 import {
-  getNotificationSettingsUrl,
-  supportsNotifications,
-  supportsNotificationsPermissionRequest,
-} from 'desktop-notifications'
-import {
-  getNotificationsPermission,
-  requestNotificationsPermission,
-} from '../main-process-proxy'
+  readNotificationSettings,
+  requestNotificationSettingsPermission,
+  type NotificationSettings,
+} from '../../lib/notifications/notification-settings'
 
 interface INotificationPreferencesProps {
   readonly notificationsEnabled: boolean
@@ -18,27 +14,39 @@ interface INotificationPreferencesProps {
 }
 
 interface INotificationPreferencesState {
-  readonly suggestGrantNotificationPermission: boolean
-  readonly warnNotificationsDenied: boolean
-  readonly suggestConfigureNotifications: boolean
+  readonly settings: NotificationSettings
 }
 
 export class Notifications extends React.Component<
   INotificationPreferencesProps,
   INotificationPreferencesState
 > {
+  private mounted = false
+  private readGeneration = 0
+  private requestingPermission = false
+
   public constructor(props: INotificationPreferencesProps) {
     super(props)
 
     this.state = {
-      suggestGrantNotificationPermission: false,
-      warnNotificationsDenied: false,
-      suggestConfigureNotifications: false,
+      settings: { kind: 'unavailable' },
     }
   }
 
   public componentDidMount() {
-    this.updateNotificationsState()
+    this.mounted = true
+    window.addEventListener('focus', this.onWindowFocus)
+    void this.updateNotificationsState()
+  }
+
+  public componentWillUnmount() {
+    this.mounted = false
+    this.readGeneration++
+    window.removeEventListener('focus', this.onWindowFocus)
+  }
+
+  private onWindowFocus = () => {
+    void this.updateNotificationsState()
   }
 
   private onNotificationsEnabledChanged = (
@@ -61,45 +69,56 @@ export class Notifications extends React.Component<
             }
             onChange={this.onNotificationsEnabledChanged}
           />
-          <p className="settings-description">
+          <div className="settings-description">
             Allows the display of notifications when high-signal events take
             place in the current repository.{this.renderNotificationHint()}
-          </p>
+          </div>
         </div>
       </DialogContent>
     )
   }
 
   private onGrantNotificationPermission = async () => {
-    await requestNotificationsPermission()
-    this.updateNotificationsState()
+    if (this.requestingPermission) {
+      return
+    }
+    this.requestingPermission = true
+    try {
+      await requestNotificationSettingsPermission()
+    } catch (error) {
+      log.warn('Failed to request notification permission', error)
+    } finally {
+      this.requestingPermission = false
+      if (this.mounted) {
+        void this.updateNotificationsState()
+      }
+    }
   }
 
   private async updateNotificationsState() {
-    const notificationsPermission = await getNotificationsPermission()
-    this.setState({
-      suggestGrantNotificationPermission:
-        supportsNotificationsPermissionRequest() &&
-        notificationsPermission === 'default',
-      warnNotificationsDenied: notificationsPermission === 'denied',
-      suggestConfigureNotifications: notificationsPermission === 'granted',
-    })
+    const generation = ++this.readGeneration
+    try {
+      const settings = await readNotificationSettings()
+      if (this.mounted && this.readGeneration === generation) {
+        this.setState({ settings })
+      }
+    } catch (error) {
+      log.warn('Failed to read notification settings', error)
+      if (this.mounted && this.readGeneration === generation) {
+        this.setState({ settings: { kind: 'unavailable' } })
+      }
+    }
   }
 
   private renderNotificationHint() {
     // No need to bother the user if their environment doesn't support our
     // notifications or if they've been explicitly disabled.
-    if (!supportsNotifications() || !this.props.notificationsEnabled) {
+    const { settings } = this.state
+    if (settings.kind === 'unavailable' || !this.props.notificationsEnabled) {
       return null
     }
 
-    const {
-      suggestGrantNotificationPermission,
-      warnNotificationsDenied,
-      suggestConfigureNotifications,
-    } = this.state
-
-    if (suggestGrantNotificationPermission) {
+    if (settings.canRequest && settings.permission === 'default') {
       return (
         <>
           {' '}
@@ -112,18 +131,25 @@ export class Notifications extends React.Component<
       )
     }
 
-    const notificationSettingsURL = getNotificationSettingsUrl()
+    if (settings.kind === 'web') {
+      return settings.permission === 'denied' ? (
+        <div className="setting-hint-warning">
+          <span className="warning-icon">⚠️</span> Notifications are blocked.
+          Enable them in your browser or system notification settings.
+        </div>
+      ) : null
+    }
 
-    if (notificationSettingsURL === null) {
+    if (settings.settingsUrl === null) {
       return null
     }
 
-    if (warnNotificationsDenied) {
+    if (settings.permission === 'denied') {
       return (
         <div className="setting-hint-warning">
           <span className="warning-icon">⚠️</span> GitHub Desktop has no
           permission to display notifications. Please, enable them in the{' '}
-          <LinkButton uri={notificationSettingsURL}>
+          <LinkButton uri={settings.settingsUrl}>
             Notifications Settings
           </LinkButton>
           .
@@ -131,15 +157,14 @@ export class Notifications extends React.Component<
       )
     }
 
-    const verb = suggestConfigureNotifications
-      ? 'properly configured'
-      : 'enabled'
+    const verb =
+      settings.permission === 'granted' ? 'properly configured' : 'enabled'
 
     return (
       <>
         {' '}
         Make sure notifications are {verb} for GitHub Desktop in the{' '}
-        <LinkButton uri={notificationSettingsURL}>
+        <LinkButton uri={settings.settingsUrl}>
           Notifications Settings
         </LinkButton>
         .
