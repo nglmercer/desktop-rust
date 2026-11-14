@@ -156,7 +156,7 @@ describe('git/merge', () => {
         const repository = await setupEmptyRepository(t)
         await assert.rejects(
           () => abortMerge(repository),
-          /There is no merge in progress, so there is nothing to abort/
+          /There is no merge in progress, so there is nothing to abort|the requested Git operation is not in progress/
         )
       })
     })

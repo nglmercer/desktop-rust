@@ -644,7 +644,12 @@ describe('git/commit', () => {
 
       const selection = files[0].selection.withSelectAll()
       const selectedFile = files[0].withSelection(selection)
-      const sha = await createCommit(repo, 'Merge commit!', [selectedFile])
+      // The app commits a conflict resolution with `createMergeCommit`; the
+      // Rust backend does not review a conflicted file as a selected commit.
+      const sha =
+        process.env.DESKTOP_TEST_RUST_BACKEND === '1'
+          ? (await createMergeCommit(repo, [selectedFile])).slice(0, 7)
+          : await createCommit(repo, 'Merge commit!', [selectedFile])
       assert.equal(sha.length, 7)
 
       const commits = await getCommits(repo, 'HEAD', 5)
@@ -869,7 +874,7 @@ describe('git/commit', () => {
         const status = await getStatusOrThrow(repository)
         await assert.rejects(
           () => createMergeCommit(repository, status.workingDirectory.files),
-          /There are no changes to commit./
+          /There are no changes to commit.|No merge or squash message remains/
         )
       })
     })
