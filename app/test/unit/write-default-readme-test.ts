@@ -4,12 +4,12 @@ import { readFile } from 'fs/promises'
 import * as path from 'path'
 
 import { writeDefaultReadme } from '../../src/ui/add-repository/write-default-readme'
-import { createTempDirectory } from '../helpers/temp'
+import { setupEmptyRepository } from '../helpers/repositories'
 
 describe('repository setup', () => {
   describe('writeDefaultReadme', () => {
     it('writes a default README without a description', async t => {
-      const directory = await createTempDirectory(t)
+      const directory = (await setupEmptyRepository(t)).path
       const file = path.join(directory, 'README.md')
 
       await writeDefaultReadme(directory, 'some-repository')
@@ -19,7 +19,7 @@ describe('repository setup', () => {
     })
 
     it('writes a README with description when provided', async t => {
-      const directory = await createTempDirectory(t)
+      const directory = (await setupEmptyRepository(t)).path
       const file = path.join(directory, 'README.md')
 
       await writeDefaultReadme(

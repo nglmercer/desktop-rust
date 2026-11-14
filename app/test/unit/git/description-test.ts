@@ -10,6 +10,7 @@ import {
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as Path from 'node:path'
+import { exec } from 'dugite'
 import {
   DefaultGitDescription,
   getGitDescription,
@@ -20,7 +21,8 @@ let directory: string | undefined
 
 async function repository(): Promise<string> {
   directory = await mkdtemp(Path.join(tmpdir(), 'desktop-description-test-'))
-  await mkdir(Path.join(directory, '.git'))
+  await exec(['init'], directory)
+  await mkdir(Path.join(directory, '.git'), { recursive: true })
   await writeFile(
     Path.join(directory, '.git', 'description'),
     DefaultGitDescription
@@ -34,7 +36,7 @@ afterEach(async () => {
   directory = undefined
 })
 
-describe('Git description non-Rust fallback', () => {
+describe('Git description', () => {
   it('returns empty for Git’s default description', async () => {
     await expect(getGitDescription(await repository())).resolves.toBe('')
   })
