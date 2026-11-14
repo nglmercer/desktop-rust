@@ -389,5 +389,9 @@
   "app/test/unit/acknowledgements-test.tsx",
   "app/test/unit/native-clone-dialog-test.tsx",
   "app/test/unit/reveal-repository-routing-test.ts",
-  "app/test/unit/reveal-repository-client-test.ts"
+  "app/test/unit/reveal-repository-client-test.ts",
+  "app/test/unit/release-changelog-routing-test.ts",
+  "app/test/unit/release-changelog-client-test.ts",
+  "script/build-rust-production.test.ts",
+  "script/start-rust-package.test.ts"
 ]

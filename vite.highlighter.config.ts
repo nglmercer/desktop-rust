@@ -2,8 +2,20 @@ import { defineConfig, type Plugin } from 'vite'
 import path from 'path'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
+import {
+  requireAbsentViteOutputFiles,
+  viteOutputDirectory,
+} from './script/vite-output'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const outputDirectory = viteOutputDirectory(__dirname)
+if (process.env.DESKTOP_VITE_DIST !== undefined) {
+  requireAbsentViteOutputFiles(outputDirectory, [
+    'highlighter.js',
+    'highlighter.js.map',
+  ])
+}
 
 const runmodeEntry = createRequire(
   path.resolve(__dirname, 'app/package.json')
@@ -20,7 +32,10 @@ const codeMirrorNodeRunmode: Plugin = {
   name: 'highlighter-codemirror-runmode',
   enforce: 'pre',
   resolveId(source) {
-    if (source === 'codemirror' || /(^|\/)lib\/codemirror(\.js)?$/.test(source)) {
+    if (
+      source === 'codemirror' ||
+      /(^|\/)lib\/codemirror(\.js)?$/.test(source)
+    ) {
       return runmodeEntry
     }
     return null
@@ -71,7 +86,7 @@ export default defineConfig({
     ],
   },
   build: {
-    outDir: path.resolve(__dirname, 'out/vite-dist'),
+    outDir: outputDirectory,
     emptyOutDir: false,
     lib: {
       entry: path.resolve(__dirname, 'app/src/highlighter/index.ts'),

@@ -10,7 +10,7 @@ use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-static ASSETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
+static ASSETS: Dir = include_dir!("$DESKTOP_EMBEDDED_UI_DIR");
 
 fn valid_path(path: &str) -> bool {
     !path.starts_with('/')

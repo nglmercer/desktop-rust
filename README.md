@@ -22,9 +22,34 @@ cargo build -p desktop-app --locked
 without starting them. It rejects a Cargo cross-target because renderer platform
 flags follow Node's host. Node and the Rust toolchain must also use the same
 host OS and architecture; that combination is not checked automatically. Vite
-updates `out/vite-dist` before Cargo rejects an unsupported target. This is a
-development build; the production build and packaging pipeline remain under
-migration.
+updates `out/vite-dist` before Cargo rejects an unsupported target.
+
+`pnpm build:prod` builds optimized Rust desktop and browser-enabled CLI
+binaries; `pnpm package` stages a relocatable Rust package under `dist/`. These
+are migration artifacts, not release installers: distribution, signing,
+updates, complete license inventories and feature parity remain unfinished.
+After packaging, `pnpm start:prod` starts that staged desktop. Copilot uses its
+adjacent runtime when it is installed. Set `DESKTOP_RUST_DIST_DIR` to an
+absolute directory to stage and launch a package elsewhere. Close other Rust
+desktop instances first: state writes are not yet coordinated across processes.
+Production OAuth callbacks are not yet registered by the Rust shell. While
+`pnpm start:prod` is running, another invocation for the same staged package is
+blocked; it cannot forward URLs or launch actions to the open instance through
+that command.
+
+Production builds and packages use a private, temporary Vite bundle, so the
+development watcher can continue using `out/vite-dist`. Direct Cargo builds
+with `desktop-app/packaged-ui` require an absolute `DESKTOP_VITE_DIST` path
+to a complete, freshly built bundle outside the development directory. Package
+builds use a separate `desktop-packaged` subdirectory under Cargo's target
+directory and cooperative locks on that target and the package destination.
+External Cargo commands do not respect these locks. If a package operation or
+staged host is killed unexpectedly, a lock can remain: inspect its recorded
+owner and verify that no related host or build process is running before
+manually removing it. A force-killed packaging parent may leave its temporary
+Vite directory and child build process behind.
+The existing Electron production pipeline is available through
+`pnpm build:electron:prod` and `pnpm package:electron` until it is replaced.
 
 For development, `pnpm start` builds and starts the Rust shell and watches the
 Vite renderer, highlighter and IPC bootstrap. After a successful rebuild and

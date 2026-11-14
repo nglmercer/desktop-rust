@@ -120,14 +120,16 @@ class UpdateStore {
 
   private onUpdateNotAvailable = async () => {
     // This is so we can check for pretext changelog for showcasing a recent update
-    this.newReleases = await generateReleaseSummary()
+    const releases = await generateReleaseSummary()
+    this.newReleases = releases.length > 0 ? releases : null
     this.touchLastChecked()
     this.status = UpdateStatus.UpdateNotAvailable
     this.emitDidChange()
   }
 
   private onUpdateDownloaded = async () => {
-    this.newReleases = await generateReleaseSummary()
+    const releases = await generateReleaseSummary()
+    this.newReleases = releases.length > 0 ? releases : null
     // We know it's an "immediate" auto-update from x64 to arm64 if the app is
     // running on arm64 under x64 emulation and there is only one new release
     // and it's the same version we have right now (which means we spoofed
@@ -311,7 +313,8 @@ class UpdateStore {
     ) {
       // On prod or with test manual check for updates, we are doing this during
       // the automatic check for updates
-      this.newReleases = await generateReleaseSummary()
+      const releases = await generateReleaseSummary()
+      this.newReleases = releases.length > 0 ? releases : null
     }
 
     if (this.newReleases === null) {

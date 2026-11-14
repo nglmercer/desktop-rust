@@ -27,6 +27,7 @@ import {
 } from './contracts'
 import { randomUUID } from '../web/random-uuid'
 import { isRecord } from '../lib/is-record'
+import type { ReleaseMetadata } from '../models/release-notes'
 
 export interface BackendRequestOptions {
   readonly repositoryId?: string
@@ -805,6 +806,12 @@ class WebSocketTransport {
     }
   }
 
+  /** An independently queued connection using the same authenticated session. */
+  auxiliary(): WebSocketTransport {
+    if (this.closed) throw this.terminalError ?? disconnectedError()
+    return new WebSocketTransport(this.token)
+  }
+
   get ready(): boolean {
     return this._ready !== null
   }
@@ -1238,6 +1245,8 @@ class WebSocketTransport {
 export class BackendClient {
   private wry: WryTransport | null = null
   private ws: WebSocketTransport | null = null
+  private wsChangelog: WebSocketTransport | null = null
+  private changelogRequests = 0
   private transport: 'wry' | 'ws' | 'none' = 'none'
   private comparisonTurn: Promise<void> = Promise.resolve()
 
@@ -1331,6 +1340,7 @@ export class BackendClient {
 
   close(): void {
     this.ws?.close()
+    this.wsChangelog?.close()
   }
 
   /** Snapshot of current repository (ws) or health/capabilities (wry). */
@@ -1468,6 +1478,48 @@ export class BackendClient {
       if (!result.retryable && !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(result.code)) throw error
       throw new BackendError({ code: result.code, message: `${result.message}. The file manager may have opened; check before retrying.`, retryable: false })
     }
+  }
+
+  /** Read the public Desktop changelog through the browser's Rust bridge. */
+  async releaseChangelog(
+    channel: 'beta' | 'test' | null,
+    limit?: number
+  ): Promise<ReadonlyArray<ReleaseMetadata>> {
+    if (this.transport !== 'ws') {
+      throw new BackendError({ code: 'unsupported', message: 'Changelog bridge requires the browser transport', retryable: false })
+    }
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 0 || limit > 250)) {
+      throw new BackendError({ code: 'invalid_request', message: 'Invalid changelog limit', retryable: false })
+    }
+    // Release notes can take up to 30 seconds over the network. The bridge
+    // serializes each connection, so use a separate authenticated connection
+    // to keep repository operations responsive.
+    const changelog = this.wsChangelog ??= this.ws!.auxiliary()
+    this.changelogRequests++
+    let value: unknown
+    try {
+      value = await changelog.request('release_changelog', {
+        channel,
+        limit: limit ?? null,
+      }, { deadlineMs: 40_000 })
+    } finally {
+      this.changelogRequests--
+      if (this.changelogRequests === 0 && this.wsChangelog === changelog) {
+        this.wsChangelog = null
+        changelog.close()
+      }
+    }
+    if (
+      !Array.isArray(value) ||
+      !value.every(entry =>
+        isRecord(entry) && typeof entry.name === 'string' &&
+        typeof entry.pub_date === 'string' && typeof entry.version === 'string' &&
+        Array.isArray(entry.notes) && entry.notes.every((note: unknown) => typeof note === 'string')
+      )
+    ) {
+      throw new BackendError({ code: 'invalid_response', message: 'Invalid changelog response', retryable: false })
+    }
+    return value
   }
 
   /** Find graphical editors using the Rust host's fixed discovery list. */

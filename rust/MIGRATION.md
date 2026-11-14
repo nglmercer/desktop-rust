@@ -1,5 +1,23 @@
 # Full migration and legacy-removal ledger
 
+The default production build and package commands now produce the Rust desktop
+and browser-enabled CLI using isolated Vite assets. The package is a migration
+artifact: it is not a signed installer and does not establish release, update,
+license or feature parity. On Linux, a staged package mounted React, completed
+backend RPC and drained on normal exit and Ctrl-C under Xvfb. Native macOS and
+Windows validation remains open. The staged launcher holds a cooperative
+package lock while the host is running; a second launcher cannot forward URLs
+to that instance, and production OAuth callback registration remains open.
+Electron and Webpack remain active in the legacy CI and release workflows.
+
+The browser renderer reads Desktop release notes through the Rust bridge, using
+the official fixed endpoint and system TLS roots. Its temporary authenticated
+connection keeps a slow download off the main operation queue and closes after
+the last request. Concurrent note requests share that connection; their 40 s
+deadline includes time waiting in its queue. A Linux local proxy test covered
+trusted and untrusted certificates, hostname validation and concurrent RPC;
+native certificate stores on macOS and Windows remain unverified.
+
 The legacy Electron packaging helper for `printenvz` now builds the checked-in
 Rust source directly through a TypeScript script. Its separate JavaScript npm
 package and local file dependency were removed. Native host and supported

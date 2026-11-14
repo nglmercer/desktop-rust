@@ -34,14 +34,15 @@ use include_dir::{Dir, include_dir};
 
 use crate::host::AppEvent;
 
-static VITE_DIST: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../../out/vite-dist");
+static VITE_DIST: Dir = include_dir!("$DESKTOP_EMBEDDED_UI_DIR");
 #[cfg(not(feature = "packaged-ui"))]
-const DEV_VITE_DIST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../out/vite-dist");
+const DEV_VITE_DIST: &str = env!("DESKTOP_EMBEDDED_UI_DIR");
 
 /// Injected before any page script runs. It defines `window.__desktop`,
 /// `window.desktop` and an `ipcRenderer`-shaped object so the web frontend (or
 /// a browser build of the legacy React renderer) needs no Electron globals.
-pub const INIT_SCRIPT: &str = include_str!("../../../../out/vite-dist/ipc-shim.js");
+pub const INIT_SCRIPT: &str =
+    include_str!(concat!(env!("DESKTOP_EMBEDDED_UI_DIR"), "/ipc-shim.js"));
 
 const JSON: &str = "application/json; charset=utf-8";
 

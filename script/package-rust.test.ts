@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   mkdirSync,
   mkdtempSync,
+  cpSync,
+  existsSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -17,7 +19,13 @@ vi.mock('node:child_process', () => ({
   spawnSync: spawn,
   default: { spawnSync: spawn },
 }))
-import { copilotPlatform, packageRust } from './package-rust'
+import {
+  acquirePackageOutputLock,
+  copilotPlatform,
+  packageRust,
+  stagedRustDesktop,
+} from './package-rust'
+import { acquireRustPackageLock } from './rust-package-lock'
 
 const roots: string[] = []
 const host =
@@ -57,10 +65,10 @@ function fixture(): string {
   )
   for (const file of [
     'node_modules/vite/bin/vite.js',
-    `rust/target/debug/desktop-rs${suffix}`,
-    `rust/target/debug/github-desktop-rs${suffix}`,
-    `rust/target/release/desktop-rs${suffix}`,
-    `rust/target/release/github-desktop-rs${suffix}`,
+    `rust/target/desktop-packaged/debug/desktop-rs${suffix}`,
+    `rust/target/desktop-packaged/debug/github-desktop-rs${suffix}`,
+    `rust/target/desktop-packaged/release/desktop-rs${suffix}`,
+    `rust/target/desktop-packaged/release/github-desktop-rs${suffix}`,
     'out/vite-dist/index.html',
     'out/vite-dist/highlighter.js',
     'out/vite-dist/ipc-shim.js',
@@ -89,12 +97,14 @@ function fixture(): string {
 }
 
 beforeEach(() => {
+  vi.stubEnv('NODE_ENV', undefined)
   vi.stubEnv('DESKTOP_RUST_PACKAGE_PROFILE', 'debug')
+  vi.stubEnv('DESKTOP_RUST_DIST_DIR', '')
   spawn.mockImplementation((...args: unknown[]) => {
     const [command, values, options] = args as [
       string,
       string[],
-      { cwd: string }
+      { cwd: string; env?: NodeJS.ProcessEnv }
     ]
     if (command === 'rustc') {
       const rustArch = process.arch === 'x64' ? 'x86_64' : 'aarch64'
@@ -148,7 +158,7 @@ beforeEach(() => {
         ? 'desktop-rs'
         : 'github-desktop-rs'
       const profile = values.includes('--release') ? 'release' : 'debug'
-      const directory = `rust/target/${
+      const directory = `rust/target/desktop-packaged/${
         process.env.FAKE_BAD_ARTIFACT
           ? profile === 'debug'
             ? 'release'
@@ -166,6 +176,17 @@ beforeEach(() => {
         stderr: '',
       }
     }
+    if (
+      command === process.execPath &&
+      values[0]?.endsWith('vite.js') &&
+      values.length === 2
+    ) {
+      const output = options.env?.DESKTOP_VITE_DIST
+      if (!output) throw new Error('Missing isolated Vite output')
+      cpSync(path.join(options.cwd, 'out/vite-dist'), output, {
+        recursive: true,
+      })
+    }
     return { status: 0, stdout: '', stderr: '' }
   })
 })
@@ -178,6 +199,152 @@ afterEach(() => {
 })
 
 describe('Rust packaging', () => {
+  it.each([
+    ['production', 'debug'],
+    ['development', 'release'],
+  ])(
+    'requires production NODE_ENV for %s channel and %s profile',
+    (channel, profile) => {
+      const root = fixture()
+      vi.stubEnv('RELEASE_CHANNEL', channel)
+      vi.stubEnv('DESKTOP_RUST_PACKAGE_PROFILE', profile)
+      vi.stubEnv('NODE_ENV', 'development')
+      expect(() => packageRust(root)).toThrow(
+        'Production packages require NODE_ENV=production'
+      )
+      expect(spawn).not.toHaveBeenCalled()
+    }
+  )
+
+  it('sets a consistent production environment for Vite and Cargo', () => {
+    const root = fixture()
+    vi.stubEnv('RELEASE_CHANNEL', 'production')
+    vi.stubEnv('DESKTOP_RUST_PACKAGE_PROFILE', 'release')
+    packageRust(root)
+    const builds = spawn.mock.calls.filter(
+      ([command, values]) =>
+        command === process.execPath ||
+        (command === 'cargo' && (values as string[])[0] === 'build')
+    )
+    expect(builds).toHaveLength(5)
+    for (const call of builds) {
+      const options = call[2] as { env: NodeJS.ProcessEnv }
+      expect(options.env.NODE_ENV).toBe('production')
+      expect(options.env.RELEASE_CHANNEL).toBe('production')
+    }
+  })
+  it('blocks a destination even when Cargo targets differ and preserves its lock', () => {
+    const root = fixture()
+    const release = acquirePackageOutputLock(root, 'development')
+    vi.stubEnv('CARGO_TARGET_DIR', path.join(root, 'other-target'))
+    expect(() => packageRust(root)).toThrow('lock was retained')
+    release()
+    const reacquired = acquirePackageOutputLock(root, 'development')
+    reacquired()
+  })
+
+  it('blocks a target shared by different destinations and releases its own destination lock', () => {
+    const root = fixture()
+    const target = path.join(root, 'rust/target/desktop-packaged')
+    const release = acquireRustPackageLock(
+      path.join(target, '.desktop-package-target.lock')
+    )
+    vi.stubEnv('DESKTOP_RUST_DIST_DIR', path.join(root, 'other-dist'))
+    expect(() => packageRust(root)).toThrow('lock was retained')
+    const destination = acquirePackageOutputLock(root, 'development')
+    destination()
+    release()
+  })
+
+  it('does not remove a replaced or preexisting lock', () => {
+    const root = fixture()
+    const lock = path.join(root, 'test.lock')
+    const release = acquireRustPackageLock(lock)
+    expect(() => acquireRustPackageLock(lock)).toThrow('lock was retained')
+    writeFileSync(lock, 'another owner')
+    expect(release).toThrow('lock changed')
+    expect(readFileSync(lock, 'utf8')).toBe('another owner')
+  })
+  it('stages into an explicit absolute output directory', () => {
+    const root = fixture()
+    const destination = path.join(root, 'custom destination')
+    vi.stubEnv('DESKTOP_RUST_DIST_DIR', destination)
+    const output = packageRust(root)
+    expect(path.dirname(output)).toBe(destination)
+    expect(
+      readFileSync(path.join(output, 'ui/assets/renderer.js'), 'utf8')
+    ).toBe('renderer')
+    expect(
+      stagedRustDesktop(root, { channel: 'development', profile: 'debug' })
+    ).toBe(path.join(output, 'bin', `github-desktop-rs${suffix}`))
+  })
+
+  it('requires a staged package before starting the desktop', () => {
+    const root = fixture()
+    expect(() =>
+      stagedRustDesktop(root, { channel: 'production', profile: 'release' })
+    ).toThrow('run pnpm package first')
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a symlinked staged desktop executable',
+    () => {
+      const root = fixture()
+      const output = packageRust(root)
+      const executable = path.join(output, 'bin', 'github-desktop-rs')
+      rmSync(executable)
+      symlinkSync(path.join(root, 'LICENSE'), executable)
+      expect(() =>
+        stagedRustDesktop(root, { channel: 'development', profile: 'debug' })
+      ).toThrow('run pnpm package first')
+    }
+  )
+
+  it('refuses a debug package when a release desktop is requested', () => {
+    const root = fixture()
+    vi.stubEnv('RELEASE_CHANNEL', 'production')
+    packageRust(root)
+    expect(() =>
+      stagedRustDesktop(root, { channel: 'production', profile: 'release' })
+    ).toThrow('run pnpm package first')
+  })
+
+  it('rejects relative output directories before running build commands', () => {
+    const root = fixture()
+    vi.stubEnv('DESKTOP_RUST_DIST_DIR', 'relative-output')
+    expect(() => packageRust(root)).toThrow(
+      'DESKTOP_RUST_DIST_DIR must be an absolute path'
+    )
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('does not replace an unrelated directory at the package destination', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    const root = fixture()
+    const destination = path.join(root, 'custom destination')
+    vi.stubEnv('DESKTOP_RUST_DIST_DIR', destination)
+    const unrelated = path.join(
+      destination,
+      `Test Desktop-dev-${host}-${process.arch}`,
+      'important.txt'
+    )
+    mkdirSync(path.dirname(unrelated), { recursive: true })
+    writeFileSync(unrelated, 'keep')
+    expect(() => packageRust(root)).toThrow(
+      'Refusing to replace an unrecognized package directory'
+    )
+    expect(readFileSync(unrelated, 'utf8')).toBe('keep')
+  })
+
+  it('replaces a previously staged Rust package', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    const root = fixture()
+    const output = packageRust(root)
+    writeFileSync(path.join(output, 'meta', 'old-file'), 'old')
+    expect(packageRust(root)).toBe(output)
+    expect(() => readFileSync(path.join(output, 'meta', 'old-file'))).toThrow()
+  })
+
   it('builds and stages the actual shell and embedded browser UI', () => {
     vi.stubEnv('RELEASE_CHANNEL', 'development')
     vi.stubEnv('CARGO_TARGET_DIR', '')
@@ -194,6 +361,24 @@ describe('Rust packaging', () => {
       })
     )
     const output = packageRust(root)
+    const bundleArguments = spawn.mock.calls
+      .filter(
+        call =>
+          call[0] === process.execPath ||
+          (call[0] === 'cargo' && (call[1] as string[])[0] === 'build')
+      )
+      .map(
+        call => (call[2] as { env?: NodeJS.ProcessEnv }).env?.DESKTOP_VITE_DIST
+      )
+    expect(bundleArguments.length).toBe(5)
+    expect(new Set(bundleArguments).size).toBe(1)
+    const privateBundle = bundleArguments[0]
+    expect(privateBundle).toBeDefined()
+    expect(privateBundle).not.toBe(path.join(root, 'out/vite-dist'))
+    expect(privateBundle && existsSync(privateBundle)).toBe(false)
+    expect(
+      readFileSync(path.join(root, 'out/vite-dist/index.html'), 'utf8')
+    ).toBe('test')
     expect(
       readFileSync(path.join(output, 'ui/assets/renderer.js'), 'utf8')
     ).toBe('renderer')

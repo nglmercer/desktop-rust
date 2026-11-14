@@ -396,9 +396,15 @@ export function showTestUI(
   }
 
   async function showFakeReleaseNotesPopup() {
+    const newReleases = await generateDevReleaseSummary().catch(() => null)
+    if (newReleases === null || newReleases.length === 0) {
+      return dispatcher.postError(
+        new Error('Release notes are unavailable. Check your connection and try again.')
+      )
+    }
     dispatcher.showPopup({
       type: PopupType.ReleaseNotes,
-      newReleases: await generateDevReleaseSummary(),
+      newReleases,
     })
   }
 

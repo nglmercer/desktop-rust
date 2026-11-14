@@ -1,4 +1,5 @@
 //! Loopback HTTP/WebSocket transport for the browser and native shells.
+mod changelog;
 #[cfg(feature = "embedded-ui")]
 mod frontend;
 use axum::{
@@ -315,6 +316,12 @@ enum ControlOperation {
 enum ManagementOperation {
     AvailableEditors,
     AvailableTerminals,
+    ReleaseChangelog {
+        #[serde(default)]
+        channel: Option<changelog::Channel>,
+        #[serde(default)]
+        limit: Option<u16>,
+    },
     RevealRepository {
         repository_path: String,
     },
@@ -583,6 +590,13 @@ async fn execute(
         }
         ApplicationOperation::Management(AvailableTerminals) => {
             desktop_core::available_terminals().await
+        }
+        ApplicationOperation::Management(ReleaseChangelog { channel, limit }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "release notes requests cannot use a selected-repository binding"
+            );
+            changelog::fetch(channel, limit).await
         }
         ApplicationOperation::Management(RevealRepository { repository_path }) => {
             anyhow::ensure!(
@@ -1318,7 +1332,8 @@ impl Active {
         let clone_write = matches!(
             &rpc.operation,
             ApplicationOperation::Management(
-                ManagementOperation::CloneRepository { .. } | ManagementOperation::RecoverClone { .. }
+                ManagementOperation::CloneRepository { .. }
+                    | ManagementOperation::RecoverClone { .. }
             )
         );
         let cancellation = Cancellation::default();

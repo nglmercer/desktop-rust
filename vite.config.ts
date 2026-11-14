@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from 'vite'
+import { requireEmptyViteOutput, viteOutputDirectory } from './script/vite-output'
 import react from '@vitejs/plugin-react'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
@@ -339,7 +340,8 @@ export function copyStaticResources(
   }
 }
 
-const outDir = path.resolve(__dirname, 'out/vite-dist')
+const outDir = viteOutputDirectory(__dirname)
+if (process.env.DESKTOP_VITE_DIST !== undefined) requireEmptyViteOutput(outDir)
 
 export default defineConfig({
   root: 'app',
@@ -452,7 +454,7 @@ export default defineConfig({
   },
   build: {
     outDir,
-    emptyOutDir: true,
+    emptyOutDir: process.env.DESKTOP_VITE_DIST === undefined,
     // Off for the distributed bundle; see moveSourceMaps().
     sourcemap: process.env.DESKTOP_VITE_SOURCEMAP ? true : false,
     chunkSizeWarningLimit: 2000,

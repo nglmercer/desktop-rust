@@ -159,6 +159,59 @@ fn begin_shutdown(
     }
 }
 
+#[cfg(feature = "packaged-ui")]
+fn write_package_shutdown_result(quit: &std::path::Path, status: &str) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind, Write};
+    if quit.file_name().and_then(|name| name.to_str()) != Some("quit") {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "invalid package control path",
+        ));
+    }
+    let directory = quit
+        .parent()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "missing package control directory"))?;
+    let metadata = std::fs::symlink_metadata(directory)?;
+    if !metadata.file_type().is_dir() {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "package control directory is not a directory",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        unsafe extern "C" {
+            fn geteuid() -> std::os::raw::c_uint;
+        }
+        if metadata.mode() & 0o077 != 0 || metadata.uid() != unsafe { geteuid() } {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "package control directory is not private",
+            ));
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+        .open(directory.join("result"))?
+        .write_all(status.as_bytes())
+}
+
+/// Confirm exits that never created a window or admitted bridge work.
+fn finish_without_window() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "packaged-ui")]
+    if let Some(path) = std::env::var_os("DESKTOP_PACKAGE_QUIT_FILE") {
+        write_package_shutdown_result(std::path::Path::new(&path), "drained")?;
+    }
+    Ok(())
+}
+
 fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -176,7 +229,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             return Err("development launcher requires a debug host without packaged-ui".into());
         }
         println!("desktop-dev-host-ok");
-        return Ok(());
+        return finish_without_window();
     }
 
     if args.iter().any(|a| a == "--version" || a == "-v") {
@@ -184,17 +237,18 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "github-desktop-rs {} (tao + wry, no Tauri)",
             env!("CARGO_PKG_VERSION")
         );
-        return Ok(());
+        return finish_without_window();
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
-        return Ok(());
+        return finish_without_window();
     }
     if args
         .iter()
         .any(|a| a == "--self-test" || a == "--no-window")
     {
-        return self_test();
+        self_test()?;
+        return finish_without_window();
     }
 
     // A launch that only carries a URL or CLI action belongs to the window
@@ -204,7 +258,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .join("instance.sock");
     if args.iter().any(|arg| instance::is_forwardable(arg)) {
         if instance::forward(&instance_socket, &args) {
-            return Ok(());
+            return finish_without_window();
         }
         // An older or unrecognized listener must not receive OAuth secrets,
         // and a new window cannot complete another window's pending sign-in.
@@ -222,7 +276,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 .set_description(&message)
                 .set_buttons(rfd::MessageButtons::Ok)
                 .show();
-            return Ok(());
+            return finish_without_window();
         }
     }
 
@@ -364,6 +418,22 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // This control channel is opt-in and private to the package supervisor.
+    #[cfg(feature = "packaged-ui")]
+    if let Some(path) = std::env::var_os("DESKTOP_PACKAGE_QUIT_FILE") {
+        let proxy = proxy.clone();
+        std::thread::spawn(move || {
+            let path = std::path::PathBuf::from(path);
+            loop {
+                if path.is_file() {
+                    let _ = proxy.send_event(AppEvent::PackagedShutdown);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+    }
+
     // Initial state / launch actions are queued in the host outbox and flushed
     // as user events once the loop starts, so nothing is lost to load timing.
     app.broadcast_initial_state();
@@ -411,6 +481,9 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut smoke_outcome = None;
     #[cfg(debug_assertions)]
     let mut development_shutdown = false;
+    #[cfg(feature = "packaged-ui")]
+    let package_control =
+        std::env::var_os("DESKTOP_PACKAGE_QUIT_FILE").map(std::path::PathBuf::from);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -426,6 +499,14 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                         begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
                     }
                 }
+                #[cfg(feature = "packaged-ui")]
+                AppEvent::PackagedShutdown => {
+                    if !shutting_down {
+                        app_loop.emit("will-quit", vec![]);
+                        shutting_down = true;
+                        begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
+                    }
+                }
                 AppEvent::SmokeResult(passed) => {
                     if shutting_down { return; }
                     shutting_down = true;
@@ -434,6 +515,16 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
                 AppEvent::ShutdownComplete { drained } => {
                     if !shutting_down { return; }
+                    #[cfg(feature = "packaged-ui")]
+                    if let Some(path) = &package_control {
+                        let status = if drained { "drained" } else { "timed-out" };
+                        eprintln!("desktop-package-shutdown:{status}");
+                        if let Err(error) = write_package_shutdown_result(path, status) {
+                            eprintln!("failed to report packaged shutdown: {error}");
+                            std::process::exit(1);
+                        }
+                        if !drained { std::process::exit(1); }
+                    }
                     #[cfg(debug_assertions)]
                     if development_shutdown {
                         eprintln!("desktop-dev-shutdown:{}", if drained { "drained" } else { "timed-out" });
@@ -713,6 +804,7 @@ fn self_test() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     app.send("renderer-ready", vec![json!(0.0)])?;
     app.send("log", vec![json!("info"), json!("self-test complete")])?;
+    app.shutdown_io();
     println!("\nself-test: all {} channels answered", cases.len());
     Ok(())
 }
@@ -723,5 +815,25 @@ fn compact(value: &Value) -> String {
         format!("{}…", text.chars().take(96).collect::<String>())
     } else {
         text
+    }
+}
+
+#[cfg(all(test, feature = "packaged-ui"))]
+mod packaged_shutdown_tests {
+    #[test]
+    fn result_never_overwrites_an_existing_file() {
+        let directory =
+            std::env::temp_dir().join(format!("desktop-control-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let result = directory.join("result");
+        std::fs::write(&result, "keep").unwrap();
+        assert!(super::write_package_shutdown_result(&directory.join("quit"), "drained").is_err());
+        assert_eq!(std::fs::read_to_string(&result).unwrap(), "keep");
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

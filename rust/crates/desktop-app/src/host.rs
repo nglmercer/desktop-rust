@@ -51,6 +51,9 @@ pub enum AppEvent {
     /// Request a normal shutdown from the debug development supervisor.
     #[cfg(debug_assertions)]
     DevelopmentShutdown,
+    /// Request normal shutdown from the packaged desktop supervisor.
+    #[cfg(feature = "packaged-ui")]
+    PackagedShutdown,
     /// Executor shutdown completed or reached its deadline.
     ShutdownComplete { drained: bool },
 }

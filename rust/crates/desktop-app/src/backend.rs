@@ -3037,13 +3037,21 @@ mod tests {
             for action in ["cancel", "timeout", "close"] {
                 let _ = std::fs::remove_file(root.join("started"));
                 let _ = std::fs::remove_file(root.join("late"));
-                let backend = Backend::new(16).unwrap().with_registry(desktop_backend::Registry::new(root.join("registry.json")));
+                let backend = Backend::new(16)
+                    .unwrap()
+                    .with_registry(desktop_backend::Registry::new(root.join("registry.json")));
                 let request_id = uuid::Uuid::new_v4();
                 let job = backend.admit_git_info(vec![json!({"request_id":request_id,"deadline_ms":if action == "timeout" { 1000 } else { 30000 },"operation":{"type":"clone_selected","url":"https://github.com/a/b","path":root.join("repo"),"account":{"host":"github.com","login":"alice","id":1}}})]).unwrap();
                 std::thread::scope(|scope| {
-                    let worker = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn_scoped(scope, || backend.read(job)).unwrap();
+                    let worker = std::thread::Builder::new()
+                        .stack_size(8 * 1024 * 1024)
+                        .spawn_scoped(scope, || backend.read(job))
+                        .unwrap();
                     let limit = std::time::Instant::now() + Duration::from_secs(5);
-                    while !root.join("started").exists() && !worker.is_finished() && std::time::Instant::now() < limit {
+                    while !root.join("started").exists()
+                        && !worker.is_finished()
+                        && std::time::Instant::now() < limit
+                    {
                         std::thread::sleep(Duration::from_millis(10));
                     }
                     assert!(root.join("started").exists(), "clone Git did not start");
@@ -3055,28 +3063,46 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(100));
                     assert!(!worker.is_finished(), "clone returned while Git still ran");
                     let result = worker.join().unwrap();
-                    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == if action == "timeout" { "ETIMEDOUT" } else { "cancelled" }));
+                    assert!(
+                        matches!(result, Err(AppError::Coded { code, .. }) if code == if action == "timeout" { "ETIMEDOUT" } else { "cancelled" })
+                    );
                 });
                 std::thread::sleep(Duration::from_secs(4));
-                assert!(!root.join("late").exists(), "Git continued writing after the host returned");
+                assert!(
+                    !root.join("late").exists(),
+                    "Git continued writing after the host returned"
+                );
             }
             return;
         }
-        let root = std::env::temp_dir().join(format!("desktop-wry-clone-stop-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("desktop-wry-clone-stop-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
         let script = root.join("git");
         std::fs::write(&script, "#!/bin/sh\ntrap '' INT\nprintf started > \"$DESKTOP_WRY_CLONE_TEST_ROOT/started\"\nsleep 5\nprintf late > \"$DESKTOP_WRY_CLONE_TEST_ROOT/late\"\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let mut paths = vec![root.clone()];
-        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "backend::tests::wry_clone_cancel_timeout_and_host_close_wait_for_git", "--nocapture"])
+            .args([
+                "--exact",
+                "backend::tests::wry_clone_cancel_timeout_and_host_close_wait_for_git",
+                "--nocapture",
+            ])
             .env("DESKTOP_WRY_CLONE_TEST_ROOT", &root)
             .env("HOME", &root)
             .env("PATH", std::env::join_paths(paths).unwrap())
             .env_remove("GIT_SSL_NO_VERIFY")
-            .output().unwrap();
-        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

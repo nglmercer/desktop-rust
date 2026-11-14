@@ -246,10 +246,16 @@ jobs:
         run: |
           cargo clippy -p desktop-app --all-targets --locked -- -D warnings
           cargo test -p desktop-app --locked
+          bundle_root=$(mktemp -d)
+          trap 'rm -rf "$bundle_root"' EXIT
+          cp -R out/vite-dist "$bundle_root/bundle"
+          export DESKTOP_VITE_DIST="$bundle_root/bundle"
           cargo test -p desktop-app --features packaged-ui --bin github-desktop-rs packaged_assets_and_listings_ignore_checkout_files --locked
+          cargo test -p desktop-app --features packaged-ui --test packaged_early_exit --locked
           cargo test -p desktop-shell-core-legacy adjacent_sdk_takes_precedence_and_legacy_layout_remains_supported --locked
           cargo test -p desktop-shell-core-legacy --features packaged-ui adjacent_sdk_takes_precedence_and_legacy_layout_remains_supported --locked
           cargo test -p desktop-core --features packaged-runtime packaged_runtime_ignores_untrusted_working_directory --locked
+          unset DESKTOP_VITE_DIST
           cargo build -p desktop-app --locked
       - name: Exercise native webview on Linux
         if: runner.os == 'Linux'

@@ -42,6 +42,6 @@ Or if you want to test the production build:
 
 
 ```shellsession
-$ npm run build:prod
-$ npm run start:prod
+$ npm run build:electron:prod
+$ npm run start:electron:prod
 ```

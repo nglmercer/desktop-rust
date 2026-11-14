@@ -140,7 +140,7 @@ jobs:
           app-store-connect-api-key-issuer-id: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
           app-store-connect-api-key-base64-private-key: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
       - name: Build production app
-        run: npm run build:prod
+        run: npm run build:electron:prod
         env:
           DESKTOP_OAUTH_CLIENT_ID: ${{ secrets.DESKTOP_OAUTH_CLIENT_ID }}
           DESKTOP_OAUTH_CLIENT_SECRET: ${{ secrets.DESKTOP_OAUTH_CLIENT_SECRET }}
@@ -175,7 +175,7 @@ jobs:
           azure-client-id: ${{ secrets.AZURE_CODE_SIGNING_CLIENT_ID }}
           azure-tenant-id: ${{ secrets.AZURE_CODE_SIGNING_TENANT_ID }}
       - name: Package production app
-        run: npm run package
+        run: npm run package:electron
         env:
           npm_config_arch: ${{ matrix.arch }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_CODE_SIGNING_TENANT_ID }}
@@ -248,7 +248,7 @@ jobs:
           app-store-connect-api-key-issuer-id: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_ISSUER_ID }}
           app-store-connect-api-key-base64-private-key: ${{ secrets.GATEWATCHER_APP_STORE_CONNECT_API_BASE64_PRIVATE_KEY }}
       - name: Build production app
-        run: npm run build:prod
+        run: npm run build:electron:prod
         env:
           DESKTOP_E2E_UPDATES_URL: http://127.0.0.1:51789/update
           DESKTOP_OAUTH_CLIENT_ID: ${{ secrets.DESKTOP_OAUTH_CLIENT_ID }}
@@ -276,7 +276,7 @@ jobs:
           azure-client-id: ${{ secrets.AZURE_CODE_SIGNING_CLIENT_ID }}
           azure-tenant-id: ${{ secrets.AZURE_CODE_SIGNING_TENANT_ID }}
       - name: Package production app
-        run: npm run package
+        run: npm run package:electron
         env:
           npm_config_arch: ${{ matrix.arch }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_CODE_SIGNING_TENANT_ID }}

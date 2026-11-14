@@ -9,6 +9,9 @@
 //! There is no fallback to another package manager: if the build fails, the
 //! Cargo build stops with the cause.
 
+#[path = "../vite_build.rs"]
+mod vite_build;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
@@ -16,6 +19,7 @@ use std::time::SystemTime;
 /// Inputs whose change makes the bundle stale. Directories are scanned.
 const INPUTS: &[&str] = &[
     "vite.config.ts",
+    "script/vite-output.ts",
     "vite.highlighter.config.ts",
     "vite.ipc-shim.config.ts",
     "package.json",
@@ -128,7 +132,15 @@ fn main() {
     }
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repo: PathBuf = manifest.join("../../..");
-    let dist = repo.join("out/vite-dist");
+    let explicit = std::env::var_os("DESKTOP_VITE_DIST");
+    assert!(
+        explicit.is_some() || std::env::var_os("CARGO_FEATURE_PACKAGED_UI").is_none(),
+        "packaged-ui requires a prebuilt isolated DESKTOP_VITE_DIST"
+    );
+    let dist = explicit
+        .clone()
+        .map(|value| vite_build::explicit_bundle(&repo, value))
+        .unwrap_or_else(|| repo.join("out/vite-dist"));
 
     // Cargo re-runs this script when an input changes, and this check decides
     // whether anything has to be rebuilt.
@@ -147,11 +159,22 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DESKTOP_SERVE_FROM_DISK");
 
     let force = std::env::var_os("DESKTOP_VITE_FORCE").is_some();
-    if force || bundle_is_stale(&repo, &dist) {
+    if explicit.is_some() {
+        assert!(
+            !force,
+            "DESKTOP_VITE_FORCE cannot rebuild a supplied bundle"
+        );
+        assert!(
+            !bundle_is_stale(&repo, &dist),
+            "DESKTOP_VITE_DIST is stale; rebuild the isolated Vite bundle"
+        );
+    } else if force || bundle_is_stale(&repo, &dist) {
         if let Err(cause) = build_bundle(&repo, &dist) {
             panic!("the renderer bundle could not be built: {cause}");
         }
     }
+    let dist = dist.canonicalize().expect("renderer bundle must exist");
+    vite_build::export_bundle(&dist);
 }
 
 #[cfg(test)]

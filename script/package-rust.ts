@@ -1,11 +1,14 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -13,9 +16,18 @@ import {
 } from 'node:fs'
 import * as path from 'node:path'
 import { collectRustLicenseInventory } from './rust-license-inventory'
+import { createIsolatedViteOutput } from './vite-output'
+import { acquireRustPackageLock } from './rust-package-lock'
 
 type Platform = 'linux' | 'macos' | 'windows'
 type Architecture = 'x64' | 'arm64'
+
+interface IAppPackage {
+  readonly productName: string
+  readonly version: string
+  readonly bundleID: string
+  readonly dependencies: Record<string, string>
+}
 
 function hostPlatform(platform: NodeJS.Platform): Platform {
   switch (platform) {
@@ -33,6 +45,54 @@ function hostPlatform(platform: NodeJS.Platform): Platform {
 function hostArchitecture(arch: string): Architecture {
   if (arch === 'x64' || arch === 'arm64') return arch
   throw new Error(`Unsupported host architecture: ${arch}`)
+}
+
+function distributionDirectory(repo: string): string {
+  const configured = process.env.DESKTOP_RUST_DIST_DIR
+  if (configured && !path.isAbsolute(configured)) {
+    throw new Error('DESKTOP_RUST_DIST_DIR must be an absolute path')
+  }
+  return configured ? path.resolve(configured) : path.join(repo, 'dist')
+}
+
+function productName(app: IAppPackage, channel: string): string {
+  const product =
+    channel === 'development' ? `${app.productName}-dev` : app.productName
+  if (
+    !product ||
+    /[\\/\0]/.test(product) ||
+    product === '.' ||
+    product === '..'
+  ) {
+    throw new Error('Invalid product name')
+  }
+  return product
+}
+
+function appPackage(repo: string): IAppPackage {
+  return JSON.parse(
+    readFileSync(path.join(repo, 'app/package.json'), 'utf8')
+  ) as IAppPackage
+}
+
+/** Protect one package destination while it is staged or executed. */
+export function acquirePackageOutputLock(
+  repo: string,
+  channel: string
+): () => void {
+  const platform = hostPlatform(process.platform)
+  const arch = hostArchitecture(process.arch)
+  const product = productName(appPackage(repo), channel)
+  const dist = distributionDirectory(repo)
+  mkdirSync(dist, { recursive: true })
+  const canonical = realpathSync(dist)
+  // Case-folding only serializes extra distinct destinations on case-sensitive
+  // filesystems; it also protects aliases on case-insensitive filesystems.
+  const key = `${product}-${platform}-${arch}`.toLowerCase()
+  const digest = createHash('sha256').update(key).digest('hex')
+  return acquireRustPackageLock(
+    path.join(canonical, `.desktop-package-${digest}.lock`)
+  )
 }
 
 /** SDK platform names follow Node's OS naming, unlike package labels. */
@@ -60,14 +120,193 @@ function copyOptional(source: string, destination: string): void {
   if (existsSync(source)) cpSync(source, destination, { recursive: true })
 }
 
+/** Only replace a directory bearing the metadata of a previous Rust package. */
+function assertManagedOutput(
+  output: string,
+  product: string,
+  bundleID: string,
+  platform: Platform,
+  arch: Architecture
+): void {
+  let entry
+  try {
+    entry = lstatSync(output)
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    )
+      return
+    throw error
+  }
+  const refuse = () => {
+    throw new Error(
+      `Refusing to replace an unrecognized package directory: ${output}`
+    )
+  }
+  if (!entry.isDirectory() || entry.isSymbolicLink()) refuse()
+  const meta = path.join(output, 'meta')
+  const manifest = path.join(meta, 'package.json')
+  try {
+    const directory = lstatSync(meta)
+    const file = lstatSync(manifest)
+    if (
+      !directory.isDirectory() ||
+      directory.isSymbolicLink() ||
+      !file.isFile() ||
+      file.isSymbolicLink()
+    )
+      refuse()
+    const value: unknown = JSON.parse(readFileSync(manifest, 'utf8'))
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      !('productName' in value) ||
+      value.productName !== product ||
+      !('bundleID' in value) ||
+      value.bundleID !== bundleID ||
+      !('platform' in value) ||
+      value.platform !== platform ||
+      !('arch' in value) ||
+      value.arch !== arch ||
+      !('executable' in value) ||
+      value.executable !==
+        `bin/desktop-rs${platform === 'windows' ? '.exe' : ''}`
+    )
+      refuse()
+  } catch {
+    refuse()
+  }
+}
+
+/** Resolve the executable from a previously staged Rust package. */
+export function stagedRustDesktop(
+  repo: string,
+  expected: { readonly channel: string; readonly profile: 'debug' | 'release' }
+): string {
+  const platform = hostPlatform(process.platform)
+  const arch = hostArchitecture(process.arch)
+  const app = appPackage(repo)
+  const product = productName(app, expected.channel)
+  const output = path.join(
+    distributionDirectory(repo),
+    `${product}-${platform}-${arch}`
+  )
+  assertManagedOutput(output, product, app.bundleID, platform, arch)
+  const bin = path.join(output, 'bin')
+  const executable = path.join(
+    bin,
+    `github-desktop-rs${platform === 'windows' ? '.exe' : ''}`
+  )
+  try {
+    const metadata: unknown = JSON.parse(
+      readFileSync(path.join(output, 'meta', 'package.json'), 'utf8')
+    )
+    if (
+      metadata === null ||
+      typeof metadata !== 'object' ||
+      Array.isArray(metadata) ||
+      !('channel' in metadata) ||
+      metadata.channel !== expected.channel ||
+      !('profile' in metadata) ||
+      metadata.profile !== expected.profile ||
+      !('version' in metadata) ||
+      metadata.version !== app.version
+    ) {
+      throw new Error('package profile, channel or version does not match')
+    }
+    const directory = lstatSync(bin)
+    const file = lstatSync(executable)
+    if (
+      !directory.isDirectory() ||
+      directory.isSymbolicLink() ||
+      !file.isFile() ||
+      file.isSymbolicLink()
+    ) {
+      throw new Error('invalid executable')
+    }
+  } catch {
+    throw new Error(
+      `Rust package is unavailable at ${output}; run pnpm package first`
+    )
+  }
+  return executable
+}
+
 /** Package only the host architecture: Cargo is not being cross-compiled here. */
 export function packageRust(
   repo: string,
   requestedPlatform: string = 'auto'
 ): string {
+  if (process.env.DESKTOP_VITE_DIST !== undefined) {
+    throw new Error('package:rust manages its own Vite output directory')
+  }
+  const channel = process.env.RELEASE_CHANNEL || 'development'
+  const production =
+    channel === 'production' ||
+    process.env.DESKTOP_RUST_PACKAGE_PROFILE === 'release'
+  if (
+    production &&
+    process.env.NODE_ENV !== undefined &&
+    process.env.NODE_ENV !== 'production'
+  ) {
+    throw new Error('Production packages require NODE_ENV=production')
+  }
+  const buildEnvironment = {
+    ...process.env,
+    RELEASE_CHANNEL: channel,
+    ...(production ? { NODE_ENV: 'production' } : {}),
+  }
+  const releaseDestination = acquirePackageOutputLock(repo, channel)
+  let releaseTarget: (() => void) | undefined
+  try {
+    const base = process.env.CARGO_TARGET_DIR
+      ? path.resolve(repo, process.env.CARGO_TARGET_DIR)
+      : path.join(repo, 'rust/target')
+    mkdirSync(base, { recursive: true })
+    const target = path.join(realpathSync(base), 'desktop-packaged')
+    mkdirSync(target, { recursive: true })
+    const targetStat = lstatSync(target)
+    if (!targetStat.isDirectory() || targetStat.isSymbolicLink())
+      throw new Error('Package target must be a real directory')
+    releaseTarget = acquireRustPackageLock(
+      path.join(target, '.desktop-package-target.lock')
+    )
+    const output = createIsolatedViteOutput()
+    try {
+      return packageRustWithOutput(
+        repo,
+        requestedPlatform,
+        output.directory,
+        target,
+        buildEnvironment
+      )
+    } finally {
+      output.dispose()
+    }
+  } finally {
+    try {
+      releaseTarget?.()
+    } finally {
+      releaseDestination()
+    }
+  }
+}
+
+function packageRustWithOutput(
+  repo: string,
+  requestedPlatform: string,
+  ui: string,
+  target: string,
+  buildEnvironment: NodeJS.ProcessEnv
+): string {
   const platform = hostPlatform(process.platform)
   const arch = hostArchitecture(process.arch)
   const profile = process.env.DESKTOP_RUST_PACKAGE_PROFILE ?? 'debug'
+  const dist = distributionDirectory(repo)
   if (profile !== 'debug' && profile !== 'release') {
     throw new Error('DESKTOP_RUST_PACKAGE_PROFILE must be debug or release')
   }
@@ -88,14 +327,7 @@ export function packageRust(
   ]) {
     requiredFile(path.join(repo, file))
   }
-  const app = JSON.parse(
-    readFileSync(path.join(repo, 'app/package.json'), 'utf8')
-  ) as {
-    productName: string
-    version: string
-    bundleID: string
-    dependencies: Record<string, string>
-  }
+  const app = appPackage(repo)
   const rustVersion = readFileSync(
     path.join(repo, 'rust/crates/core/src/copilot.rs'),
     'utf8'
@@ -115,16 +347,7 @@ export function packageRust(
     throw new Error('Rust host target does not match the packaging host')
   }
   const channel = process.env.RELEASE_CHANNEL || 'development'
-  const product =
-    channel === 'development' ? `${app.productName}-dev` : app.productName
-  if (
-    !product ||
-    /[\\/\0]/.test(product) ||
-    product === '.' ||
-    product === '..'
-  ) {
-    throw new Error('Invalid product name')
-  }
+  const product = productName(app, channel)
   const vite = path.join(repo, 'node_modules/vite/bin/vite.js')
   requiredFile(vite)
   for (const args of [
@@ -135,14 +358,12 @@ export function packageRust(
     const result = spawnSync(process.execPath, [vite, ...args], {
       cwd: repo,
       stdio: 'inherit',
+      env: { ...buildEnvironment, DESKTOP_VITE_DIST: ui },
     })
     if (result.error) throw result.error
     if (result.status !== 0) throw new Error(`Vite ${args.join(' ')} failed`)
   }
   const suffix = platform === 'windows' ? '.exe' : ''
-  const target = process.env.CARGO_TARGET_DIR
-    ? path.resolve(repo, process.env.CARGO_TARGET_DIR)
-    : path.join(repo, 'rust/target')
   const runCargo = (args: string[], name: string): string => {
     const result = spawnSync(
       'cargo',
@@ -151,6 +372,12 @@ export function packageRust(
         cwd: repo,
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
+        env: {
+          ...buildEnvironment,
+          DESKTOP_VITE_DIST: ui,
+          CARGO_TARGET_DIR: target,
+          DESKTOP_REQUIRE_NATIVE_PLATFORM: '1',
+        },
       }
     )
     if (result.error) throw result.error
@@ -208,7 +435,6 @@ export function packageRust(
     ],
     'github-desktop-rs'
   )
-  const ui = path.join(repo, 'out/vite-dist')
   for (const file of [
     cli,
     gui,
@@ -278,7 +504,6 @@ export function packageRust(
     )
   }
 
-  const dist = path.join(repo, 'dist')
   mkdirSync(dist, { recursive: true })
   const output = path.join(dist, `${product}-${platform}-${arch}`)
   const staging = mkdtempSync(path.join(dist, '.package-rust-'))
@@ -353,6 +578,7 @@ export function packageRust(
         2
       )}\n`
     )
+    assertManagedOutput(output, product, app.bundleID, platform, arch)
     if (existsSync(output)) {
       renameSync(output, backup)
       hadPrevious = true
@@ -382,6 +608,7 @@ if (require.main === module) {
     console.log(
       'Set DESKTOP_RUST_PACKAGE_PROFILE=release for an optimized package.'
     )
+    console.log('Set DESKTOP_RUST_DIST_DIR to an absolute output directory.')
   } else if (args.length > 1) {
     console.error('Expected at most one platform argument')
     process.exitCode = 1

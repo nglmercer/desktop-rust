@@ -23,6 +23,8 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
+import { createServer, type Socket } from 'node:net'
+import { createSecureContext, TLSSocket } from 'node:tls'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BackendClient } from '../../src/backend/client'
 import type { Repository } from '../../src/models/repository'
@@ -123,6 +125,142 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it.skipIf(process.platform !== 'linux')('uses system CA roots through a TLS proxy and rejects untrusted or mismatched certificates', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-release-tls-'))
+      const root = directory
+      const openssl = (args: string[]) => execFileSync('openssl', args, { cwd: root, stdio: 'ignore' })
+      openssl(['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', 'ca.key', '-out', 'ca.pem', '-days', '1', '-subj', '/CN=Desktop Test CA', '-addext', 'basicConstraints=critical,CA:TRUE'])
+      openssl(['req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', 'leaf.key', '-out', 'leaf.csr', '-subj', '/CN=central.github.com'])
+      await writeFile(path.join(root, 'extensions'), 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:central.github.com\n')
+      openssl(['x509', '-req', '-in', 'leaf.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAcreateserial', '-out', 'leaf.pem', '-days', '1', '-extfile', 'extensions'])
+      openssl(['req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', 'wrong.key', '-out', 'wrong.csr', '-subj', '/CN=wrong.example'])
+      await writeFile(path.join(root, 'wrong-extensions'), 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:wrong.example\n')
+      openssl(['x509', '-req', '-in', 'wrong.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAserial', 'ca.srl', '-out', 'wrong.pem', '-days', '1', '-extfile', 'wrong-extensions'])
+      await writeFile(path.join(root, 'empty.pem'), '')
+      const contexts = {
+        valid: createSecureContext({ key: await readFile(path.join(root, 'leaf.key')), cert: await readFile(path.join(root, 'leaf.pem')) }),
+        wrong: createSecureContext({ key: await readFile(path.join(root, 'wrong.key')), cert: await readFile(path.join(root, 'wrong.pem')) }),
+      }
+      let current: 'valid' | 'wrong' = 'valid'
+      const sockets = new Set<Socket>()
+      const requests: string[] = []
+      const routes: string[] = []
+      let releaseResponse: (() => void) | undefined
+      let activeTls: TLSSocket | undefined
+      const proxy = createServer(socket => {
+        sockets.add(socket)
+        socket.on('close', () => sockets.delete(socket))
+        socket.on('error', () => {})
+        let header = ''
+        const readConnect = (chunk: Buffer) => {
+          header += chunk.toString('latin1')
+          if (!header.includes('\r\n\r\n')) return
+          socket.removeListener('data', readConnect)
+          requests.push(header.split('\r\n')[0])
+          socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+          const tls = new TLSSocket(socket, { isServer: true, secureContext: contexts[current] })
+          tls.on('error', () => {})
+          let innerRequest = ''
+          tls.on('data', chunk => {
+            innerRequest += chunk.toString('utf8')
+            if (!innerRequest.includes('\r\n\r\n')) return
+            routes.push(innerRequest.split('\r\n')[0])
+            activeTls = tls
+            const body = JSON.stringify([{ name: 'Fixture', notes: ['[Fixed] Example'], pub_date: '2025-01-01', version: '3.0.0' }])
+            releaseResponse = () => tls.end(`HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`)
+          })
+        }
+        socket.on('data', readConnect)
+      })
+      await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve))
+      const address = proxy.address()
+      if (!address || typeof address === 'string') throw new Error('Missing proxy address')
+      try {
+        for (const mode of ['trusted', 'untrusted', 'wrong-host', 'cancel', 'concurrent'] as const) {
+          releaseResponse = undefined
+          activeTls = undefined
+          current = mode === 'wrong-host' ? 'wrong' : 'valid'
+          const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_') && !/^(https?_proxy|all_proxy|no_proxy|SSL_CERT_FILE|SSL_CERT_DIR)$/i.test(key)))
+          server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(root, `${mode}.json`), 'serve', '--empty', '--port', '0'], {
+            env: { ...env, HOME: root, HTTPS_PROXY: `http://127.0.0.1:${address.port}`, SSL_CERT_FILE: path.join(root, mode === 'untrusted' ? 'empty.pem' : 'ca.pem'), GIT_CONFIG_NOSYSTEM: '1' },
+            stdio: ['ignore', 'ignore', 'pipe'],
+          })
+          const child = server
+          const lines = createInterface({ input: child.stderr! })
+          const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); child.once('error', reject); child.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+          dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+          const bridgeSockets: WebSocket[] = []
+          const NativeSocket = dom.window.WebSocket
+          class TrackedSocket extends NativeSocket {
+            constructor(url: string | URL, protocols?: string | string[]) { super(url, protocols); bridgeSockets.push(this as unknown as WebSocket) }
+          }
+          vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', TrackedSocket); vi.stubGlobal('location', dom.window.location)
+          const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+          if (mode === 'trusted' || mode === 'cancel' || mode === 'concurrent') {
+            const changelog = client.releaseChangelog(null, 1)
+            const second = mode === 'concurrent' ? client.releaseChangelog(null, 1) : undefined
+            const cancelled = mode === 'cancel' ? expect(changelog).rejects.toMatchObject({ code: 'disconnected' }) : undefined
+            await waitFor(() => releaseResponse !== undefined)
+            // The network request remains held at the proxy while the main
+            // connection processes an unrelated RPC.
+            await expect(bounded(client.request('get_preferences', {}), 2_000)).resolves.toBeDefined()
+            if (mode !== 'cancel') {
+              const finishFirst = releaseResponse!
+              releaseResponse = undefined
+              finishFirst()
+              expect(await bounded(changelog)).toEqual([expect.objectContaining({ version: '3.0.0' })])
+              if (second) {
+                await waitFor(() => releaseResponse !== undefined)
+                expect(bridgeSockets[1].readyState).toBe(WebSocket.OPEN)
+                releaseResponse!()
+                expect(await bounded(second)).toEqual([expect.objectContaining({ version: '3.0.0' })])
+              }
+            } else {
+              client.close()
+              await bounded(cancelled!)
+              await waitFor(() => activeTls?.destroyed === true)
+            }
+          } else await expect(bounded(client.releaseChangelog(null, 1))).rejects.toThrow('Unable to download release notes')
+          if (mode !== 'cancel') {
+            await waitFor(() => bridgeSockets[1]?.readyState === WebSocket.CLOSED)
+            expect(bridgeSockets[0].readyState).toBe(WebSocket.OPEN)
+          }
+          client.close()
+          expect(bridgeSockets).toHaveLength(2)
+          await waitFor(() => bridgeSockets.every(socket => socket.readyState === WebSocket.CLOSED))
+          dom.window.close(); dom = undefined
+          const exited = new Promise<void>(resolve => child.once('exit', () => resolve()))
+          child.kill('SIGINT'); await bounded(exited)
+          server = undefined
+        }
+        expect(requests).toEqual(Array(6).fill('CONNECT central.github.com:443 HTTP/1.1'))
+        expect(routes).toEqual(Array(4).fill('GET /deployments/desktop/desktop/changelog.json?limit=1 HTTP/1.1'))
+      } finally {
+        for (const socket of sockets) socket.destroy()
+        await new Promise<void>(resolve => proxy.close(() => resolve()))
+      }
+    }, 60_000)
+
+    it.skipIf(process.env.DESKTOP_TEST_CHANGELOG_ONLINE !== '1')('retrieves the public release changelog through the real bridge', async () => {
+      directory = await mkdtemp(path.join(tmpdir(), 'desktop-release-notes-'))
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')))
+      server = spawn(path.resolve('rust/target/debug/desktop-rs'), ['--config', path.join(directory, 'registry.json'), 'serve', '--empty', '--port', '0'], {
+        env: { ...env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'global-config') },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      })
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(new Promise<string>((resolve, reject) => { lines.once('line', resolve); server!.once('error', reject); server!.once('exit', code => reject(new Error(`bridge exited before startup: ${code}`))) }))
+      dom = new JSDOM('', { url: line.startsWith('Open ') ? line.slice(5) : '' })
+      vi.stubGlobal('window', dom.window); vi.stubGlobal('sessionStorage', dom.window.sessionStorage); vi.stubGlobal('WebSocket', dom.window.WebSocket); vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient(); clients.push(client); await bounded(client.waitReady())
+      const releases = await bounded(client.releaseChangelog(null, 1), 45_000)
+      expect(releases).toHaveLength(1)
+      expect(releases[0].version).toBeTruthy()
+      expect(Array.isArray(releases[0].notes)).toBe(true)
+      // Untrusted callers cannot supply a different URL to this operation.
+      await expect(client.request('release_changelog', { channel: null, limit: 1, url: 'http://127.0.0.1:1/' })).rejects.toThrow()
+    }, 60_000)
+
     it.each(['cancel', 'disconnect'])('stops a real clone child after %s', async action => {
       directory = await mkdtemp(path.join(tmpdir(), 'desktop-clone-stop-'))
       const marker = path.join(directory, 'started')
