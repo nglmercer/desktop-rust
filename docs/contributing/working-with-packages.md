@@ -98,7 +98,7 @@ packages for the target CPU via npm's `--cpu` option. The application's
 `allowScripts` policy skips only Koffi's install hook, which otherwise tries
 loading a host binary during target installation. Desktop uses the target's
 published Koffi prebuild instead of compiling Koffi from source; missing target
-packages fail the webpack build. Other native install hooks still run normally.
+packages fail the Vite build. Other native install hooks still run normally.
 
 `app/.prebuild-installrc` forces the pinned legacy downloader to attempt prebuilt
 native binaries even though modern npm omits its expected `_from` metadata.

@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'vitest'
 
+const RUN_HOOK = require('node:path').resolve(__dirname, 'ts-register.cjs')
+
 function startFixture(hang = false, acknowledge = true, argument?: string) {
   const root = mkdtempSync(path.join(tmpdir(), 'desktop-prod-supervisor-'))
   const app = JSON.parse(readFileSync('app/package.json', 'utf8')) as {
@@ -22,7 +24,10 @@ function startFixture(hang = false, acknowledge = true, argument?: string) {
     version: string
   }
   const platform = process.platform === 'darwin' ? 'macos' : 'linux'
-  const packageDir = path.join(root, `${app.productName}-${platform}-${process.arch}`)
+  const packageDir = path.join(
+    root,
+    `${app.productName}-${platform}-${process.arch}`
+  )
   mkdirSync(path.join(packageDir, 'bin'), { recursive: true })
   mkdirSync(path.join(packageDir, 'meta'), { recursive: true })
   writeFileSync(
@@ -66,7 +71,12 @@ setInterval(() => {
   )
   const child = spawn(
     process.execPath,
-    ['--import', '@oxc-node/core/register', 'script/start-rust-package.ts', ...(argument ? [argument] : [])],
+    [
+      '--require',
+      RUN_HOOK,
+      'script/start-rust-package.ts',
+      ...(argument ? [argument] : []),
+    ],
     {
       cwd: process.cwd(),
       detached: true,
@@ -81,18 +91,27 @@ setInterval(() => {
     }
   )
   let output = ''
-  child.stdout.on('data', chunk => { output += String(chunk) })
-  child.stderr.on('data', chunk => { output += String(chunk) })
-  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-    (resolve, reject) => {
-      child.once('error', reject)
-      child.once('close', (code, signal) => resolve({ code, signal }))
-    }
-  )
+  child.stdout.on('data', chunk => {
+    output += String(chunk)
+  })
+  child.stderr.on('data', chunk => {
+    output += String(chunk)
+  })
+  const closed = new Promise<{
+    code: number | null
+    signal: NodeJS.Signals | null
+  }>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', (code, signal) => resolve({ code, signal }))
+  })
   return { child, root, closed, output: () => output }
 }
 
-async function waitFor(output: () => string, expression: RegExp, timeout: number) {
+async function waitFor(
+  output: () => string,
+  expression: RegExp,
+  timeout: number
+) {
   const until = Date.now() + timeout
   while (Date.now() < until) {
     const match = expression.exec(output())
@@ -108,7 +127,10 @@ async function bounded<T>(value: Promise<T>, timeout: number): Promise<T> {
     return await Promise.race([
       value,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Supervisor did not exit')), timeout)
+        timer = setTimeout(
+          () => reject(new Error('Supervisor did not exit')),
+          timeout
+        )
       }),
     ])
   } finally {
@@ -117,15 +139,27 @@ async function bounded<T>(value: Promise<T>, timeout: number): Promise<T> {
 }
 
 async function launchAgain(root: string) {
-  const child = spawn(process.execPath, ['--import', '@oxc-node/core/register', 'script/start-rust-package.ts'], {
-    cwd: process.cwd(),
-    detached: true,
-    env: { ...process.env, RELEASE_CHANNEL: 'production', DESKTOP_RUST_DIST_DIR: root },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  const child = spawn(
+    process.execPath,
+    ['--require', RUN_HOOK, 'script/start-rust-package.ts'],
+    {
+      cwd: process.cwd(),
+      detached: true,
+      env: {
+        ...process.env,
+        RELEASE_CHANNEL: 'production',
+        DESKTOP_RUST_DIST_DIR: root,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
+  )
   let output = ''
-  child.stdout.on('data', chunk => { output += String(chunk) })
-  child.stderr.on('data', chunk => { output += String(chunk) })
+  child.stdout.on('data', chunk => {
+    output += String(chunk)
+  })
+  child.stderr.on('data', chunk => {
+    output += String(chunk)
+  })
   const closed = new Promise<number | null>((resolve, reject) => {
     child.once('error', reject)
     child.once('close', code => resolve(code))
@@ -135,10 +169,14 @@ async function launchAgain(root: string) {
   } finally {
     const hostPid = Number(/READY (\d+)/.exec(output)?.[1])
     if (hostPid && isAlive(hostPid)) {
-      try { process.kill(-hostPid, 'SIGKILL') } catch {}
+      try {
+        process.kill(-hostPid, 'SIGKILL')
+      } catch {}
     }
     if (child.pid && child.exitCode === null && child.signalCode === null) {
-      try { process.kill(-child.pid, 'SIGKILL') } catch {}
+      try {
+        process.kill(-child.pid, 'SIGKILL')
+      } catch {}
     }
   }
 }
@@ -152,17 +190,29 @@ function isAlive(pid: number): boolean {
   }
 }
 
-describe.skipIf(!['linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch))('packaged desktop supervisor', () => {
+describe.skipIf(
+  !['linux', 'darwin'].includes(process.platform) ||
+    !['x64', 'arm64'].includes(process.arch)
+)('packaged desktop supervisor', () => {
   it('releases its lock after an acknowledged early version exit', async () => {
     const run = startFixture(false, true, '--version')
     try {
       const result = await bounded(run.closed, 10_000)
       assert.equal(result.code, 0, run.output())
       assert.match(run.output(), /fixture version/)
-      assert.equal(readdirSync(run.root).some(name => name.endsWith('.lock')), false)
+      assert.equal(
+        readdirSync(run.root).some(name => name.endsWith('.lock')),
+        false
+      )
     } finally {
-      if (run.child.pid && run.child.exitCode === null && run.child.signalCode === null) {
-        try { process.kill(-run.child.pid, 'SIGKILL') } catch {}
+      if (
+        run.child.pid &&
+        run.child.exitCode === null &&
+        run.child.signalCode === null
+      ) {
+        try {
+          process.kill(-run.child.pid, 'SIGKILL')
+        } catch {}
       }
       await bounded(run.closed, 5_000).catch(() => {})
       rmSync(run.root, { recursive: true, force: true })
@@ -191,13 +241,24 @@ describe.skipIf(!['linux', 'darwin'].includes(process.platform) || !['x64', 'arm
       assert.match(run.output(), /desktop-package-shutdown:drained/)
       assert.equal(isAlive(hostPid), false)
       assert.equal(existsSync(control), false)
-      assert.equal(readdirSync(run.root).some(name => name.endsWith('.lock')), false)
+      assert.equal(
+        readdirSync(run.root).some(name => name.endsWith('.lock')),
+        false
+      )
     } finally {
       if (hostPid && isAlive(hostPid)) {
-        try { process.kill(-hostPid, 'SIGKILL') } catch {}
+        try {
+          process.kill(-hostPid, 'SIGKILL')
+        } catch {}
       }
-      if (run.child.pid && run.child.exitCode === null && run.child.signalCode === null) {
-        try { process.kill(-run.child.pid, 'SIGKILL') } catch {}
+      if (
+        run.child.pid &&
+        run.child.exitCode === null &&
+        run.child.signalCode === null
+      ) {
+        try {
+          process.kill(-run.child.pid, 'SIGKILL')
+        } catch {}
       }
       await bounded(run.closed, 5_000).catch(() => {})
       rmSync(run.root, { recursive: true, force: true })
@@ -215,16 +276,27 @@ describe.skipIf(!['linux', 'darwin'].includes(process.platform) || !['x64', 'arm
       assert.equal(result.code, 1, run.output())
       assert.match(run.output(), /shutdown was not confirmed as drained/)
       assert.equal(isAlive(hostPid), false)
-      assert.equal(readdirSync(run.root).some(name => name.endsWith('.lock')), true)
+      assert.equal(
+        readdirSync(run.root).some(name => name.endsWith('.lock')),
+        true
+      )
       const retry = await launchAgain(run.root)
       assert.equal(retry.code, 1, retry.output)
       assert.match(retry.output, /lock/i)
     } finally {
       if (hostPid && isAlive(hostPid)) {
-        try { process.kill(-hostPid, 'SIGKILL') } catch {}
+        try {
+          process.kill(-hostPid, 'SIGKILL')
+        } catch {}
       }
-      if (run.child.pid && run.child.exitCode === null && run.child.signalCode === null) {
-        try { process.kill(-run.child.pid, 'SIGKILL') } catch {}
+      if (
+        run.child.pid &&
+        run.child.exitCode === null &&
+        run.child.signalCode === null
+      ) {
+        try {
+          process.kill(-run.child.pid, 'SIGKILL')
+        } catch {}
       }
       await bounded(run.closed, 5_000).catch(() => {})
       rmSync(run.root, { recursive: true, force: true })
@@ -247,10 +319,18 @@ describe.skipIf(!['linux', 'darwin'].includes(process.platform) || !['x64', 'arm
       assert.equal(existsSync(control), false)
     } finally {
       if (hostPid && isAlive(hostPid)) {
-        try { process.kill(-hostPid, 'SIGKILL') } catch {}
+        try {
+          process.kill(-hostPid, 'SIGKILL')
+        } catch {}
       }
-      if (run.child.pid && run.child.exitCode === null && run.child.signalCode === null) {
-        try { process.kill(-run.child.pid, 'SIGKILL') } catch {}
+      if (
+        run.child.pid &&
+        run.child.exitCode === null &&
+        run.child.signalCode === null
+      ) {
+        try {
+          process.kill(-run.child.pid, 'SIGKILL')
+        } catch {}
       }
       await bounded(run.closed, 5_000).catch(() => {})
       rmSync(run.root, { recursive: true, force: true })

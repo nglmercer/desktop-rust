@@ -410,7 +410,7 @@ export default defineConfig({
     __APP_NAME__: JSON.stringify(appPackage.productName),
     __RELEASE_CHANNEL__: JSON.stringify(channel),
     __SHA__: JSON.stringify('vite'),
-    // Mirrors getReplacements() in app/app-info.ts, which the webpack build
+    // Mirrors getReplacements() in app/app-info.ts, which the previous build
     // injected. The UI is built on the host the Rust shell is compiled on.
     __DARWIN__: process.platform === 'darwin',
     __WIN32__: process.platform === 'win32',

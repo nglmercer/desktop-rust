@@ -15,7 +15,7 @@ order, but hopefully it makes sense by the end.
 ## Shared Modules
 
 These folders should contain modules that can be shared across any of the
-Webpack bundles that Desktop generates.
+Vite bundles that Desktop generates.
 
  - `app/src/models` - contains the shapes used in the codebase to represent
 common objects. They should be immutable and plain.
@@ -31,7 +31,7 @@ live within a `models` or `lib` folder within the given bundle directory.
 
 ## Application Bundles
 
-I'm referring to these folders as "bundles" because our webpack config will
+I'm referring to these folders as "bundles" because our Vite config will
 transpile a specific file in each of these directories to generate what it
 needs to package and run the application.
 

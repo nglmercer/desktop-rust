@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --import @oxc-node/core/register
+#!/usr/bin/env -S node --require ./script/ts-register.cjs
 
 import * as Path from 'path'
 import * as Fs from 'fs'

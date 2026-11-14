@@ -24,17 +24,40 @@ import {
   viteOutputDirectory,
 } from './vite-output'
 
+const RUN_HOOK = require('node:path').resolve(__dirname, 'ts-register.cjs')
+
 const directories: string[] = []
 
 describe('renderer OAuth callback scheme', () => {
   it('matches the configured credential pair and rejects incomplete pairs', () => {
-    assert.equal(oauthCallbackScheme('production', undefined, undefined), 'x-github-desktop-dev-auth')
-    assert.equal(oauthCallbackScheme('production', '', ''), 'x-github-desktop-dev-auth')
-    assert.equal(oauthCallbackScheme('development', 'custom', 'secret'), 'x-github-desktop-dev-auth')
-    assert.equal(oauthCallbackScheme('production', 'custom', 'secret'), 'x-github-desktop-auth')
-    assert.equal(oauthCallbackScheme('production', '3a723b10ac5575cc5bb9', 'secret'), 'x-github-desktop-dev-auth')
-    assert.throws(() => oauthCallbackScheme('production', 'custom', undefined), /provided together/)
-    assert.throws(() => oauthCallbackScheme('production', undefined, 'secret'), /provided together/)
+    assert.equal(
+      oauthCallbackScheme('production', undefined, undefined),
+      'x-github-desktop-dev-auth'
+    )
+    assert.equal(
+      oauthCallbackScheme('production', '', ''),
+      'x-github-desktop-dev-auth'
+    )
+    assert.equal(
+      oauthCallbackScheme('development', 'custom', 'secret'),
+      'x-github-desktop-dev-auth'
+    )
+    assert.equal(
+      oauthCallbackScheme('production', 'custom', 'secret'),
+      'x-github-desktop-auth'
+    )
+    assert.equal(
+      oauthCallbackScheme('production', '3a723b10ac5575cc5bb9', 'secret'),
+      'x-github-desktop-dev-auth'
+    )
+    assert.throws(
+      () => oauthCallbackScheme('production', 'custom', undefined),
+      /provided together/
+    )
+    assert.throws(
+      () => oauthCallbackScheme('production', undefined, 'secret'),
+      /provided together/
+    )
   })
 })
 afterEach(() => {
@@ -316,7 +339,7 @@ describe.skipIf(process.platform === 'win32')(
           root
         )}).catch(() => { process.exitCode = 1 })\n`
       )
-      const child = spawn(process.execPath, ['--import', '@oxc-node/core/register', driver], {
+      const child = spawn(process.execPath, ['--require', RUN_HOOK, driver], {
         cwd: process.cwd(),
         env: { ...env, WAIT_VITE: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],

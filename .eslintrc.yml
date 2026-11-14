@@ -89,8 +89,8 @@ rules:
   # Would love to be able to turn this on eventually
   '@typescript-eslint/no-non-null-assertion': off
 
-  # Preserve no-var-requires: off. Electron renderer callbacks and startup paths
-  # can require synchronous CommonJS loading.
+  # Preserve no-var-requires: off. Renderer callbacks and startup paths can
+  # require synchronous CommonJS loading.
   '@typescript-eslint/no-require-imports': off
 
   # Don't particularly care about these
@@ -157,27 +157,13 @@ rules:
   no-buffer-constructor: error
   no-restricted-imports:
     - error
-    - paths:
-        - name: electron
-          importNames: ['ipcRenderer']
+    - patterns:
+        - group: ['**/web/host-bridge']
+          importNames: ['hostIpc']
           message:
             "Please use 'import * as ipcRenderer' from 'ipc-renderer' instead to
             get strongly typed IPC methods."
-        - name: electron/renderer
-          importNames: ['ipcRenderer']
-          message:
-            "Please use 'import * as ipcRenderer' from 'ipc-renderer' instead to
-            get strongly typed IPC methods."
-        - name: electron
-          importNames: ['ipcMain']
-          message:
-            "Please use 'import * as ipcMain' from 'ipc-main' instead to get
-            strongly typed IPC methods."
-        - name: electron/main
-          importNames: ['ipcMain']
-          message:
-            "Please use 'import * as ipcMain' from 'ipc-main' instead to get
-            strongly typed IPC methods."
+
 
   ###########
   # SPECIAL #
@@ -212,6 +198,8 @@ overrides:
     rules:
       '@typescript-eslint/no-non-null-assertion': off
       react/jsx-no-bind: off
+      # Tests drive the host bridge directly to observe IPC.
+      no-restricted-imports: off
   - files: 'script/**/*'
     rules:
       '@typescript-eslint/no-non-null-assertion': off

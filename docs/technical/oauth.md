@@ -19,7 +19,7 @@ due to the credentials not being present there.
 ## Provide your own Client ID and Secret
 
 The OAuth client ID and Client Secret are bundled into the application with
-webpack. If you want to provide your own Client ID and Client Secret, set these
+Vite. If you want to provide your own Client ID and Client Secret, set these
 environment variables:
 
  - `DESKTOP_OAUTH_CLIENT_ID`

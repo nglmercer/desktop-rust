@@ -18,12 +18,17 @@ import { watchRustBundle, type DevWatcher } from './rust-dev-watcher'
 import { stopDevelopmentBuild } from './rust-dev-process'
 import { copyStaticResources } from '../vite.config'
 
+const RUN_HOOK = require('node:path').resolve(__dirname, 'ts-register.cjs')
+
 const enabled =
   process.env.DESKTOP_TEST_RUST_DEV === '1' &&
   process.platform === 'linux' &&
   !!process.env.DISPLAY
 
-function startHost(args: ReadonlyArray<string> = [], useDefaultCommand = false) {
+function startHost(
+  args: ReadonlyArray<string> = [],
+  useDefaultCommand = false
+) {
   const directory = mkdtempSync(path.join(tmpdir(), 'desktop-rust-dev-test-'))
   const runtime = path.join(directory, 'runtime')
   mkdirSync(runtime, { mode: 0o700 })
@@ -36,7 +41,7 @@ function startHost(args: ReadonlyArray<string> = [], useDefaultCommand = false) 
     useDefaultCommand ? 'pnpm' : process.execPath,
     useDefaultCommand
       ? ['start', ...args]
-      : ['--import', '@oxc-node/core/register', 'script/start-rust.ts', ...args],
+      : ['--require', RUN_HOOK, 'script/start-rust.ts', ...args],
     {
       cwd: process.cwd(),
       detached: useDefaultCommand,
@@ -577,7 +582,7 @@ describe.skipIf(process.platform === 'win32')(
       setInterval(() => {}, 1000)
     `
       )
-      const child = spawn(process.execPath, ['--import', '@oxc-node/core/register', script], {
+      const child = spawn(process.execPath, ['--require', RUN_HOOK, script], {
         cwd: process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
       })

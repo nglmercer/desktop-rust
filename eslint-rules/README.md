@@ -70,7 +70,7 @@ previously disabled `ban-types` rule. ESLint's core
 `no-loss-of-precision` replaces the removed TypeScript extension rule.
 
 The disabled `no-var-requires` rule maps to disabled `no-require-imports`:
-Electron renderer callbacks and startup paths can require synchronous CommonJS
+Renderer callbacks and startup paths can require synchronous CommonJS
 loading. This retains the previous policy rather than forcing asynchronous
 imports or changing where those modules execute. Other newly recommended
 checks, including `no-wrapper-object-types` and `no-unsafe-function-type`,

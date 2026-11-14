@@ -22,7 +22,7 @@ let nativeExec: typeof Dugite.exec
 let loginGitParameters: string | undefined
 
 before(async () => {
-  // Unit tests do not have webpack's packaged binary assets. Resolve only those
+  // Unit tests do not have the packaged binary assets. Resolve only those
   // assets and the login-shell environment; all Git, hooks and proxy IPC are real.
   const copy = FileSystem.cp
   const resolveBinary = Dugite.resolveGitBinary

@@ -115,7 +115,7 @@ The application, build scripts, custom ESLint rules, and native modules use
 TypeScript 6. Keep the compiler versions in the root package and the three
 TypeScript-based packages under `vendor/` aligned, including their lockfiles.
 
-Webpack compiles the application and syntax-highlighting worker using `bundler`
+Vite compiles the application and syntax-highlighting worker using `bundler`
 module resolution. Build scripts use `nodenext`, and native modules use `node16`
 to retain their CommonJS output. Each compiler project declares its source root
 explicitly. Use public package exports when importing types; for SDK types that

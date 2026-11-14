@@ -1,6 +1,6 @@
 ## Placeholders and Replacements in Source Code
 
-As GitHub Desktop uses Webpack to transpile, minify and merge our code
+As GitHub Desktop uses Vite to transpile, minify and merge our code
 into unified scripts for each configuration we define, we use some tricks
 to manage complexity and enable some optimizations.
 
@@ -82,7 +82,7 @@ if (false) {
 }
 ```
 
-As part of Webpack's minification and bundling, the dead code paths are
+As part of Vite's minification and bundling, the dead code paths are
 eliminated, leaving this code for macOS:
 
 ```js
@@ -115,5 +115,5 @@ declare const __DARWIN__: boolean
 declare const __WIN32__: boolean
 ```
 
-As a convention, globals which should be replaced by Webpack should be prefixed
+As a convention, globals which should be replaced by Vite should be prefixed
 and suffixed with two underscores, e.g. `__DEV__`.

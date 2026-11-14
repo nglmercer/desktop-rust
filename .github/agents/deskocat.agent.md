@@ -278,7 +278,7 @@ it('commits files', async t => {
 - The host bridge's `shell` and `ipcRenderer` (not available in Node.js)
 - IndexedDB (via `fake-indexeddb`)
 - DOM globals (via `global-jsdom`)
-- Webpack globals: `__DEV__`, `__TEST__`, `__DARWIN__`, `__WIN32__`, `__LINUX__`
+- Vite globals: `__DEV__`, `__TEST__`, `__DARWIN__`, `__WIN32__`, `__LINUX__`
 
 ---
 

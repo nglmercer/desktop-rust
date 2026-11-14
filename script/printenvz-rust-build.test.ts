@@ -14,13 +14,10 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { afterEach, describe, it } from 'vitest'
 import { resolveRustTarget } from './printenvz'
 
-const oxcRegister = pathToFileURL(
-  path.join(path.dirname(require.resolve('@oxc-node/core')), 'register.mjs')
-).href
+const tsRegister = path.resolve(__dirname, 'ts-register.cjs')
 
 const directories: string[] = []
 afterEach(() => {
@@ -62,7 +59,7 @@ function fixture() {
   mkdirSync(path.dirname(targetBinary), { recursive: true })
   writeFileSync(targetBinary, 'arm64 binary')
   const invoke = (extra: NodeJS.ProcessEnv = {}) =>
-    spawnSync(process.execPath, ['--import', oxcRegister, driver], {
+    spawnSync(process.execPath, ['--require', tsRegister, driver], {
       cwd: root,
       env: {
         ...process.env,
@@ -146,7 +143,7 @@ describe.skipIf(process.platform !== 'linux')(
         )
         const build = spawnSync(
           process.execPath,
-          ['--import', oxcRegister, driver],
+          ['--require', tsRegister, driver],
           {
             cwd: root,
             env,

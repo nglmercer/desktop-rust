@@ -5,7 +5,7 @@
  * of truth for version computation, tag discovery, and changelog aggregation.
  *
  * Usage (from repo root):
- *   node --import @oxc-node/core/register script/draft-release/ci.ts <command> [args]
+ *   node --require ./script/ts-register.cjs script/draft-release/ci.ts <command> [args]
  *
  * Commands:
  *   version <channel>

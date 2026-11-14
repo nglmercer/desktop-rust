@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 /**
  * This array tells the source map logic which files that we can expect to
  * be able to resolve a source map for and they should reflect the chunks
- * entry names from our webpack config.
+ * entry names from our Vite config.
  *
  * Note that we explicitly don't enable source maps for the crash process
  * since it's possible that the error which caused us to spawn the crash

@@ -11,7 +11,7 @@
       "vitest.config.ts",
       "app/test/vitest-setup.ts",
       "app/test/unit/usage-data-test.ts",
-      "app/test/unit/web-electron-shim-loader-test.ts",
+      "app/test/unit/web-host-bridge-loader-test.ts",
       "app/test/unit/backend-browser-entry-integration-test.ts",
       "app/test/unit/backend-browser-repository-integration-test.ts",
       "app/test/unit/browser-repository-selection-test.ts",

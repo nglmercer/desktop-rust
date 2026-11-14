@@ -380,7 +380,7 @@ This file is loaded automatically by the test runner. It:
 
 - Imports `fake-indexeddb/auto` and `global-jsdom/register` for browser API
   simulation.
-- Defines Webpack build-time constants (`__DEV__`, `__APP_NAME__`, etc.).
+- Defines Vite build-time constants (`__DEV__`, `__APP_NAME__`, etc.).
 - Mocks the host bridge module (host IPC and shell).
 - Removes `MessageChannel`/`MessagePort`/`BroadcastChannel` to prevent test
   hangs (React 16 + Dexie cleanup issue).
