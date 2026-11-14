@@ -56,7 +56,7 @@
       "app/test/helpers/usage-data.ts",
       "app/src/lib/stats/stats-payload.ts",
       "app/src/web/**",
-      "app/src/models/diff/**",
+      "app/src/models/**",
       "app/src/lib/progress/**",
       "app/src/lib/markdown-filters/**",
       "app/src/lib/actions-log-parser/**",

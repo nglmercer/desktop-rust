@@ -5,8 +5,8 @@ export type RepositoryPublicationSettings =
   | IDotcomPublicationSettings
 
 export enum PublishSettingsType {
-  'enterprise',
-  'dotcom',
+  enterprise,
+  dotcom,
 }
 
 export interface IEnterprisePublicationSettings {

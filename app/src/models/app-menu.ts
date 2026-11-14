@@ -216,7 +216,7 @@ function menuItemFromElectronMenuItem(menuItem: Electron.MenuItem): MenuItem {
       }
     case 'separator':
       return { id, type: 'separator', visible }
-    case 'submenu':
+    case 'submenu': {
       const menu = menuFromElectronMenu(menuItem.submenu as Electron.Menu, id)
       return {
         id,
@@ -227,6 +227,7 @@ function menuItemFromElectronMenuItem(menuItem: Electron.MenuItem): MenuItem {
         menu,
         accessKey,
       }
+    }
     case 'checkbox':
       return {
         id,

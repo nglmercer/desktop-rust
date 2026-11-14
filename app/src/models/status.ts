@@ -372,7 +372,9 @@ export class WorkingDirectoryStatus {
     public readonly files: ReadonlyArray<WorkingDirectoryFileChange>,
     public readonly includeAll: boolean | null = true
   ) {
-    files.forEach((f, ix) => this.fileIxById.set(f.id, ix))
+    files.forEach((f, ix) => {
+      this.fileIxById.set(f.id, ix)
+    })
   }
 
   /**

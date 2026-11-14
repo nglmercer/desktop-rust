@@ -21,7 +21,11 @@ export enum BannerType {
 }
 
 export type Banner =
-  | { readonly type: BannerType.DiscardedSelection; readonly undoId: string; readonly onUndo: () => void }
+  | {
+      readonly type: BannerType.DiscardedSelection
+      readonly undoId: string
+      readonly onUndo: () => void
+    }
   | {
       readonly type: BannerType.SuccessfulMerge
       /** name of the branch that was merged into */

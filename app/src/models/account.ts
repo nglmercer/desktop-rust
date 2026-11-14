@@ -122,9 +122,10 @@ export class Account {
    * hostname without the protocol and/or path.
    */
   public get friendlyEndpoint(): string {
-    return (this._friendlyEndpoint ??= isDotComAccount(this)
+    this._friendlyEndpoint ??= isDotComAccount(this)
       ? 'GitHub.com'
-      : new URL(getHTMLURL(this.endpoint)).hostname)
+      : new URL(getHTMLURL(this.endpoint)).hostname
+    return this._friendlyEndpoint
   }
 }
 
