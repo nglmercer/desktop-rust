@@ -1,17 +1,17 @@
 import * as React from 'react'
-import { Octicon, OcticonSymbol } from '../octicons'
+import { Octicon, type OcticonSymbol } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import classNames from 'classnames'
-import { GitHubRepository } from '../../models/github-repository'
-import { Repository } from '../../models/repository'
+import type { GitHubRepository } from '../../models/github-repository'
+import type { Repository } from '../../models/repository'
 import type { Disposable } from 'event-kit'
-import { Dispatcher } from '../dispatcher'
+import type { Dispatcher } from '../dispatcher'
 import {
   getCheckRunConclusionAdjective,
-  ICombinedRefCheck,
-  IRefCheck,
+  type ICombinedRefCheck,
+  type IRefCheck,
 } from '../../lib/ci-checks/ci-checks'
-import { IAPIWorkflowJobStep } from '../../lib/api'
+import type { IAPIWorkflowJobStep } from '../../lib/api'
 
 interface ICIStatusProps {
   /** The classname for the underlying element. */

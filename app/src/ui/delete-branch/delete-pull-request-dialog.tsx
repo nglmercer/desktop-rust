@@ -1,10 +1,10 @@
 import * as React from 'react'
 
-import { Dispatcher } from '../dispatcher'
+import type { Dispatcher } from '../dispatcher'
 
-import { Repository } from '../../models/repository'
-import { Branch } from '../../models/branch'
-import { PullRequest } from '../../models/pull-request'
+import type { Repository } from '../../models/repository'
+import type { Branch } from '../../models/branch'
+import type { PullRequest } from '../../models/pull-request'
 
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { LinkButton } from '../lib/link-button'
@@ -18,7 +18,7 @@ interface IDeleteBranchProps {
   readonly onDismissed: () => void
 }
 
-export class DeletePullRequest extends React.Component<IDeleteBranchProps, {}> {
+export class DeletePullRequest extends React.Component<IDeleteBranchProps> {
   public render() {
     return (
       <Dialog

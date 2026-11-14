@@ -1,37 +1,37 @@
 import * as React from 'react'
 
-import { Repository } from '../../models/repository'
-import { Dispatcher } from '../dispatcher'
-import { Branch, StartPoint } from '../../models/branch'
+import type { Repository } from '../../models/repository'
+import type { Dispatcher } from '../dispatcher'
+import { type Branch, StartPoint } from '../../models/branch'
 import { Row } from '../lib/row'
 import { Ref } from '../lib/ref'
 import { LinkButton } from '../lib/link-button'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import {
   VerticalSegmentedControl,
-  ISegmentedItem,
+  type ISegmentedItem,
 } from '../lib/vertical-segmented-control'
 import {
   TipState,
-  IUnbornRepository,
-  IDetachedHead,
-  IValidBranch,
+  type IUnbornRepository,
+  type IDetachedHead,
+  type IValidBranch,
 } from '../../models/tip'
 import { assertNever } from '../../lib/fatal-error'
 import { renderBranchNameExistsOnRemoteWarning } from '../lib/branch-name-warnings'
 import { getStartPoint } from '../../lib/create-branch'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 import { startTimer } from '../lib/timing'
-import { GitHubRepository } from '../../models/github-repository'
+import type { GitHubRepository } from '../../models/github-repository'
 import { RefNameTextBox } from '../lib/ref-name-text-box'
-import { CommitOneLine } from '../../models/commit'
+import type { CommitOneLine } from '../../models/commit'
 import { PopupType } from '../../models/popup'
 import { RepositorySettingsTab } from '../repository-settings/repository-settings'
 import { isRepositoryWithForkedGitHubRepository } from '../../models/repository'
-import { IAPIRepoRuleset } from '../../lib/api'
-import { Account } from '../../models/account'
+import type { IAPIRepoRuleset } from '../../lib/api'
+import type { Account } from '../../models/account'
 import {
-  IBranchRuleError,
+  type IBranchRuleError,
   checkBranchNameRules,
   renderBranchNameRuleError,
 } from '../lib/branch-name-rule-validation'
@@ -594,6 +594,6 @@ function getBranchForStartPoint(
   return startPoint === StartPoint.UpstreamDefaultBranch
     ? branchInfo.upstreamDefaultBranch
     : startPoint === StartPoint.DefaultBranch
-    ? branchInfo.defaultBranch
-    : null
+      ? branchInfo.defaultBranch
+      : null
 }

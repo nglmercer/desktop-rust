@@ -1,16 +1,16 @@
 import * as React from 'react'
 
-import { Dispatcher } from '../dispatcher'
-import { Repository } from '../../models/repository'
-import { Branch } from '../../models/branch'
+import type { Dispatcher } from '../dispatcher'
+import type { Repository } from '../../models/repository'
+import type { Branch } from '../../models/branch'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { renderBranchHasRemoteWarning } from '../lib/branch-name-warnings'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 import { RefNameTextBox } from '../lib/ref-name-text-box'
-import { IAPIRepoRuleset } from '../../lib/api'
-import { Account } from '../../models/account'
+import type { IAPIRepoRuleset } from '../../lib/api'
+import type { Account } from '../../models/account'
 import {
-  IBranchRuleError,
+  type IBranchRuleError,
   checkBranchNameRules,
   renderBranchNameRuleError,
 } from '../lib/branch-name-rule-validation'

@@ -1,6 +1,6 @@
-import { IMenuItem } from '../../lib/menu-item'
+import type { IMenuItem } from '../../lib/menu-item'
 import { writeClipboardText } from '../main-process-proxy'
-import { Branch, BranchType } from '../../models/branch'
+import { type Branch, BranchType } from '../../models/branch'
 
 interface IBranchContextMenuConfig {
   branch: Branch
@@ -22,7 +22,7 @@ export function generateBranchContextMenuItems(
     onDeleteBranch,
     onCheckoutInNewWorktree,
   } = config
-  const items = new Array<IMenuItem>()
+  const items: IMenuItem[] = []
 
   if (onRenameBranch !== undefined) {
     items.push({

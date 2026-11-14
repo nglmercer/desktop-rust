@@ -1,5 +1,5 @@
-import { Branch } from '../../models/branch'
-import { IFilterListGroup, IFilterListItem } from '../lib/filter-list'
+import type { Branch } from '../../models/branch'
+import type { IFilterListGroup, IFilterListItem } from '../lib/filter-list'
 
 export type BranchGroupIdentifier = 'default' | 'recent' | 'other'
 
@@ -11,11 +11,11 @@ export interface IBranchListItem extends IFilterListItem {
 
 export function groupBranches(
   defaultBranch: Branch | null,
-  currentBranch: Branch | null,
+  _currentBranch: Branch | null,
   allBranches: ReadonlyArray<Branch>,
   recentBranches: ReadonlyArray<Branch>
 ): ReadonlyArray<IFilterListGroup<IBranchListItem>> {
-  const groups = new Array<IFilterListGroup<IBranchListItem>>()
+  const groups: IFilterListGroup<IBranchListItem>[] = []
 
   if (defaultBranch) {
     groups.push({
@@ -36,7 +36,7 @@ export function groupBranches(
     b => b.name !== defaultBranchName
   )
   if (recentBranchesWithoutDefault.length > 0) {
-    const recentBranches = new Array<IBranchListItem>()
+    const recentBranches: IBranchListItem[] = []
 
     for (const branch of recentBranchesWithoutDefault) {
       recentBranches.push({

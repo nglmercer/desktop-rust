@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-import { IMatches } from '../../lib/fuzzy-find'
+import type { IMatches } from '../../lib/fuzzy-find'
 
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
@@ -105,7 +105,7 @@ export class BranchListItem extends React.Component<
        * This a11y linter is a false-positive as the element is a drop target
        * facilitating our drag and drop functionality for cherry-picking.
        */
-      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+      /* eslint-disable-next-line jsx-a11y/no-static-element-interactions */ // biome-ignore lint/a11y/noStaticElementInteractions: This is a drop target for cherry-picking.
       <div
         className={className}
         onMouseEnter={this.onMouseEnter}

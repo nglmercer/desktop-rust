@@ -1,27 +1,27 @@
 import * as React from 'react'
 
-import { Branch } from '../../models/branch'
+import type { Branch } from '../../models/branch'
 
 import { assertNever } from '../../lib/fatal-error'
 
-import { SelectionSource } from '../lib/filter-list'
-import { IMatches } from '../../lib/fuzzy-find'
+import type { SelectionSource } from '../lib/filter-list'
+import type { IMatches } from '../../lib/fuzzy-find'
 import { Button } from '../lib/button'
-import { TextBox } from '../lib/text-box'
+import type { TextBox } from '../lib/text-box'
 
 import {
   groupBranches,
-  IBranchListItem,
-  BranchGroupIdentifier,
+  type IBranchListItem,
+  type BranchGroupIdentifier,
 } from './group-branches'
 import { NoBranches } from './no-branches'
-import { SelectionDirection, ClickSource } from '../lib/list'
+import type { SelectionDirection, ClickSource } from '../lib/list'
 import { generateBranchContextMenuItems } from './branch-list-item-context-menu'
 import { showContextualMenu } from '../../lib/menu-item'
 import { SectionFilterList } from '../lib/section-filter-list'
 import memoizeOne from 'memoize-one'
 import { getAuthors } from '../../lib/git/log'
-import { Repository } from '../../models/repository'
+import type { Repository } from '../../models/repository'
 import { formatDate } from '../../lib/format-date'
 
 const RowHeight = 30
@@ -214,7 +214,7 @@ export class BranchList extends React.Component<
 
   private populateCommitDates = () => {
     const cached = new Map<string, Date>()
-    const missing = new Array<string>()
+    const missing: string[] = []
     const uniqShas = new Set(this.props.allBranches.map(b => b.tip.sha))
 
     for (const sha of uniqShas) {
@@ -238,7 +238,9 @@ export class BranchList extends React.Component<
     if (missing.length > 0) {
       getAuthors(this.props.repository, missing)
         .then(x => {
-          x.forEach(({ date }, i) => commitDateCache.set(missing[i], date))
+          x.forEach(({ date }, i) => {
+            commitDateCache.set(missing[i], date)
+          })
           this.populateCommitDates()
         })
         .catch(e => log.error(`Failed to populate commit dates`, e))

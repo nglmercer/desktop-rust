@@ -71,6 +71,13 @@ app/src/lib/copilot/**
 app/src/lib/copilot-app/**
 app/src/lib/trampoline/**
 app/src/lib/assisted-commit/**
+# Branch and tag dialogs are checked and formatted by Biome.
+app/src/ui/branches/**
+app/src/ui/create-branch/**
+app/src/ui/delete-branch/**
+app/src/ui/rename-branch/**
+app/src/ui/create-tag/**
+app/src/ui/delete-tag/**
 vite.cli.config.ts
 script/cli-build.test.ts
 vite.crash.config.ts

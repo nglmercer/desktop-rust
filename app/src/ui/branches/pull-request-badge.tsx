@@ -1,9 +1,9 @@
 import * as React from 'react'
 import { CIStatus } from './ci-status'
-import { GitHubRepository } from '../../models/github-repository'
-import { Repository } from '../../models/repository'
-import { Dispatcher } from '../dispatcher'
-import { ICombinedRefCheck } from '../../lib/ci-checks/ci-checks'
+import type { GitHubRepository } from '../../models/github-repository'
+import type { Repository } from '../../models/repository'
+import type { Dispatcher } from '../dispatcher'
+import type { ICombinedRefCheck } from '../../lib/ci-checks/ci-checks'
 import { getPullRequestCommitRef } from '../../models/pull-request'
 import { Button } from '../lib/button'
 

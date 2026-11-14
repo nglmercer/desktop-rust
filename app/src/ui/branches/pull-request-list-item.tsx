@@ -4,10 +4,10 @@ import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { CIStatus } from './ci-status'
 import { HighlightText } from '../lib/highlight-text'
-import { IMatches } from '../../lib/fuzzy-find'
-import { GitHubRepository } from '../../models/github-repository'
-import { Repository } from '../../models/repository'
-import { Dispatcher } from '../dispatcher'
+import type { IMatches } from '../../lib/fuzzy-find'
+import type { GitHubRepository } from '../../models/github-repository'
+import type { Repository } from '../../models/repository'
+import type { Dispatcher } from '../dispatcher'
 import { dragAndDropManager } from '../../lib/drag-and-drop-manager'
 import { DropTargetType } from '../../models/drag-drop'
 import { getPullRequestCommitRef } from '../../models/pull-request'
@@ -137,7 +137,7 @@ export class PullRequestListItem extends React.Component<
        * This a11y linter is a false-positive as the element is a drop target
        * facilitating our drag and drop functionality for cherry-picking.
        */
-      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+      /* eslint-disable-next-line jsx-a11y/no-static-element-interactions */ // biome-ignore lint/a11y/noStaticElementInteractions: This is a drop target for cherry-picking.
       <div
         className={className}
         onMouseEnter={this.onMouseEnter}

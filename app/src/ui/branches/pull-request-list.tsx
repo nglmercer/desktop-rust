@@ -1,16 +1,16 @@
 import * as React from 'react'
-import {
+import type {
   IFilterListGroup,
   IFilterListItem,
   SelectionSource,
 } from '../lib/filter-list'
 import { PullRequestListItem } from './pull-request-list-item'
-import { PullRequest } from '../../models/pull-request'
+import type { PullRequest } from '../../models/pull-request'
 import { NoPullRequests } from './no-pull-requests'
-import { IMatches } from '../../lib/fuzzy-find'
-import { Dispatcher } from '../dispatcher'
+import type { IMatches } from '../../lib/fuzzy-find'
+import type { Dispatcher } from '../dispatcher'
 import {
-  RepositoryWithGitHubRepository,
+  type RepositoryWithGitHubRepository,
   getNonForkGitHubRepository,
 } from '../../models/repository'
 import { Button } from '../lib/button'
@@ -137,8 +137,8 @@ export class PullRequestList extends React.Component<
     const screenReaderStateMessage = loadingStarted
       ? 'Hang Tight. Loading pull requests as fast as I can!'
       : loadingComplete
-      ? `${numPullRequests} pull request${plural} found`
-      : null
+        ? `${numPullRequests} pull request${plural} found`
+        : null
 
     this.setState({
       groupedItems: [group],

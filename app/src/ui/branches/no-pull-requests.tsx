@@ -29,7 +29,7 @@ interface INoPullRequestsProps {
 }
 
 /** The placeholder for when there are no open pull requests. */
-export class NoPullRequests extends React.Component<INoPullRequestsProps, {}> {
+export class NoPullRequests extends React.Component<INoPullRequestsProps> {
   public render() {
     return (
       <div className="no-pull-requests">

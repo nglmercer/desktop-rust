@@ -1,15 +1,15 @@
 import * as React from 'react'
 
-import { PullRequest } from '../../models/pull-request'
+import type { PullRequest } from '../../models/pull-request'
 import {
-  Repository,
+  type Repository,
   isRepositoryWithGitHubRepository,
 } from '../../models/repository'
-import { Branch } from '../../models/branch'
+import type { Branch } from '../../models/branch'
 import { BranchesTab } from '../../models/branches-tab'
 import { PopupType } from '../../models/popup'
 
-import { Dispatcher } from '../dispatcher'
+import type { Dispatcher } from '../dispatcher'
 import { FoldoutType } from '../../lib/app-state'
 import { assertNever } from '../../lib/fatal-error'
 
@@ -22,12 +22,12 @@ import { Button } from '../lib/button'
 
 import { BranchList } from './branch-list'
 import { PullRequestList } from './pull-request-list'
-import { IBranchListItem } from './group-branches'
+import type { IBranchListItem } from './group-branches'
 import {
   getDefaultAriaLabelForBranch,
   renderDefaultBranch,
 } from './branch-renderer'
-import { IMatches } from '../../lib/fuzzy-find'
+import type { IMatches } from '../../lib/fuzzy-find'
 import { startTimer } from '../lib/timing'
 import { dragAndDropManager } from '../../lib/drag-and-drop-manager'
 import { DragType, DropTargetType } from '../../models/drag-drop'
@@ -37,7 +37,7 @@ import {
   enableWorktreeSupport,
 } from '../../lib/feature-flag'
 import { PullRequestQuickView } from '../pull-request-quick-view'
-import { Emoji } from '../../lib/emoji'
+import type { Emoji } from '../../lib/emoji'
 import classNames from 'classnames'
 
 interface IBranchesContainerProps {
@@ -322,7 +322,7 @@ export class BranchesContainer extends React.Component<
        * This a11y linter is a false-positive as the element is a drop target
        * facilitating our drag and drop functionality for cherry-picking.
        */
-      // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+      /* eslint-disable-next-line jsx-a11y/no-static-element-interactions */ // biome-ignore lint/a11y/noStaticElementInteractions: This is a drop target for cherry-picking.
       <div
         className="branches-list-item new-branch-drop"
         onMouseEnter={this.onMouseEnterNewBranchDrop}

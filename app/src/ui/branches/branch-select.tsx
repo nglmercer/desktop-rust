@@ -1,15 +1,15 @@
 import * as React from 'react'
-import { IMatches } from '../../lib/fuzzy-find'
-import { Branch } from '../../models/branch'
-import { ClickSource } from '../lib/list'
+import type { IMatches } from '../../lib/fuzzy-find'
+import type { Branch } from '../../models/branch'
+import type { ClickSource } from '../lib/list'
 import { PopoverDropdown } from '../lib/popover-dropdown'
 import { BranchList } from './branch-list'
 import {
   getDefaultAriaLabelForBranch,
   renderDefaultBranch,
 } from './branch-renderer'
-import { IBranchListItem } from './group-branches'
-import { Repository } from '../../models/repository'
+import type { IBranchListItem } from './group-branches'
+import type { Repository } from '../../models/repository'
 
 interface IBranchSelectProps {
   readonly repository: Repository

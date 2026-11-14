@@ -1,7 +1,7 @@
 import * as React from 'react'
 
-import { Repository } from '../../models/repository'
-import { Dispatcher } from '../dispatcher'
+import type { Repository } from '../../models/repository'
+import type { Dispatcher } from '../dispatcher'
 import { Dialog, DialogError, DialogContent, DialogFooter } from '../dialog'
 
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
@@ -105,9 +105,7 @@ export class CreateTag extends React.Component<
         {lastThreeTags.length === 0 ? (
           <p>{`No matches found for '${tagName}'`}</p>
         ) : (
-          lastThreeTags.map((item: string, index: number) => (
-            <Ref key={index}>{item}</Ref>
-          ))
+          lastThreeTags.map((item: string) => <Ref key={item}>{item}</Ref>)
         )}
       </>
     )
@@ -120,8 +118,7 @@ export class CreateTag extends React.Component<
       )
     }
 
-    const alreadyExists =
-      this.props.localTags && this.props.localTags.has(this.state.tagName)
+    const alreadyExists = this.props.localTags?.has(this.state.tagName)
     if (alreadyExists) {
       return (
         <>

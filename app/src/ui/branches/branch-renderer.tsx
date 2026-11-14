@@ -1,10 +1,11 @@
+// biome-ignore lint/correctness/noUnusedImports: The classic JSX transform uses React.
 import * as React from 'react'
 
-import { Branch } from '../../models/branch'
+import type { Branch } from '../../models/branch'
 
-import { IBranchListItem } from './group-branches'
+import type { IBranchListItem } from './group-branches'
 import { BranchListItem } from './branch-list-item'
-import { IMatches } from '../../lib/fuzzy-find'
+import type { IMatches } from '../../lib/fuzzy-find'
 import { getRelativeTimeInfoFromDate } from '../relative-time'
 import { getPreferAbsoluteDates } from '../../models/formatting-preferences'
 

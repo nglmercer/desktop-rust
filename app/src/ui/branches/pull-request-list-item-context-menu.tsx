@@ -1,4 +1,4 @@
-import { IMenuItem } from '../../lib/menu-item'
+import type { IMenuItem } from '../../lib/menu-item'
 
 interface IPullRequestContextMenuConfig {
   onViewPullRequestOnGitHub?: () => void
@@ -9,7 +9,7 @@ export function generatePullRequestContextMenuItems(
   config: IPullRequestContextMenuConfig
 ): IMenuItem[] {
   const { onViewPullRequestOnGitHub, onCheckoutInNewWorktree } = config
-  const items = new Array<IMenuItem>()
+  const items: IMenuItem[] = []
 
   if (onViewPullRequestOnGitHub !== undefined) {
     items.push({
