@@ -9,6 +9,11 @@ must contain their compiled native addons. For testing an installation whose
 native addons are elsewhere, set `DESKTOP_RENDERER_FS_ADMIN_NODE` and
 `DESKTOP_RENDERER_KEYTAR_NODE` to their absolute paths.
 
+The addon plugin watches both binaries and checks that their expected loaders
+are included and unchanged. Its tests cover path normalization, relocation,
+watch rebuilds and invalid loaders with simulated addons. These tests do not
+validate native addons or the renderer on Windows or macOS.
+
 A Linux integration probe builds the current Electron main process and the Vite
 renderer, overlays them onto a temporary copy of an existing installation, and
 starts that copy with an isolated profile. It creates a local repository,

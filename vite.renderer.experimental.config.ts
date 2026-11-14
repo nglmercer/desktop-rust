@@ -1,11 +1,12 @@
 import { builtinModules, createRequire } from 'node:module'
 import path from 'node:path'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { getReplacements } from './app/app-info'
 import { packagedExternals } from './app/build-externals'
 import { getDistArchitecture } from './script/dist-info'
+import { rendererNativeAddons } from './script/renderer-vite-native-addons'
 
 if (process.platform !== 'linux') {
   throw new Error(
@@ -28,38 +29,6 @@ const native = [
   },
 ] as const
 
-function nativeAddons(): Plugin {
-  return {
-    name: 'electron-renderer-native-addons',
-    enforce: 'pre',
-    buildStart() {
-      for (const addon of native) {
-        const file =
-          process.env[`DESKTOP_RENDERER_${addon.name.toUpperCase()}_NODE`] ??
-          path.resolve(path.dirname(addon.loader), addon.pattern)
-        if (!existsSync(file)) {
-          this.error(`Missing ${addon.name} addon: ${file}`)
-        }
-        this.emitFile({
-          type: 'asset',
-          fileName: `${addon.name}.node`,
-          source: readFileSync(file),
-        })
-      }
-    },
-    transform(code, id) {
-      const addon = native.find(item => item.loader === id)
-      if (!addon) {
-        return null
-      }
-      const replacement = `desktop-native-addon:${addon.name}`
-      if (!code.includes(addon.pattern)) {
-        this.error(`Unexpected ${addon.name} native loader`)
-      }
-      return { code: code.replace(addon.pattern, replacement), map: null }
-    },
-  }
-}
 const sdk = appRequire.resolve('@github/copilot-sdk')
 const koffiPath = appRequire.resolve('koffi', { paths: [sdk] })
 const koffiName = `@koromix/koffi-${process.platform}-${getDistArchitecture()}`
@@ -131,7 +100,15 @@ function rendererHtml(): Plugin {
 }
 export default defineConfig({
   root: 'app',
-  plugins: [react(), nativeAddons(), koffiPackage(), rendererHtml()],
+  plugins: [
+    react(),
+    rendererNativeAddons(native, {
+      fs_admin: process.env.DESKTOP_RENDERER_FS_ADMIN_NODE,
+      keytar: process.env.DESKTOP_RENDERER_KEYTAR_NODE,
+    }),
+    koffiPackage(),
+    rendererHtml(),
+  ],
   define: { ...replacements, __PROCESS_KIND__: JSON.stringify('ui') },
   resolve: {
     mainFields: ['module', 'main'],

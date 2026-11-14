@@ -1,4 +1,5 @@
 [
+  "script/renderer-vite-native-addons.test.ts",
   "app/test/unit/api-test.ts",
   "app/test/unit/get-shell-env-test.ts",
   "script/printenvz-rust-build.test.ts",
