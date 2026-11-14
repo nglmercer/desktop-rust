@@ -64,6 +64,15 @@ pub(crate) fn write_file(root: &Path, kind: CreationFile, contents: &[u8]) -> Re
                 Some(metadata.permissions())
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            // Opening a symbolic link without following it fails with ELOOP.
+            Err(_)
+                if matches!(kind, CreationFile::Gitignore)
+                    && directory
+                        .symlink_metadata(name)
+                        .is_ok_and(|metadata| metadata.is_symlink()) =>
+            {
+                anyhow::bail!("Cannot use a symbolic link as the root .gitignore file");
+            }
             Err(error) => return Err(error.into()),
         }
     };

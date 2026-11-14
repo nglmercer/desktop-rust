@@ -102,6 +102,15 @@ fn read(root: &Path) -> Result<Option<String>> {
             }
             return Ok(None);
         }
+        // Opening a symbolic link without following it fails with ELOOP.
+        Err(error)
+            if dir
+                .symlink_metadata(".gitignore")
+                .is_ok_and(|metadata| metadata.is_symlink()) =>
+        {
+            let _ = error;
+            anyhow::bail!("Cannot use a symbolic link as the root .gitignore file");
+        }
         Err(error) => return Err(error.into()),
     };
     ensure!(
