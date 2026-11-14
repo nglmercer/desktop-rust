@@ -6,7 +6,7 @@ import { pathExists } from '../../../src/lib/path-exists'
 
 import { Repository } from '../../../src/models/repository'
 import {
-  createCommit,
+  createCommit as createCommitInRepository,
   getCommits,
   getCommit,
   getChangedFiles,
@@ -34,11 +34,61 @@ import {
   DiffSelectionType,
   DiffSelection,
   ITextDiff,
+  ILargeTextDiff,
   DiffType,
 } from '../../../src/models/diff'
 import { getStatusOrThrow } from '../../helpers/status'
 import { ManualConflictResolution } from '../../../src/models/manual-conflict-resolution'
 import { isConflictedFile } from '../../../src/lib/status'
+
+import { exec as execGit } from 'dugite'
+import { backend } from '../../../src/backend/client'
+import { reviewSelectedCommit } from '../../../src/lib/git/selected-commit-review'
+
+/**
+ * Commit the way the app does: it reviews the selection first and commits that
+ * review, rather than handing the working directory files straight to Git. The
+ * Rust path returns the full object id where the Node path returned the
+ * abbreviated one; compare on the abbreviation so both are accepted.
+ */
+const createCommit: typeof createCommitInRepository = async (
+  repository,
+  message,
+  files,
+  options
+) => {
+  if (
+    options?.selectedReview !== undefined ||
+    backend().transportKind === 'none'
+  ) {
+    return createCommitInRepository(repository, message, files, options)
+  }
+  const head = await execGit(['rev-parse', '--verify', 'HEAD'], repository.path)
+  const ref = await execGit(['symbolic-ref', '-q', 'HEAD'], repository.path)
+  const tip = head.exitCode === 0 ? head.stdout.trim() : null
+  const displayed = new Map<string, ITextDiff | ILargeTextDiff>()
+  for (const file of files) {
+    if (file.selection.getSelectionType() === DiffSelectionType.Partial) {
+      const diff = await getWorkingDirectoryDiff(repository, file)
+      if (diff.kind === DiffType.Text || diff.kind === DiffType.LargeText) {
+        displayed.set(file.path, diff)
+      }
+    }
+  }
+  const review = await reviewSelectedCommit(
+    repository,
+    files,
+    file => displayed.get(file.path),
+    options?.amend === true && tip !== null ? tip : undefined,
+    { ref: ref.exitCode === 0 ? ref.stdout.trim() : null, sha: tip },
+    options?.allowEmpty === true
+  )
+  const oid = await createCommitInRepository(repository, message, files, {
+    ...options,
+    selectedReview: review,
+  })
+  return oid.slice(0, 7)
+}
 
 async function getTextDiff(
   repo: Repository,
@@ -118,7 +168,9 @@ describe('git/commit', () => {
         'added two files\n\nthis is a description',
         allChanges
       )
-      assert.equal(sha, '(root-commit)')
+      // The Node path reports Git's "(root-commit)" marker for a first commit;
+      // the Rust path reports the commit's id.
+      assert.match(sha, /^(\(root-commit\)|[0-9a-f]{7})$/)
 
       const statusAfter = await getStatusOrThrow(repo)
 
@@ -850,7 +902,9 @@ describe('git/commit', () => {
       const toCommit = status.workingDirectory.withIncludeAllFiles(true)
 
       const sha = await createCommit(repo, 'commit everything', toCommit.files)
-      assert.equal(sha, '(root-commit)')
+      // The Node path reports Git's "(root-commit)" marker for a first commit;
+      // the Rust path reports the commit's id.
+      assert.match(sha, /^(\(root-commit\)|[0-9a-f]{7})$/)
 
       status = await getStatusOrThrow(repo)
       files = status.workingDirectory.files

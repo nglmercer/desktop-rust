@@ -83,7 +83,7 @@ Worklist (failing files, with the first cause each hits):
 - [x] `git/cherry-pick-test` basis, merge basis — 16 of 20 pass; remaining 4 are Progress ×3 and Contract ×1
 - [x] `git/rebase/*`, `git/rebase-full-test` basis — 29 of 37 pass; remaining 8 are Contract ×4, Progress ×3, Error shape ×1
 - [x] `git/revert-test`, `git/merge-test` basis — 10 of 11 pass; remaining 1 is Error shape (`abortMerge` with no merge)
-- [ ] `git/commit-test` (20): Basis — needs the reviewed selection the app builds first
+- [x] `git/commit-test` basis: the test reviews the selection as the app does (`reviewSelectedCommit`); 25 of 27 pass with the Rust backend. Remaining 2 are Contract: committing conflicted files through `createCommit`, and the error text for `createMergeCommit` with nothing to commit. The Rust path returns the full object id and a real id for a first commit where the Node path returned an abbreviation and Git's `(root-commit)` marker; the test accepts both.
 - [~] `git/rev-parse-test` (16 of 17 left): the harness now restarts the server with the test's Git environment (ownership check, tracing, home) when it changes between requests, which fixed one case; the rest fail because the Rust `trust` operation answers "cannot add Git directory exception" for the paths these tests add — investigate the Rust side
 - [~] `git/remote-operations-test` (11 of 40 left): rebase/merge basis done; push needs its expected reference, and a remote literally named `--remote` is refused by Rust (Contract)
 - [ ] `git/pull/*` (25): Contract / Basis
