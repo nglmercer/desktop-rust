@@ -48,6 +48,9 @@ pub enum AppEvent {
     NativeMenu(String),
     /// Completion of the explicit webview smoke test.
     SmokeResult(bool),
+    /// Request a normal shutdown from the debug development supervisor.
+    #[cfg(debug_assertions)]
+    DevelopmentShutdown,
     /// Executor shutdown completed or reached its deadline.
     ShutdownComplete { drained: bool },
 }

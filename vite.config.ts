@@ -112,20 +112,23 @@ function writeOutputFile(destination: string, contents: string) {
 }
 
 /** Copy bundled emoji while rejecting links and excluding Unicode images. */
-function copyEmojiImages(source: string, destination: string, output: string) {
+function copyEmojiImages(source: string, destination: string, output: string, sources?: Set<string>) {
   ensureOutputDirectory(output, destination)
   for (const entry of readdirSync(source, { withFileTypes: true })) {
     if (entry.name === 'unicode') continue
     const from = path.join(source, entry.name)
     const to = path.join(destination, entry.name)
-    if (entry.isDirectory()) copyEmojiImages(from, to, output)
-    else if (entry.isFile()) copyOutputFile(from, to)
+    if (entry.isDirectory()) copyEmojiImages(from, to, output, sources)
+    else if (entry.isFile()) {
+      copyOutputFile(from, to)
+      sources?.add(from)
+    }
     else throw new Error(`Unsupported bundled emoji resource: ${from}`)
   }
 }
 
 /** Materialize template symlinks without following existing output links. */
-export function copyGitignoreTemplates(source: string, destination: string, trustedRoot = path.dirname(destination)) {
+export function copyGitignoreTemplates(source: string, destination: string, trustedRoot = path.dirname(destination), sources?: Set<string>) {
   const root = realpathSync(source)
   const anchor = path.resolve(trustedRoot)
   const output = path.resolve(destination)
@@ -145,6 +148,7 @@ export function copyGitignoreTemplates(source: string, destination: string, trus
     // A previous build may have left an absolute symlink in the output. Copy
     // into a new file and replace the directory entry so it is never followed.
     copyOutputFile(resolved, path.join(destination, name))
+    sources?.add(path.join(source, name))
   }
 }
 
@@ -189,7 +193,7 @@ export function moveSourceMaps(): Plugin {
     configResolved(config) {
       outDir = path.resolve(config.root, config.build.outDir)
     },
-    closeBundle() {
+    writeBundle() {
       if (!process.env.DESKTOP_VITE_SOURCEMAP) {
         return
       }
@@ -218,15 +222,58 @@ export function moveSourceMaps(): Plugin {
  * loads by URL (images, stylesheets). Directories under static/ are data the
  * renderer read through `fs`; those are served by the Rust backend instead.
  */
-export function copyStaticResources(platformDirectory = staticDirName): Plugin {
+export function copyStaticResources(
+  platformDirectory = staticDirName,
+  projectRoot = __dirname,
+  licenseDump = createLicenseDump
+): Plugin {
   let outDir: string
+  let copiedSources = new Set<string>()
   return {
     name: 'desktop-copy-static',
     apply: 'build',
     configResolved(config) {
       outDir = path.resolve(config.root, config.build.outDir)
     },
-    async closeBundle() {
+    buildStart() {
+      for (const source of copiedSources) {
+        if (!existsSync(source)) {
+          this.error(`A copied static resource was removed: ${source}. Stop the development launcher, run pnpm vite:build, then restart it to clear the old output.`)
+        }
+      }
+      for (const input of ['LICENSE', 'gemoji/db/emoji.json', 'app/static/common/choosealicense.com/LICENSE.md']) {
+        const file = path.resolve(projectRoot, input)
+        if (existsSync(file)) this.addWatchFile(file)
+      }
+      const watchDirectory = (directory: string, recursive: boolean, links = false) => {
+        if (!existsSync(directory)) return
+        this.addWatchFile(directory)
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          if (recursive && entry.name === 'unicode') continue
+          const file = path.join(directory, entry.name)
+          if (entry.isFile()) {
+            this.addWatchFile(file)
+          } else if (entry.isDirectory() && recursive) {
+            watchDirectory(file, true)
+          } else if (entry.isSymbolicLink() && links) {
+            this.addWatchFile(file)
+            try {
+              const resolved = realpathSync(file)
+              if (isInside(realpathSync(directory), resolved)) this.addWatchFile(resolved)
+            } catch {
+              // Copying reports a broken template link as a build error.
+            }
+          }
+        }
+      }
+      watchDirectory(path.resolve(projectRoot, 'gemoji/images/emoji'), true)
+      watchDirectory(path.resolve(projectRoot, 'app/static/common'), false)
+      watchDirectory(path.resolve(projectRoot, 'app/static/common/gitignore'), false, true)
+      watchDirectory(path.resolve(projectRoot, 'app/static/common/choosealicense.com/_licenses'), false)
+      watchDirectory(path.resolve(projectRoot, `app/static/${platformDirectory}`), false)
+    },
+    async writeBundle() {
+      const currentSources = new Set<string>()
       const trustedRoot = outputRoot(outDir)
       ensureOutputDirectory(trustedRoot, outDir)
       const output = realpathSync(outDir)
@@ -236,20 +283,24 @@ export function copyStaticResources(platformDirectory = staticDirName): Plugin {
       // renderer as well as in packaged Electron builds.
       writeOutputFile(
         path.join(destination, 'licenses.json'),
-        JSON.stringify(await createLicenseDump(__dirname))
+        JSON.stringify(await licenseDump(projectRoot))
       )
+      const projectLicense = path.join(projectRoot, 'LICENSE')
+      if (existsSync(projectLicense)) currentSources.add(projectLicense)
       // copyEmoji() in script/build.ts: the database plus the images of
       // GitHub's custom emoji (unicode ones render as text).
-      const gemoji = path.resolve(__dirname, 'gemoji')
-      copyOutputFile(path.join(gemoji, 'db/emoji.json'), path.join(output, 'emoji.json'))
-      copyEmojiImages(path.join(gemoji, 'images/emoji'), path.join(output, 'emoji'), output)
+      const gemoji = path.resolve(projectRoot, 'gemoji')
+      const emojiDatabase = path.join(gemoji, 'db/emoji.json')
+      copyOutputFile(emojiDatabase, path.join(output, 'emoji.json'))
+      currentSources.add(emojiDatabase)
+      copyEmojiImages(path.join(gemoji, 'images/emoji'), path.join(output, 'emoji'), output, currentSources)
 
       // The gitignore templates offered when creating a repository.
-      const gitignores = path.resolve(__dirname, 'app/static/common/gitignore')
-      copyGitignoreTemplates(gitignores, path.join(destination, 'gitignore'), output)
+      const gitignores = path.resolve(projectRoot, 'app/static/common/gitignore')
+      copyGitignoreTemplates(gitignores, path.join(destination, 'gitignore'), output, currentSources)
 
       // generateLicenseMetadata() in script/build.ts.
-      const chooseALicense = path.resolve(__dirname, 'app/static/common/choosealicense.com')
+      const chooseALicense = path.resolve(projectRoot, 'app/static/common/choosealicense.com')
       const licensesDir = path.join(chooseALicense, '_licenses')
       const licenses = readdirSync(licensesDir)
         .map(file => frontMatter<any>(readFileSync(path.join(licensesDir, file), 'utf8')))
@@ -271,15 +322,19 @@ export function copyStaticResources(platformDirectory = staticDirName): Plugin {
           '------------\n\n' +
           readFileSync(path.join(chooseALicense, 'LICENSE.md'), 'utf8')
       )
+      currentSources.add(path.join(chooseALicense, 'LICENSE.md'))
 
       for (const dir of ['common', platformDirectory]) {
-        const source = path.resolve(__dirname, 'app/static', dir)
+        const source = path.resolve(projectRoot, 'app/static', dir)
         for (const entry of readdirSync(source, { withFileTypes: true })) {
           if (entry.isFile()) {
-            copyOutputFile(path.join(source, entry.name), path.join(destination, entry.name))
+            const resource = path.join(source, entry.name)
+            copyOutputFile(resource, path.join(destination, entry.name))
+            currentSources.add(resource)
           }
         }
       }
+      copiedSources = currentSources
     },
   }
 }

@@ -28,6 +28,7 @@
     "test:e2e:run:unpackaged": "cross-env DESKTOP_E2E_APP_MODE=unpackaged playwright test --config app/test/e2e/playwright.config.ts",
     "postinstall": "node --import tsx script/post-install.ts",
     "start": "cross-env NODE_ENV=development node --import tsx script/start.ts",
+    "start:rust": "cross-env NODE_ENV=development node --import tsx script/start-rust.ts",
     "start:prod": "cross-env NODE_ENV=production node --import tsx script/start.ts",
     "compile:main:vite": "vite build -c vite.main.config.ts",
     "compile:renderer:vite": "vite build -c vite.renderer.experimental.config.ts",

@@ -171,6 +171,14 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let smoke_test = args.iter().any(|a| a == "--smoke-test");
 
+    if args.iter().any(|a| a == "--check-dev-host") {
+        if !cfg!(debug_assertions) || cfg!(feature = "packaged-ui") {
+            return Err("development launcher requires a debug host without packaged-ui".into());
+        }
+        println!("desktop-dev-host-ok");
+        return Ok(());
+    }
+
     if args.iter().any(|a| a == "--version" || a == "-v") {
         println!(
             "github-desktop-rs {} (tao + wry, no Tauri)",
@@ -338,6 +346,24 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         builder.build_gtk(vbox)?
     };
 
+    // The development launcher asks the shell to close through the normal
+    // shutdown path instead of terminating it while Git work may be active.
+    // Release builds never inspect this control file.
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("DESKTOP_DEV_QUIT_FILE") {
+        let proxy = proxy.clone();
+        std::thread::spawn(move || {
+            let path = std::path::PathBuf::from(path);
+            loop {
+                if path.is_file() {
+                    let _ = proxy.send_event(AppEvent::DevelopmentShutdown);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+    }
+
     // Initial state / launch actions are queued in the host outbox and flushed
     // as user events once the loop starts, so nothing is lost to load timing.
     app.broadcast_initial_state();
@@ -383,12 +409,23 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let proxy_loop = proxy.clone();
     let mut shutting_down = false;
     let mut smoke_outcome = None;
+    #[cfg(debug_assertions)]
+    let mut development_shutdown = false;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
         match event {
             Event::UserEvent(user) => match user {
+                #[cfg(debug_assertions)]
+                AppEvent::DevelopmentShutdown => {
+                    if !shutting_down {
+                        app_loop.emit("will-quit", vec![]);
+                        shutting_down = true;
+                        development_shutdown = true;
+                        begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
+                    }
+                }
                 AppEvent::SmokeResult(passed) => {
                     if shutting_down { return; }
                     shutting_down = true;
@@ -397,6 +434,11 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
                 AppEvent::ShutdownComplete { drained } => {
                     if !shutting_down { return; }
+                    #[cfg(debug_assertions)]
+                    if development_shutdown {
+                        eprintln!("desktop-dev-shutdown:{}", if drained { "drained" } else { "timed-out" });
+                        if !drained { std::process::exit(1); }
+                    }
                     if !drained {
                         tracing::warn!("shutdown deadline elapsed with work still active");
                     }
