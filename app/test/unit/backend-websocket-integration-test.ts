@@ -362,7 +362,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
       const repository = path.join(directory, 'repository')
       await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
-      const git = (...args: string[]) => execFileSync('git', ['-C', repository, '--literal-pathspecs', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+      const git = (...args: string[]) => execFileSync('git', ['-C', repository, '--literal-pathspecs', ...args], { encoding: 'utf8', env: { ...process.env, HOME: directory, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory!, 'empty-global-config') }, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
       const conflictPath = '[conflict].txt'
       git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false')
       await writeFile(path.join(repository, conflictPath), 'base\n'); git('add', '--', conflictPath); git('commit', '-qm', 'base')
