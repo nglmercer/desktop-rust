@@ -390,9 +390,14 @@ the browser, and image, large-file and history diff parity remain open.
 Syntax highlighting's partial committed-file reads now use a typed Rust blob
 prefix operation on both transports. It resolves trees and index stages,
 preserves binary bytes and bounds the returned prefix to 1 MiB, including when
-the underlying blob is larger. Missing paths return null and invalid revisions
-remain errors. Full blob reads now use bounded chunks on both Rust transports,
-pinning the object ID across the read and rejecting changes to a branch or
+the underlying blob is larger. Missing blob paths return null and invalid
+revisions remain errors. Working-tree highlighting also reads a bounded
+1 MiB prefix through Rust on Wry and WebSocket instead of the renderer's Node
+filesystem. Relative symlinks confined to the repository are supported; absolute
+links and links outside the repository are rejected. The file stability check
+is not an atomic snapshot against other programs. Full blob reads now use
+bounded chunks on both Rust transports, pinning the object ID across the read
+and rejecting changes to a branch or
 index stage. The Git process re-reads preceding bytes for each chunk, so very
 large files can be slow; other legacy background reads still need migration.
 Worktree listing from a repository path uses Rust for Wry and WebSocket,

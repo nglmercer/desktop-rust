@@ -15,6 +15,8 @@ import {
 import { Repository } from '../../../models/repository'
 import { DiffHunk, DiffLineType, DiffLine } from '../../../models/diff'
 import { getOldPathOrDefault } from '../../../lib/get-old-path'
+import { backend } from '../../../backend/client'
+import { withRepositoryGitOperation } from '../../../lib/git/repository-operation'
 
 /** The maximum number of bytes we'll process for highlighting. */
 const MaxHighlightContentLength = 1024 * 1024
@@ -87,6 +89,28 @@ async function getNewFileContent(
   }
 
   if (file instanceof WorkingDirectoryFileChange) {
+    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+      const read = () =>
+        backend().repositoryReadSnapshot(
+          repository.path,
+          'renderer_working_file',
+          {
+            path: file.path,
+            max_bytes: MaxHighlightContentLength,
+            prefix: true,
+          }
+        )
+      const bytes =
+        backend().transportKind === 'wry'
+          ? await withRepositoryGitOperation(
+              repository.path,
+              'read',
+              read,
+              true
+            )
+          : await read()
+      return bytes === null ? null : Buffer.from(bytes)
+    }
     return readPartialFile(
       Path.join(repository.path, file.path),
       0,

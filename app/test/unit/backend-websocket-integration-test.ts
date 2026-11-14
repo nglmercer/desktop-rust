@@ -378,6 +378,18 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const imagePath = path.join(repository, '[a].PNG')
       const bytes = Buffer.alloc(2 * 1024 * 1024 + 23, 0xab); bytes[0] = 0; bytes[1] = 255
       await writeFile(imagePath, bytes)
+      await writeFile(path.join(repository, 'large-highlight.txt'), 'first line\n' + 'x'.repeat(1024 * 1024))
+      const { getFileContents } = await import('../../src/ui/diff/syntax-highlighting')
+      const highlightFile = new WorkingDirectoryFileChange('large-highlight.txt', { kind: AppFileStatusKind.Untracked }, DiffSelection.fromInitialSelection(DiffSelectionType.All))
+      const highlighted = await getFileContents({ path: repository } as Repository, highlightFile)
+      expect(highlighted.newContents[0]).toBe('first line')
+      expect(highlighted.newContents[1]).toHaveLength(1024 * 1024 - 'first line\n'.length)
+      expect(highlighted.canBeExpanded).toBe(false)
+      await symlink('large-highlight.txt', path.join(repository, 'highlight-link.txt'))
+      const linkedHighlight = await getFileContents({ path: repository } as Repository, new WorkingDirectoryFileChange('highlight-link.txt', { kind: AppFileStatusKind.Untracked }, DiffSelection.fromInitialSelection(DiffSelectionType.All)))
+      expect(linkedHighlight.newContents).toEqual(highlighted.newContents)
+      await symlink('/etc/passwd', path.join(repository, 'highlight-outside.txt'))
+      await expect(client.repositoryReadSnapshot(repository, 'renderer_working_file', { path: 'highlight-outside.txt', max_bytes: 1024 * 1024, prefix: true })).rejects.toThrow()
       const binding = await client.request('repository_binding', { path: repository }) as { root_id: string }
       const full = await client.request('conflict_detail', { path: conflictPath }, { repositoryId: binding.root_id }) as { basis: string }
       const certificate = await client.request('conflict_detail', { path: conflictPath, max_working_bytes: 10_485_760, certificate_only: true }, { repositoryId: binding.root_id }) as { basis: string; stages: Array<Record<string, unknown>> }

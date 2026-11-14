@@ -2483,6 +2483,24 @@ mod tests {
             let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
             assert_eq!(backend.read(release).unwrap()["released"], true);
             assert_eq!(backend.read(route(json!({"method":"renderer_working_file","path":"[a].png","max_bytes":5}))).unwrap()["kind"], "too_large");
+            let preview = backend.read(route(json!({"method":"renderer_working_file","path":"[a].png","max_bytes":3,"prefix":true}))).unwrap();
+            let id = preview["id"].as_str().unwrap();
+            let chunk = backend.read(route(json!({"method":"renderer_compare_diff_chunk","snapshot_id":id,"offset":0,"length":64}))).unwrap();
+            assert_eq!(chunk["data"], "AP8A");
+            let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
+            assert_eq!(backend.read(release).unwrap()["released"], true);
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink("[a].png", root.join("link.png")).unwrap();
+                std::os::unix::fs::symlink("/etc/passwd", root.join("outside.png")).unwrap();
+                let preview = backend.read(route(json!({"method":"renderer_working_file","path":"link.png","max_bytes":3,"prefix":true}))).unwrap();
+                let id = preview["id"].as_str().unwrap();
+                let chunk = backend.read(route(json!({"method":"renderer_compare_diff_chunk","snapshot_id":id,"offset":0,"length":64}))).unwrap();
+                assert_eq!(chunk["data"], "AP8A");
+                let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}})]).unwrap();
+                assert_eq!(backend.read(release).unwrap()["released"], true);
+                assert!(backend.read(route(json!({"method":"renderer_working_file","path":"outside.png","max_bytes":3,"prefix":true}))).is_err());
+            }
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

@@ -676,9 +676,10 @@ impl Repository {
                 path,
                 max_bytes,
                 sha256,
+                prefix,
             } => {
                 return self
-                    .renderer_working_file_with_digest(path, max_bytes, sha256)
+                    .renderer_working_file_with_digest(path, max_bytes, sha256, prefix)
                     .await;
             }
             Operation::RendererWorkingDiff {

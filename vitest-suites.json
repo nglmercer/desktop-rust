@@ -109,6 +109,7 @@
   "app/test/unit/release-notes-test.ts",
   "app/test/unit/remote-parsing-test.ts",
   "app/test/unit/rust-status-routing-test.ts",
+  "app/test/unit/rust-syntax-highlighting-test.ts",
   "app/test/unit/rust-branch-routing-test.ts",
   "app/test/unit/rust-branch-query-routing-test.ts",
   "app/test/unit/rust-ahead-behind-routing-test.ts",

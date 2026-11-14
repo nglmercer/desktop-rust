@@ -153,6 +153,15 @@ impl WorkingFile {
 
     /// Read a regular worktree file without following symlinks or special files.
     pub fn read_bounded(&self, limit: u64) -> Result<Vec<u8>> {
+        self.read_with_limit(limit, false)
+    }
+
+    /// Read a stable prefix without loading the rest of a large worktree file.
+    pub fn read_prefix(&self, limit: u64) -> Result<Vec<u8>> {
+        self.read_with_limit(limit, true)
+    }
+
+    fn read_with_limit(&self, limit: u64, prefix: bool) -> Result<Vec<u8>> {
         let mut options = OpenOptions::new();
         options.read(true).follow(FollowSymlinks::No);
         #[cfg(unix)]
@@ -166,10 +175,10 @@ impl WorkingFile {
             metadata.is_file(),
             "Working file is not a supported regular file"
         );
-        if metadata.len() > limit {
+        if !prefix && metadata.len() > limit {
             return Err(WorkingFileTooLarge.into());
         }
-        let mut input = file.take(limit + 1);
+        let mut input = file.take(if prefix { limit } else { limit + 1 });
         let mut bytes = Vec::new();
         let mut chunk = [0; 64 * 1024];
         loop {
@@ -185,7 +194,12 @@ impl WorkingFile {
         }
         let after = input.into_inner().metadata()?;
         anyhow::ensure!(
-            bytes.len() as u64 == metadata.len()
+            bytes.len() as u64
+                == if prefix {
+                    metadata.len().min(limit)
+                } else {
+                    metadata.len()
+                }
                 && after.len() == metadata.len()
                 && after.modified().ok() == metadata.modified().ok(),
             "Working file changed while reading"

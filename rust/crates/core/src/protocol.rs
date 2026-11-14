@@ -511,6 +511,8 @@ pub enum Operation {
         max_bytes: Option<u64>,
         #[serde(default)]
         sha256: bool,
+        #[serde(default)]
+        prefix: bool,
     },
     RendererBlobPrefix {
         revision: String,
