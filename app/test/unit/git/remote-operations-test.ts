@@ -7,10 +7,48 @@ import { git, GitError } from '../../../src/lib/git/core'
 import { fetch, fetchRefspec } from '../../../src/lib/git/fetch'
 import { pull } from '../../../src/lib/git/pull'
 import { push } from '../../../src/lib/git/push'
-import { getMergeBase, merge, MergeResult } from '../../../src/lib/git/merge'
+import {
+  getMergeBase,
+  merge as mergeInRepository,
+  MergeResult,
+} from '../../../src/lib/git/merge'
 import { createBranch, deleteRemoteBranch } from '../../../src/lib/git/branch'
 import { getBranches } from '../../../src/lib/git/for-each-ref'
-import { rebase, RebaseResult } from '../../../src/lib/git/rebase'
+import {
+  rebase as rebaseInRepository,
+  RebaseResult,
+} from '../../../src/lib/git/rebase'
+import { currentBasis, mergeBasis } from '../../helpers/rust-backend'
+
+/** Merge the way the app does, from the branch tips as they are. */
+const merge: typeof mergeInRepository = async (
+  repository,
+  branch,
+  options,
+  expected
+) =>
+  mergeInRepository(
+    repository,
+    branch,
+    options,
+    expected ?? (await mergeBasis(repository, branch))
+  )
+
+/** Start a rebase the way the app does, from the repository's current basis. */
+const rebase: typeof rebaseInRepository = async (
+  repository,
+  baseBranch,
+  targetBranch,
+  progress,
+  expected
+) =>
+  rebaseInRepository(
+    repository,
+    baseBranch,
+    targetBranch,
+    progress,
+    expected ?? (await currentBasis(repository))
+  )
 import { checkoutBranch } from '../../../src/lib/git/checkout'
 import { addWorktree } from '../../../src/lib/git/worktree'
 import { IRemote } from '../../../src/models/remote'

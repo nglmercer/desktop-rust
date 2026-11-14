@@ -68,7 +68,8 @@ Effort: S = a day or less, M = a few days, L = a week or more.
 
 **How to measure it.** `DESKTOP_TEST_RUST_BACKEND=1 pnpm exec vitest run` runs
 every Vitest file against a real Rust server (about 5 minutes). First
-measurement: **332 of 396 files pass, 34 fail (198 tests)**. Each failing file
+measurement: 332 of 396 files passed, 34 failed (198 tests). After the basis
+wrappers and harness opt-outs: **339 of 397 pass, 28 fail (126 tests)**. Each failing file
 is one of four kinds, and the fix for each kind is different:
 
 | Kind | Meaning | Fix |
@@ -82,8 +83,10 @@ Worklist (failing files, with the first cause each hits):
 - [x] `git/cherry-pick-test` basis, merge basis — 16 of 20 pass; remaining 4 are Progress ×3 and Contract ×1
 - [x] `git/rebase/*`, `git/rebase-full-test` basis — 29 of 37 pass; remaining 8 are Contract ×4, Progress ×3, Error shape ×1
 - [x] `git/revert-test`, `git/merge-test` basis — 10 of 11 pass; remaining 1 is Error shape (`abortMerge` with no merge)
-- [ ] `git/commit-test` (27): Basis — needs the reviewed selection the app builds first
-- [ ] `git/rev-parse-test` (17), `git/remote-operations-test` (15), `git/pull/*` (25): Contract / Basis
+- [ ] `git/commit-test` (20): Basis — needs the reviewed selection the app builds first
+- [ ] `git/rev-parse-test` (17): the unsafe-ownership cases set Git environment in the test process, which the separate server never sees — start the server with that environment (`startRustBackend({ env })`)
+- [~] `git/remote-operations-test` (11 of 40 left): rebase/merge basis done; push needs its expected reference, and a remote literally named `--remote` is refused by Rust (Contract)
+- [ ] `git/pull/*` (25): Contract / Basis
 - [ ] `git/branch-test` (2): Basis — needs a reviewed branch tip
 - [ ] `git/gitignore-test` (4), `git/remote-discovery-test` (4), `git/description-test` (3), `git/worktree-move-test` (3), `git/revision-consumers-test` (3): Error shape
 - [ ] `git/stash-test` (2), `git/remote-management-test` (2), `git/checkout-test` (2), `git/lfs-test` (2), `git/status-test`, `git/squash-test`, `git/reorder-test`, `git/for-each-ref-test`, `git/log-revision-exclusions-test`: Contract
