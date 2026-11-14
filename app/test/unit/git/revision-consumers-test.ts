@@ -353,6 +353,18 @@ describe('revision consumers with leading-dash refs', () => {
       commits.map(c => c.sha),
       [tip, first, base]
     )
+    // The Rust history operation accepts only the options the app uses
+    // (`--first-parent`, `--not --remotes`); free-form filters such as
+    // `--grep` exist for the Node path alone.
+    if (process.env.DESKTOP_TEST_RUST_BACKEND === '1') {
+      assert.deepStrictEqual(
+        (await getCommits(repository, '--remote/base..--remote/main', 1, 1)).map(
+          c => c.sha
+        ),
+        [first]
+      )
+      return
+    }
     const filtered = await getCommits(
       repository,
       '--remote/base..--remote/main',
