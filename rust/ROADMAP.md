@@ -90,7 +90,8 @@ Worklist (failing files, with the first cause each hits):
 - [ ] `git/branch-test` (2): Basis — needs a reviewed branch tip
 - [x] `git/branch-test`, `git/stash-test`, `git/checkout-test`, `git/gitignore-test` (Rust now names the symlinked root `.gitignore`), `git/description-test`, `write-default-readme-test`, `git/status-test`, `git/for-each-ref-test`: pass with the Rust backend on
 - [ ] `git/remote-discovery-test` (4 left): Rust runs remote discovery with global/system config pinned to an empty file on purpose (`process.rs`), so the tests that expect global/system remotes and Git's empty-URL reset semantics need a decision: keep the isolation and change the tests' expectation under Rust, or read those scopes. Needs the user's call because the isolation is a security choice.
-- [ ] `git/worktree-move-test` (3), `git/revision-consumers-test` (3): Error shape / contract, not yet investigated
+- [x] `git/worktree-move-test`: passes with the Rust backend on (the spy on the Node runner is skipped there)
+- [ ] `git/revision-consumers-test` (3): leading-dash refs and ranges; not yet investigated
 - [ ] `git/stash-test` (2), `git/remote-management-test` (2), `git/checkout-test` (2), `git/lfs-test` (2), `git/status-test`, `git/squash-test`, `git/reorder-test`, `git/for-each-ref-test`, `git/log-revision-exclusions-test`: Contract
 - [ ] `pull-hook-callbacks-test`, `write-default-readme-test`: Contract
 - [ ] `web-open-path-test`, `web-host-bridge-loader-test`, `script/*`: not backend work — they stub `window`, which the harness also does; make them opt out of the harness

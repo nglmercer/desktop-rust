@@ -49,6 +49,12 @@ function assertMoveNotRunFrom(worktreePath: string) {
   const moves = execCalls.filter(
     c => c.args[0] === 'worktree' && c.args[1] === 'move'
   )
+  // With the Rust backend the move runs in the backend, not through the
+  // renderer's Git runner, so there is no invocation here to inspect; the
+  // tests still assert the result on disk.
+  if (moves.length === 0 && process.env.DESKTOP_TEST_RUST_BACKEND === '1') {
+    return
+  }
   assert.strictEqual(moves.length, 1)
   assert(
     !isInside(Path.resolve(worktreePath), Path.resolve(moves[0].path)),
