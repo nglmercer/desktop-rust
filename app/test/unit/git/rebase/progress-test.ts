@@ -9,7 +9,7 @@ import {
 import { createRepository as createShortRebaseTest } from '../../../helpers/repository-builder-rebase-test'
 import { createRepository as createLongRebaseTest } from '../../../helpers/repository-builder-long-rebase-test'
 import { getStatusOrThrow } from '../../../helpers/status'
-import { setupEmptyDirectory } from '../../../helpers/repositories'
+import { setupEmptyRepository } from '../../../helpers/repositories'
 import { getBranchOrError } from '../../../helpers/git'
 import { IMultiCommitOperationProgress } from '../../../../src/models/progress'
 import { isConflictedFile } from '../../../../src/lib/status'
@@ -40,7 +40,7 @@ const featureBranchName = 'this-is-a-feature'
 describe('git/rebase', () => {
   describe('skips a normal repository', () => {
     it('returns null for rebase progress', async t => {
-      const repository = await setupEmptyDirectory(t)
+      const repository = await setupEmptyRepository(t)
       const progress = await getRebaseSnapshot(repository)
 
       assert.equal(progress, null)

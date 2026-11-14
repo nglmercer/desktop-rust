@@ -381,7 +381,28 @@ export async function rebase(
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     if (expected === undefined) throw new Error('Refresh the current branch before rebasing')
     const request = { base_ref: baseBranch.ref, base_head: baseBranch.tip.sha, target_ref: targetBranch.ref, target_head: targetBranch.tip.sha, current_head: expected.head, current_branch: expected.branch }
+    // The native rebase does not stream its steps yet. Read the commits it will
+    // replay now and report each step once the operation has returned.
+    const replayed =
+      progressCallback === undefined
+        ? null
+        : await getCommitsBetweenCommits(
+            repository,
+            baseBranch.tip.sha,
+            targetBranch.tip.sha
+          )
     const result = await withRepositoryGitOperation(repository.path, 'mutation', () => backend().startRepositoryRebase(repository.path, request), true)
+    if (progressCallback !== undefined && replayed !== null && result !== 'up_to_date') {
+      const steps =
+        result === 'conflict'
+          ? (await getRebaseSnapshot(repository))?.progress.position ?? 0
+          : replayed.length
+      const parser = new GitRebaseParser(replayed)
+      for (let step = 1; step <= steps; step++) {
+        const progress = parser.parse(`Rebasing (${step}/${replayed.length})`)
+        if (progress !== null) progressCallback(progress)
+      }
+    }
     return result === 'conflict' ? RebaseResult.ConflictsEncountered : result === 'up_to_date' ? RebaseResult.AlreadyUpToDate : RebaseResult.CompletedWithoutError
   }
   const baseOptions: IGitStringExecutionOptions = {
@@ -561,8 +582,46 @@ export async function continueRebase(
   }
 
   if (native && expectedHead !== undefined && expectedHead !== null) {
-    const result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().continueRepositoryRebase(repository.path, expectedHead, trackedFilesAfter.length === 0, opts?.noVerify === true), true)
+    const before = opts?.progressCallback
+      ? await getRebaseSnapshot(repository)
+      : null
+    let result: 'complete' | 'conflict'
+    try {
+      result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
+        backend().continueRepositoryRebase(repository.path, expectedHead, trackedFilesAfter.length === 0, opts?.noVerify === true), true)
+    } catch (error) {
+      // Git refuses to continue while conflicts or tracked changes are not
+      // staged; callers handle that as a result, not a failure.
+      if (error instanceof Error) {
+        if (error.message === 'Resolve and stage conflicts before continuing') {
+          return RebaseResult.OutstandingFilesNotStaged
+        }
+        if (
+          error.message.startsWith('Unable to continue rebase') &&
+          (await git(['diff', '--quiet'], repository.path, 'continueRebaseUnstaged', {
+            successExitCodes: new Set([0, 1]),
+          })).exitCode === 1
+        ) {
+          return RebaseResult.OutstandingFilesNotStaged
+        }
+      }
+      throw error
+    }
+    // The native rebase does not stream its steps yet; report the ones it
+    // applied now that it has returned.
+    if (opts?.progressCallback && before !== null) {
+      const total = before.progress.totalCommitCount
+      const reached =
+        result === 'complete'
+          ? total
+          : (await getRebaseSnapshot(repository))?.progress.position ??
+            before.progress.position
+      const parser = new GitRebaseParser(before.commits)
+      for (let step = before.progress.position + 1; step <= reached; step++) {
+        const progress = parser.parse(`Rebasing (${step}/${total})`)
+        if (progress !== null) opts.progressCallback(progress)
+      }
+    }
     return result === 'complete' ? RebaseResult.CompletedWithoutError : RebaseResult.ConflictsEncountered
   }
 
