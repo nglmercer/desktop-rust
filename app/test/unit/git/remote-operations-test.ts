@@ -405,7 +405,7 @@ describe('git/remote operations', () => {
             remote,
             'master',
             'published',
-            ['refs/tags/v1.0'],
+            ['v1.0'],
             { noVerify: true },
             withProgress ? progress : undefined
           )
@@ -459,8 +459,12 @@ describe('git/remote operations', () => {
       await assert.rejects(
         result,
         (error: unknown) =>
-          error instanceof GitError &&
-          error.result.stderr.includes("'--dry-run'")
+          (error instanceof GitError &&
+            error.result.stderr.includes("'--dry-run'")) ||
+          // The Rust backend refuses a remote that is not configured before
+          // it runs Git at all.
+          (error instanceof Error &&
+            error.message === 'Configured remote no longer exists')
       )
 
       const after = await getRefOrError(
@@ -475,11 +479,22 @@ describe('git/remote operations', () => {
     const { repository, upstream } = await setupRemote(t, 'origin')
     const before = await getRefOrError(repository, 'refs/remotes/origin/master')
 
+    // Git tolerates the unknown remote; the Rust backend refuses it up front.
+    // Either way the existing remote-tracking refs must stay as they are.
     await fetchRefspec(
       repository,
       { name: '--multiple', url: upstream.path },
       'origin'
-    )
+    ).catch(error => {
+      if (
+        !(
+          error instanceof Error &&
+          error.message === 'Configured remote no longer exists'
+        )
+      ) {
+        throw error
+      }
+    })
 
     const after = await getRefOrError(repository, 'refs/remotes/origin/master')
     assert.strictEqual(after.sha, before.sha)
