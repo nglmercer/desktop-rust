@@ -362,15 +362,21 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       const client = new BackendClient(); clients.push(client); await bounded(client.waitReady()); route.client = client
       const repository = path.join(directory, 'repository')
       await client.request('init_repository', { path: repository }); await client.selectBrowserRepository(repository)
+      const git = (...args: string[]) => execFileSync('git', ['-C', repository, '--literal-pathspecs', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+      const conflictPath = '[conflict].txt'
+      git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false')
+      await writeFile(path.join(repository, conflictPath), 'base\n'); git('add', '--', conflictPath); git('commit', '-qm', 'base')
+      git('switch', '-qc', 'topic'); await writeFile(path.join(repository, conflictPath), 'theirs\n'); git('commit', '-qam', 'topic')
+      git('switch', '-q', '-'); await writeFile(path.join(repository, conflictPath), 'ours\n'); git('commit', '-qam', 'ours')
+      expect(() => git('merge', 'topic')).toThrow()
       const imagePath = path.join(repository, '[a].PNG')
       const bytes = Buffer.alloc(2 * 1024 * 1024 + 23, 0xab); bytes[0] = 0; bytes[1] = 255
       await writeFile(imagePath, bytes)
-      await writeFile(path.join(repository, 'conflict.txt'), '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n')
       const { buildConflictContext } = await import('../../src/lib/copilot-conflict-context')
-      const context = await buildConflictContext('ours', 'theirs', repository, [{ path: 'conflict.txt' }, { path: '[a].PNG' }])
+      const context = await buildConflictContext('ours', 'theirs', repository, [{ path: conflictPath }, { path: '[a].PNG' }])
       expect(context.files[0].hunks[0].oursContent).toBe('ours')
       expect(context.files[1].skippedReason).toBe('No conflict markers found')
-      await expect(client.repositoryReadSnapshot(repository, 'renderer_working_file', { path: 'conflict.txt', max_bytes: 5 })).rejects.toThrow()
+      await expect(client.repositoryReadSnapshot(repository, 'renderer_working_file', { path: conflictPath, max_bytes: 5 })).rejects.toThrow()
       const { getWorkingDirectoryImage } = await import('../../src/lib/git/diff')
       const model = { path: repository } as Repository
       const image = await getWorkingDirectoryImage(model, new FileChange('[a].PNG', { kind: AppFileStatusKind.Modified }))
