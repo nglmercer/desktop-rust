@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { before, describe, it, mock, TestContext } from 'node:test'
+import { afterAll, afterEach, beforeAll, describe, it, vi } from 'vitest'
 import { Disposable } from 'event-kit'
 import {
   API,
@@ -54,8 +54,8 @@ const pullRequest = new PullRequest(
   false,
   ''
 )
-const showNotification = mock.fn()
-const getCommit = mock.fn(async () => {
+const showNotification = vi.fn()
+const getCommit = vi.fn(async () => {
   const { Commit } = await import('../../src/models/commit')
   const { CommitIdentity } = await import('../../src/models/commit-identity')
   const identity = new CommitIdentity(
@@ -66,16 +66,22 @@ const getCommit = mock.fn(async () => {
   return new Commit('abc123', 'abc123', '', '', identity, identity, [], [], [])
 })
 
-before(() => {
-  mock.module('../../src/lib/git/index.ts', {
-    namedExports: { getCommit },
-  })
-  mock.module('../../src/ui/dispatcher/index.ts', {
-    namedExports: { defaultErrorHandler: mock.fn() },
-  })
-  mock.module('../../src/lib/notifications/show-notification.ts', {
-    namedExports: { showNotification },
-  })
+beforeAll(() => {
+  vi.doMock('../../src/lib/git/index.ts', () => ({ getCommit }))
+  vi.doMock('../../src/ui/dispatcher/index.ts', () => ({
+    defaultErrorHandler: vi.fn(),
+  }))
+  vi.doMock('../../src/lib/notifications/show-notification.ts', () => ({
+    showNotification,
+  }))
+})
+
+afterEach(() => vi.restoreAllMocks())
+afterAll(() => {
+  vi.doUnmock('../../src/lib/git/index.ts')
+  vi.doUnmock('../../src/ui/dispatcher/index.ts')
+  vi.doUnmock('../../src/lib/notifications/show-notification.ts')
+  vi.resetModules()
 })
 
 function local(login: string | null, remote = github, id = 1) {
@@ -113,7 +119,7 @@ function review(account: Account): IAPIPullRequestReview {
   }
 }
 
-async function createStores(t: TestContext) {
+async function createStores() {
   const { NotificationsStore } = await import(
     '../../src/lib/stores/notifications-store'
   )
@@ -176,7 +182,7 @@ async function createStores(t: TestContext) {
     owner: string,
     repo: string
   ) => requests.push([account.login, method, owner, repo])
-  t.mock.method(API, 'fromAccount', (account: Account) =>
+  vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
     createMockAPI({
       fetchIssueComment: async (owner, repo) => {
         record(account, 'comment', owner, repo)
@@ -260,8 +266,8 @@ const reviewEvent: DesktopAliveEvent = {
 }
 
 describe('Notification repository account assignment', () => {
-  it('checks commit ownership against the assigned account instead of the first signed-in account', async t => {
-    const { store, emit } = await createStores(t)
+  it('checks commit ownership against the assigned account instead of the first signed-in account', async () => {
+    const { store, emit } = await createStores()
     const repository = local('second')
     store.selectRepository(repository)
     const check = {
@@ -274,10 +280,10 @@ describe('Notification repository account assignment', () => {
       htmlUrl: null,
       checkSuiteId: 1,
     }
-    const fetchChecks = t.mock.method(store, 'getChecksForRef', async () => [
-      check,
-    ])
-    const shown = showNotification.mock.callCount()
+    const fetchChecks = vi
+      .spyOn(store, 'getChecksForRef')
+      .mockImplementation(async () => [check])
+    const shown = showNotification.mock.calls.length
     await emit({
       type: 'pr-checks-failed',
       timestamp: 0,
@@ -287,15 +293,15 @@ describe('Notification repository account assignment', () => {
       check_suite_id: 1,
       commit_sha: 'abc123',
     })
-    assert.deepStrictEqual(fetchChecks.mock.calls[0].arguments, [
+    assert.deepStrictEqual(fetchChecks.mock.calls[0], [
       repository,
       'refs/pull/1/head',
     ])
-    assert.strictEqual(showNotification.mock.callCount(), shown + 1)
+    assert.strictEqual(showNotification.mock.calls.length, shown + 1)
   })
 
-  it('does not use an account with the same login on a different endpoint', async t => {
-    const { store, debug, requests } = await createStores(t)
+  it('does not use an account with the same login on a different endpoint', async () => {
+    const { store, debug, requests } = await createStores()
     const enterprise = new GitHubRepository(
       'repo',
       new Owner('owner', 'https://enterprise.example/api/v3', 1),
@@ -314,8 +320,8 @@ describe('Notification repository account assignment', () => {
     assert.deepStrictEqual(requests, [])
   })
 
-  it('enriches comments and reviews with the selected local identity, not the first recent clone', async t => {
-    const { store, emit, requests } = await createStores(t)
+  it('enriches comments and reviews with the selected local identity, not the first recent clone', async () => {
+    const { store, emit, requests } = await createStores()
     store.setRecentRepositories([local('first', github, 2), local('second')])
     store.selectRepository(local('second'))
     await emit(commentEvent)
@@ -328,8 +334,8 @@ describe('Notification repository account assignment', () => {
     ])
   })
 
-  it('uses only recent repositories for statistics, not account or repository fallback', async t => {
-    const { store, emit, requests } = await createStores(t)
+  it('uses only recent repositories for statistics, not account or repository fallback', async () => {
+    const { store, emit, requests } = await createStores()
     store.setRecentRepositories([local('first'), local('second', github, 2)])
     await emit(commentEvent)
     store.selectRepository(
@@ -340,8 +346,8 @@ describe('Notification repository account assignment', () => {
   })
 
   for (const login of [null, 'signed-out']) {
-    it(`skips background enrichment and checks for ${login} assignment`, async t => {
-      const { store, emit, requests } = await createStores(t)
+    it(`skips background enrichment and checks for ${login} assignment`, async () => {
+      const { store, emit, requests } = await createStores()
       const repository = local(login)
       store.selectRepository(repository)
       store.setRecentRepositories([local('first', github, 2)])
@@ -355,8 +361,8 @@ describe('Notification repository account assignment', () => {
     })
   }
 
-  it('tracks assignment changes and removal by local repository ID', async t => {
-    const { store, emit, requests, updateRepositories } = await createStores(t)
+  it('tracks assignment changes and removal by local repository ID', async () => {
+    const { store, emit, requests, updateRepositories } = await createStores()
     store.selectRepository(local('first'))
     updateRepositories([local('second'), local('first', github, 2)])
     await emit(commentEvent)
@@ -367,8 +373,8 @@ describe('Notification repository account assignment', () => {
     assert.deepStrictEqual(requests, [['second', 'comment', 'owner', 'repo']])
   })
 
-  it('uses the fork assignment to fetch upstream checks and reviews', async t => {
-    const { store, emit, requests } = await createStores(t)
+  it('uses the fork assignment to fetch upstream checks and reviews', async () => {
+    const { store, emit, requests } = await createStores()
     const fork = new GitHubRepository(
       'fork',
       new Owner('second', endpoint, 2),
@@ -395,8 +401,8 @@ describe('Notification repository account assignment', () => {
 })
 
 describe('NotificationsDebugStore account isolation', () => {
-  it('isolates comments and reviews for the same PR number across accounts and repositories', async t => {
-    const { debug, requests } = await createStores(t)
+  it('isolates comments and reviews for the same PR number across accounts and repositories', async () => {
+    const { debug, requests } = await createStores()
     for (const account of [first, second, first]) {
       const repository = local(account.login)
       assert.strictEqual(
@@ -422,8 +428,8 @@ describe('NotificationsDebugStore account isolation', () => {
     ])
   })
 
-  it('does not return cached enrichment after sign-out or for unassigned repositories', async t => {
-    const { debug, accounts, requests } = await createStores(t)
+  it('does not return cached enrichment after sign-out or for unassigned repositories', async () => {
+    const { debug, accounts, requests } = await createStores()
     await debug.getPullRequests(local('second'), {
       filterByReviews: true,
       filterByComments: true,

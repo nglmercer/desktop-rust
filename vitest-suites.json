@@ -1,4 +1,6 @@
 [
+  "app/test/unit/notifications-account-test.ts",
+  "app/test/unit/commit-status-store-test.ts",
   "script/rust-license-inventory.test.ts",
   "app/test/unit/ui/repository-list-item-context-menu-test.ts",
   "app/test/unit/git-store-test.ts",

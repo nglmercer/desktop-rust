@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it, TestContext } from 'node:test'
+import { afterEach, describe, it, vi, type TestContext } from 'vitest'
 import {
   API,
   APICheckConclusion,
@@ -101,7 +101,7 @@ function subscribe(
       () => reject(new Error('Timed out waiting for commit status')),
       5000
     )
-    t.after(() => clearTimeout(timeout))
+    t.onTestFinished(() => clearTimeout(timeout))
     const subscription = store.subscribe(
       githubRepository,
       repository,
@@ -114,15 +114,16 @@ function subscribe(
       },
       branchName
     )
-    t.after(() => subscription.dispose())
+    t.onTestFinished(() => subscription.dispose())
   })
 }
 
 describe('CommitStatusStore account assignment', () => {
+  afterEach(() => vi.restoreAllMocks())
   it('isolates subscriptions and cached statuses for accounts on the same endpoint', async t => {
     const { store } = await createStore()
     const tokens: string[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) => {
       tokens.push(account.token)
       return createMockAPI({
         fetchCombinedRefStatus: async () => statusFor(account),
@@ -165,7 +166,7 @@ describe('CommitStatusStore account assignment', () => {
   for (const login of [null, 'missing']) {
     it(`does not fall back to another account when assignment is ${login}`, async t => {
       const { store } = await createStore()
-      const api = t.mock.method(API, 'fromAccount', () => {
+      const api = vi.spyOn(API, 'fromAccount').mockImplementation(() => {
         throw new Error('Must not make an API request')
       })
       const repository = localRepository(login)
@@ -175,7 +176,7 @@ describe('CommitStatusStore account assignment', () => {
         ref,
         () => {}
       )
-      t.after(() => subscription.dispose())
+      t.onTestFinished(() => subscription.dispose())
       await flushRefreshes()
 
       assert.strictEqual(
@@ -198,7 +199,7 @@ describe('CommitStatusStore account assignment', () => {
         store.tryGetStatus(githubRepository, repository, ref),
         null
       )
-      assert.strictEqual(api.mock.callCount(), 0)
+      assert.strictEqual(api.mock.calls.length, 0)
     })
   }
 
@@ -212,7 +213,7 @@ describe('CommitStatusStore account assignment', () => {
       status: APICheckStatus.Completed,
       created_at: new Date().toISOString(),
     }
-    t.mock.method(API, 'fromAccount', (account: Account) => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) => {
       tokens.push(account.token)
       return createMockAPI({
         fetchCheckSuite: async () => suite,
@@ -244,7 +245,7 @@ describe('CommitStatusStore account assignment', () => {
   it('keeps the PR base as the request target without using its owner as the account', async t => {
     const { store } = await createStore()
     const requests: ReadonlyArray<string | number>[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) => {
       assert.strictEqual(account.token, 'second-token')
       return createMockAPI({
         fetchCheckSuite: async (owner, name, id) => {
@@ -270,7 +271,7 @@ describe('CommitStatusStore account assignment', () => {
 
   it('does not use the assigned token against a different endpoint', async t => {
     const { store } = await createStore()
-    const api = t.mock.method(API, 'fromAccount', () => {
+    const api = vi.spyOn(API, 'fromAccount').mockImplementation(() => {
       throw new Error('Must not make an API request')
     })
     const otherRepository = new GitHubRepository(
@@ -285,7 +286,7 @@ describe('CommitStatusStore account assignment', () => {
       ref,
       () => {}
     )
-    t.after(() => subscription.dispose())
+    t.onTestFinished(() => subscription.dispose())
     await flushRefreshes()
 
     assert.strictEqual(
@@ -296,13 +297,13 @@ describe('CommitStatusStore account assignment', () => {
       await store.rerunJob(otherRepository, repository, 1),
       false
     )
-    assert.strictEqual(api.mock.callCount(), 0)
+    assert.strictEqual(api.mock.calls.length, 0)
   })
 
   it('uses the assigned token when fetching Actions workflows and jobs', async t => {
     const { store } = await createStore()
     const tokens: string[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) => {
       tokens.push(account.token)
       return createMockAPI({
         fetchCombinedRefStatus: async () => null,
@@ -351,7 +352,7 @@ describe('CommitStatusStore account assignment', () => {
 
   it('clears cached status when the assigned account is removed', async t => {
     const { store, accountsStore } = await createStore()
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchCombinedRefStatus: async () => statusFor(account),
         fetchRefCheckRuns: async () => ({ total_count: 0, check_runs: [] }),
@@ -366,7 +367,7 @@ describe('CommitStatusStore account assignment', () => {
       ref,
       check => updates.push(check)
     )
-    t.after(() => subscription.dispose())
+    t.onTestFinished(() => subscription.dispose())
 
     await accountsStore.removeAccount(secondAccount)
     await flushRefreshes()
@@ -379,7 +380,7 @@ describe('CommitStatusStore account assignment', () => {
 
   it('keeps cached status when an account is updated without changing who is signed in', async t => {
     const { store, accountsStore } = await createStore()
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchCombinedRefStatus: async () => statusFor(account),
         fetchRefCheckRuns: async () => ({ total_count: 0, check_runs: [] }),
@@ -394,7 +395,7 @@ describe('CommitStatusStore account assignment', () => {
       ref,
       check => updates.push(check)
     )
-    t.after(() => subscription.dispose())
+    t.onTestFinished(() => subscription.dispose())
 
     await accountsStore.addAccount(secondAccount.withToken('refreshed'))
     await flushRefreshes()
@@ -410,7 +411,7 @@ describe('CommitStatusStore account assignment', () => {
     let finish: (status: IAPIRefStatus) => void = () => {
       throw new Error('Request has not started')
     }
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) =>
       createMockAPI({
         fetchCombinedRefStatus: () =>
           account.login === firstAccount.login
