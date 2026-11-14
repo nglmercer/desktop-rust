@@ -62,7 +62,6 @@ Update the following files with the new Node.js version:
 
 3. **`.tool-versions`** - Update the `nodejs` line:
    ```
-   python 3.9.5
    nodejs NEW_NODE_VERSION
    ```
 
