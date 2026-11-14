@@ -2287,7 +2287,18 @@ pub async fn clone_repository_with_options(
             "invalid clone branch"
         );
     }
+    let home = clone_home_directory().context("Cannot determine the user's home directory")?;
+    #[cfg(windows)]
+    let app_data = std::env::var_os("APPDATA")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    #[cfg(not(windows))]
+    let app_data: Option<PathBuf> = None;
+    ensure_ordinary_clone_destination(path, Some(&home), app_data.as_deref())?;
     let destination = prepare_destination(path)?;
+    // Check the resolved destination again after creating missing parents. Git
+    // still owns the final operation and independent writers can race it.
+    ensure_ordinary_clone_destination(&destination, Some(&home), app_data.as_deref())?;
     let parent = destination
         .parent()
         .context("repository needs a parent directory")?;
@@ -2322,6 +2333,148 @@ pub async fn clone_repository_with_options(
     Repository::open(&destination).await.map_err(|_| {
         anyhow::anyhow!("Clone completed, but its repository could not be opened; inspect the destination before retrying")
     })
+}
+
+fn clone_home_directory() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let configured = std::env::var_os("USERPROFILE");
+    #[cfg(not(windows))]
+    let configured = std::env::var_os("HOME");
+    configured
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            #[allow(deprecated)]
+            std::env::home_dir()
+        })
+}
+
+/// Resolve existing links while preserving the names of missing descendants.
+fn canonical_clone_candidate(path: &Path) -> Result<PathBuf> {
+    Ok(resolve_clone_candidate(path)?.0)
+}
+
+/// Also retain missing paths traversed before `..`: `create_dir_all` can
+/// create these even when they are not part of the final destination.
+fn resolve_clone_candidate(path: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut resolved = PathBuf::new();
+    let mut traversed_missing = Vec::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                resolved.push(component.as_os_str());
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !resolved.exists() {
+                    traversed_missing.push(resolved.clone());
+                }
+                if !resolved.pop() {
+                    anyhow::ensure!(resolved.has_root(), "Cannot resolve clone path parent");
+                }
+            }
+            std::path::Component::Normal(name) => {
+                let candidate = resolved.join(name);
+                match fs::canonicalize(&candidate) {
+                    Ok(path) => resolved = crate::repository_discovery::display_canonical(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        resolved.push(name);
+                    }
+                    Err(error) => return Err(error).context("Cannot inspect clone destination"),
+                }
+            }
+        }
+    }
+    Ok((resolved, traversed_missing))
+}
+
+/// Preserve aliases at every resolvable ancestor as well as the final target.
+/// This catches a differently-cased sensitive name that is itself a symlink.
+fn clone_candidate_aliases(path: &Path) -> Result<Vec<PathBuf>> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let (destination, traversed_missing) = resolve_clone_candidate(&absolute)?;
+    let mut candidates = vec![destination];
+    candidates.extend(traversed_missing);
+    for ancestor in absolute.ancestors() {
+        if let Ok(resolved) = fs::canonicalize(ancestor) {
+            let suffix = absolute.strip_prefix(ancestor)?;
+            let candidate = crate::repository_discovery::normalize(
+                &crate::repository_discovery::display_canonical(resolved).join(suffix),
+            );
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+fn clone_path_starts_with(path: &Path, base: &Path) -> bool {
+    // The existing renderer compares lowercased paths on every platform.
+    // Preserve byte-exact comparison when an OS path is not valid Unicode.
+    let mut components = path.components();
+    base.components().all(|base| {
+        components.next().is_some_and(|part| {
+            match (part.as_os_str().to_str(), base.as_os_str().to_str()) {
+                (Some(part), Some(base)) => part.to_lowercase() == base.to_lowercase(),
+                _ => part.as_os_str() == base.as_os_str(),
+            }
+        })
+    })
+}
+
+/// Reject the same sensitive destinations as the original renderer, including
+/// existing aliases of those directories. No directories are created here.
+fn ensure_ordinary_clone_destination(
+    path: &Path,
+    home: Option<&Path>,
+    app_data: Option<&Path>,
+) -> Result<()> {
+    let destinations = clone_candidate_aliases(path)?;
+    if let Some(home) = home {
+        let home = canonical_clone_candidate(home)?;
+        for destination in &destinations {
+            anyhow::ensure!(
+                !(clone_path_starts_with(destination, &home)
+                    && clone_path_starts_with(&home, destination)),
+                "Clone destination targets a sensitive system location"
+            );
+        }
+        for name in [".ssh", ".gnupg", ".config", ".gitconfig"] {
+            let protected = home.join(name);
+            // An inaccessible protected target should not prevent cloning to
+            // an unrelated directory; still reject its lexical path.
+            let resolved = canonical_clone_candidate(&protected).ok();
+            for destination in &destinations {
+                anyhow::ensure!(
+                    !clone_path_starts_with(destination, &protected)
+                        && !resolved
+                            .as_ref()
+                            .is_some_and(|resolved| clone_path_starts_with(destination, resolved)),
+                    "Clone destination targets a sensitive system location"
+                );
+            }
+        }
+    }
+    if let Some(app_data) = app_data {
+        let app_data = canonical_clone_candidate(app_data)?;
+        for destination in &destinations {
+            anyhow::ensure!(
+                !clone_path_starts_with(destination, &app_data),
+                "Clone destination targets a sensitive system location"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Clone output may contain raw URLs (including credentials added by a Git
@@ -2415,6 +2568,211 @@ fn config_directory(mut env: impl FnMut(&str) -> Option<std::ffi::OsString>) -> 
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[test]
+    fn ordinary_clone_rejects_sensitive_destinations_before_creation() {
+        let fixture = RegistryFixture::new();
+        let home = fixture.directory.join("home");
+        let app_data = fixture.directory.join("app-data");
+        fs::create_dir(&home).unwrap();
+        fs::create_dir(&app_data).unwrap();
+        for path in [
+            home.clone(),
+            home.join(".ssh/repository"),
+            home.join(".SSH/repository"),
+            home.join(".gnupg/repository"),
+            home.join(".config/git/repository"),
+            home.join(".cOnFiG/git/repository"),
+            home.join(".gitconfig/repository"),
+            app_data.join("repository"),
+        ] {
+            assert!(
+                ensure_ordinary_clone_destination(&path, Some(&home), Some(&app_data)).is_err(),
+                "{}",
+                path.display()
+            );
+        }
+        assert!(
+            ensure_ordinary_clone_destination(
+                &home.join("projects/repository"),
+                Some(&home),
+                Some(&app_data)
+            )
+            .is_ok()
+        );
+        assert!(
+            ensure_ordinary_clone_destination(
+                &home.join(".ssh-backup/repository"),
+                Some(&home),
+                Some(&app_data)
+            )
+            .is_ok()
+        );
+        assert!(!home.join(".ssh").exists());
+        assert!(!home.join("projects").exists());
+    }
+
+    #[test]
+    fn ordinary_clone_resolves_missing_parent_components() {
+        let fixture = RegistryFixture::new();
+        let home = fixture.directory.join("home");
+        fs::create_dir(&home).unwrap();
+        let path = home.join("new/../repository");
+        assert_eq!(
+            canonical_clone_candidate(&path).unwrap(),
+            home.join("repository")
+        );
+        assert!(ensure_ordinary_clone_destination(&path, Some(&home), None).is_ok());
+        assert!(!home.join("new").exists());
+        assert!(!home.join("repository").exists());
+
+        // Git's destination preparation may create these parents before
+        // traversing `..`, even though the final path is outside `.ssh`.
+        let through_sensitive = home.join(".ssh/new/../../repository");
+        assert!(ensure_ordinary_clone_destination(&through_sensitive, Some(&home), None).is_err());
+        assert!(!home.join(".ssh").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_clone_resolves_symlinks_before_parent_components() {
+        use std::os::unix::fs::symlink;
+        let fixture = RegistryFixture::new();
+        let outside = fixture.directory.join("outside");
+        let target = outside.join("target");
+        fs::create_dir_all(&target).unwrap();
+        let alias = fixture.directory.join("alias");
+        symlink(&target, &alias).unwrap();
+        let candidate = alias.join("../repository");
+        assert_eq!(
+            canonical_clone_candidate(&candidate).unwrap(),
+            outside.join("repository")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_clone_rejects_symlink_aliases_of_sensitive_directories() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let fixture = RegistryFixture::new();
+        let home = fixture.directory.join("home");
+        let protected = fixture.directory.join("protected");
+        fs::create_dir(&home).unwrap();
+        fs::create_dir(&protected).unwrap();
+        fs::create_dir(fixture.directory.join("elsewhere")).unwrap();
+        symlink(&protected, home.join(".ssh")).unwrap();
+        symlink(&protected, fixture.directory.join("alias")).unwrap();
+        symlink(&home, fixture.directory.join("home-alias")).unwrap();
+        symlink(fixture.directory.join("elsewhere"), home.join(".SSH")).unwrap();
+        symlink(
+            fixture.directory.join("elsewhere"),
+            fixture.directory.join("appdata-alias"),
+        )
+        .unwrap();
+        assert!(
+            ensure_ordinary_clone_destination(
+                &fixture.directory.join("alias/new/repo"),
+                Some(&home),
+                None
+            )
+            .is_err()
+        );
+        assert!(!protected.join("new").exists());
+        assert!(
+            ensure_ordinary_clone_destination(
+                &fixture.directory.join("home-alias/.SSH/repo"),
+                Some(&home),
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            ensure_ordinary_clone_destination(
+                &fixture.directory.join("elsewhere/repo"),
+                None,
+                Some(&fixture.directory.join("appdata-alias")),
+            )
+            .is_err()
+        );
+        // An inaccessible destination must not be treated as a missing path.
+        // Root can traverse mode-000 directories, so exercise this when the
+        // current user is subject to normal Unix permission checks.
+        if unsafe { libc::geteuid() } != 0 {
+            let inaccessible = fixture.directory.join("inaccessible");
+            fs::create_dir(&inaccessible).unwrap();
+            symlink(&inaccessible, fixture.directory.join("inaccessible-alias")).unwrap();
+            fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o000)).unwrap();
+            let result = ensure_ordinary_clone_destination(
+                &fixture.directory.join("inaccessible-alias/repo"),
+                Some(&home),
+                None,
+            );
+            fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(result.is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ordinary_clone_checks_sensitive_home_before_running_git() {
+        use std::process::Command;
+        const CHILD: &str = "DESKTOP_TEST_ORDINARY_CLONE_HOME";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let source = root.join("source.git");
+            assert!(
+                Command::new("git")
+                    .args(["init", "--bare", "-q"])
+                    .arg(&source)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let protected = root.join(".ssh/new/repository");
+            let error = clone_repository(source.to_str().unwrap(), &protected)
+                .await
+                .err()
+                .expect("sensitive path must fail");
+            assert!(error.to_string().contains("sensitive system location"));
+            assert!(!root.join(".ssh").exists());
+            let destination = root.join("projects/repository");
+            clone_repository(source.to_str().unwrap(), &destination)
+                .await
+                .unwrap();
+            assert!(destination.join(".git").is_dir());
+            let through_missing_parent = root.join("new/../second");
+            clone_repository(source.to_str().unwrap(), &through_missing_parent)
+                .await
+                .unwrap();
+            assert!(root.join("second/.git").is_dir());
+            return;
+        }
+        let fixture = RegistryFixture::new();
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "registry::tests::ordinary_clone_checks_sensitive_home_before_running_git",
+                "--nocapture",
+            ])
+            .env_clear()
+            .envs(std::env::vars_os().filter(|(key, _)| !key.to_string_lossy().starts_with("GIT_")))
+            .env(CHILD, &fixture.directory)
+            .env("HOME", &fixture.directory)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                fixture.directory.join("missing-config"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[tokio::test]

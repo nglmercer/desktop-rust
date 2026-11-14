@@ -2743,6 +2743,17 @@ defaults for old clients. These options are covered by real Git and WebSocket
 tests, including a rewritten external helper in a submodule. Requests without
 an account retain native Git credential configuration.
 
+The ordinary Rust clone checks the destination against the user's home and
+credential/configuration directories before and after preparing missing parents.
+It also checks existing symlink aliases and applies the renderer's case-folded
+comparison. This is a path-based admission check, not a reservation against a
+concurrent process changing a symlink between the check and Git's write. The
+check fails closed when home cannot be determined or when the destination,
+home, or configured application-data directory cannot be inspected. An
+uninspectable protected alias cannot be identified, and an unset APPDATA
+cannot be checked. The case-folding logic has
+unit coverage, but has not been verified on macOS or Windows filesystems.
+
 An opt-in selected-account clone can name a stored
 account and numeric actor for an HTTPS clone. It verifies the account and
 repository, rejects URL rewrites and redirects, and uses an isolated Git
