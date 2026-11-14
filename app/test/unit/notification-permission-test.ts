@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { afterEach, describe, it, onTestFinished, vi } from 'vitest'
-import { ipcRenderer } from '../../src/web/host-bridge'
+import { hostIpc } from '../../src/web/host-bridge'
 import { MockIPC } from '../helpers/mock-ipc'
 
 let nativeNotificationsSupported = true
@@ -34,8 +34,8 @@ describe('system notification permission', () => {
         nativeNotificationsSupported = true
         const ipc = new MockIPC()
         ipc.onInvoke('get-notifications-permission', async () => permission)
-        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
-          ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+        vi.spyOn(hostIpc, 'invoke').mockImplementation(
+          ipc.invoke.bind(ipc) as typeof hostIpc.invoke
         )
 
         assert.strictEqual(
@@ -52,7 +52,7 @@ describe('system notification permission', () => {
     it(`reads HTML5 ${permission} permission without native IPC`, async () => {
       nativeNotificationsSupported = false
       vi.stubGlobal('Notification', { permission })
-      const invoke = vi.spyOn(ipcRenderer, 'invoke')
+      const invoke = vi.spyOn(hostIpc, 'invoke')
 
       assert.strictEqual(
         await getSystemNotificationsPermission(),
@@ -71,7 +71,7 @@ describe('system notification permission', () => {
   it('reports null and logs native permission lookup failures', async () => {
     nativeNotificationsSupported = true
     const error = new Error('Permission lookup failed')
-    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(async () => {
+    vi.spyOn(hostIpc, 'invoke').mockImplementation(async () => {
       throw error
     })
     const warn = vi.spyOn(log, 'warn')

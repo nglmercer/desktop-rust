@@ -14,16 +14,13 @@ This document describes the three tiers of tests in GitHub Desktop, how to run
 them, and the patterns you should follow when writing new tests or updating
 existing ones as part of a feature or bugfix.
 
-> **Note:** the Electron-based E2E harness (`app/test/e2e/`, `npm run test:e2e:*`)
-> was removed with Electron. Sections below that describe it are historical.
-
 ## Overview
 
 | Tier | Purpose | Location | Runner |
 |------|---------|----------|--------|
 | Unit / integration (non-UI) | Pure logic, stores, models, git operations | `app/test/unit/` | `node:test` via `npm test` |
 | UI component | React components rendered in JSDOM | `app/test/unit/ui/` | `node:test` + React Testing Library via `npm test` |
-| E2E | Removed with Electron; use the Chromium and Wry integration tests under `rust/tests/` | `rust/tests/` | Vitest |
+| Browser / Wry integration | Real renderer in Chromium or the Wry shell | `rust/tests/` | Vitest |
 
 ### When to use each tier
 
@@ -45,14 +42,6 @@ npm test -- app/test/unit/my-feature-test.ts
 # All tests in a directory (recursive)
 npm test -- app/test/unit/ui
 
-# E2E — build unpackaged app + run (fast local iteration)
-npm run test:e2e:unpackaged
-
-# E2E — run against an already-built unpackaged app
-DESKTOP_E2E_APP_MODE=unpackaged npx playwright test --config app/test/e2e/playwright.config.ts
-
-# E2E — full packaged build + run (production-like)
-npm run test:e2e:packaged
 ```
 
 The test runner (`script/test.mts`) discovers files matching
@@ -355,7 +344,7 @@ an assertion throws:
 
 ```tsx
 import { afterEach, it } from 'node:test'
-import { captureClipboardWrites } from '../../helpers/ui/electron'
+import { captureClipboardWrites } from '../../helpers/ui/host-ipc'
 
 describe('CopyButton', () => {
   let restore: () => void
@@ -383,271 +372,6 @@ functions in JSX are fine in tests.
 
 ---
 
-## Ad-hoc E2E Tests
-
-E2E tests launch the real Desktop app via Playwright's Electron support. Use
-them **only for temporary validation** of your work — to capture screenshots
-and video for the Pull Request. Do **not** add tests to the permanent smoke
-suite (`app-launch.e2e.ts`) unless explicitly asked.
-
-### File conventions
-
-- Location: `app/test/e2e/`.
-- File name: `*.e2e.ts` (Playwright config matches this pattern).
-- Do **not** modify `app-launch.e2e.ts` unless explicitly asked.
-
-> ⚠️ **Delete ad-hoc specs before opening your PR.** Playwright's config
-> matches every `*.e2e.ts` file in `app/test/e2e/`, so any file you create
-> there will run in CI. Ad-hoc specs are for local validation only — stage and
-> run them locally, then `git rm` them before committing.
-
-### Imports
-
-```ts
-import {
-  test,
-  expect,
-  controlMockServer,
-  getMockRequests,
-  dismissMoveToApplicationsDialog,
-} from './e2e-fixtures'
-import type { Page } from '@playwright/test'
-```
-
-### Test structure
-
-```ts
-test.describe.configure({ mode: 'serial' })
-
-test.describe('My Feature E2E', () => {
-  test('launches app and shows feature', async ({ mainWindow: page }) => {
-    // Wait for the React app to mount
-    await page.waitForFunction(
-      () =>
-        (document.getElementById('desktop-app-container')?.innerHTML.length ??
-          0) > 100,
-      null,
-      { timeout: 30000 }
-    )
-
-    // ... interact with the app ...
-  })
-})
-```
-
-All tests run **serially** in the same Electron session (one app launch per
-test file).
-
-### Locating elements
-
-```ts
-// CSS selector
-const button = page.locator('button:has-text("Finish")')
-
-// XPath
-const item = page.locator('//div[contains(@class, "list-item")]')
-
-// Waiting for visibility
-await button.waitFor({ state: 'visible', timeout: 15000 })
-```
-
-### Setting React controlled inputs
-
-For most inputs, Playwright's `.fill()` works fine. However, some React
-controlled inputs ignore `.fill()` because they rely on React's synthetic
-event system rather than native DOM events. If `.fill()` doesn't update
-the React state (i.e., the value appears empty after filling), use this
-workaround that fires both `input` and `change` events through React's
-internal value setter:
-
-```ts
-await input.evaluate((el, value) => {
-  const inp = el as HTMLInputElement
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
-    ?.set?.call(inp, value)
-  inp.dispatchEvent(new Event('input', { bubbles: true }))
-  inp.dispatchEvent(new Event('change', { bubbles: true }))
-}, 'my-value')
-```
-
-Use `.fill()` first — only fall back to the workaround when `.fill()` does
-not produce the expected state change in React.
-
-### Assertions
-
-**Direct assertions** on locators:
-
-```ts
-await expect(locator).toContainText('expected text', { timeout: 15000 })
-await expect(locator).toBeVisible()
-await expect(locator).not.toBeVisible()
-```
-
-**Polling assertions** for async conditions (git state, server requests):
-
-```ts
-await expect
-  .poll(() => getSmokeRepoCurrentBranch(), {
-    timeout: 15000,
-    intervals: [1000],
-  })
-  .toBe('my-branch')
-```
-
-### IPC events
-
-Trigger menu events or app actions from the renderer:
-
-```ts
-await page.evaluate(() => {
-  require('electron').ipcRenderer.emit('menu-event', {}, 'show-about')
-})
-```
-
-### Taking screenshots
-
-Take screenshots at key UI moments during the test. Save them under
-`playwright-videos/` so they are collected alongside videos:
-
-```ts
-await page.screenshot({
-  path: 'playwright-videos/01-feature-dialog-open.png',
-})
-```
-
-Name screenshots with a numeric prefix so they appear in order. Be
-descriptive:
-
-```ts
-await page.screenshot({ path: 'playwright-videos/02-branch-created.png' })
-await page.screenshot({ path: 'playwright-videos/03-diff-view.png' })
-```
-
-### Video recording
-
-Videos are recorded **automatically** by the fixture configuration at
-1280×800 resolution. They are saved in the `playwright-videos/` directory.
-You do not need to configure recording — just run the tests.
-
-### Running ad-hoc E2E tests
-
-For local iteration, use the unpackaged mode to avoid a full packaging step:
-
-```bash
-# Build unpackaged + run all E2E tests
-npm run test:e2e:unpackaged
-
-# Run only your specific test file (after building)
-DESKTOP_E2E_APP_MODE=unpackaged npx playwright test \
-  --config app/test/e2e/playwright.config.ts \
-  app/test/e2e/my-feature.e2e.ts
-```
-
-> ⚠️ **Do NOT use `npm run build:electron:dev` for E2E tests.** The legacy development build
-> produces an `index.html` that loads the renderer bundle from
-> `http://localhost:3000/build/renderer.js` (the webpack dev server). Without
-> the dev server running, the React app never mounts and the Playwright
-> `waitForFunction` on `desktop-app-container` will time out silently.
->
-> Always use `npm run test:e2e:build:unpackaged` (or the combined
-> `npm run test:e2e:unpackaged`) which runs a **production** build with
-> `DESKTOP_SKIP_PACKAGE=1`. This bundles `renderer.js` directly into `out/`
-> so the app is self-contained.
-
-### Handling the welcome flow and macOS dialogs
-
-If your test launches from a fresh state, you will encounter the welcome flow.
-Handle it like the smoke test does:
-
-```ts
-// Skip the welcome sign-in
-const skipButton = page.locator('a.skip-button')
-await skipButton.waitFor({ state: 'visible', timeout: 30000 })
-await skipButton.click()
-
-// Fill name/email and finish
-const nameInput = page.locator('input[placeholder="Your Name"]')
-await nameInput.waitFor({ state: 'visible', timeout: 15000 })
-if ((await nameInput.inputValue()) === '') {
-  await nameInput.fill('GitHub Desktop E2E')
-}
-const emailInput = page.locator('input[placeholder="your-email@example.com"]')
-if ((await emailInput.inputValue()) === '') {
-  await emailInput.fill('desktop-e2e@example.com')
-}
-await page.locator('button:has-text("Finish")').click()
-await page.waitForSelector('#welcome', { state: 'hidden', timeout: 15000 })
-
-// Dismiss macOS "Move to Applications" dialog if it appears
-await dismissMoveToApplicationsDialog(page)
-```
-
-### Attaching artifacts to Pull Requests
-
-After running E2E tests, collect artifacts from `playwright-videos/`:
-
-- **Screenshots**: the `.png` files you captured with `page.screenshot()`.
-- **Videos**: the `.webm` files recorded automatically by Playwright.
-- **Traces**: the `trace-*.zip` files saved by the fixture teardown.
-
-Attach the screenshots and video to the Pull Request description or as
-comments to show the new UI additions and prove the feature works end-to-end.
-
-#### Faking data or state for ad-hoc E2E screenshots
-
-Some UI features are only visible under specific conditions — for example, a
-signed-in GitHub.com account, a populated model list, or an active Copilot
-subscription. In ad-hoc E2E tests whose sole purpose is capturing screenshots
-for a Pull Request, you can temporarily modify source code to bypass those
-conditions and show the full UI.
-
-**Workflow:**
-
-1. Make the minimum temporary changes needed (e.g. hardcode a store property,
-   inject fake data, force a boolean flag).
-2. Rebuild with `npm run test:e2e:build:unpackaged`.
-3. Run your ad-hoc E2E spec and capture screenshots/video.
-4. **Revert every temporary change** before committing. Verify with
-   `git diff <file>` that no fake data leaks into the branch.
-5. Delete the ad-hoc E2E spec.
-
-**Tips:**
-
-- **Prefer overriding in `getState()`** (in `AppStore`) rather than deep in a
-  store or API layer. This keeps the blast radius small — a single file, a
-  few lines — and easy to revert cleanly.
-- **Use realistic but obviously fake data.** If you inject model names, use
-  real-looking IDs and display names so the screenshots read naturally.
-- **Guard with `__DEV__` only if you plan to commit the fake data** (not
-  recommended). For ad-hoc screenshots the code is reverted immediately, so
-  a plain unconditional override is simpler and avoids issues with `__DEV__`
-  being `false` in production E2E builds (`RELEASE_CHANNEL=production`).
-- **Watch out for tree-shaking.** The E2E build uses `NODE_ENV=production`.
-  Constants like `__DEV__` are `false` in that mode, so any code guarded by
-  `if (__DEV__)` will be dead-code-eliminated by webpack. If you need the
-  fake data to survive the production build, don't guard it.
-- **Verify the revert is complete.** After capturing artifacts, run
-  `git diff -- <files you touched>` and confirm zero output before moving on.
-
-**Example — forcing a populated Copilot model list:**
-
-```ts
-// In AppStore.getState(), temporarily replace:
-copilotModels: this.copilotModels,
-copilotAvailable: this.copilotStore.isAvailable,
-
-// With:
-copilotModels:
-  this.copilotModels !== null && this.copilotModels.length > 0
-    ? this.copilotModels
-    : fakeModels,       // defined as a const above the class
-copilotAvailable: true,
-```
-
-After screenshots are captured, revert these two lines back to their originals.
-
----
-
 ## Test Helpers Reference
 
 ### Global test environment (`app/test/globals.cjs`)
@@ -657,7 +381,7 @@ This file is loaded automatically by the test runner. It:
 - Imports `fake-indexeddb/auto` and `global-jsdom/register` for browser API
   simulation.
 - Defines Webpack build-time constants (`__DEV__`, `__APP_NAME__`, etc.).
-- Mocks the `electron` module (clipboard, shell, ipcRenderer).
+- Mocks the host bridge module (host IPC and shell).
 - Removes `MessageChannel`/`MessagePort`/`BroadcastChannel` to prevent test
   hangs (React 16 + Dexie cleanup issue).
 

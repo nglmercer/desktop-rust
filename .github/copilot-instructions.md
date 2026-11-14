@@ -11,8 +11,8 @@ PR-preparation skill.
 
 - **Language**: TypeScript (strict mode enabled)
 - **UI Framework**: React 16.x
-- **Runtime**: Electron > 38.x (see `app/.npmrc` for specific version)
-- **Build Tools**: Vite for the web renderer and every Electron bundle (main, renderer, crash, CLI, highlighter); Cargo builds the Rust workspace
+- **Runtime**: a Rust host (Tao/Wry webview) serving the React renderer over IPC
+- **Build Tools**: Vite for the renderer and highlighter; Cargo builds the Rust workspace
 - **Package Manager**: pnpm (see `packageManager` in `package.json`); existing scripts also use npm
 - **Node Version**: >= 22.12.0 (see `.nvmrc` for the recommended version)
 - **Testing**: Vitest for migrated TypeScript suites, the Node.js test runner for remaining legacy suites, and Cargo for Rust tests. `npm test -- <file>` routes registered Vitest suites via `vitest-suites.json`.
@@ -65,8 +65,7 @@ GitHub Desktop has been developed for many years through many iterations of tech
 
 ### Import Restrictions
 
-- **Never import `ipcRenderer` directly** from `electron` or `electron/renderer` - use `import * as ipcRenderer from 'ipc-renderer'` (app/src/lib/ipc-renderer.ts) for strongly typed IPC methods
-- **Never import `ipcMain` directly** from `electron` or `electron/main` - use `import * as ipcMain from 'ipc-main'` (app/src/lib/ipc-main.ts) for strongly typed IPC methods
+- **Never import the host IPC (`hostIpc`) directly** - use `import * as ipcRenderer from 'ipc-renderer'` (app/src/lib/ipc-renderer.ts) for strongly typed IPC methods
 
 ### Code Quality
 
@@ -106,7 +105,6 @@ pnpm install --frozen-lockfile --ignore-scripts
 pnpm start
 ```
 
-The Electron development and production builds have been removed.
 
 ### Testing
 

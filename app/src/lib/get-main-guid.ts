@@ -1,4 +1,4 @@
-import { app } from '../web/host-bridge'
+import { hostApp } from '../web/host-bridge'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
@@ -48,4 +48,4 @@ export async function saveGUIDFile(guid: string) {
   await writeFile(getGUIDPath(), guid, 'utf8')
 }
 
-const getGUIDPath = () => join(app.getPath('userData'), '.guid')
+const getGUIDPath = () => join(hostApp.getPath('userData'), '.guid')

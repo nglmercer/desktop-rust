@@ -81,7 +81,6 @@ or a specific subset of users:
 |                             | Label name     | Description |
 | --------------------------- | -------------- | ----------- |
 | [:mag_right:][codemirror]   | `codemirror`   | Issues related to our use of [CodeMirror](https://codemirror.net/) that may require upstream fixes |
-| [:mag_right:][electron]     | `electron`     | Issues related to our use of [Electron](https://electronjs.org) that may need updates to Electron or upstream fixes |
 | [:mag_right:][integrations] | `integrations` | Issues related to editor and shell integrations that ship in Desktop |
 | [:mag_right:][performance]  | `performance`  | Relating to things affecting performance |
 | [:mag_right:][themes]       | `themes`       | Issues related the light or dark themes that ship in Desktop |
@@ -115,7 +114,6 @@ time:
 [bug]: https://github.com/desktop/desktop/labels/bug
 [codemirror]: https://github.com/desktop/desktop/labels/codemirror
 [docs]: https://github.com/desktop/desktop/labels/docs
-[electron]: https://github.com/desktop/desktop/labels/electron
 [enhancement]: https://github.com/desktop/desktop/labels/enhancement
 [epic:rebase]:https://github.com/desktop/desktop/labels/epic%3Arebase
 [epic:stashing]:https://github.com/desktop/desktop/labels/epic%3Astashing

@@ -24,7 +24,7 @@ Other important folders:
 
 ## Adding Unit Tests
 
-Unit tests are ideal for functions that don't depend on the DOM or Electron
+Unit tests are ideal for functions that don't depend on the DOM or the host
 APIs, so if you are working on some code that will benefit from writing tests
 here is a guide to getting this working.
 

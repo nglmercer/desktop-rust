@@ -330,7 +330,7 @@ finalization does not remove it while readers or locked refresh recovery remain.
 Related repositories' backend and UI admission use that same protection.
 The context uses public async-hooks resource callbacks rather than Node's
 AsyncContextFrame-backed AsyncLocalStorage, which can fatally crash in an
-Electron renderer realm. This is exercised against the production Electron app,
+renderer realm. This is exercised against the Rust desktop app,
 not just Node unit tests.
 
 Reconciliation inside the retained result/recovery scope uses command-local

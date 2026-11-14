@@ -3,8 +3,8 @@ import { JSDOM } from 'jsdom'
 import packageInfo from '../package.json'
 
 vi.mock('../src/web/host-bridge', () => ({
-  shell: { openPath: vi.fn(async () => '') },
-  ipcRenderer: { invoke: vi.fn(async () => {}), on: vi.fn() },
+  hostShell: { readShortcutLink: vi.fn(() => ({})) },
+  hostIpc: { invoke: vi.fn(async () => {}), on: vi.fn() },
 }))
 
 Object.assign(globalThis, {

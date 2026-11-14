@@ -8,7 +8,7 @@ import {
   onTestFinished,
   vi,
 } from 'vitest'
-import { ipcRenderer } from '../../src/web/host-bridge'
+import { hostIpc } from '../../src/web/host-bridge'
 import { MockIPC } from '../helpers/mock-ipc'
 import { notificationCallbacks } from '../../src/lib/notifications/notification-handler'
 
@@ -49,8 +49,8 @@ describe('showNotification', () => {
         const ipc = new MockIPC()
         ipc.onInvoke('show-notification', async () => 'notification-id')
         ipc.onInvoke('get-notifications-permission', async () => permission)
-        vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
-          ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+        vi.spyOn(hostIpc, 'invoke').mockImplementation(
+          ipc.invoke.bind(ipc) as typeof hostIpc.invoke
         )
         const onClick = () => {}
 
@@ -73,8 +73,8 @@ describe('showNotification', () => {
   it('does not count native failures or register a click callback', async () => {
     const ipc = new MockIPC()
     ipc.onInvoke('show-notification', async () => null)
-    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
-      ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+    vi.spyOn(hostIpc, 'invoke').mockImplementation(
+      ipc.invoke.bind(ipc) as typeof hostIpc.invoke
     )
     const warn = vi.spyOn(log, 'warn')
 
@@ -92,7 +92,7 @@ describe('showNotification', () => {
   })
 
   it('propagates IPC failures', async () => {
-    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(async () => {
+    vi.spyOn(hostIpc, 'invoke').mockImplementation(async () => {
       throw new Error('Notification IPC failed')
     })
     await assert.rejects(
@@ -107,8 +107,8 @@ describe('showNotification', () => {
     ipc.onInvoke('get-notifications-permission', async () => {
       throw new Error('Permission lookup failed')
     })
-    vi.spyOn(ipcRenderer, 'invoke').mockImplementation(
-      ipc.invoke.bind(ipc) as typeof ipcRenderer.invoke
+    vi.spyOn(hostIpc, 'invoke').mockImplementation(
+      ipc.invoke.bind(ipc) as typeof hostIpc.invoke
     )
     const warn = vi.spyOn(log, 'warn')
     assert.strictEqual(
@@ -177,18 +177,18 @@ describe('showNotification', () => {
       vi.stubGlobal('Notification', Notification)
       const ipc = new MockIPC()
       const sendDescriptor = Object.getOwnPropertyDescriptor(
-        ipcRenderer,
+        hostIpc,
         'send'
       )
-      Object.defineProperty(ipcRenderer, 'send', {
+      Object.defineProperty(hostIpc, 'send', {
         configurable: true,
         value: ipc.send.bind(ipc),
       })
       onTestFinished(() => {
         if (sendDescriptor === undefined) {
-          Reflect.deleteProperty(ipcRenderer, 'send')
+          Reflect.deleteProperty(hostIpc, 'send')
         } else {
-          Object.defineProperty(ipcRenderer, 'send', sendDescriptor)
+          Object.defineProperty(hostIpc, 'send', sendDescriptor)
         }
       })
       const onClick = vi.fn()

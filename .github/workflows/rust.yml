@@ -132,7 +132,7 @@ jobs:
           rustup component add rustfmt clippy
       - name: Install the renderer and build its bundle
         # The renderer is the React app built by Vite. The root package.json
-        # postinstall is the Electron-era npm installer, so it is not run here.
+        # dependency install scripts are not run here.
         # Vite must run before any Rust crate that embeds out/vite-dist.
         run: |
           npm install --global pnpm@11.17.0

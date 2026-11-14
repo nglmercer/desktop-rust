@@ -22,8 +22,8 @@ vi.mock('../../src/backend/client', async importOriginal => ({
   },
 }))
 vi.mock('../../src/web/host-bridge', () => ({
-  ipcRenderer: { send: vi.fn(), on: vi.fn(), invoke: vi.fn() },
-  shell: { openPath: vi.fn(async () => '') },
+  hostIpc: { send: vi.fn(), on: vi.fn(), invoke: vi.fn() },
+  hostShell: { readShortcutLink: vi.fn(() => ({})) },
 }))
 
 import { BackendClient } from '../../src/backend/client'

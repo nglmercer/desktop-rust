@@ -2,7 +2,7 @@ import assert from 'node:assert'
 import { describe, it, TestContext } from 'node:test'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
-import { ipcRenderer } from '../../../src/web/host-bridge'
+import { hostIpc } from '../../../src/web/host-bridge'
 import { createAssistedCommitRunHarness } from '../../helpers/assisted-commit-run'
 import { rawGit, seed } from '../../helpers/assisted-commit'
 import { MockIPC } from '../../helpers/mock-ipc'
@@ -84,7 +84,7 @@ async function previewFixture(t: TestContext) {
     )
   const menuEnabled = (enabled: boolean) => {
     const ipc = new MockIPC()
-    const send = t.mock.method(ipcRenderer, 'send', ipc.send.bind(ipc))
+    const send = t.mock.method(hostIpc, 'send', ipc.send.bind(ipc))
     try {
       updateMenuState(
         {

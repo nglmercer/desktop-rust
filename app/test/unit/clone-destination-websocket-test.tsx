@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const status = vi.hoisted(() => vi.fn())
 const canonical = vi.hoisted(() => vi.fn(async (path: string) => path))
 vi.mock('../../src/web/host-bridge', () => ({
-  ipcRenderer: { send: vi.fn(), on: vi.fn(), invoke: vi.fn() },
+  hostIpc: { send: vi.fn(), on: vi.fn(), invoke: vi.fn() },
   shell: { openPath: vi.fn(async () => '') },
 }))
 vi.mock('../../src/backend/client', () => ({

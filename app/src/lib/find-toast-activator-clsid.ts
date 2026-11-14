@@ -1,6 +1,6 @@
 import * as path from 'path'
 import * as os from 'os'
-import { shell } from '../web/host-bridge'
+import { hostShell } from '../web/host-bridge'
 
 /**
  * Checks all Windows shortcuts created by Squirrel looking for the toast
@@ -35,7 +35,7 @@ export function findToastActivatorClsid() {
 
 function findToastActivatorClsidInShorcut(shortcutPath: string) {
   try {
-    const shortcutDetails = shell.readShortcutLink(shortcutPath)
+    const shortcutDetails = hostShell.readShortcutLink(shortcutPath)
 
     if (
       shortcutDetails.toastActivatorClsid === undefined ||

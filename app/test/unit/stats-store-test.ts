@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import assert from 'node:assert'
-import { ipcRenderer } from '../../src/web/host-bridge'
+import { hostIpc } from '../../src/web/host-bridge'
 import { TestStatsDatabase } from '../helpers/databases'
 import { mockNotification } from '../helpers/mock-notification'
 
@@ -19,9 +19,9 @@ describe('StatsStore', () => {
   let statsDb: TestStatsDatabase
 
   beforeEach(() => {
-    const invoke = ipcRenderer.invoke
+    const invoke = hostIpc.invoke
     mock.method(
-      ipcRenderer,
+      hostIpc,
       'invoke',
       async (channel: string, ...args: unknown[]) =>
         channel === 'get-notifications-permission'
@@ -285,9 +285,9 @@ describe('StatsStore', () => {
           throw new Error('Permission lookup failed')
         },
       })
-      const invoke = ipcRenderer.invoke
+      const invoke = hostIpc.invoke
       t.mock.method(
-        ipcRenderer,
+        hostIpc,
         'invoke',
         async (channel: string, ...args: unknown[]) => {
           if (channel === 'get-notifications-permission') {

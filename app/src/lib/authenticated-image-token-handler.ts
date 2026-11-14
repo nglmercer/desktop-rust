@@ -1,4 +1,4 @@
-import { IpcRendererEvent } from '../web/host-bridge'
+import type { HostIpcEvent } from './host-types'
 import * as ipcRenderer from './ipc-renderer'
 
 /**
@@ -11,7 +11,7 @@ export function installAuthenticatedImageTokenHandler(
 ) {
   let disposed = false
   const listener = async (
-    _event: IpcRendererEvent,
+    _event: HostIpcEvent,
     requestId: number,
     endpoint: string,
     token: string

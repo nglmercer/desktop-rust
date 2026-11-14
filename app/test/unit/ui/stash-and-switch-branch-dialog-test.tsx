@@ -26,10 +26,10 @@ const branchToCheckout = new Branch(
 
 it('disables the switch button after clicking it', async () => {
   const hostBridge = await import('../../../src/web/host-bridge')
-  const previousSend = hostBridge.ipcRenderer.send
-  hostBridge.ipcRenderer.send = () => {}
+  const previousSend = hostBridge.hostIpc.send
+  hostBridge.hostIpc.send = () => {}
   onTestFinished(() => {
-    hostBridge.ipcRenderer.send = previousSend
+    hostBridge.hostIpc.send = previousSend
   })
 
   const dispatcher = {

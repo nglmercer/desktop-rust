@@ -61,7 +61,7 @@ staged host is killed unexpectedly, a lock can remain: inspect its recorded
 owner and verify that no related host or build process is running before
 manually removing it. A force-killed packaging parent may leave its temporary
 Vite directory and child build process behind.
-The Electron production pipeline has been removed; `pnpm package` is the only
+`pnpm package` is the only
 packaging path.
 
 For development, `pnpm start` builds and starts the Rust shell and watches the
@@ -101,17 +101,16 @@ Biome checks the test-runner tooling and project-specific rules via
 cover other files while their migration is in progress.
 
 See [Rust development and commands](rust/README.md) and the
-[full migration ledger](rust/MIGRATION.md). The Electron-era `postinstall`
-script in `package.json` is not used by the Rust shell; `--ignore-scripts`
-skips it.
+[full migration ledger](rust/MIGRATION.md). Install scripts are never needed
+by the Rust shell; use `--ignore-scripts`.
 This is an in-progress fork, not an official GitHub Desktop release.
 
 ---
 
 # [GitHub Desktop](https://desktop.github.com)
 
-[GitHub Desktop](https://desktop.github.com/) is an open-source [Electron](https://www.electronjs.org/)-based
-GitHub app. It is written in [TypeScript](https://www.typescriptlang.org) and
+[GitHub Desktop](https://desktop.github.com/) is an open-source
+GitHub app, now a Rust host (Tao/Wry) serving a React renderer. It is written in [TypeScript](https://www.typescriptlang.org) and
 uses [React](https://reactjs.org/).
 
 <picture>

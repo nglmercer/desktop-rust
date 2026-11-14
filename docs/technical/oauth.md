@@ -150,7 +150,7 @@ registration while older Desktop versions remain in use.
 `AccountsStore` is the credential authority in Desktop's single main renderer.
 It keeps the account list and delegates renewal, token resolution, rejected-token
 handling, and ordered secure-storage writes to `CredentialSessions`.
-Electron's single-instance lock prevents a second Desktop instance from owning
+The single-instance lock prevents a second Desktop instance from owning
 the same application profile. Main-process private image requests delegate token
 resolution to that renderer; Git subprocesses use the existing trampoline.
 

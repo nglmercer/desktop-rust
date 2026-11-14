@@ -17,20 +17,26 @@ replaced by `@oxc-node/core` (`node --import @oxc-node/core/register`) and
 esbuild/tsx. Neither lockfile contains Electron, Webpack, esbuild, tsx or jiti
 (`electron-to-chromium` is browserslist data).
 
-What the renderer still carries: it keeps its Electron-shaped IPC vocabulary,
-served by `app/src/web/electron.ts` over the Rust bridge. The `electron`
-specifier is aliased to that shim in Vite and Vitest, redirected to it by
-`app/test/globals.cjs` for Node tests, and typed by `app/typings/electron.d.ts`.
-`keytar`, `fs-admin`, `registry-js`, `desktop-notifications` and
-`windows-argv-parser` are no longer dependencies either: Vite, Vitest, the Node
-tests and `tsconfig.notifications.json` resolve them to the web shims or the
-vendored TypeScript sources (`registry-js` now has a faithful typed shim; the
-`fs-admin` shim's elevated operations fail explicitly). `desktop-trampoline`
-and `dugite` remain real dependencies. The Electron IPC branch of `openPath`
-was removed. Names and comments still mention Electron in about 40 renderer
-files (types such as `Electron.Certificate`, the `*NoLongerSupportedByElectron`
-OS-support banners and update gating, install-CLI via `fs-admin`); these are
-cosmetic or Squirrel-era behavior and were not removed.
+What the renderer still carries: its IPC vocabulary (channel names and typed
+payloads in `ipc-shared.ts`, which the Rust host implements) is unchanged, so
+the host and renderer stay compatible. It is served over the Rust bridge by
+`app/src/web/host-bridge.ts`, reduced to `hostIpc`, `hostShell`, `hostFiles`
+and `hostApp`, with payload types in `app/src/lib/host-types.ts`. There is no
+`electron` module, alias or type declaration any more. `keytar`, `registry-js`,
+`desktop-notifications` and `windows-argv-parser` are no longer dependencies:
+Vite, Vitest, the Node tests (`app/test/globals.cjs`) and
+`tsconfig.notifications.json` resolve them to the web shims or the vendored
+TypeScript sources (`registry-js` has a typed shim). `fs-admin` and the
+install-CLI feature that used it are gone. `desktop-trampoline` and `dugite`
+remain real dependencies.
+
+The non-Rust code paths in the renderer (about 240 `transportKind` checks in 69
+files) are not Electron code: they are the Node-backed Git and filesystem
+implementations that the unit tests exercise directly and that run when no
+Rust transport is attached. Deleting them requires moving those tests onto the
+Rust backend, which is the "Remove legacy source" gate below, not an Electron
+removal. The removed Electron IPC branch of `openPath` was the only
+Electron-specific one found.
 
 Loaders: scripts run with oxc-node (`node --import @oxc-node/core/register`).
 The remaining `node:test` suites run with `script/ts-register.cjs`, a require

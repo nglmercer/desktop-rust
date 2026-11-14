@@ -79,15 +79,15 @@ Use Node mock timers for scheduled UI refreshes and transient feedback states.
 That keeps the tests deterministic and matches the existing unit-test style in
 this repository.
 
-## Targeted Electron Mocks
+## Targeted Host Mocks
 
 Prefer targeted overrides in the individual test file over expanding the global
-Electron mock for every new component.
+host mock for every new component.
 
-For clipboard-style tests, use the helper in `app/test/helpers/ui/electron.ts`.
+For clipboard-style tests, use the helper in `app/test/helpers/ui/host-ipc.ts`.
 
 ```ts
-import { captureClipboardWrites } from '../../helpers/ui/electron'
+import { captureClipboardWrites } from '../../helpers/ui/host-ipc'
 
 let clipboardCapture = captureClipboardWrites()
 
@@ -100,9 +100,9 @@ afterEach(() => {
 })
 ```
 
-The global Electron mock in `app/test/globals.cjs` should stay minimal. Add a
+The global host mock in `app/test/globals.cjs` should stay minimal. Add a
 new global stub only when multiple unrelated UI tests need the same default
-Electron surface.
+host surface.
 
 ## Assertions
 
@@ -129,5 +129,5 @@ Good first targets:
 - timer-driven UI with deterministic output
 - moderate composition components that expose callbacks through props
 
-Defer components that require large AppStore, dispatcher, or Electron-heavy test
+Defer components that require large AppStore, dispatcher, or host-heavy test
 doubles until the helper pattern needs to expand.

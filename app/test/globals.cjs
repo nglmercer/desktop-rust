@@ -68,16 +68,12 @@ const shimmed = new Map(
 )
 mock.module(shimmed.get('host-bridge'), {
   namedExports: {
-    shell: {
-      // Consumed through `app-shell`'s `openPath`, which binds this eagerly at
-      // import time, so it has to exist here for tests to be able to mock it.
-      openPath: async () => '',
-    },
-    ipcRenderer: {
+    hostShell: { readShortcutLink: () => ({}) },
+    hostIpc: {
       invoke: mock.fn(async () => {}),
       on: mock.fn(() => {}),
     },
-    webUtils: { getPathForFile: () => '' },
+    hostFiles: { getPathForFile: () => '' },
   },
 })
 

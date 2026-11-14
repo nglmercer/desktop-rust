@@ -31,10 +31,10 @@ afterEach(async () => {
 describe('helper side-effect surfaces', () => {
   it('applies theme classes, updates color scheme, and clears theme classes on unmount', async () => {
     const hostBridge = await import('../../../src/web/host-bridge')
-    const previousSend = hostBridge.ipcRenderer.send
+    const previousSend = hostBridge.hostIpc.send
     const sends: Array<[string, string]> = []
 
-    hostBridge.ipcRenderer.send = (channel: string, value: string) => {
+    hostBridge.hostIpc.send = (channel: string, value: string) => {
       sends.push([channel, value])
     }
 
@@ -63,7 +63,7 @@ describe('helper side-effect surfaces', () => {
 
       assert.equal(document.body.classList.contains('theme-light'), false)
     } finally {
-      hostBridge.ipcRenderer.send = previousSend
+      hostBridge.hostIpc.send = previousSend
     }
   })
 

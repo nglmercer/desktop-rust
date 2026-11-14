@@ -20,7 +20,7 @@ In the straightforward case where a user is connected straight to the Internet w
 
 ### Chromium's vs libcurl proxy support
 
-Electron/Chromium automatically sends network requests to the system-configured proxy if one exists. This happens transparently and doesn't require any custom logic from us. libcurl, however, requires manual configuration of proxies. This makes a lot of sense when one considers the complexities involved in resolving a proxy. System configuration dialogs can make proxy configuration seem trivial.
+The webview automatically sends network requests to the system-configured proxy if one exists. This happens transparently and doesn't require any custom logic from us. libcurl, however, requires manual configuration of proxies. This makes a lot of sense when one considers the complexities involved in resolving a proxy. System configuration dialogs can make proxy configuration seem trivial.
 
 <img width="780" alt="image" src="https://user-images.githubusercontent.com/634063/76533168-f014c400-6477-11ea-99db-d843e9a72dd2.png">
 
@@ -42,8 +42,8 @@ Now that we understand the components involved we can talk about the big picture
 
 1. [Determine remote endpoint for the Git network operations](https://github.com/desktop/desktop/pull/9139)
 2. [Determine if the user has set any environment variables](https://github.com/desktop/desktop/blob/65f17f1e0482b95a4dfe2b1f9a9f9643a0103aa8/app/src/lib/git/environment.ts#L94-L128) such as `http_proxy`, `all_proxy` etc that we would override if we attempted to automatically configure the proxy. If such a variable is set we bail.
-3. [Ask Electron to resolve the proxy](https://github.com/desktop/desktop/blob/65f17f1e0482b95a4dfe2b1f9a9f9643a0103aa8/app/src/lib/resolve-git-proxy.ts#L12-L23)
-4. [Parse the PAC-string](https://github.com/desktop/desktop/blob/65f17f1e0482b95a4dfe2b1f9a9f9643a0103aa8/app/src/lib/parse-pac-string.ts#L60-L90) that we get back from electron
+3. [Ask the host to resolve the proxy](https://github.com/desktop/desktop/blob/65f17f1e0482b95a4dfe2b1f9a9f9643a0103aa8/app/src/lib/resolve-git-proxy.ts#L12-L23)
+4. [Parse the PAC-string](https://github.com/desktop/desktop/blob/65f17f1e0482b95a4dfe2b1f9a9f9643a0103aa8/app/src/lib/parse-pac-string.ts#L60-L90) that we get back from the host
 5. [Set the appropriate proxy environment variables](https://github.com/desktop/desktop/blob/65f17f1e0482b95a4dfe2b1f9a9f9643a0103aa8/app/src/lib/git/environment.ts#L130-L135) 
 
 #### Determining the remote endpoint
@@ -74,11 +74,11 @@ For now though this is our only workaround and as such [#9188](https://github.co
 
 ### There's no way to disable the automatic proxy support from the UI
 
-When implementing this feature we debated whether to include an "opt-out" setting in preferences to turn off the automatic proxy support. We decided against it for a few reasons. One being that we really wanted this feature to be exactly as transparent as the proxy support in Electron is today. We also felt that since we never override existing Git proxy configuration variables there's very little risk to existing users who are successfully using GitHub Desktop with a proxy today.
+When implementing this feature we debated whether to include an "opt-out" setting in preferences to turn off the automatic proxy support. We decided against it for a few reasons. One being that we really wanted this feature to be exactly as transparent as the proxy support in the host is today. We also felt that since we never override existing Git proxy configuration variables there's very little risk to existing users who are successfully using GitHub Desktop with a proxy today.
 
 ### Can resolveProxy be slow?
 
-While I haven't found any indication of this being an actual problem it's theoretically possible that the resolveProxy logic in Electron/Chromium could be slow and therefore add an unreasonable delay to each Git network operation. Should this problem exist my assumption is that it's very rare as it would presumably have manifested itself in super slow API requests for the same reason. Nevertheless, should this occur post launch my recommendation for mitigation would be to either add an explicit timeout (using Promise.race) or add some way of disabling the entire proxy support from the UI (preferences). A workaround for users experiencing such a problem would be to set the `all_proxy` environment variable to the same value that they currently have for their `http.proxy` Git config variable as that effectively kills the automatic proxy support in GitHub Desktop.
+While I haven't found any indication of this being an actual problem it's theoretically possible that the resolveProxy logic in the host could be slow and therefore add an unreasonable delay to each Git network operation. Should this problem exist my assumption is that it's very rare as it would presumably have manifested itself in super slow API requests for the same reason. Nevertheless, should this occur post launch my recommendation for mitigation would be to either add an explicit timeout (using Promise.race) or add some way of disabling the entire proxy support from the UI (preferences). A workaround for users experiencing such a problem would be to set the `all_proxy` environment variable to the same value that they currently have for their `http.proxy` Git config variable as that effectively kills the automatic proxy support in GitHub Desktop.
 
 ## Potentially confusing things
 
@@ -102,11 +102,9 @@ fatal: unable to access 'https://github.com/niik/RxSpy/': Unsupported proxy 'loc
 
 ## Debugging tips
 
-In order to inspect what Electron sends back as the proxy server for a given request I've been using this command in the console.
+In order to inspect what the host sends back as the proxy server for a given request I've been using this command in the console.
 
-```javascript
-require('electron').remote.session.defaultSession.resolveProxy('https://github.com').then(console.log)
-```
+(Inspect the host's `resolve-proxy` IPC reply for the URL in the developer tools console.)
 
 When debugging user issues with this feature I also imagine it would be useful to inspect their environment variables using
 
@@ -126,7 +124,7 @@ That network request will **not** use a proxy server. So if you're troubleshooti
 
 #### Authenticating proxies
 
-A stretch goal for the proxy support was supporting authenticating proxies. That unfortunately didn't make it in. Worth noting here is that not even Electron supports authenticating proxies out of the box so there's no users out there today that's using GitHub Desktop in signed-in mode with an authenticating proxy blocking their traffic.
+A stretch goal for the proxy support was supporting authenticating proxies. That unfortunately didn't make it in. Worth noting here is that not even the webview supports authenticating proxies out of the box so there's no users out there today that's using GitHub Desktop in signed-in mode with an authenticating proxy blocking their traffic.
 
 #### Best effort certificate revocation checks in cURL
 

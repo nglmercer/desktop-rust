@@ -4,7 +4,7 @@ import { getWorkingDirectoryDiff } from '../../src/lib/git/diff'
 import assert from 'node:assert'
 import { TestContext } from 'node:test'
 import { join } from 'path'
-import { ipcRenderer } from '../../src/web/host-bridge'
+import { hostIpc } from '../../src/web/host-bridge'
 import { AppStore } from '../../src/lib/stores/app-store'
 import { AccountsStore } from '../../src/lib/stores/accounts-store'
 import { AliveStore } from '../../src/lib/stores/alive-store'
@@ -30,10 +30,10 @@ export async function createAssistedCommitRunHarness(
   t: TestContext,
   accountsStore?: AccountsStore
 ) {
-  const previousSend = ipcRenderer.send
-  ipcRenderer.send = () => {}
+  const previousSend = hostIpc.send
+  hostIpc.send = () => {}
   t.after(() => {
-    ipcRenderer.send = previousSend
+    hostIpc.send = previousSend
   })
   t.mock.method(window, 'setTimeout', () => 0)
   t.mock.method(window, 'addEventListener', () => {})

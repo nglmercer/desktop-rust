@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { before, describe, it } from 'node:test'
-import { ipcRenderer } from '../../../src/web/host-bridge'
+import { hostIpc } from '../../../src/web/host-bridge'
 import * as React from 'react'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -15,7 +15,7 @@ import {
 import { fireEvent, render, screen, waitFor } from '../../helpers/ui/render'
 
 before(() => {
-  ipcRenderer.send = () => {}
+  hostIpc.send = () => {}
 })
 
 describe('real assisted Changes sidebar wiring', () => {

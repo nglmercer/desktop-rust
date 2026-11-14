@@ -73,10 +73,10 @@ async function setup(
   })
 
   const hostBridge = await import('../../../src/web/host-bridge')
-  const originalSend = hostBridge.ipcRenderer.send
-  hostBridge.ipcRenderer.send = () => {}
+  const originalSend = hostBridge.hostIpc.send
+  hostBridge.hostIpc.send = () => {}
   t.after(() => {
-    hostBridge.ipcRenderer.send = originalSend
+    hostBridge.hostIpc.send = originalSend
   })
 
   return t.mock.method(API, 'fromAccount', (account: Account) =>

@@ -12,8 +12,8 @@ describe('Session recovery dialog', () => {
   let restoreIpc: (() => void) | undefined
   beforeEach(async () => {
     const hostBridge = await import('../../../src/web/host-bridge')
-    const previousSend = hostBridge.ipcRenderer.send
-    hostBridge.ipcRenderer.send = () => {}
+    const previousSend = hostBridge.hostIpc.send
+    hostBridge.hostIpc.send = () => {}
     const showModal = Object.getOwnPropertyDescriptor(
       HTMLDialogElement.prototype,
       'showModal'
@@ -29,7 +29,7 @@ describe('Session recovery dialog', () => {
       this.open = false
     }
     restoreIpc = () => {
-      hostBridge.ipcRenderer.send = previousSend
+      hostBridge.hostIpc.send = previousSend
       for (const [key, descriptor] of [
         ['showModal', showModal],
         ['close', close],

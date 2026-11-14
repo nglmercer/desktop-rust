@@ -15,7 +15,7 @@ cloning or switching branches.
 ```
 
 This restores the locked versions to `node_modules`. The root postinstall also
-installs the application dependencies, downloads Electron, initializes
+installs the application dependencies, initializes
 submodules, and checks the build scripts. Application packages are installed
 afresh so edited native sources rebuild after switching branches. CI uses the
 same command and fails if a manifest and its lockfile disagree.

@@ -5,7 +5,7 @@ import {
 } from '../../../src/models/status'
 import { DiffSelection, DiffSelectionType } from '../../../src/models/diff'
 import { TipState } from '../../../src/models/tip'
-import { ipcRenderer } from '../../../src/web/host-bridge'
+import { hostIpc } from '../../../src/web/host-bridge'
 import { UncommittedChangesStrategy } from '../../../src/models/uncommitted-changes-strategy'
 import assert from 'node:assert'
 import { describe, it } from 'node:test'
@@ -908,7 +908,7 @@ describe('AppStore assisted repository operation admission', () => {
     const repository = await h.register(source)
     const moved = join(await createTempDirectory(t), 'moved')
     await rename(repository.path, moved)
-    const dialog = t.mock.method(ipcRenderer, 'invoke', async () => null)
+    const dialog = t.mock.method(hostIpc, 'invoke', async () => null)
     try {
       await h.appStore._relocateRepository(repository)
       assert.strictEqual(dialog.mock.callCount(), 1)

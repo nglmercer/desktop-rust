@@ -8,7 +8,7 @@ import {
 import assert from 'node:assert'
 import { afterEach, describe, it, type TestContext } from 'node:test'
 import * as React from 'react'
-import { ipcRenderer } from '../../../src/web/host-bridge'
+import { hostIpc } from '../../../src/web/host-bridge'
 import { act } from '@testing-library/react'
 
 import { Account } from '../../../src/models/account'
@@ -1678,7 +1678,7 @@ describe('CommitMessage', () => {
       const menus = new Array<ReadonlyArray<ISerializableMenuItem>>()
       let selectedLabel: string | null = null
       t.mock.method(
-        ipcRenderer,
+        hostIpc,
         'invoke',
         async (
           channel: string,
@@ -1819,7 +1819,7 @@ describe('CommitMessage', () => {
         state.kind === 'error' ? `/${state.retry}` : ''
       }`, t => {
         let acted = 0
-        const menu = t.mock.method(ipcRenderer, 'invoke', async () => null)
+        const menu = t.mock.method(hostIpc, 'invoke', async () => null)
         const { view } = renderWithCommitModes({
           commitMode: 'copilot',
           isCreatingCopilotAssistedCommits: working,
@@ -1880,7 +1880,7 @@ describe('CommitMessage', () => {
     }
 
     it('keeps the panel gear disabled during pushing without exposing rollback Cancel', t => {
-      const menu = t.mock.method(ipcRenderer, 'invoke', async () => null)
+      const menu = t.mock.method(hostIpc, 'invoke', async () => null)
       const { view } = renderWithCommitModes({
         commitMode: 'copilot',
         isCreatingCopilotAssistedCommits: true,
@@ -2306,7 +2306,7 @@ describe('CommitMessage', () => {
       const updates = new Array<Partial<CommitOptions>>()
       let signOffIndex = -1
       t.mock.method(
-        ipcRenderer,
+        hostIpc,
         'invoke',
         (channel: string, items: ReadonlyArray<ISerializableMenuItem>) => {
           assert.strictEqual(channel, 'show-contextual-menu')

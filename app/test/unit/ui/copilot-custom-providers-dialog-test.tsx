@@ -28,10 +28,10 @@ let restoreIpcSend: (() => void) | null = null
 describe('CopilotCustomProvidersDialog', () => {
   beforeEach(async () => {
     const hostBridge = await import('../../../src/web/host-bridge')
-    const previousSend = hostBridge.ipcRenderer.send
-    hostBridge.ipcRenderer.send = () => {}
+    const previousSend = hostBridge.hostIpc.send
+    hostBridge.hostIpc.send = () => {}
     restoreIpcSend = () => {
-      hostBridge.ipcRenderer.send = previousSend
+      hostBridge.hostIpc.send = previousSend
     }
   })
 

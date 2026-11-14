@@ -2,7 +2,7 @@ import assert from 'node:assert'
 import { describe, it, TestContext } from 'node:test'
 import * as React from 'react'
 import { act } from '@testing-library/react'
-import { ipcRenderer } from '../../../src/web/host-bridge'
+import { hostIpc } from '../../../src/web/host-bridge'
 import { join } from 'path'
 import { RepositorySectionTab } from '../../../src/lib/app-state'
 import { ErrorWithMetadata } from '../../../src/lib/error-with-metadata'
@@ -41,7 +41,7 @@ async function renderHistory(t: TestContext) {
   t.mock.method(h.dispatcher, 'updateCompareForm', () => {})
   const menus = new Array<ReadonlyArray<ISerializableMenuItem>>()
   t.mock.method(
-    ipcRenderer,
+    hostIpc,
     'invoke',
     async (channel: string, items: ReadonlyArray<ISerializableMenuItem>) => {
       assert.strictEqual(channel, 'show-contextual-menu')

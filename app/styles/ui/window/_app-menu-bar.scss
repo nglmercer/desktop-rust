@@ -26,7 +26,7 @@
     }
   }
 
-  // Chromium 152 (Electron 44) made -webkit-app-region an inherited property
+  // Chromium 152 made -webkit-app-region an inherited property
   // (https://web.dev/blog/web-platform-08-2026?hl=en#the_window-drag_css_property),
   // so the foldout now inherits the title bar's drag region and contributes its
   // own box to it. Since the foldout covers the whole window below the title

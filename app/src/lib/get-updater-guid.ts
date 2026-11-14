@@ -1,10 +1,10 @@
-import { app } from '../web/host-bridge'
+import { hostApp } from '../web/host-bridge'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
 let cachedGUID: string | undefined = undefined
 
-const getUpdateGUIDPath = () => join(app.getPath('userData'), '.update-id')
+const getUpdateGUIDPath = () => join(hostApp.getPath('userData'), '.update-id')
 const writeUpdateGUID = (id = crypto.randomUUID()) =>
   writeFile(getUpdateGUIDPath(), id).then(() => id)
 

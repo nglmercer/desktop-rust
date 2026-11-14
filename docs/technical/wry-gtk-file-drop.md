@@ -1,7 +1,6 @@
 # Wry GTK file drop investigation
 
-The repository drop handler currently relies on Electron's
-`webUtils.getPathForFile`; the Vite renderer shim returns an empty path. A
+The repository drop handler currently previously relied on the old shell's native path lookup (`getPathForFile`); the host-bridge shim returns an empty path. A
 replacement for the Rust host remains necessary.
 
 On Linux with Wry 0.57.2, an experiment installed

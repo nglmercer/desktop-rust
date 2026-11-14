@@ -7,7 +7,7 @@
 
 type Listener = (event: any, ...args: any[]) => void
 
-class ShimIpcRenderer {
+class HostIpc {
   private listeners = new Map<string, Set<Listener>>()
 
   private bridge() {
@@ -87,128 +87,34 @@ class ShimIpcRenderer {
   }
 }
 
-export const ipcRenderer = new ShimIpcRenderer()
+export const hostIpc = new HostIpc()
 
-export const shell = {
-  beep: () => {
-    try {
-      new AudioContext().createOscillator().start()
-    } catch {}
-  },
-  openPath: async (p: string): Promise<string> => {
-    const bridge = Reflect.get(window, '__desktop')
-    if (!bridge || bridge.platform !== 'wry' || typeof bridge.invoke !== 'function') {
-      return 'Opening a host file is unavailable from this browser.'
-    }
-    try {
-      const result: unknown = await bridge.invoke('desktop.io.open-path', { path: p })
-      return typeof result === 'string' ? result : 'Unable to open the path.'
-    } catch {
-      // A cancelled or disconnected request can have already opened the file.
-      return 'Unable to confirm that the path was opened. The application may already be open; check before retrying.'
-    }
-  },
-  openExternal: async (url: string) => {
-    window.open(url, '_blank', 'noopener')
-    return true
-  },
-  showItemInFolder: async (_p: string) => {},
+/** Shell integration the webview cannot do itself. */
+export const hostShell = {
   /** Windows shortcut metadata is not readable from the webview. */
   readShortcutLink: (_p: string): { toastActivatorClsid?: string } => ({}),
-  trashItem: async (_p: string) => {
-    throw new Error('trashItem via ipc')
-  },
 }
 
-export const webUtils = {
-  getPathForFile: () => '',
-  getFilePath: () => '',
+/** Native path lookup for dropped files; the webview exposes none. */
+export const hostFiles = {
+  getPathForFile: (_file: File) => '',
 }
 
-export const remote = {
-  app: {
-    getVersion: () => '3.6.11-beta1',
-    getName: () => 'GitHub Desktop',
-    getPath: () => '',
-    getAppPath: () => '',
-    getPathForFile: () => '',
-  },
-  dialog: {},
-  getCurrentWindow: () => ({ isFocused: () => document.hasFocus() }),
-  getCurrentWebContents: () => ipcRenderer,
-}
-
-export interface App {
+export interface HostApp {
   getVersion(): string
   getName(): string
   getPath(name: string): string
   getAppPath(): string
-  getPathForFile(): string
   runningUnderARM64Translation?: boolean
   on(event: string, listener: (...args: any[]) => void): void
   once(event: string, listener: (...args: any[]) => void): void
 }
 
-export type { HostIpcEvent as IpcRendererEvent } from '../lib/host-types'
-
-export const app: App = {
-  getVersion: () => '3.6.11-beta1',
-  getName: () => 'GitHub Desktop',
+export const hostApp: HostApp = {
+  getVersion: () => __APP_VERSION__,
+  getName: () => __APP_NAME__,
   getPath: (_name: string) => '',
   getAppPath: () => '',
-  getPathForFile: () => '',
-  on: (_ev: string, _fn: any) => {},
-  once: (_ev: string, _fn: any) => {},
-}
-
-export const Menu = {
-  buildFromTemplate: (template: any[]) => ({
-    getMenuItemById: (_id: string) => null,
-    append: (_item: any) => {},
-    popup: (_opts?: any) => {},
-    setApplicationMenu: (_m: any) => {},
-  }),
-  setApplicationMenu: (_m: any) => {},
-  getApplicationMenu: () => null,
-}
-export const MenuItem = class {}
-export const ipcMain = {} as any
-export const contextBridge = { exposeInMainWorld(_k: string, _v: any) {} }
-export const nativeTheme = {
-  themeSource: 'system',
-  shouldUseDarkColors: false,
-  on: (_e: string, _f: any) => {},
-}
-export const screen = {
-  getPrimaryDisplay: () => ({ workAreaSize: { width: 1920, height: 1080 } }),
-  on: (_e: string, _f: any) => {},
-}
-export type BrowserWindowType = any
-// BrowserWindow placeholder is defined above via BrowserWindowShim
-
-export const dialog = {
-  showOpenDialog: async () => ({ canceled: true, filePaths: [] as string[] }),
-  showSaveDialog: async () => ({
-    canceled: true,
-    filePath: undefined as string | undefined,
-  }),
-  showMessageBox: async () => ({ response: 0 }),
-  showErrorBox: (_t: string, _c: string) => {},
-}
-
-export const BrowserWindowShim = {
-  getFocusedWindow: () => null,
-  getAllWindows: () => [],
-}
-// re-export for compat
-export { BrowserWindowShim as BrowserWindow }
-
-export default {
-  ipcRenderer,
-  shell,
-  webUtils,
-  remote,
-  app,
-  dialog,
-  BrowserWindow: BrowserWindowShim,
+  on: (_event: string, _listener: (...args: any[]) => void) => {},
+  once: (_event: string, _listener: (...args: any[]) => void) => {},
 }

@@ -161,7 +161,7 @@ Enabling Mandatory ASLR affects the MSYS2 core library, which is relied upon by 
 
 Related issue: [#3921](https://github.com/desktop/desktop/issues/3921)
 
-Electron enables hardware accelerated graphics by default, but some graphics cards have issues with hardware acceleration which means the application will launch successfully but it will be a black screen.
+The webview enables hardware accelerated graphics by default, but some graphics cards have issues with hardware acceleration which means the application will launch successfully but it will be a black screen.
 
 **Workaround:** if you set the `GITHUB_DESKTOP_DISABLE_HARDWARE_ACCELERATION` environment variable to any value and launch Desktop again it will disable hardware acceleration on launch, so the application is usable. Here are the steps to set the environment variable in PowerShell:
 

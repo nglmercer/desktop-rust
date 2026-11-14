@@ -29,13 +29,13 @@ async function renderCloneDialog(
 ) {
   const hostBridge = await import('../../../src/web/host-bridge')
   const originalDarwin = __DARWIN__
-  const originalSend = hostBridge.ipcRenderer.send
+  const originalSend = hostBridge.hostIpc.send
   const originalDefaultDir = localStorage.getItem('last-clone-location')
   Object.assign(globalThis, { __DARWIN__: darwin })
-  hostBridge.ipcRenderer.send = () => {}
+  hostBridge.hostIpc.send = () => {}
   t.after(() => {
     Object.assign(globalThis, { __DARWIN__: originalDarwin })
-    hostBridge.ipcRenderer.send = originalSend
+    hostBridge.hostIpc.send = originalSend
     if (originalDefaultDir === null) {
       localStorage.removeItem('last-clone-location')
     } else {
@@ -165,7 +165,7 @@ describe('CloneRepository path validation', () => {
     const { directory, pathInput, cloneButton } = await renderCloneDialog(t)
     const path = Path.join(directory, 'chosen.app')
     const hostBridge = await import('../../../src/web/host-bridge')
-    t.mock.method(hostBridge.ipcRenderer, 'invoke', async (channel: string) => {
+    t.mock.method(hostBridge.hostIpc, 'invoke', async (channel: string) => {
       assert.strictEqual(channel, 'show-save-dialog')
       return path
     })
@@ -385,11 +385,11 @@ describe('CloneRepository GitHub tab account changes', () => {
     const originalResizeObserver = window.ResizeObserver
     Object.assign(window, { ResizeObserver: SizedResizeObserver })
     const hostBridge = await import('../../../src/web/host-bridge')
-    const originalSend = hostBridge.ipcRenderer.send
-    hostBridge.ipcRenderer.send = () => {}
+    const originalSend = hostBridge.hostIpc.send
+    hostBridge.hostIpc.send = () => {}
     t.after(() => {
       Object.assign(window, { ResizeObserver: originalResizeObserver })
-      hostBridge.ipcRenderer.send = originalSend
+      hostBridge.hostIpc.send = originalSend
     })
     t.mock.method(API, 'fromAccount', () =>
       createMockAPI({ fetchRepositoryCloneInfo })

@@ -42,7 +42,7 @@ Do NOT generate entries for:
 - Documentation updates
 - PRs with `Notes: no-notes` in their body
 
-**Exception:** Updates to **embedded components that ship with the app** (e.g., Git, Git LFS, Git Credential Manager, Electron) should always be included, even when triggered by a security advisory. These are user-facing because they change the software users run. Example:
+**Exception:** Updates to **embedded components that ship with the app** (e.g., Git, Git LFS, Git Credential Manager) should always be included, even when triggered by a security advisory. These are user-facing because they change the software users run. Example:
 ```
 [Improved] Update Git for Windows to v2.53.0.windows.3 - #21957
 ```
