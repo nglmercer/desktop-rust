@@ -303,11 +303,12 @@ export async function mergeBasis(
     (await exec(args, repository.path)).stdout.trim()
   // Resolve by full ref name so a branch or remote named like an option
   // (`--remote/main`) is not read as one.
-  let sourceRef = `refs/heads/${sourceBranch}`
-  for (const candidate of [
-    `refs/heads/${sourceBranch}`,
-    `refs/remotes/${sourceBranch}`,
-  ]) {
+  let sourceRef = sourceBranch.startsWith('refs/')
+    ? sourceBranch
+    : `refs/heads/${sourceBranch}`
+  for (const candidate of sourceBranch.startsWith('refs/')
+    ? []
+    : [`refs/heads/${sourceBranch}`, `refs/remotes/${sourceBranch}`]) {
     const found = await exec(
       ['show-ref', '--verify', '--quiet', '--', candidate],
       repository.path
