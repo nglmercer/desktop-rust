@@ -2841,6 +2841,16 @@ responsible for inspecting any partial destination. Windows process-tree
 cancellation, Git LFS progress, and recursive selected-account isolation remain
 open.
 
+The Wry `resolve-proxy` implementation reports only a marker when the host has
+a proxy environment variable; it does not return proxy URLs or credentials to
+the renderer. Proxy-aware operations conservatively retain their existing Git
+route, and the Rust host's Git child inherits the proxy and `NO_PROXY` settings.
+This marker does not prevent Git diagnostics from exposing credentials: malformed
+proxy settings can still cause Git to include them in stderr sent to the UI.
+This does not read operating-system proxy settings or evaluate PAC files.
+Ordinary clone still uses its existing renderer Git route; selected-account and
+recursive clone proxy and credential parity remain incomplete.
+
 Wry and browser WebSocket remote-HEAD refresh use a reviewed Rust operation. It binds
 the raw loose HEAD file, including dangling symbolic refs, and checks path
 components for links. It currently accepts only Git's files ref backend and

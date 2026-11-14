@@ -1,5 +1,5 @@
 import { envForAuthentication } from './authentication'
-import { resolveGitProxy } from '../resolve-git-proxy'
+import { inheritHostProxy, resolveGitProxy } from '../resolve-git-proxy'
 import { getHTMLURL } from '../api'
 import {
   Repository,
@@ -93,7 +93,7 @@ export async function envForRemoteOperation(remoteUrl: string) {
 export async function envForProxy(
   remoteUrl: string,
   env: NodeJS.ProcessEnv = process.env,
-  resolve: (url: string) => Promise<string | undefined> = resolveGitProxy
+  resolve: (url: string) => Promise<string | typeof inheritHostProxy | undefined> = resolveGitProxy
 ): Promise<Record<string, string | undefined> | undefined> {
   const protocolMatch = /^(https?):\/\//i.exec(remoteUrl)
 
@@ -135,5 +135,10 @@ export async function envForProxy(
     return undefined
   })
 
+  // Wry's Git child inherits the host environment. Return a non-undefined
+  // value so callers that require proxy parity select their legacy Git route.
+  if (proxyUrl === inheritHostProxy) {
+    return {}
+  }
   return proxyUrl === undefined ? undefined : { [envKey]: proxyUrl }
 }

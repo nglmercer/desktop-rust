@@ -1,9 +1,12 @@
 import { resolveProxy } from '../ui/main-process-proxy'
 import { parsePACString } from './parse-pac-string'
 
+/** Wry's host has a proxy in its environment, inherited by its Git child. */
+export const inheritHostProxy = Symbol('inheritHostProxy')
+
 export async function resolveGitProxy(
   url: string
-): Promise<string | undefined> {
+): Promise<string | typeof inheritHostProxy | undefined> {
   // resolveProxy doesn't throw an error (at least not in the
   // current Electron version) but it could in the future and
   // it's also possible that the IPC layer could throw an
@@ -14,6 +17,10 @@ export async function resolveGitProxy(
     log.error(`Failed resolving proxy for '${url}'`, err)
     return 'DIRECT'
   })
+
+  if (pacString === 'DESKTOP_INHERIT_PROXY') {
+    return inheritHostProxy
+  }
 
   const proxies = parsePACString(pacString)
 

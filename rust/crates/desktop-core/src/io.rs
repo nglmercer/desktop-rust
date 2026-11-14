@@ -1110,6 +1110,140 @@ mod tests {
         Resources::new(Limits::for_profile(Profile::Default))
     }
 
+    #[test]
+    fn git_inherits_host_proxy_and_no_proxy() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            process::Command,
+            time::Instant,
+        };
+        const CHILD: &str = "DESKTOP_PROXY_INHERITANCE_TEST";
+        if let Ok(target) = std::env::var(CHILD) {
+            assert_eq!(
+                crate::platform::resolve_proxy(&target),
+                "DESKTOP_INHERIT_PROXY"
+            );
+            let result = git_exec(
+                Path::new("git"),
+                &test_resources(),
+                &json!({
+                    "args": ["ls-remote", "--", target],
+                    "env": {}
+                }),
+            );
+            let visible = format!("{result:?}");
+            assert!(!visible.contains("proxy-secret"));
+            return;
+        }
+        for mode in ["http_proxy", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let address = listener.local_addr().unwrap();
+            let https = mode == "HTTPS_PROXY";
+            let target = if mode == "NO_PROXY" {
+                format!("http://{address}/repo")
+            } else if https {
+                "https://example.invalid/repo".into()
+            } else {
+                "http://example.invalid/repo".into()
+            };
+            let proxy = format!("http://proxy-user:proxy-secret@{address}");
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "io::tests::git_inherits_host_proxy_and_no_proxy",
+                    "--nocapture",
+                ])
+                .env(CHILD, &target)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env(
+                    "GIT_CONFIG_GLOBAL",
+                    if cfg!(windows) { "NUL" } else { "/dev/null" },
+                );
+            for name in [
+                "http_proxy",
+                "HTTP_PROXY",
+                "https_proxy",
+                "HTTPS_PROXY",
+                "all_proxy",
+                "ALL_PROXY",
+                "no_proxy",
+                "NO_PROXY",
+            ] {
+                command.env_remove(name);
+            }
+            if mode == "NO_PROXY" {
+                command
+                    .env("http_proxy", "http://127.0.0.1:1")
+                    .env("NO_PROXY", "127.0.0.0/8");
+            } else {
+                command.env(mode, &proxy);
+            }
+            let mut child = command
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let until = Instant::now() + Duration::from_secs(10);
+            let mut request = String::new();
+            for attempt in 0..2 {
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && Instant::now() < until =>
+                        {
+                            std::thread::sleep(Duration::from_millis(10))
+                        }
+                        Err(error) => {
+                            let _ = child.kill();
+                            panic!("proxy fixture did not receive {mode}: {error}");
+                        }
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buf = [0; 1024];
+                while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0 && bytes.len() + n <= 8192);
+                    bytes.extend_from_slice(&buf[..n]);
+                }
+                request = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
+                if mode != "NO_PROXY" && attempt == 0 && !request.contains("proxy-authorization:") {
+                    stream.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"test\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                    continue;
+                }
+                stream
+                    .write_all(
+                        b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+                break;
+            }
+            if mode != "NO_PROXY" {
+                assert!(
+                    request.contains("proxy-authorization: basic chjvehktdxnlcjpwcm94es1zzwnyzxq=")
+                );
+            } else {
+                assert!(!request.contains("proxy-authorization:"));
+            }
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "child failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("proxy-secret"));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains("proxy-secret"));
+        }
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("desktop-io-{name}-{}", unique_suffix(0)));
         std::fs::create_dir_all(&dir).unwrap();

@@ -309,36 +309,51 @@ pub fn move_to_trash(path: &str) -> Result<()> {
     }
 }
 
-/// `session.defaultSession.resolveProxy(url)`. We do not own a Chromium
-/// network stack, so honour the standard proxy environment variables and
-/// return the same `"PROXY host:port"` / `"DIRECT"` shape.
+/// Tell the renderer when Git must inherit a host-configured proxy without
+/// returning the proxy URL (which may contain credentials) across IPC.
+/// This does not inspect system proxy settings or evaluate PAC files.
 pub fn resolve_proxy(url: &str) -> String {
-    let no_proxy = std::env::var("NO_PROXY").unwrap_or_default();
-    let host = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split('/')
-        .next()
-        .unwrap_or("");
-    if no_proxy.split(',').any(|entry| {
-        let entry = entry.trim().trim_start_matches('.');
-        !entry.is_empty() && (host == entry || host.ends_with(&format!(".{entry}")))
-    }) {
-        return "DIRECT".to_string();
-    }
-    let proxy = if url.starts_with("https") {
-        std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy"))
-    } else {
-        std::env::var("HTTP_PROXY").or_else(|_| std::env::var("http_proxy"))
+    resolve_proxy_with(url, |name| {
+        std::env::var_os(name).is_some_and(|v| !v.is_empty())
+    })
+}
+
+fn resolve_proxy_with(url: &str, present: impl Fn(&str) -> bool) -> String {
+    let Ok(target) = reqwest::Url::parse(url) else {
+        return "DIRECT".into();
     };
-    match proxy {
-        Ok(value) => format!(
-            "PROXY {}",
-            value
-                .trim_start_matches("http://")
-                .trim_start_matches("https://")
-        ),
-        Err(_) => "DIRECT".to_string(),
+    let configured = match target.scheme() {
+        "http" => present("http_proxy"),
+        "https" => present("https_proxy") || present("HTTPS_PROXY"),
+        _ => false,
+    } || (matches!(target.scheme(), "http" | "https")
+        && (present("all_proxy") || present("ALL_PROXY")));
+    if configured {
+        "DESKTOP_INHERIT_PROXY".into()
+    } else {
+        "DIRECT".into()
+    }
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::resolve_proxy_with;
+
+    #[test]
+    fn proxy_detection_is_only_a_marker_and_keeps_curl_http_proxy_rules() {
+        let detect =
+            |target: &str, names: &[&str]| resolve_proxy_with(target, |name| names.contains(&name));
+        assert_eq!(
+            detect("https://example.test", &["HTTPS_PROXY"]),
+            "DESKTOP_INHERIT_PROXY"
+        );
+        assert_eq!(
+            detect("http://example.test", &["ALL_PROXY"]),
+            "DESKTOP_INHERIT_PROXY"
+        );
+        assert_eq!(detect("http://example.test", &["HTTP_PROXY"]), "DIRECT");
+        assert_eq!(detect("ssh://example.test", &["ALL_PROXY"]), "DIRECT");
+        assert_eq!(detect("https://example.test", &[]), "DIRECT");
     }
 }
 

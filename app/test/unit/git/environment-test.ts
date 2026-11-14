@@ -1,7 +1,12 @@
 // @vitest-environment node
-import { describe, it } from 'vitest'
+import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import { envForProxy } from '../../../src/lib/git/environment'
+import { inheritHostProxy, resolveGitProxy } from '../../../src/lib/resolve-git-proxy'
+
+vi.mock('../../../src/ui/main-process-proxy', () => ({
+  resolveProxy: vi.fn(async () => 'DESKTOP_INHERIT_PROXY'),
+}))
 
 describe('git/environmnent', () => {
   const httpProxyUrl = 'http://proxy:8888/'
@@ -20,6 +25,13 @@ describe('git/environmnent', () => {
   }
 
   describe('envForProxy', () => {
+    it('leaves a host-configured proxy in the child environment while signalling fallback', async () => {
+      assert.equal(await resolveGitProxy('https://github.com/'), inheritHostProxy)
+      assert.deepStrictEqual(
+        await envForProxy('https://github.com/', {}, resolveGitProxy),
+        {}
+      )
+    })
     it('sets the correct environment variable based on protocol', async () => {
       assert.deepStrictEqual(
         await envForProxy('https://github.com/', {}, defaultResolver),
