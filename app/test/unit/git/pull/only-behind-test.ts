@@ -1,8 +1,6 @@
 import { describe, it, type TestContext } from 'vitest'
 import assert from 'node:assert'
 import {
-  fetch,
-  pull,
   getAheadBehind,
   revSymmetricDifference,
 } from '../../../../src/lib/git'
@@ -13,6 +11,7 @@ import {
 } from '../../../helpers/repository-scaffolding'
 import { getTipOrError, getRefOrError } from '../../../helpers/git'
 import { setupLocalConfig } from '../../../helpers/local-config'
+import { fetch, pull } from '../../../helpers/pull'
 import { IRemote } from '../../../../src/models/remote'
 
 const featureBranch = 'this-is-a-feature'
