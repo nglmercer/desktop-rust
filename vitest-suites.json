@@ -1,4 +1,6 @@
 [
+  "app/test/unit/browser-creation-templates-integration-test.ts",
+  "app/test/unit/bundled-creation-templates-test.ts",
   "app/test/unit/accounts-store-test.ts",
   "app/test/unit/desktop-file-transport-test.ts",
   "app/test/unit/main-process/menu-test.ts",

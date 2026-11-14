@@ -1,6 +1,7 @@
 import * as Path from 'path'
 import { readFile, writeFile } from 'fs/promises'
 import { backend } from '../../backend/client'
+import { readBundledTemplate } from './bundled-templates'
 
 export interface ILicense {
   /** The human-readable name. */
@@ -33,7 +34,10 @@ export async function getLicenses(): Promise<ReadonlyArray<ILicense>> {
       'static',
       'available-licenses.json'
     )
-    const json = await readFile(licensesMetadataPath, 'utf8')
+    const json =
+      typeof window !== 'undefined' && backend().transportKind !== 'none'
+        ? await readBundledTemplate('static/available-licenses.json')
+        : await readFile(licensesMetadataPath, 'utf8')
     const licenses: Array<ILicense> = JSON.parse(json)
 
     cachedLicenses = licenses.sort((a, b) => {

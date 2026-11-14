@@ -312,11 +312,16 @@ transports stage the selected paths through Rust and refuse a repository with an
 existing commit or a populated index. It uses the Rust large-blob guard before
 committing; a blocked, failed or interrupted commit can leave files staged and
 requires inspection before retrying. Template loading remains
-in the renderer. Registration and ordinary remote refreshes resolve supported
-fetch remotes through Rust, preserving Git's URL rewrites and exact editable
-URLs. Bare repositories and non-repository directories are also handled by
-Rust. Credential-bearing or unsupported URL forms and calls with custom Git
-environments retain the legacy discovery path.
+in the renderer. For Wry and WebSocket, license metadata and gitignore templates
+are loaded directly from the Rust-served renderer bundle rather than through
+the Node filesystem shim. An actual Linux Wry webview loaded the generated
+assets through the desktop protocol. A Chromium journey through the real
+WebSocket bridge created a repository using C++ and MIT templates, including
+the URL-encoded template name. Registration and ordinary remote refreshes
+resolve supported fetch remotes through Rust, preserving Git's URL rewrites
+and exact editable URLs. Bare repositories and non-repository directories are
+also handled by Rust. Credential-bearing or unsupported URL forms and calls with
+custom Git environments retain the legacy discovery path.
 Individual remote URL reads also use Rust for supported URLs, distinguishing a
 missing remote from an unsupported URL without exposing credentials.
 Adding, updating and removing supported remotes now use a typed Rust operation

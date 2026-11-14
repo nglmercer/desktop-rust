@@ -6,12 +6,18 @@ const mocks = vi.hoisted(() => ({
   writeFile: vi.fn(),
   readFile: vi.fn(),
   readdir: vi.fn(),
+  listTemplates: vi.fn(),
+  readTemplate: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
     transportKind: mocks.transport,
     writeRepositoryCreationFile: mocks.writeCreationFile,
   }),
+}))
+vi.mock('../../src/ui/add-repository/bundled-templates', () => ({
+  listBundledGitIgnores: mocks.listTemplates,
+  readBundledTemplate: mocks.readTemplate,
 }))
 vi.mock('fs/promises', () => ({
   writeFile: mocks.writeFile,
@@ -35,6 +41,8 @@ describe('new repository files', () => {
     mocks.transport = 'ws'
     mocks.readdir.mockResolvedValue(['Node.gitignore'])
     mocks.readFile.mockResolvedValue('node_modules/\n')
+    mocks.listTemplates.mockResolvedValue(['Node.gitignore'])
+    mocks.readTemplate.mockResolvedValue('node_modules/\n')
   })
 
   it.each(['ws', 'wry'])(
@@ -71,6 +79,11 @@ describe('new repository files', () => {
         ],
       ])
       expect(mocks.writeFile).not.toHaveBeenCalled()
+      expect(mocks.readdir).not.toHaveBeenCalled()
+      expect(mocks.readFile).not.toHaveBeenCalled()
+      expect(mocks.readTemplate).toHaveBeenCalledWith(
+        'static/gitignore/Node.gitignore'
+      )
     }
   )
 
@@ -85,6 +98,15 @@ describe('new repository files', () => {
     expect(mocks.writeFile).toHaveBeenCalledWith(
       expect.stringMatching(/README\.md$/),
       '# Project\n'
+    )
+    await writeGitIgnore('/repo', 'Node')
+    expect(mocks.readFile).toHaveBeenCalledWith(
+      expect.stringMatching(/Node\.gitignore$/),
+      'utf8'
+    )
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      expect.stringMatching(/\.gitignore$/),
+      'node_modules/\n'
     )
   })
 })

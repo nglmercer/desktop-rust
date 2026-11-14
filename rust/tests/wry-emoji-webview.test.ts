@@ -75,11 +75,21 @@ describe.skipIf(!enabled || process.platform !== 'linux')(
         }
         const filter = path.resolve('app/src/lib/markdown-filters/emoji-filter')
         const reader = path.resolve('app/src/lib/read-emoji')
+        const templates = path.resolve(
+          'app/src/ui/add-repository/bundled-templates'
+        )
+        const gitignores = path.resolve('app/src/ui/add-repository/gitignores')
+        const licenses = path.resolve('app/src/ui/add-repository/licenses')
         writeFileSync(
           entry,
           `
 import { EmojiFilter } from ${JSON.stringify(filter)}
 import { readEmoji } from ${JSON.stringify(reader)}
+import { listBundledGitIgnores, readBundledTemplate } from ${JSON.stringify(
+            templates
+          )}
+import { getGitIgnoreNames } from ${JSON.stringify(gitignores)}
+import { getLicenses } from ${JSON.stringify(licenses)}
 ;(window as any).runProbe = async () => {
   const emojis = await readEmoji('/__desktop_app__')
   const shipit = emojis.get(':shipit:')
@@ -87,6 +97,13 @@ import { readEmoji } from ${JSON.stringify(reader)}
   const nodes = await new EmojiFilter(emojis).filter(document.createTextNode('hello :shipit:'))
   const image = nodes?.find(node => node instanceof HTMLImageElement) as HTMLImageElement | undefined
   if (!image || !image.src.startsWith('data:image/png;base64,iVBOR')) throw new Error('Emoji filter did not render a PNG')
+  const names = await listBundledGitIgnores()
+  if (!names.includes('Node.gitignore')) throw new Error('Missing Node gitignore template')
+  if (!(await getGitIgnoreNames()).includes('Node')) throw new Error('Repository creation omitted Node template')
+  const ignore = await readBundledTemplate('static/gitignore/Node.gitignore')
+  if (!ignore.includes('node_modules')) throw new Error('Incorrect Node gitignore template')
+  const licenseData = await getLicenses()
+  if (!Array.isArray(licenseData) || !licenseData.some((license: any) => license.name && license.body)) throw new Error('Missing license templates')
   return { url: shipit.url, imagePrefix: image.src.slice(0, 45) }
 }
 `
