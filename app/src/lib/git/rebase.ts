@@ -596,11 +596,13 @@ export async function continueRebase(
         if (error.message === 'Resolve and stage conflicts before continuing') {
           return RebaseResult.OutstandingFilesNotStaged
         }
+        // A tracked change the caller did not list is never staged, which is
+        // what makes Git refuse to continue.
         if (
           error.message.startsWith('Unable to continue rebase') &&
-          (await git(['diff', '--quiet'], repository.path, 'continueRebaseUnstaged', {
-            successExitCodes: new Set([0, 1]),
-          })).exitCode === 1
+          trackedFilesAfter.some(
+            changed => !files.some(listed => listed.path === changed.path)
+          )
         ) {
           return RebaseResult.OutstandingFilesNotStaged
         }
