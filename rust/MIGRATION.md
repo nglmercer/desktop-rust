@@ -65,7 +65,23 @@ It refuses cross-platform labels, retains an existing package if preparation
 fails, and no longer builds the older `desktop-native` host. On Linux the
 staged CLI was run outside the checkout and served the embedded renderer.
 This is a development package, not proof of complete platform packaging or
-third-party license inventory. The desktop package requires Wry dependencies;
+third-party license inventory. The package now includes a host-filtered Cargo
+normal-dependency inventory in `meta/rust-dependencies.json`, with explicitly
+declared license files and top-level LICENSE, LICENCE, LICENSES, LICENCES,
+UNLICENSE, COPYING, NOTICE, COPYRIGHT, AUTHORS and THIRD_PARTY files copied
+byte-for-byte into
+`licenses/rust` under content hashes. Matching includes punctuation suffixes;
+matching directories are listed but not searched; other nested files are not
+searched. Missing local notices and missing declared
+files are recorded explicitly. Metadata resolution is locked and respects
+Cargo's network settings; an inspection failure leaves any existing package
+intact. The graph can include
+extra workspace-unified features and excludes Cargo build/dev dependencies,
+embedded code, native system libraries and npm packages. The renderer's
+existing `ui/static/licenses.json` remains a separate, incomplete npm notice
+list. License file path checks reject symlinks and escaping paths but do not
+lock crate directories against concurrent changes by another process.
+The desktop package requires Wry dependencies;
 headless Termux builds remain a separate path.
 
 Build and release scripts now use `tsx` rather than a direct `ts-node`

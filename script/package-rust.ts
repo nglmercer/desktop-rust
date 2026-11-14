@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import * as path from 'node:path'
+import { collectRustLicenseInventory } from './rust-license-inventory'
 
 type Platform = 'linux' | 'macos' | 'windows'
 type Architecture = 'x64' | 'arm64'
@@ -79,6 +80,13 @@ export function packageRust(
     throw new Error(
       `Cannot package ${requestedPlatform} on ${platform}: build on the target platform`
     )
+  }
+  for (const file of [
+    'LICENSE',
+    'rust/THIRD_PARTY_NOTICES.txt',
+    'gemoji/LICENSE',
+  ]) {
+    requiredFile(path.join(repo, file))
   }
   const app = JSON.parse(
     readFileSync(path.join(repo, 'app/package.json'), 'utf8')
@@ -207,9 +215,36 @@ export function packageRust(
     path.join(ui, 'index.html'),
     path.join(ui, 'highlighter.js'),
     path.join(ui, 'ipc-shim.js'),
+    path.join(ui, 'static/licenses.json'),
+    path.join(ui, 'static/LICENSE.choosealicense.md'),
     path.join(repo, 'gemoji/db/emoji.json'),
   ])
     requiredFile(file)
+  let webNotices: unknown
+  try {
+    webNotices = JSON.parse(
+      readFileSync(path.join(ui, 'static/licenses.json'), 'utf8')
+    )
+  } catch {
+    throw new Error('The renderer license notice list is invalid')
+  }
+  if (
+    webNotices === null ||
+    typeof webNotices !== 'object' ||
+    Array.isArray(webNotices) ||
+    Object.keys(webNotices).length === 0 ||
+    !Object.values(webNotices).every(
+      notice =>
+        notice !== null &&
+        typeof notice === 'object' &&
+        !Array.isArray(notice) &&
+        'license' in notice &&
+        typeof notice.license === 'string' &&
+        notice.license.trim().length > 0
+    )
+  ) {
+    throw new Error('The renderer license notice list is empty or invalid')
+  }
 
   const linuxMusl = platform === 'linux' && triple.includes('musl')
   const sdkPlatform = copilotPlatform(platform, linuxMusl)
@@ -252,6 +287,7 @@ export function packageRust(
   try {
     for (const dir of ['bin', 'ui', 'assets', 'licenses', 'meta'])
       mkdirSync(path.join(staging, dir))
+    collectRustLicenseInventory(repo, triple, staging)
     cpSync(cli, path.join(staging, 'bin', `desktop-rs${suffix}`))
     cpSync(gui, path.join(staging, 'bin', `github-desktop-rs${suffix}`))
     if (platform !== 'windows') {
@@ -267,20 +303,27 @@ export function packageRust(
         recursive: true,
         dereference: true,
       })
-    for (const file of [
-      'LICENSE',
-      'rust/THIRD_PARTY_NOTICES.txt',
-      'app/LICENSE',
+    for (const [source, name] of [
+      [path.join(repo, 'LICENSE'), 'LICENSE'],
+      [
+        path.join(repo, 'rust/THIRD_PARTY_NOTICES.txt'),
+        'THIRD_PARTY_NOTICES.txt',
+      ],
+      [path.join(repo, 'gemoji/LICENSE'), 'gemoji-LICENSE'],
+      [path.join(ui, 'static/licenses.json'), 'web-notices.json'],
+      [
+        path.join(ui, 'static/LICENSE.choosealicense.md'),
+        'choosealicense-LICENSE',
+      ],
     ]) {
-      copyOptional(
-        path.join(repo, file),
-        path.join(
-          staging,
-          'licenses',
-          file === 'app/LICENSE' ? 'app-LICENSE' : path.basename(file)
-        )
-      )
+      cpSync(source, path.join(staging, 'licenses', name), {
+        dereference: true,
+      })
     }
+    copyOptional(
+      path.join(repo, 'app/LICENSE'),
+      path.join(staging, 'licenses/app-LICENSE')
+    )
     writeFileSync(
       path.join(staging, 'meta/package.json'),
       `${JSON.stringify(

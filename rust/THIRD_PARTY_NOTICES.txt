@@ -2,7 +2,9 @@ Desktop Rust migration: third-party notices
 
 The backend embeds the trusted RE2JS matcher through rquickjs/QuickJS-NG.
 The original GitHub Desktop shared matcher is covered by the repository MIT LICENSE.
-Other browser dependency notices are in web/THIRD_PARTY_NOTICES.txt.
+The renderer's generated static/licenses.json contains a partial browser
+dependency notice list. Rust development packages also include that file as
+licenses/web-notices.json; it is not a complete dependency inventory.
 
 rquickjs 0.14.0 (MIT)
 =====================

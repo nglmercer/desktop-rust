@@ -1,4 +1,5 @@
 [
+  "script/rust-license-inventory.test.ts",
   "app/test/unit/ui/repository-list-item-context-menu-test.ts",
   "app/test/unit/git-store-test.ts",
   "app/test/unit/git/worktree-move-test.ts",

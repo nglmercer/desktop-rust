@@ -64,8 +64,12 @@ function fixture(): string {
     'out/vite-dist/index.html',
     'out/vite-dist/highlighter.js',
     'out/vite-dist/ipc-shim.js',
+    'out/vite-dist/static/licenses.json',
+    'out/vite-dist/static/LICENSE.choosealicense.md',
     'gemoji/db/emoji.json',
+    'gemoji/LICENSE',
     'LICENSE',
+    'rust/THIRD_PARTY_NOTICES.txt',
   ])
     write(root, file)
   write(
@@ -73,7 +77,14 @@ function fixture(): string {
     'rust/crates/core/src/copilot.rs',
     'pub const COPILOT_SDK_VERSION: &str = "1.2.3";'
   )
+  write(root, 'rust/crates/desktop-app/Cargo.toml')
+  write(root, 'rust/crates/cli/Cargo.toml')
   write(root, 'out/vite-dist/assets/renderer.js', 'renderer')
+  write(
+    root,
+    'out/vite-dist/static/licenses.json',
+    JSON.stringify({ desktop: { license: 'MIT' } })
+  )
   return root
 }
 
@@ -98,6 +109,41 @@ beforeEach(() => {
       return { status: 0, stdout: `host: ${rustArch}-${rustOs}\n`, stderr: '' }
     }
     if (command === 'cargo') {
+      if (values[0] === 'metadata') {
+        if (process.env.FAKE_METADATA_ERROR)
+          return { status: 1, stdout: '', stderr: 'unavailable' }
+        const packages = [
+          {
+            id: 'desktop-app',
+            name: 'desktop-app',
+            manifest_path: path.join(
+              options.cwd,
+              'rust/crates/desktop-app/Cargo.toml'
+            ),
+          },
+          {
+            id: 'desktop-cli',
+            name: 'desktop-cli',
+            manifest_path: path.join(options.cwd, 'rust/crates/cli/Cargo.toml'),
+          },
+        ].map(pkg => ({
+          ...pkg,
+          version: '1.0.0',
+          source: null,
+          repository: null,
+          license: 'MIT',
+          license_file: null,
+        }))
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            packages,
+            workspace_members: packages.map(pkg => pkg.id),
+            resolve: { nodes: packages.map(pkg => ({ id: pkg.id, deps: [] })) },
+          }),
+          stderr: '',
+        }
+      }
       const name = values.includes('desktop-cli')
         ? 'desktop-rs'
         : 'github-desktop-rs'
@@ -202,7 +248,36 @@ describe('Rust packaging', () => {
         'packaged-ui',
         '--message-format=json-render-diagnostics',
       ],
+      [
+        'metadata',
+        '--locked',
+        '--format-version=1',
+        '--filter-platform',
+        expect.any(String),
+        '--features',
+        'desktop-cli/embedded-ui,desktop-cli/packaged-runtime,desktop-app/packaged-ui',
+      ],
     ])
+    const inventory = JSON.parse(
+      readFileSync(path.join(output, 'meta/rust-dependencies.json'), 'utf8')
+    )
+    expect(inventory.packages).toHaveLength(2)
+    expect(
+      inventory.packages.every(
+        (pkg: { noLocalNoticeFound: boolean }) => pkg.noLocalNoticeFound
+      )
+    ).toBe(true)
+    for (const file of [
+      'LICENSE',
+      'THIRD_PARTY_NOTICES.txt',
+      'gemoji-LICENSE',
+      'web-notices.json',
+      'choosealicense-LICENSE',
+    ]) {
+      expect(
+        readFileSync(path.join(output, 'licenses', file)).length
+      ).toBeGreaterThan(0)
+    }
   })
 
   it('rejects an unrelated target before building', () => {
@@ -237,7 +312,9 @@ describe('Rust packaging', () => {
     ).toBe('release')
     expect(
       spawn.mock.calls
-        .filter(call => call[0] === 'cargo')
+        .filter(
+          call => call[0] === 'cargo' && (call[1] as string[])[0] === 'build'
+        )
         .every(call => (call[1] as string[]).includes('--release'))
     ).toBe(true)
     vi.stubEnv('FAKE_BAD_ARTIFACT', '1')
@@ -313,6 +390,65 @@ describe('Rust packaging', () => {
     expect(() => packageRust(root)).toThrow('highlighter.js')
     expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
   })
+
+  it('preserves an existing package when the renderer notice list is invalid', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    const root = fixture()
+    const previous = `dist/Test Desktop-dev-${host}-${process.arch}/previous`
+    write(root, previous, 'keep')
+    write(root, 'out/vite-dist/static/licenses.json', '{}')
+    expect(() => packageRust(root)).toThrow(
+      'license notice list is empty or invalid'
+    )
+    expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
+    for (const contents of ['{"bad":null}', '{"bad":{"license":""}}']) {
+      write(root, 'out/vite-dist/static/licenses.json', contents)
+      expect(() => packageRust(root)).toThrow(
+        'license notice list is empty or invalid'
+      )
+      expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
+    }
+  })
+
+  it('refuses packaging without the bundled emoji license', () => {
+    const root = fixture()
+    rmSync(path.join(root, 'gemoji/LICENSE'))
+    expect(() => packageRust(root)).toThrow('gemoji')
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('preserves an existing package when Cargo metadata is unavailable', () => {
+    vi.stubEnv('RELEASE_CHANNEL', 'development')
+    vi.stubEnv('CARGO_TARGET_DIR', '')
+    vi.stubEnv('FAKE_METADATA_ERROR', '1')
+    const root = fixture()
+    const previous = `dist/Test Desktop-dev-${host}-${process.arch}/previous`
+    write(root, previous, 'keep')
+    expect(() => packageRust(root)).toThrow(
+      'Could not inspect locked Cargo metadata'
+    )
+    expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves an existing package when a crate license is a symlink',
+    () => {
+      vi.stubEnv('RELEASE_CHANNEL', 'development')
+      vi.stubEnv('CARGO_TARGET_DIR', '')
+      const root = fixture()
+      const previous = `dist/Test Desktop-dev-${host}-${process.arch}/previous`
+      write(root, previous, 'keep')
+      const privateFile = path.join(root, 'private')
+      writeFileSync(privateFile, 'private')
+      symlinkSync(
+        privateFile,
+        path.join(root, 'rust/crates/desktop-app/LICENSE')
+      )
+      expect(() => packageRust(root)).toThrow('symbolic link')
+      expect(readFileSync(path.join(root, previous), 'utf8')).toBe('keep')
+    }
+  )
 
   it('preserves an existing package when the release build fails', () => {
     vi.stubEnv('RELEASE_CHANNEL', 'development')
