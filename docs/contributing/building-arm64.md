@@ -34,7 +34,7 @@ $ export TARGET_ARCH=arm64
 The following commands build the legacy Electron development version of Desktop:
 
 ```shellsession
-$ npm run build:dev
+$ npm run build:electron:dev
 $ npm run start:electron
 ```
 

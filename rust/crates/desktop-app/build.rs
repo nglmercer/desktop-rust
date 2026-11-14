@@ -107,7 +107,25 @@ fn build_bundle(repo: &Path, dist: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The development renderer uses Node's host platform when compiling assets.
+fn require_native_target(enabled: bool, host: &str, target: &str) -> Result<(), String> {
+    if enabled && host != target {
+        return Err(format!(
+            "Rust development builds require the native Cargo target: host is {host}, target is {target}. Remove the Cargo target override and rebuild the renderer."
+        ));
+    }
+    Ok(())
+}
+
 fn main() {
+    println!("cargo:rerun-if-env-changed=DESKTOP_REQUIRE_NATIVE_PLATFORM");
+    let require_native =
+        std::env::var_os("DESKTOP_REQUIRE_NATIVE_PLATFORM").is_some_and(|value| value == "1");
+    if require_native {
+        let host = std::env::var("HOST").expect("Cargo did not provide the host target");
+        let target = std::env::var("TARGET").expect("Cargo did not provide the build target");
+        require_native_target(true, &host, &target).unwrap_or_else(|error| panic!("{error}"));
+    }
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repo: PathBuf = manifest.join("../../..");
     let dist = repo.join("out/vite-dist");
@@ -144,6 +162,21 @@ mod tests {
     use std::time::Duration;
 
     static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn development_build_requires_the_host_target_when_enabled() {
+        assert!(
+            require_native_target(true, "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu")
+                .is_ok()
+        );
+        let error = require_native_target(true, "x86_64-unknown-linux-gnu", "aarch64-apple-darwin")
+            .unwrap_err();
+        assert!(error.contains("native Cargo target"));
+        assert!(
+            require_native_target(false, "x86_64-unknown-linux-gnu", "aarch64-apple-darwin")
+                .is_ok()
+        );
+    }
 
     struct Fixture(PathBuf);
 

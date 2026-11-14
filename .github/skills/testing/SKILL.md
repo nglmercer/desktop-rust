@@ -540,7 +540,7 @@ DESKTOP_E2E_APP_MODE=unpackaged npx playwright test \
   app/test/e2e/my-feature.e2e.ts
 ```
 
-> ⚠️ **Do NOT use `npm run build:dev` for E2E tests.** The development build
+> ⚠️ **Do NOT use `npm run build:electron:dev` for E2E tests.** The legacy development build
 > produces an `index.html` that loads the renderer bundle from
 > `http://localhost:3000/build/renderer.js` (the webpack dev server). Without
 > the dev server running, the React app never mounts and the Playwright

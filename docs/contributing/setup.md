@@ -42,6 +42,7 @@ First, create a fork of `desktop/desktop` and then clone the repository to your 
 For the Rust/Vite desktop, install the platform dependencies for Wry and run:
 
 ```sh
+git submodule update --init --recursive
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm start
 ```
@@ -51,10 +52,13 @@ rebuild, wait for any Git operation to finish and reload the app with
 <kbd>Ctrl/Command+Alt+R</kbd>. See the [migration README](../../README.md)
 for launcher limitations and the separate browser build.
 
+To build both the Rust desktop and browser-enabled CLI without starting them,
+run `pnpm build:dev`.
+
 The legacy Electron workflow remains available while migration is incomplete:
 
 * Run `npm ci` to get all required dependencies on your machine.
-* Run `npm run build:dev` to create a development build of the app.
+* Run `npm run build:electron:dev` to create a development build of the app.
 * Run `npm run start:electron` to launch the application. Changes will be compiled in the
   background. The app can then be reloaded to see the changes (<kbd>Ctrl/Command+Alt+R</kbd>).
 
@@ -69,7 +73,7 @@ $ screen -R "desktop" # to reopen the session, read the logs, and exit (Ctrl+C)
 ```
 
 If you've made changes in the `main-process` folder you need to run `npm run
-build:dev` to rebuild the package, and then `npm run start:electron` for these changes to be
+build:electron:dev` to rebuild the package, and then `npm run start:electron` for these changes to be
 reflected in the running app.
 
 If you are using GitHub Enterprise with your development build of GitHub Desktop, you will need to follow a few extra steps to [authenticate properly](github-enterprise-auth-from-dev-build.md).

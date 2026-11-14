@@ -81,9 +81,9 @@ After making all changes:
    ```
    Ensure the command completes successfully without errors.
 
-2. **Run `npm run build:dev`** to verify the build:
+2. **Run `npm run build:electron:dev`** to verify the build:
    ```bash
-   npm run build:dev
+   npm run build:electron:dev
    ```
    Ensure the build completes successfully without errors.
 
@@ -161,7 +161,7 @@ git commit -m "Bump Node.js to v22.20.0"
 
 # Step 5: Install dependencies and verify
 npm install
-npm run build:dev
+npm run build:electron:dev
 
 # Step 6: Push the branch and create a Draft PR
 git push origin HEAD
@@ -174,7 +174,7 @@ git push origin HEAD
 - **Do NOT modify the `production` version** in `script/validate-electron-version.ts` - only update the `beta` version
 - The `.nvmrc` file uses a `v` prefix (e.g., `v22.19.0`), while `.node-version` does not (e.g., `22.19.0`)
 - Always verify the build works after making changes
-- If `npm install` or `npm run build:dev` fails, investigate and fix the issues before committing
+- If `npm install` or `npm run build:electron:dev` fails, investigate and fix the issues before committing
 
 ## Current Versions (for reference)
 

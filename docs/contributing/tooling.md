@@ -32,7 +32,7 @@ debugging and inspecting the live application.
 
 ```shellsession
 $ npm ci
-$ npm run build:dev
+$ npm run build:electron:dev
 $ npm run start:electron
 ```
 

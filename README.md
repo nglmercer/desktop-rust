@@ -11,11 +11,20 @@ for the page until the frontend is included.
 Build and start the desktop shell:
 
 ```sh
+git submodule update --init --recursive           # bundled renderer resources
 pnpm install --frozen-lockfile --ignore-scripts   # renderer dependencies
 pnpm vite:build                                   # renderer bundle -> out/vite-dist
 cargo build -p desktop-app --locked
 ./rust/target/debug/github-desktop-rs
 ```
+
+`pnpm build:dev` builds the renderer, Rust desktop and embedded-browser CLI
+without starting them. It rejects a Cargo cross-target because renderer platform
+flags follow Node's host. Node and the Rust toolchain must also use the same
+host OS and architecture; that combination is not checked automatically. Vite
+updates `out/vite-dist` before Cargo rejects an unsupported target. This is a
+development build; the production build and packaging pipeline remain under
+migration.
 
 For development, `pnpm start` builds and starts the Rust shell and watches the
 Vite renderer, highlighter and IPC bootstrap. After a successful rebuild and
