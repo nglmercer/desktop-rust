@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { describe, it, beforeEach, vi } from 'vitest'
 import assert from 'node:assert'
 import { Account } from '../../src/models/account'
 import { AccountsStore } from '../../src/lib/stores'
@@ -126,7 +126,7 @@ describe('AccountsStore', () => {
     })
     const events: TokenRefreshEvent[] = []
     const subscription = store.onTokenRefreshEvent(event => events.push(event))
-    t.after(() => subscription.dispose())
+    t.onTestFinished(() => subscription.dispose())
     await store.getAccountWithFreshToken(account)
     assert.deepEqual(events, ['attempt', 'success'])
     subscription.dispose()
@@ -160,15 +160,16 @@ describe('AccountsStore', () => {
     })
     const events: TokenRefreshEvent[] = []
     const subscription = store.onTokenRefreshEvent(event => events.push(event))
-    t.after(() => subscription.dispose())
-    const deletion = t.mock.method(secure, 'deleteItem', async () => {
+    t.onTestFinished(() => subscription.dispose())
+    const deletion = vi.spyOn(secure, 'deleteItem').mockImplementation(async () => {
       throw new Error('Secure deletion failed')
     })
+    t.onTestFinished(() => deletion.mockRestore())
     await assert.rejects(
       store.getAccountWithFreshToken(account),
       OAuthRefreshRejectedError
     )
-    assert.equal(deletion.mock.callCount(), 1)
+    assert.equal(deletion.mock.calls.length, 1)
     assert.deepEqual(await store.getAll(), [])
     assert.deepEqual(events, [
       'attempt',
@@ -180,7 +181,7 @@ describe('AccountsStore', () => {
   it('edits expiry without publishing an account change or triggering renewal', async t => {
     const previousPreview = process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
     process.env.GITHUB_DESKTOP_PREVIEW_FEATURES = '1'
-    t.after(() => {
+    t.onTestFinished(() => {
       if (previousPreview === undefined) {
         delete process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
       } else {
@@ -209,7 +210,7 @@ describe('AccountsStore', () => {
     const subscription = accountsStore.onDidUpdate(() => {
       updates++
     })
-    t.after(() => subscription.dispose())
+    t.onTestFinished(() => subscription.dispose())
 
     await accountsStore.setTokenExpirationForTesting(current, now + 5 * 60_000)
     assert.equal((await getter()).expiresAt, now + 5 * 60_000)

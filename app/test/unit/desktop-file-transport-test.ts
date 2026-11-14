@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { afterEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import { readdir, readFile } from 'fs/promises'
 import { EOL } from 'os'
@@ -14,6 +14,7 @@ const format = (msg: string, lvl: string) => ({ [MESSAGE]: msg, [LEVEL]: lvl })
 const info = (t: DesktopFileTransport, m: string) => write(t, format(m, 'info'))
 
 describe('DesktopFileTransport', () => {
+  afterEach(() => vi.useRealTimers())
   it('creates a file on demand', async t => {
     const d = await createTempDirectory(t)
     const transport = new DesktopFileTransport({ logDirectory: d })
@@ -28,17 +29,17 @@ describe('DesktopFileTransport', () => {
   })
 
   it('creates a file for each day', async t => {
-    t.mock.timers.enable({ apis: ['Date'] })
+    vi.useFakeTimers({ toFake: ['Date'] })
 
     const d = await createTempDirectory(t)
     const transport = new DesktopFileTransport({ logDirectory: d })
 
     assert.equal((await readdir(d)).length, 0)
 
-    t.mock.timers.setTime(Date.parse('2022-03-10T10:00:00.000Z'))
+    vi.setSystemTime(Date.parse('2022-03-10T10:00:00.000Z'))
     await info(transport, 'heyo')
 
-    t.mock.timers.setTime(Date.parse('2022-03-11T11:00:00.000Z'))
+    vi.setSystemTime(Date.parse('2022-03-11T11:00:00.000Z'))
     await info(transport, 'heyo')
 
     assert.equal((await readdir(d)).length, 2)
@@ -47,7 +48,7 @@ describe('DesktopFileTransport', () => {
   })
 
   it('retains a maximum of 14 log files', async t => {
-    t.mock.timers.enable({ apis: ['Date'] })
+    vi.useFakeTimers({ toFake: ['Date'] })
     const d = await createTempDirectory(t)
     const transport = new DesktopFileTransport({ logDirectory: d })
 
@@ -76,7 +77,7 @@ describe('DesktopFileTransport', () => {
 
     assert.equal((await readdir(d)).length, 0)
     for (const date of dates) {
-      t.mock.timers.setTime(Date.parse(date))
+      vi.setSystemTime(Date.parse(date))
       await info(transport, 'heyo')
     }
 

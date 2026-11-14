@@ -1,4 +1,7 @@
 [
+  "app/test/unit/accounts-store-test.ts",
+  "app/test/unit/desktop-file-transport-test.ts",
+  "app/test/unit/main-process/menu-test.ts",
   "app/test/unit/git/clone-fallback-account-test.ts",
   "app/test/unit/ui/assisted-worktree-mutations-test.ts",
   "app/test/unit/cygwin-test.ts",

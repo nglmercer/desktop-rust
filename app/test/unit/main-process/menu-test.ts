@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import {
   ensureItemIds,
@@ -170,7 +170,7 @@ describe('main-process menu', () => {
         )
       }
 
-      t.after(() => {
+      t.onTestFinished(() => {
         if (preview === undefined) {
           delete process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
         } else {
