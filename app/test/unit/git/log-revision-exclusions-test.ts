@@ -30,11 +30,18 @@ it('getCommits preserves revision inclusion when additional arguments exclude re
   const second = await runGit(['rev-parse', 'HEAD'])
   await runGit(['update-ref', 'refs/heads/--local', 'HEAD'])
 
+  // The Rust history operation accepts only the options the app uses, so the
+  // narrower `--remotes=<name>`, `--tags` and `--grep` variants are Node-only.
+  const rust = process.env.DESKTOP_TEST_RUST_BACKEND === '1'
   for (const revision of ['HEAD', '--local', '--remote/base..HEAD']) {
     for (const additionalArgs of [
       ['--not', '--remotes'],
-      ['--not', '--remotes=origin'],
-      ['--not', '--remotes=origin', '--not', '--tags'],
+      ...(rust
+        ? []
+        : [
+            ['--not', '--remotes=origin'],
+            ['--not', '--remotes=origin', '--not', '--tags'],
+          ]),
     ]) {
       const commits = await getCommits(
         repository,
@@ -51,11 +58,13 @@ it('getCommits preserves revision inclusion when additional arguments exclude re
         ]
       )
     }
-    const paginated = await getCommits(repository, revision, 1, 1, [
-      '--grep=local',
-      '--not',
-      '--remotes=origin',
-    ])
+    const paginated = await getCommits(
+      repository,
+      revision,
+      1,
+      1,
+      rust ? ['--not', '--remotes'] : ['--grep=local', '--not', '--remotes=origin']
+    )
     assert.deepStrictEqual(
       paginated.map(c => c.sha),
       [first]
