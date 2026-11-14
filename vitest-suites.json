@@ -395,5 +395,6 @@
   "script/test-capabilities.test.ts",
   "app/test/unit/web-fs-watch-test.ts",
   "app/test/unit/rust-backend-harness-test.ts",
-  "app/test/unit/ui/terminal-lazy-test.tsx"
+  "app/test/unit/ui/terminal-lazy-test.tsx",
+  "script/migration-metrics.test.ts"
 ]

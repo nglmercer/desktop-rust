@@ -138,6 +138,7 @@ jobs:
           npm install --global pnpm@11.17.0
           pnpm install --frozen-lockfile --ignore-scripts
           npm run check:ipc
+          pnpm migration:check
           pnpm vite:build
           test -f out/vite-dist/ipc-shim.js
           test -f out/vite-dist/index.html

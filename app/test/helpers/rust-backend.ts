@@ -5,8 +5,11 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
-import { vi } from 'vitest'
-import { BackendClient } from '../../src/backend/client'
+import { afterAll, beforeAll, vi } from 'vitest'
+import {
+  BackendClient,
+  overrideBackendForTests,
+} from '../../src/backend/client'
 
 /**
  * A real Rust bridge for tests: it starts `desktop-rs serve`, attaches a
@@ -49,14 +52,41 @@ async function bounded<T>(promise: Promise<T>, milliseconds = 15_000) {
   }
 }
 
+/**
+ * The server serves one selected repository, as the app does when the user
+ * picks one. Tests build many repositories and ask about each in turn, so
+ * select the repository a request is about just before binding to it.
+ */
+function followRequestedRepository(client: BackendClient) {
+  const request = client.request.bind(client)
+  let selected: string | null = null
+  client.request = async (method: string, params: unknown, opts?: any) => {
+    const target = (params as { path?: unknown } | null)?.path
+    if (
+      method === 'repository_binding' &&
+      typeof target === 'string' &&
+      target !== selected
+    ) {
+      await client.selectBrowserRepository(target)
+      selected = target
+    }
+    return request(method, params, opts)
+  }
+}
+
 export async function startRustBackend(): Promise<IRustBackend> {
   if (!rustBackendAvailable) {
     throw new Error(`Build the bridge first: ${rustBackendBinary} is missing`)
   }
   const directory = await mkdtemp(path.join(tmpdir(), 'desktop-rust-backend-'))
-  // Keep the caller's Git settings out of the server's environment.
+  // Keep the caller's Git settings out of the server's environment, except the
+  // author and committer the test environment defines for its commits.
   const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))
+    Object.entries(process.env).filter(
+      ([key]) =>
+        !key.startsWith('GIT_') ||
+        /^GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)$/.test(key)
+    )
   )
   const server: ChildProcess = spawn(
     rustBackendBinary,
@@ -102,6 +132,7 @@ export async function startRustBackend(): Promise<IRustBackend> {
   vi.stubGlobal('location', dom.window.location)
   const client = new BackendClient()
   await bounded(client.waitReady())
+  followRequestedRepository(client)
 
   return {
     client,
@@ -124,4 +155,30 @@ export async function startRustBackend(): Promise<IRustBackend> {
       await rm(directory, { recursive: true, force: true })
     },
   }
+}
+
+/**
+ * Route `backend()` to a real Rust server for every test in the file.
+ *
+ * Call it at the top of a test file (inside `describe` or at module level). The
+ * server starts once before the file's tests and stops after them; the returned
+ * object is filled in when it is ready, so read `rust.client` and
+ * `rust.directory` inside tests, not at definition time.
+ */
+export function useRustBackend(): { client: BackendClient; directory: string } {
+  const handle = {} as { client: BackendClient; directory: string }
+  let started: IRustBackend | undefined
+  beforeAll(async () => {
+    started = await startRustBackend()
+    Object.assign(handle, {
+      client: started.client,
+      directory: started.directory,
+    })
+    overrideBackendForTests(started.client)
+  }, 60_000)
+  afterAll(async () => {
+    overrideBackendForTests(null)
+    await started?.stop()
+  }, 60_000)
+  return handle
 }

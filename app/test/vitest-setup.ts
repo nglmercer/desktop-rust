@@ -28,3 +28,12 @@ vi.stubGlobal(
   'localStorage',
   new JSDOM('', { url: 'http://localhost/' }).window.localStorage
 )
+
+// Opt-in: run every test file against a real Rust server, so the renderer takes
+// its Rust code paths instead of the Node fallbacks (see rust/ROADMAP.md, R1).
+if (process.env.DESKTOP_TEST_RUST_BACKEND === '1') {
+  const harness = await import('./helpers/rust-backend')
+  if (harness.rustBackendAvailable) {
+    harness.useRustBackend()
+  }
+}

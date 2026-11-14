@@ -4000,3 +4000,11 @@ export function backend(): BackendClient {
   if (!singleton) singleton = new BackendClient()
   return singleton
 }
+
+/**
+ * Test seam: route `backend()` to a specific client (for example one attached
+ * to a real Rust server), or restore the default with `null`.
+ */
+export function overrideBackendForTests(client: BackendClient | null): void {
+  singleton = client
+}

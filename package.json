@@ -24,6 +24,8 @@
     "package": "cross-env NODE_ENV=production RELEASE_CHANNEL=production DESKTOP_RUST_PACKAGE_PROFILE=release node --require ./script/ts-register.cjs script/package-rust.ts",
     "package:rust": "node --require ./script/ts-register.cjs script/package-rust.ts",
     "migration:status": "node --require ./script/ts-register.cjs script/migration-metrics.ts",
+    "migration:check": "node --require ./script/ts-register.cjs script/migration-metrics.ts --check",
+    "migration:baseline": "node --require ./script/ts-register.cjs script/migration-metrics.ts --update",
     "generate-octicons": "node --require ./script/ts-register.cjs script/generate-octicons.ts",
     "generate-example-usage-data": "node --import @oxc-node/core/register script/generate-example-usage-data.mts",
     "compile:script": "tsc -P script/tsconfig.json",
