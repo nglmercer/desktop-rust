@@ -147,10 +147,12 @@ describe('Rust push routing', () => {
           no_verify: false,
           report_progress: true,
           require_hook_callbacks: false,
+          interactive_hook_decision: false,
         },
         expect.any(Function),
         transport === 'wry' ? expect.any(Function) : undefined,
         expect.any(Function),
+        undefined,
         undefined
       )
       expect(progress).toHaveBeenCalledWith(
