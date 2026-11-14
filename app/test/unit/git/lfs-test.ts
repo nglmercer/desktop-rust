@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import * as Path from 'path'
@@ -15,6 +16,13 @@ import {
   filesNotTrackedByLFS,
 } from '../../../src/lib/git/lfs'
 
+// The Rust backend runs the system Git, which needs git-lfs installed to track
+// paths; the Node path uses the git-lfs that dugite bundles.
+const systemLFSMissing =
+  process.env.DESKTOP_TEST_RUST_BACKEND === '1' &&
+  spawnSync('git', ['lfs', 'version']).status !== 0
+const itWithLFS = it.skipIf(systemLFSMissing)
+
 describe('git-lfs', () => {
   describe('isUsingLFS', () => {
     it('returns false for repository not using LFS', async t => {
@@ -25,7 +33,7 @@ describe('git-lfs', () => {
       assert(!usingLFS)
     })
 
-    it('returns true if LFS is tracking a path', async t => {
+    itWithLFS('returns true if LFS is tracking a path', async t => {
       const path = await setupFixtureRepository(t, 'test-repo')
       const repository = new Repository(path, -1, null, false)
 
@@ -50,7 +58,7 @@ describe('git-lfs', () => {
       assert(!usingLFS)
     })
 
-    it('returns true if LFS tracks a path alongside a non-LFS Git filter', async t => {
+    itWithLFS('returns true if LFS tracks a path alongside a non-LFS Git filter', async t => {
       const repository = await setupEmptyRepository(t)
       const attributesPath = Path.join(
         repository.path,

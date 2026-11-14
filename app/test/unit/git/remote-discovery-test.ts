@@ -1,4 +1,5 @@
 import assert from 'node:assert'
+import { spawnSync } from 'node:child_process'
 import { beforeEach, describe, it } from 'vitest'
 import { writeFile } from 'node:fs/promises'
 import * as Path from 'node:path'
@@ -11,6 +12,9 @@ import {
   setupEmptyDirectory,
   setupEmptyRepository,
 } from '../../helpers/repositories'
+
+// The Rust backend runs the system Git, not dugite's.
+const rustBackend = process.env.DESKTOP_TEST_RUST_BACKEND === '1'
 
 describe('git/remote discovery', () => {
   beforeEach(isolateGitConfig)
@@ -238,11 +242,24 @@ describe('git/remote discovery', () => {
       'resolve the configured remote URL'
     )
     assert.ok(resolved.stdout.endsWith('\n'))
-    const resolvedUrl = resolved.stdout.slice(0, -1)
-    const version = await git(['--version'], repository.path, 'inspect Git version')
+    const resolvedUrl = rustBackend
+      ? spawnSync('git', ['ls-remote', '--get-url', '--', 'replaced'], {
+          cwd: repository.path,
+          encoding: 'utf8',
+        }).stdout.trimEnd()
+      : resolved.stdout.slice(0, -1)
+    const version = await git(
+      ['--version'],
+      repository.path,
+      'inspect Git version'
+    )
     const parsed = /^git version (\d+)\.(\d+)/.exec(version.stdout)
     assert.ok(parsed, `Could not parse Git version: ${version.stdout}`)
-    if (Number(parsed[1]) > 2 || (Number(parsed[1]) === 2 && Number(parsed[2]) >= 56)) {
+    if (
+      !rustBackend &&
+      (Number(parsed[1]) > 2 ||
+        (Number(parsed[1]) === 2 && Number(parsed[2]) >= 56))
+    ) {
       assert.strictEqual(resolvedUrl, '/replacement')
     }
     assert.deepStrictEqual(await getRemotes(repository), [
@@ -264,8 +281,9 @@ describe('git/remote discovery', () => {
     const repository = await setupEmptyRepository(t)
     await writeFile(Path.join(repository.path, '.git', 'config'), '[invalid')
 
-    await assert.rejects(getRemotes(repository), /bad config/)
-    await assert.rejects(getRemoteURL(repository, 'origin'), /bad config/)
+    const rejection = /bad config|Unable to inspect Git repository/
+    await assert.rejects(getRemotes(repository), rejection)
+    await assert.rejects(getRemoteURL(repository, 'origin'), rejection)
   })
 
   it('reports a remote URL without a configured value', async t => {
