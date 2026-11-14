@@ -1,6 +1,6 @@
 import { getDistArchitecture } from './dist-info'
 
-/** The pnpm workspace supplies the Rust renderer without Electron setup. */
+/** The pnpm workspace supplies the Rust renderer without any native setup. */
 export function isPnpmInstall(
   userAgent: string | undefined = process.env.npm_config_user_agent
 ): boolean {

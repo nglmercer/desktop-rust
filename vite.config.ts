@@ -259,7 +259,7 @@ export function moveSourceMaps(): Plugin {
 }
 
 /**
- * Mirrors copyStaticResources() (since removed with the Electron build) for the files the renderer
+ * Mirrors copyStaticResources() (from the earlier build script) for the files the renderer
  * loads by URL (images, stylesheets). Directories under static/ are data the
  * renderer read through `fs`; those are served by the Rust backend instead.
  */
@@ -321,14 +321,14 @@ export function copyStaticResources(
       const destination = path.join(output, 'static')
       ensureOutputDirectory(output, destination)
       // Keep the acknowledgements dialog available in the standalone web
-      // renderer as well as in packaged Electron builds.
+      // renderer as well as in packaged builds.
       writeOutputFile(
         path.join(destination, 'licenses.json'),
         JSON.stringify(await licenseDump(projectRoot))
       )
       const projectLicense = path.join(projectRoot, 'LICENSE')
       if (existsSync(projectLicense)) currentSources.add(projectLicense)
-      // copyEmoji() (since removed with the Electron build): the database plus the images of
+      // copyEmoji() (from the earlier build script): the database plus the images of
       // GitHub's custom emoji (unicode ones render as text).
       const gemoji = path.resolve(projectRoot, 'gemoji')
       const emojiDatabase = path.join(gemoji, 'db/emoji.json')
@@ -340,7 +340,7 @@ export function copyStaticResources(
       const gitignores = path.resolve(projectRoot, 'app/static/common/gitignore')
       copyGitignoreTemplates(gitignores, path.join(destination, 'gitignore'), output, currentSources)
 
-      // generateLicenseMetadata() (since removed with the Electron build).
+      // generateLicenseMetadata() (from the earlier build script).
       const chooseALicense = path.resolve(projectRoot, 'app/static/common/choosealicense.com')
       const licensesDir = path.join(chooseALicense, '_licenses')
       const licenses = readdirSync(licensesDir)

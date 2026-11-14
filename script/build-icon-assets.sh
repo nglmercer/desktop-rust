@@ -28,7 +28,7 @@ function compile() {
   --platform macosx
 
   mv $OUTDIR/Assets.car ./
-  # Keep a distinct basename so Electron Packager does not find icon-logo.icon
+  # Keep a distinct basename so icon-logo.icon is not found
   # and try to compile it, which requires a macOS 26 build host.
   mv $OUTDIR/icon-logo.icns ./icon-logo-legacy.icns
   rm -rf $OUTDIR
