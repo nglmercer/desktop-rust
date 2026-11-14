@@ -15,6 +15,7 @@
   "linter": { "rules": { "preset": "none" } },
   "plugins": [
     "./biome-rules/insecure-random.ts",
-    "./biome-rules/no-loosely-typed-webcontents-ipc.ts"
+    "./biome-rules/no-loosely-typed-webcontents-ipc.ts",
+    "./biome-rules/react-no-unbound-dispatcher-props.ts"
   ]
 }

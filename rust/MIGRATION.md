@@ -79,6 +79,11 @@ the old rule's handling of optional calls, computed identifier members,
 parentheses, escapes and TypeScript assertions. As in the old rule, computed
 string properties are not matched.
 
+The JSX dispatcher callback check now also runs as a Biome TypeScript plugin.
+It retains the previous rule's exact text-prefix behavior, including its
+whitespace and parenthesis exceptions; equivalence was checked against the
+former ESLint rule on attribute, child and nested JSX cases.
+
 Linux CI now exercises the active `github-desktop-rs` Wry webview: its
 isolated smoke run waits for the shared React renderer to mount and performs
 both shell and Rust backend IPC calls. The obsolete `desktop-native` smoke
