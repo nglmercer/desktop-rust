@@ -84,6 +84,10 @@ It retains the previous rule's exact text-prefix behavior, including its
 whitespace and parenthesis exceptions; equivalence was checked against the
 former ESLint rule on attribute, child and nested JSX cases.
 
+The props-and-state readonly check also runs in Biome rather than ESLint.
+It retains the earlier rule's text matching and its exclusions for `.ts`
+files; it is not a complete check for every mutable array type.
+
 Linux CI now exercises the active `github-desktop-rs` Wry webview: its
 isolated smoke run waits for the shared React renderer to mount and performs
 both shell and Rust backend IPC calls. The obsolete `desktop-native` smoke

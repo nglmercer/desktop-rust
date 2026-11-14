@@ -21,7 +21,6 @@ rules:
   ##########
   # CUSTOM #
   ##########
-  react-readonly-props-and-state: error
   react-proper-lifecycle-methods: error
 
   ###########

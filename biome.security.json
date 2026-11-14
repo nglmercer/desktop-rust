@@ -16,6 +16,7 @@
   "plugins": [
     "./biome-rules/insecure-random.ts",
     "./biome-rules/no-loosely-typed-webcontents-ipc.ts",
-    "./biome-rules/react-no-unbound-dispatcher-props.ts"
+    "./biome-rules/react-no-unbound-dispatcher-props.ts",
+    "./biome-rules/react-readonly-props-and-state.ts"
   ]
 }

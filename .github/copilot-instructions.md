@@ -87,10 +87,10 @@ GitHub Desktop has been developed for many years through many iterations of tech
 ### ESLint Rules
 
 The codebase uses comprehensive ESLint rules. Key custom rules:
-- `react-readonly-props-and-state`: Prevents mutation of React props and state
 - `react-proper-lifecycle-methods`: Enforces correct React lifecycle usage
-The `insecure-random`, `no-loosely-typed-webcontents-ipc` and
-`react-no-unbound-dispatcher-props` rules run as Biome TypeScript plugins
+The `insecure-random`, `no-loosely-typed-webcontents-ipc`,
+`react-no-unbound-dispatcher-props` and `react-readonly-props-and-state`
+rules run as Biome TypeScript plugins
 through `npm run lint:security`.
 
 ## Building & Testing
