@@ -43,7 +43,7 @@ describe('repository initialization', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('preserves the Electron initializer', async () => {
+  it('preserves the non-Rust initializer', async () => {
     mocks.transport = 'none'
     await initGitRepository('/new/repo')
     expect(mocks.git).toHaveBeenCalledWith(

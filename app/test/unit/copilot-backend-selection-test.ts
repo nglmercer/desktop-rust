@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // The store only formats supplied conflict data here; Git context discovery is
-// outside this test and pulls in native Electron-only packages.
+// outside this test and pulls in native-only packages.
 vi.mock('../../src/lib/copilot-conflict-context', () => ({
   formatConflictContextForPrompt: () => '',
 }))

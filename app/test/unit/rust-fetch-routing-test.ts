@@ -79,7 +79,7 @@ describe('Rust fetch routing', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('keeps the existing Electron Git path for ordinary fetch', async () => {
+  it('keeps the existing non-Rust Git path for ordinary fetch', async () => {
     mocks.transport = 'none'
     await fetch(repository, remote, undefined, false, false)
     expect(mocks.fetch).not.toHaveBeenCalled()

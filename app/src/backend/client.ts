@@ -1573,7 +1573,7 @@ export class BackendClient {
     return { isValid: value.is_valid, bundleID: typeof value.bundle_id === 'string' ? value.bundle_id : undefined }
   }
 
-  /** Parse Windows arguments with the same operating-system API used by Electron. */
+  /** Parse Windows arguments with the same operating-system API used by the previous host. */
   async parseWindowsIntegrationArguments(argumentsString: string): Promise<ReadonlyArray<string>> {
     const value = this.transport === 'wry'
       ? await this.request('git_info', { operation: { type: 'parse_windows_integration_arguments', arguments: argumentsString } })

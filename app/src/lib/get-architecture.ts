@@ -23,7 +23,7 @@ export function isAppRunningUnderARM64Translation(app: App): boolean {
   // HACK: We cannot just use runningUnderARM64Translation because on Windows,
   // it relies on IsWow64Process2 which, as of today, on Windows 11 (22000.469),
   // always returns IMAGE_FILE_MACHINE_UNKNOWN as the process machine, which
-  // indicates that the process is NOT being emulated. This means, Electron's
+  // indicates that the process is NOT being emulated. This means the
   // runningUnderARM64Translation will always return true for arm binaries on
   // Windows, so we will use process.arch to check if node (and therefore the
   // whole process) was compiled for x64.

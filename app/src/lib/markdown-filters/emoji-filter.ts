@@ -133,7 +133,7 @@ export class EmojiFilter implements INodeFilter {
     const url = new URL(filePath)
     let imageBuffer: Uint8Array
     if (url.protocol === 'file:') {
-      // Electron loads the renderer from file:. The Rust renderers serve it
+      // A renderer loaded from file: may read emoji from disk. The Rust renderers serve it
       // from their own origin and must not turn an emoji URL into an
       // arbitrary filesystem read through the web filesystem shim.
       if (document.location.protocol !== 'file:') {

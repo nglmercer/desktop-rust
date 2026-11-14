@@ -248,7 +248,7 @@ function openMode(flags: string | number | undefined): IOpenMode {
 const statOptions = (o: any) => o?.bigint === true
 
 // --- bundled resources -------------------------------------------------------
-// Files that shipped inside the Electron app directory (emoji.json, static/)
+// Files that shipped inside the app directory (emoji.json, static/)
 // are served by the shell from the page's origin. They are read-only.
 
 async function readBundled(url: string, path: string): Promise<Buffer> {

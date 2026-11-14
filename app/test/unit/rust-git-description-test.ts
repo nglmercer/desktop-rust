@@ -44,7 +44,7 @@ describe('repository Git description', () => {
     }
   )
 
-  it('retains the Electron fallback for missing and default descriptions', async () => {
+  it('retains the non-Rust fallback for missing and default descriptions', async () => {
     mocks.transport = 'none'
     mocks.readFile
       .mockResolvedValueOnce(DefaultGitDescription)

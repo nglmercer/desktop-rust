@@ -1,8 +1,7 @@
 /**
- * The list is based on Electron v17.0.1
+ * The list is based on Chromium's spellchecker dictionaries
  *
  * Call to session.availableSpellCheckerLanguages
- * https://www.electronjs.org/docs/latest/api/session#sesavailablespellcheckerlanguages-readonly
  */
 export function getAvailableSpellcheckerLanguages(): string[] {
   return [

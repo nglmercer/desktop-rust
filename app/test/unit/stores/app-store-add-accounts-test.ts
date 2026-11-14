@@ -560,7 +560,11 @@ describe('AppStore explicitly adding repositories', () => {
       })
 
       it('uses the current account after switching back to a worktree', async t => {
-        const { main } = await setupWorktree(t)
+        const { main, added: worktreeRecord } = await setupWorktree(t)
+        // The helper registers the worktree as its own repository. This test
+        // is about moving the main repository's record between worktrees, so
+        // the separate record must not exist.
+        await stores.repositoriesStore.removeRepository(worktreeRecord)
         const { listWorktrees } = await import('../../../src/lib/git/worktree')
         const { realpath } = await import('fs/promises')
         const mainPath = await realpath(main.path)

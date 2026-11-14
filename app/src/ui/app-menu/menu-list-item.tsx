@@ -79,7 +79,7 @@ interface IMenuListItemProps {
 }
 
 /**
- * Returns a platform specific human readable version of an Electron
+ * Returns a platform specific human readable version of a host
  * accelerator string. See getPlatformSpecificNameOrSymbolForModifier
  * for more information.
  */

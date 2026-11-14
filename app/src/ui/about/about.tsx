@@ -15,7 +15,6 @@ import { RelativeTime } from '../relative-time'
 import { assertNever } from '../../lib/fatal-error'
 import { ReleaseNotesUri } from '../lib/releases'
 import { encodePathAsUrl } from '../../lib/path'
-import { isOSNoLongerSupported } from '../../lib/get-os'
 import { AriaLiveContainer } from '../accessibility/aria-live-container'
 import { formatDate } from '../../lib/format-date'
 
@@ -115,11 +114,10 @@ export class About extends React.Component<IAboutProps> {
       case UpdateStatus.CheckingForUpdates:
       case UpdateStatus.UpdateAvailable:
       case UpdateStatus.UpdateNotChecked:
-        const disabled =
-          ![
-            UpdateStatus.UpdateNotChecked,
-            UpdateStatus.UpdateNotAvailable,
-          ].includes(updateStatus) || isOSNoLongerSupported()
+        const disabled = ![
+          UpdateStatus.UpdateNotChecked,
+          UpdateStatus.UpdateNotAvailable,
+        ].includes(updateStatus)
 
         const buttonTitle = 'Check for Updates'
 
@@ -203,18 +201,6 @@ export class About extends React.Component<IAboutProps> {
 
     if (!this.canCheckForUpdates) {
       return null
-    }
-
-    if (isOSNoLongerSupported()) {
-      return (
-        <DialogError>
-          This operating system is no longer supported. Software updates have
-          been disabled.{' '}
-          <LinkButton uri="https://docs.github.com/en/desktop/installing-and-configuring-github-desktop/overview/supported-operating-systems">
-            Supported operating systems
-          </LinkButton>
-        </DialogError>
-      )
     }
 
     if (!this.props.updateState.lastSuccessfulCheck) {

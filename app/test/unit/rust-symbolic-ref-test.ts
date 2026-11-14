@@ -76,7 +76,7 @@ describe('symbolic refs', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('preserves the Electron path', async () => {
+  it('preserves the non-Rust path', async () => {
     mocks.transport = 'none'
     mocks.git.mockResolvedValueOnce({
       exitCode: 0,

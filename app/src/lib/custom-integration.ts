@@ -40,7 +40,7 @@ export function parseCustomIntegrationArguments(
   return __WIN32__ ? parseCommandLineArgv(args) : stringArgv(args)
 }
 
-/** Parse Windows integration arguments on the native host when Electron is absent. */
+/** Parse Windows integration arguments on the native host. */
 export async function parseCustomIntegrationArgumentsForRuntime(
   args: string
 ): Promise<ReadonlyArray<string>> {

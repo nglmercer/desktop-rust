@@ -87,7 +87,7 @@ describe('new repository files', () => {
     }
   )
 
-  it('propagates Rust failures and retains the Electron fallback', async () => {
+  it('propagates Rust failures and retains the non-Rust fallback', async () => {
     mocks.writeCreationFile.mockRejectedValueOnce(new Error('write failed'))
     await expect(writeDefaultReadme('/repo', 'Project')).rejects.toThrow(
       'write failed'

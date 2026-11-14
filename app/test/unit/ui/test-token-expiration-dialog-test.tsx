@@ -81,11 +81,11 @@ function applyExpiry() {
 describe('TestTokenExpirationDialog', () => {
   let restoreIpcSend: () => void
   beforeEach(async () => {
-    const electron = await import('../../../src/web/host-bridge')
-    const previousSend = electron.ipcRenderer.send
-    electron.ipcRenderer.send = () => {}
+    const hostBridge = await import('../../../src/web/host-bridge')
+    const previousSend = hostBridge.ipcRenderer.send
+    hostBridge.ipcRenderer.send = () => {}
     restoreIpcSend = () => {
-      electron.ipcRenderer.send = previousSend
+      hostBridge.ipcRenderer.send = previousSend
     }
   })
   afterEach(() => restoreIpcSend())

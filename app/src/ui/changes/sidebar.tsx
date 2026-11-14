@@ -167,7 +167,7 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
     const { workingDirectory } = this.props.changes
 
     // Rust reviews the selected blobs and asks for consent against that exact
-    // review. The legacy worktree-size check is retained for Electron.
+    // review. The legacy worktree-size check is retained for non-Rust transports.
     if (typeof window === 'undefined' || backend().transportKind === 'none') {
       let filesIgnoredByLFS: ReadonlyArray<string>
       try {

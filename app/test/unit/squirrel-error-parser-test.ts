@@ -4,8 +4,6 @@ import { parseError } from '../../src/lib/squirrel-error-parser'
 
 describe('parseError', () => {
   it('parses a missing Squirrel error', () => {
-    // Source:
-    // https://github.com/electron/electron/blob/ad90de0c822490664bdb3a3d265f4a0fce3f69de/lib/browser/api/auto-updater/auto-updater-win.js#L29
     const input = new Error('Can not find Squirrel')
 
     const output = parseError(input)

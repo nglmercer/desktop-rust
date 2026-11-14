@@ -41,9 +41,8 @@ export interface IAppShell {
 }
 
 export const shell: IAppShell = {
-  // Since Electron 13, shell.trashItem doesn't work from the renderer process
+  // shell.trashItem doesn't work from the renderer process
   // on Windows. Therefore, we must invoke it from the main process. See
-  // https://github.com/electron/electron/issues/29598
   moveItemToTrash,
   openExternal,
   showItemInFolder,

@@ -16,7 +16,6 @@ export enum BannerType {
   SuccessfulSquash = 'SuccessfulSquash',
   SuccessfulReorder = 'SuccessfulReorder',
   ConflictsFound = 'ConflictsFound',
-  OSVersionNoLongerSupported = 'OSVersionNoLongerSupported',
   DiscardedSelection = 'DiscardedSelection',
 }
 
@@ -127,4 +126,3 @@ export type Banner =
       /** callback to run when user clicks on link in banner text */
       readonly onOpenConflictsDialog: () => void
     }
-  | { readonly type: BannerType.OSVersionNoLongerSupported }

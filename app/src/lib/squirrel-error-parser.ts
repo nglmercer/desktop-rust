@@ -1,4 +1,4 @@
-// an error that Electron raises when it can't find the installation for the running app
+// an error the Squirrel updater raises when it can't find the installation for the running app
 const squirrelMissingRegex = /^Can not find Squirrel$/
 
 // an error that occurs when Squirrel isn't able to reach the update server

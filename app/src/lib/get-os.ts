@@ -9,7 +9,9 @@ const { compare } = compareVersions
  * `23.4.0` is macOS 14.4). Darwin 20 started macOS 11 and Darwin 25 macOS 26;
  * earlier releases are macOS 10.x.
  */
-export function macOSVersionFromDarwinRelease(release: string): string | undefined {
+export function macOSVersionFromDarwinRelease(
+  release: string
+): string | undefined {
   const [major, minor = '0', patch = '0'] = release.split('.')
   const darwin = parseInt(major, 10)
   if (Number.isNaN(darwin)) {
@@ -25,9 +27,7 @@ export function macOSVersionFromDarwinRelease(release: string): string | undefin
 }
 
 function getSystemVersionSafe() {
-  return __DARWIN__
-    ? macOSVersionFromDarwinRelease(OS.release())
-    : OS.release()
+  return __DARWIN__ ? macOSVersionFromDarwinRelease(OS.release()) : OS.release()
 }
 
 function systemVersionGreaterThanOrEqualTo(version: string) {
@@ -94,7 +94,7 @@ export const isMacOSMojaveOrLater = memoizeOne(
 /** We're currently running macOS and it is at least Big Sur. */
 export const isMacOSBigSurOrLater = memoizeOne(
   // We're using 10.16 rather than 11.0 here due to
-  // https://github.com/electron/electron/issues/26419
+  // Chromium-based shells report macOS 11 as 10.16, so compare against that.
   () => __DARWIN__ && systemVersionGreaterThanOrEqualTo('10.16')
 )
 
@@ -106,18 +106,4 @@ export const isMacOSTahoeOrLater = memoizeOne(
 /** We're currently running Windows 10 and it is at least 1809 Preview Build 17666. */
 export const isWindows10And1809Preview17666OrLater = memoizeOne(
   () => __WIN32__ && systemVersionGreaterThanOrEqualTo('10.0.17666')
-)
-
-export const isWindowsAndNoLongerSupported = memoizeOne(
-  () => __WIN32__ && systemVersionLessThan('10')
-)
-
-export const isMacOSAndNoLongerSupported = memoizeOne(
-  () => __DARWIN__ && systemVersionLessThan('13.0')
-)
-
-export const isOSNoLongerSupported = memoizeOne(
-  () =>
-    isMacOSAndNoLongerSupported() ||
-    isWindowsAndNoLongerSupported()
 )

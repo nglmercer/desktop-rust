@@ -124,7 +124,7 @@ describe('bundled emoji in sandboxed Markdown', () => {
     }
   })
 
-  it('keeps Electron file URL loading', async () => {
+  it('keeps file URL loading', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'desktop-emoji-filter-'))
     const dom = new JSDOM('', { url: 'file:///app/index.html' })
     try {

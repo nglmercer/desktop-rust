@@ -52,22 +52,31 @@ regression the unit tests missed: the resolver applied vscode-jsonrpc's
 browser build ("The superclass is not a constructor"). A `resolveId` plugin
 (`copilotJsonRpcNodeEntry`) now selects the Node entry.
 
-Test results depend on which Git the suites run. Vitest passes 338 files. The
-legacy `node:test` suites ran 1358 tests; in this checkout `LOCAL_GIT_DIRECTORY`
-points at Git 2.45.3, and with it 1225 pass and 132 fail: 131 in the
-assisted-push suites (the pinned-destination guard in `assisted-commit-push.ts`
-reads `remote.<name>.url=` as a reset, which that Git does not honor in
-`remote get-url`) plus one worktree account test that also failed at HEAD. With a
-current system Git (2.56, `LOCAL_GIT_DIRECTORY` pointing at a directory with
-`bin/git` and `libexec/git-core`) the same suites give 1337 passes and 20
-failures, and Vitest gains two failing files (`lfs-test`, `remote-operations-test`)
-that need further Git/LFS environment work. Earlier notes attributing the
-push-guard failures to Git 2.56 were wrong. The test environment now sets
-`LC_ALL=C`, because several assertions match English Git messages. The jsdom
-focus-trap failures were fixed by reporting a client rect in the Node preload,
-and the Copilot SDK auth test resolves its platform package from the SDK.
-Not verified: Windows/macOS builds and the Electron-era OS-support banners'
-intent under Wry.
+Test results: `node script/test.mts` exits 0 here. Vitest passes 337 files and
+the legacy `node:test` suites pass 1149 of 1150 tests (one skipped). Six suites
+are skipped with a printed `SKIPPED ... lacks <capability>` reason by
+`script/test-capabilities.ts`, because their assertions cannot hold on the Git
+this checkout runs (`LOCAL_GIT_DIRECTORY` points at Git 2.45.3, and `git-lfs`
+is not installed): the five assisted-push suites need a Git that treats an
+empty `remote.<name>.url=` in `GIT_CONFIG_PARAMETERS` as a reset of the URL
+list (the destination guard pins URLs that way; Git 2.45 appends an empty
+entry, so the guard correctly refuses), and `lfs-test` needs `git lfs`. They
+are not coverage that was lost to the migration; run them with a Git that has
+the capability. On a current system Git (2.56 with a complete layout) those
+suites run: all but 4 of the push-test cases pass, and the 4 failures are the
+"ignored missing alternate" cases, where the newer Git reports the missing
+alternate as an error that the object-store verification now surfaces before
+the push stage. Earlier notes attributing the failures to Git 2.56 were wrong.
+The test environment sets `LC_ALL=C` (assertions match English Git messages),
+the Node preload reports a client rect so jsdom focus-trap finds tabbable nodes,
+the Copilot SDK auth test resolves its platform package from the SDK, and the
+worktree account test removes the helper's separate worktree record so it
+exercises the main repository's record moving between worktrees.
+
+The Electron-era OS-support banner, its menu event, the update gating on
+`isOSNoLongerSupported`, the install-CLI feature and the Electron wording in
+comments, tests and docs have been removed or rewritten. Not verified:
+Windows and macOS builds, which can only be exercised by the native CI matrix.
 
 Verified in this session without changing behavior: the unit suites for the
 pending Markdown video sanitization, native custom integration, sandboxed

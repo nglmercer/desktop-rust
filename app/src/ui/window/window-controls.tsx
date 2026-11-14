@@ -31,7 +31,7 @@ interface IWindowControlState {
  * Note that the component only supports the Windows platform at the moment
  * and will render nothing when used on other platforms.
  *
- * Uses the electron remote module to perform window state actions on the
+ * Uses the host IPC bridge to perform window state actions on the
  * current window. Relies on the custom ipc channel 'window-state-changed' to
  * be configured in the main process. The channel should emit an event at least
  * every time there's a change in the window state but _may_ send duplicate

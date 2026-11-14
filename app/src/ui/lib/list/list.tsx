@@ -520,7 +520,7 @@ export class List extends React.Component<IListProps, IListState> {
       // This is a custom event that desktop emits through <App />
       // when the user selects the Edit > Select all menu item. We
       // hijack it and select all list items rather than let it bubble
-      // to electron's default behavior which is to select all selectable
+      // to the webview's default behavior which is to select all selectable
       // text in the renderer.
       element.addEventListener('select-all', this.onSelectAll)
     }
@@ -636,7 +636,7 @@ export class List extends React.Component<IListProps, IListState> {
       event.preventDefault()
     } else if (!__DARWIN__ && event.key === 'a' && event.ctrlKey) {
       // On Windows Chromium will steal the Ctrl+A shortcut before
-      // Electron gets its hands on it meaning that the Select all
+      // the webview gets its hands on it meaning that the Select all
       // menu item can't be invoked by means of keyboard shortcuts
       // on Windows. Clicking on the menu item still emits the
       // 'select-all' custom DOM event.

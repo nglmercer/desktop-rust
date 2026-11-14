@@ -8,21 +8,20 @@
  * Note that this method is not intended to be a fully compliant PAC parser
  * nor is it intended to handle common PAC string mistakes (such as including
  * the protocol in the host portion of the spec). It's specifically designed
- * to translate PAC strings returned from Electron's resolveProxy method which
+ * to translate PAC strings returned from the host's resolveProxy method which
  * in turn relies on Chromium's `ProxyList::ToPacString()` implementation.
  *
  * Proxy protocols not supported by cURL (QUIC) will be silently omitted.
  *
  * The format of a PAC string is included below for reference but we're in a
- * special situation since what we get from Electron isn't the raw output from
+ * special situation since what we get from the host isn't the raw output from
  * the PAC script but rather a PAC-formatted version of Chromiums internal proxy
  * state. As such we can take several shortcuts not available to generic PAC
  * parsers.
  *
  * See the following links for a high-level step-through of the logic involved
- * in getting the PAC string from Electron/Chromium
+ * in getting the PAC string from the host's proxy resolver
  *
- * https://github.com/electron/electron/blob/d9321f4df751/shell/browser/net/resolve_proxy_helper.cc#L77
  * https://github.com/chromium/chromium/blob/98b0e0a61e78/net/proxy_resolution/proxy_list.cc#L134-L143
  * https://github.com/chromium/chromium/blob/2ca8c5037021/net/base/proxy_server.cc#L164-L184
  *

@@ -27,15 +27,15 @@ async function renderCloneDialog(
   initialURL = 'https://example.com/owner/repository.git',
   darwin = true
 ) {
-  const electron = await import('../../../src/web/host-bridge')
+  const hostBridge = await import('../../../src/web/host-bridge')
   const originalDarwin = __DARWIN__
-  const originalSend = electron.ipcRenderer.send
+  const originalSend = hostBridge.ipcRenderer.send
   const originalDefaultDir = localStorage.getItem('last-clone-location')
   Object.assign(globalThis, { __DARWIN__: darwin })
-  electron.ipcRenderer.send = () => {}
+  hostBridge.ipcRenderer.send = () => {}
   t.after(() => {
     Object.assign(globalThis, { __DARWIN__: originalDarwin })
-    electron.ipcRenderer.send = originalSend
+    hostBridge.ipcRenderer.send = originalSend
     if (originalDefaultDir === null) {
       localStorage.removeItem('last-clone-location')
     } else {
@@ -164,8 +164,8 @@ describe('CloneRepository path validation', () => {
   it('validates a path chosen through the macOS directory picker', async t => {
     const { directory, pathInput, cloneButton } = await renderCloneDialog(t)
     const path = Path.join(directory, 'chosen.app')
-    const electron = await import('../../../src/web/host-bridge')
-    t.mock.method(electron.ipcRenderer, 'invoke', async (channel: string) => {
+    const hostBridge = await import('../../../src/web/host-bridge')
+    t.mock.method(hostBridge.ipcRenderer, 'invoke', async (channel: string) => {
       assert.strictEqual(channel, 'show-save-dialog')
       return path
     })
@@ -384,12 +384,12 @@ describe('CloneRepository GitHub tab account changes', () => {
   ) {
     const originalResizeObserver = window.ResizeObserver
     Object.assign(window, { ResizeObserver: SizedResizeObserver })
-    const electron = await import('../../../src/web/host-bridge')
-    const originalSend = electron.ipcRenderer.send
-    electron.ipcRenderer.send = () => {}
+    const hostBridge = await import('../../../src/web/host-bridge')
+    const originalSend = hostBridge.ipcRenderer.send
+    hostBridge.ipcRenderer.send = () => {}
     t.after(() => {
       Object.assign(window, { ResizeObserver: originalResizeObserver })
-      electron.ipcRenderer.send = originalSend
+      hostBridge.ipcRenderer.send = originalSend
     })
     t.mock.method(API, 'fromAccount', () =>
       createMockAPI({ fetchRepositoryCloneInfo })

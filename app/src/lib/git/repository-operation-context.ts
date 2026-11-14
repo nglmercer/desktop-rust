@@ -3,7 +3,7 @@ import { createHook } from 'node:async_hooks'
 /**
  * Async operation context using public async-hooks callbacks.
  *
- * Electron renderer realms cannot use Node's AsyncContextFrame-backed
+ * Browser renderer realms cannot use Node's AsyncContextFrame-backed
  * AsyncLocalStorage: getStore can fatally crash V8 across the renderer realm.
  * Keep context in JavaScript and propagate it through tracked async resources.
  */

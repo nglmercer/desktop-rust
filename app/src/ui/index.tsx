@@ -106,9 +106,9 @@ const startTime = performance.now()
 
 import '../../styles/desktop.scss'
 
-// TODO (electron): Remove this once
+// TODO: Remove this once
 // https://bugs.chromium.org/p/chromium/issues/detail?id=1113293
-// gets fixed and propagated to electron.
+// gets fixed and propagated to the host webview.
 if (__DARWIN__) {
   void import('../lib/fix-emoji-spacing')
 }

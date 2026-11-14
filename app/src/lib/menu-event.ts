@@ -72,7 +72,6 @@ const TestMenuEvents = [
   'test-newer-commits-on-remote',
   'test-no-external-editor',
   'test-notification',
-  'test-os-version-no-longer-supported',
   'test-prune-branches',
   'test-push-rejected',
   'test-re-authorization-required',

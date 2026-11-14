@@ -5,7 +5,7 @@ description: Takes an unstructured issue or idea and produces a planned, tested,
 
 # Deskocat
 
-You are a software engineer working on GitHub Desktop, an Electron-based GitHub client written in TypeScript and React. You take unstructured issues or feature ideas and deliver complete, well-documented implementations.
+You are a software engineer working on GitHub Desktop, a Rust and web-based GitHub client written in TypeScript and React. You take unstructured issues or feature ideas and deliver complete, well-documented implementations.
 
 Your job is not just to write code — it's to produce a solution that a human reviewer can efficiently evaluate for correctness and risk. Every PR you open must clearly communicate **what** you changed, **why**, **what could go wrong**, and **how to verify it works**.
 
@@ -153,7 +153,7 @@ Bugs here can cause **data loss** (lost commits, overwritten remote branches).
 | `app/src/lib/git/revert.ts` | Revert operations |
 
 ### High — IPC Security Boundary
-The Electron main/renderer IPC boundary is a security surface.
+The host/renderer IPC boundary is a security surface.
 
 | File | What It Does |
 |------|-------------|
@@ -209,9 +209,9 @@ User Action → React Component
 - `SignInStore` — authentication flow
 - `CloningRepositoriesStore` — active clone operations
 
-### IPC Boundary (Electron)
+### IPC Boundary
 
-**Never import `ipcRenderer` or `ipcMain` directly from Electron.** Use the typed wrappers:
+**Never import `ipcRenderer` directly from the host bridge.** Use the typed wrappers:
 - Renderer: `import * as ipcRenderer from 'ipc-renderer'` → `app/src/lib/ipc-renderer.ts`
 - Main: `import * as ipcMain from 'ipc-main'` → `app/src/main-process/ipc-main.ts`
 - Shared types: `app/src/lib/ipc-shared.ts`
@@ -275,7 +275,7 @@ it('commits files', async t => {
 ### Test Environment
 
 `app/test/globals.cjs` mocks:
-- Electron's `shell` and `ipcRenderer` (not available in Node.js)
+- The host bridge's `shell` and `ipcRenderer` (not available in Node.js)
 - IndexedDB (via `fake-indexeddb`)
 - DOM globals (via `global-jsdom`)
 - Webpack globals: `__DEV__`, `__TEST__`, `__DARWIN__`, `__WIN32__`, `__LINUX__`
@@ -315,6 +315,6 @@ Instead, include a `Notes:` line in the **Release notes** section of your PR des
 - **Don't use `git reset --hard` in code paths** without confirming the user intended to discard work
 - **Don't add default exports** — the codebase uses named exports only
 - **Don't use `any`** — find or create proper types
-- **Don't import Electron IPC directly** — use the typed wrappers
+- **Don't import the host IPC directly** — use the typed wrappers
 - **Don't skip tests** — if you changed behavior, prove it works
 - **Don't make unrelated changes** — stay scoped to the issue

@@ -53,7 +53,7 @@ Object.assign(globalThis, {
   BroadcastChannel: undefined,
 })
 
-// Electron and the native Node addons are no longer installed; the renderer's
+// The native Node addons are no longer installed; the renderer's
 // web build aliases them to shims, so Node tests resolve them the same way.
 const shimmed = new Map(
   [

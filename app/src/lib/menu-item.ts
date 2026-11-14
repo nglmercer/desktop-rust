@@ -23,7 +23,6 @@ export interface IMenuItem {
    * The predefined behavior of the menu item.
    *
    * When specified the click property will be ignored.
-   * See https://electronjs.org/docs/api/menu-item#roles
    */
   readonly role?: HostMenuItemOptions['role']
 
@@ -41,12 +40,11 @@ export interface ISerializableMenuItem extends IMenuItem {
 }
 
 /**
- * Converts Electron accelerator modifiers to their platform specific
+ * Converts accelerator modifiers to their platform specific
  * name or symbol.
  *
  * Example: CommandOrControl becomes either '⌘' or 'Ctrl' depending on platform.
  *
- * See https://github.com/electron/electron/blob/fb74f55/docs/api/accelerator.md
  */
 export function getPlatformSpecificNameOrSymbolForModifier(
   modifier: string

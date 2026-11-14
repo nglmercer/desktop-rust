@@ -17,7 +17,7 @@ const hashInShell = (path: string, type: 'sha1' | 'sha256'): Promise<string> =>
     algorithm: type,
   })
 
-/** Hex digest of a file, read as a stream (Electron). */
+/** Hex digest of a file, read as a stream. */
 const hashInStream = (path: string, type: 'sha1' | 'sha256') =>
   new Promise<string>((resolve, reject) => {
     const hash = createHash(type)

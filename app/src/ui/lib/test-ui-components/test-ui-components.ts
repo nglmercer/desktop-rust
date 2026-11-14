@@ -87,10 +87,6 @@ export function showTestUI(
       return showTestNoExternalEditor()
     case 'test-notification':
       return testShowNotification()
-    case 'test-os-version-no-longer-supported':
-      return dispatcher.setBanner({
-        type: BannerType.OSVersionNoLongerSupported,
-      })
     case 'test-prune-branches':
       return testPruneBranches()
     case 'test-push-rejected':

@@ -9,9 +9,6 @@ In the interest of stability and caution we tend to stay a version (or more) beh
 
 | Dependency | Versions Behind Latest |
 | --- | --- |
-| electron | >= 1 major |
-| electron-packager | >= 1 major |
-| electron-winstaller | >= 1 minor |
 | typescript | >= 1 minor |
 | codemirror | >= 1 minor |
 | react | >= 1 minor |
@@ -35,7 +32,7 @@ questions, and some examples of answers here will help with the next section.
 
 ### How is this dependency used in the project?
 
-  - Core dependencies like Electron, React and Typescript are critical to
+  - Core dependencies like React and Typescript are critical to
     Desktop - without these dependencies we'd have a very different product
   - Application dependencies are other external packages which are needed at
     runtime - how can we test they still work as expected?
@@ -74,11 +71,8 @@ These are the most important dependencies to the app, and include:
 
  - `package.json`
    - `@types/node`
-   - `electron`
-   - `electron-packager`
-   - `electron-winstaller`
    - `typescript`
-   - `webpack` and related dependencies
+   - `vite` and related dependencies
  - `app/package.json`
    - `codemirror`
    - `dugite`

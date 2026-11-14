@@ -34,7 +34,7 @@ afterEach(async () => {
   directory = undefined
 })
 
-describe('Git description Electron fallback', () => {
+describe('Git description non-Rust fallback', () => {
   it('returns empty for Git’s default description', async () => {
     await expect(getGitDescription(await repository())).resolves.toBe('')
   })

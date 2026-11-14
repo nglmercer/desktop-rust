@@ -124,7 +124,7 @@ describe('notification preferences', () => {
     expect(root.textContent).not.toContain('grant permission')
   })
 
-  it('keeps the native permission flow for supported Electron platforms', async () => {
+  it('keeps the native permission flow for supported platforms', async () => {
     native.supported = true
     native.canRequest = true
     native.settingsUrl = 'ms-settings:notifications'

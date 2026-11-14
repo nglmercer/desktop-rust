@@ -30,7 +30,7 @@ if (typeof window !== 'undefined' && !Reflect.get(window, '__desktop')) {
         )
       }
       if (client.transportKind === 'ws') {
-        // Browsers own their window and zoom state; these Electron queries
+        // Browsers own their window and zoom state; these queries
         // must not be sent as repository RPCs to the Rust bridge.
         switch (channel) {
           case 'get-current-window-state':

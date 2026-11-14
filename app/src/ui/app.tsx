@@ -21,12 +21,7 @@ import { FetchType } from '../models/fetch'
 import { shouldRenderApplicationMenu } from './lib/features'
 import { matchExistingRepository } from '../lib/repository-matching'
 import { getVersion, getName } from './lib/app-proxy'
-import {
-  getOS,
-  isOSNoLongerSupported,
-  isMacOSAndNoLongerSupported,
-  isWindowsAndNoLongerSupported,
-} from '../lib/get-os'
+import { getOS } from '../lib/get-os'
 import { MenuEvent, isTestMenuEvent } from '../lib/menu-event'
 import {
   Repository,
@@ -191,9 +186,6 @@ import { TestNotifications } from './test-notifications/test-notifications'
 import { NotificationsDebugStore } from '../lib/stores/notifications-debug-store'
 import { PullRequestComment } from './notifications/pull-request-comment'
 import { UnknownAuthors } from './unknown-authors/unknown-authors-dialog'
-import { UnsupportedOSBannerDismissedAtKey } from './banners/os-version-no-longer-supported-banner'
-import { offsetFromNow } from '../lib/offset-from'
-import { getNumber } from '../lib/local-storage'
 import { IconPreviewDialog } from './octicons/icon-preview-dialog'
 import { isCertificateErrorSuppressedFor } from '../lib/suppress-certificate-error'
 import { pathsForDroppedFiles } from '../lib/dropped-files'
@@ -385,7 +377,10 @@ export class App extends React.Component<IAppProps, IAppState> {
 
   public componentWillUnmount() {
     window.clearInterval(this.updateIntervalHandle)
-    window.removeEventListener('desktop-native-file-drop', this.onNativeFileDrop)
+    window.removeEventListener(
+      'desktop-native-file-drop',
+      this.onNativeFileDrop
+    )
 
     if (__DARWIN__) {
       window.removeEventListener('keydown', this.onMacOSWindowKeyDown)
@@ -439,21 +434,10 @@ export class App extends React.Component<IAppProps, IAppState> {
    * prioritized over other banners.
    *
    * Priority:
-   * 1. OS Not Supported by Electron
-   * 2. Accessibility Settings Banner
-   * 3. Thank you banner
+   * 1. Accessibility Settings Banner
+   * 2. Thank you banner
    */
   private setOnOpenBanner() {
-    if (isOSNoLongerSupported()) {
-      const dismissedAt = getNumber(UnsupportedOSBannerDismissedAtKey, 0)
-
-      // Remind the user that they're running an unsupported OS every 90 days
-      if (dismissedAt < offsetFromNow(-90, 'days')) {
-        this.setBanner({ type: BannerType.OSVersionNoLongerSupported })
-        return
-      }
-    }
-
     this.checkIfThankYouIsInOrder()
   }
 
@@ -666,20 +650,6 @@ export class App extends React.Component<IAppProps, IAppState> {
     skipGuidCheck: boolean = false
   ) {
     if (__LINUX__ || __RELEASE_CHANNEL__ === 'development') {
-      return
-    }
-
-    if (isWindowsAndNoLongerSupported()) {
-      log.error(
-        `Can't check for updates on Windows 8.1 or older. Next available update only supports Windows 10 and later`
-      )
-      return
-    }
-
-    if (isMacOSAndNoLongerSupported()) {
-      log.error(
-        `Can't check for updates on macOS 12 or older. Next available update only supports macOS 13 and later`
-      )
       return
     }
 
@@ -1473,7 +1443,7 @@ export class App extends React.Component<IAppProps, IAppState> {
       this.state.currentFoldout &&
       this.state.currentFoldout.type === FoldoutType.AppMenu
 
-    // As Linux still uses the classic Electron menu, we are opting out of the
+    // As Linux still uses the classic menu, we are opting out of the
     // custom menu that is shown as part of the title bar below
     if (__LINUX__) {
       return null
@@ -1985,7 +1955,9 @@ export class App extends React.Component<IAppProps, IAppState> {
           <InstallGit
             key="install-git"
             onDismissed={onPopupDismissedFn}
-            onOpenShell={path => this.onOpenShellIgnoreWarning(path, popup.repository)}
+            onOpenShell={path =>
+              this.onOpenShellIgnoreWarning(path, popup.repository)
+            }
             path={popup.path}
           />
         )
@@ -3309,7 +3281,10 @@ export class App extends React.Component<IAppProps, IAppState> {
     }
   }
 
-  private onOpenShellIgnoreWarning = (path: string, repository?: Repository) => {
+  private onOpenShellIgnoreWarning = (
+    path: string,
+    repository?: Repository
+  ) => {
     this.props.dispatcher.openShell(path, true, repository)
   }
 

@@ -72,11 +72,11 @@ async function setup(
     Object.assign(window, { ResizeObserver: originalResizeObserver })
   })
 
-  const electron = await import('../../../src/web/host-bridge')
-  const originalSend = electron.ipcRenderer.send
-  electron.ipcRenderer.send = () => {}
+  const hostBridge = await import('../../../src/web/host-bridge')
+  const originalSend = hostBridge.ipcRenderer.send
+  hostBridge.ipcRenderer.send = () => {}
   t.after(() => {
-    electron.ipcRenderer.send = originalSend
+    hostBridge.ipcRenderer.send = originalSend
   })
 
   return t.mock.method(API, 'fromAccount', (account: Account) =>

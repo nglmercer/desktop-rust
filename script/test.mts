@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { parseEnv } from 'node:util'
 import { findTestFilesIn } from './test-discovery.mjs'
+import { filterByGitCapabilities } from './test-capabilities'
 
 function reporter(r: string): string[] {
   return ['--test-reporter', r, '--test-reporter-destination', 'stdout']
@@ -15,10 +16,19 @@ const fileArgs = cliArgs.filter(a => !a.startsWith('--'))
 const switchArgs = cliArgs.filter(a => a.startsWith('--'))
 
 const projectRoot = join(import.meta.dirname, '..')
-const files =
+const discovered =
   fileArgs.length > 0
     ? await findTestFilesIn(fileArgs)
     : await findTestFilesIn([join(projectRoot, 'app', 'test', 'unit')])
+
+// Some suites need Git behavior the installed Git may not have. Skip them
+// loudly rather than reporting failures that no code change can fix.
+const { files, skipped } = filterByGitCapabilities(discovered, file =>
+  resolve(projectRoot, file)
+)
+for (const { file, reason } of skipped) {
+  console.warn(`SKIPPED ${file}: ${reason}`)
+}
 
 // Suites move to Vitest one at a time; the rest still require Node's module
 // mocking setup. Keep explicit routing until those suites have been migrated.

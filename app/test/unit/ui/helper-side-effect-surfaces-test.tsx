@@ -30,11 +30,11 @@ afterEach(async () => {
 
 describe('helper side-effect surfaces', () => {
   it('applies theme classes, updates color scheme, and clears theme classes on unmount', async () => {
-    const electron = await import('../../../src/web/host-bridge')
-    const previousSend = electron.ipcRenderer.send
+    const hostBridge = await import('../../../src/web/host-bridge')
+    const previousSend = hostBridge.ipcRenderer.send
     const sends: Array<[string, string]> = []
 
-    electron.ipcRenderer.send = (channel: string, value: string) => {
+    hostBridge.ipcRenderer.send = (channel: string, value: string) => {
       sends.push([channel, value])
     }
 
@@ -63,7 +63,7 @@ describe('helper side-effect surfaces', () => {
 
       assert.equal(document.body.classList.contains('theme-light'), false)
     } finally {
-      electron.ipcRenderer.send = previousSend
+      hostBridge.ipcRenderer.send = previousSend
     }
   })
 

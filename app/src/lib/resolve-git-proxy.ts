@@ -8,7 +8,7 @@ export async function resolveGitProxy(
   url: string
 ): Promise<string | typeof inheritHostProxy | undefined> {
   // resolveProxy doesn't throw an error (at least not in the
-  // current Electron version) but it could in the future and
+  // current host version) but it could in the future and
   // it's also possible that the IPC layer could throw an
   // error (if the URL we're given is null or undefined despite
   // our best type efforts for example).

@@ -133,7 +133,6 @@ function getAccelerator(menuItem: HostMenuItem): string | null {
 
   if (menuItem.role) {
     const unsafeItem = menuItem as any
-    // https://github.com/electron/electron/blob/d4a8a64ba/lib/browser/api/menu-item.js#L62
     const getDefaultRoleAccelerator = unsafeItem.getDefaultRoleAccelerator
 
     if (typeof getDefaultRoleAccelerator === 'function') {
@@ -183,7 +182,7 @@ function parseMenuItem(
 
 /**
  * Creates an instance of one of the types in the MenuItem type union based
- * on an Electron MenuItem instance. Will recurse through all sub menus and
+ * on a host MenuItem instance. Will recurse through all sub menus and
  * convert each item.
  */
 function menuItemFromHostMenuItem(menuItem: HostMenuItem): MenuItem {
@@ -256,11 +255,11 @@ function menuItemFromHostMenuItem(menuItem: HostMenuItem): MenuItem {
   }
 }
 /**
- * Creates a IMenu instance based on an Electron Menu instance.
+ * Creates a IMenu instance based on a host Menu instance.
  * Will recurse through all sub menus and convert each item using
  * menuItemFromHostMenuItem.
  *
- * @param menu - The electron menu instance to convert into an
+ * @param menu - The host menu instance to convert into an
  *               IMenu instance
  *
  * @param id   - The id of the menu. Menus share their id with
@@ -388,7 +387,7 @@ export class AppMenu {
    * Used by static constructors and transformers.
    *
    * @param menu  The menu that this instance operates on, taken from an
-   *              electron Menu instance and converted into an IMenu model
+   *              host Menu instance and converted into an IMenu model
    *              by menuFromHostMenu.
    * @param openMenus A list of currently open menus with their selected items
    *                  in the application menu.
