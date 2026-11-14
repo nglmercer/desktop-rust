@@ -28,6 +28,8 @@ pub struct DesktopApp {
     /// Finite budgets for processes, stream data and git/HTTP results.
     pub resources: crate::io::limits::Resources,
     state: Mutex<AppState>,
+    /// Serialize snapshots through disk publication and renderer notification.
+    state_publication: Mutex<()>,
     menu_labels: Mutex<crate::menu::MenuLabels>,
     host: Arc<dyn Host>,
     started: Instant,
@@ -67,6 +69,7 @@ impl DesktopApp {
             api,
             resources: crate::io::limits::Resources::from_env(),
             state: Mutex::new(state),
+            state_publication: Mutex::new(()),
             menu_labels: Mutex::new(crate::menu::MenuLabels::default()),
             host,
             started: Instant::now(),
@@ -170,6 +173,12 @@ impl DesktopApp {
     }
 
     fn persist_and_broadcast(&self) -> Result<()> {
+        // Take this before capturing the snapshot so an older update cannot
+        // finish writing or notifying after a newer one.
+        let _publication = self
+            .state_publication
+            .lock()
+            .map_err(|_| AppError::msg("app state publication lock poisoned"))?;
         let (state, preferences) = {
             let guard = self.lock_state()?;
             (guard.sanitized(), guard.preferences.clone())
@@ -347,6 +356,105 @@ fn percent_decode(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_state_publications_keep_disk_and_renderer_ordered() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc,
+        };
+        use std::time::Duration;
+
+        struct BlockingHost {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            emitted: Mutex<Vec<u64>>,
+            count: AtomicUsize,
+        }
+        impl Host for BlockingHost {
+            fn emit(&self, channel: &str, args: Value) {
+                if channel != STATE_CHANGED {
+                    return;
+                }
+                if self.count.fetch_add(1, Ordering::SeqCst) == 0 {
+                    self.entered.send(()).unwrap();
+                    self.release.lock().unwrap().recv().unwrap();
+                }
+                self.emitted
+                    .lock()
+                    .unwrap()
+                    .push(args[0]["preferences"]["sidebarWidth"].as_u64().unwrap());
+            }
+            fn window(&self, _: crate::ipc::protocol::WindowAction) -> Result<Value> {
+                Ok(Value::Null)
+            }
+        }
+
+        let root =
+            std::env::temp_dir().join(format!("desktop-state-order-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let paths = AppPaths {
+            user_data: root.clone(),
+            app_path: root.clone(),
+            exec_path: root.join("desktop"),
+            copilot_dir: None,
+        };
+        let storage = Storage::open(paths.clone()).unwrap();
+        let secure = SecureStore::new(paths.credential_dir()).unwrap();
+        let api = ApiClient::new(secure.clone()).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let host = Arc::new(BlockingHost {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+            emitted: Mutex::new(Vec::new()),
+            count: AtomicUsize::new(0),
+        });
+        let app = Arc::new(DesktopApp {
+            paths,
+            storage,
+            secure,
+            git: GitEngine::new(),
+            api,
+            resources: crate::io::limits::Resources::from_env(),
+            state: Mutex::new(AppState::default()),
+            state_publication: Mutex::new(()),
+            menu_labels: Mutex::new(crate::menu::MenuLabels::default()),
+            host: host.clone(),
+            started: Instant::now(),
+        });
+        app.lock_state().unwrap().preferences.sidebar_width = 101;
+        let first_app = app.clone();
+        let first = std::thread::spawn(move || first_app.persist_and_broadcast());
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        app.lock_state().unwrap().preferences.sidebar_width = 202;
+        let second_app = app.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result = second_app.persist_and_broadcast();
+            finished_tx.send(()).unwrap();
+            result
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let completed_early = finished_rx.recv_timeout(Duration::from_millis(250)).is_ok();
+        release_tx.send(()).unwrap();
+        first.join().unwrap().unwrap();
+        second.join().unwrap().unwrap();
+        assert!(
+            !completed_early,
+            "a newer state was published while an older notification was pending"
+        );
+        assert_eq!(*host.emitted.lock().unwrap(), vec![101, 202]);
+        assert_eq!(
+            app.storage.load_state().unwrap().preferences.sidebar_width,
+            202
+        );
+        assert_eq!(app.storage.load_preferences().sidebar_width, 202);
+        drop(app);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn oauth_callback_is_parsed_for_every_auth_scheme() {

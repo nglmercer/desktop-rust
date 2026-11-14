@@ -1,5 +1,9 @@
 # Full migration and legacy-removal ledger
 
+Within one Rust host, state snapshots are published to disk and the renderer
+in order, and local-storage updates are serialized through their writes. This
+does not coordinate separate host processes sharing the same data directory.
+
 The Rust shell now generates UUID v4 values for new application GUIDs while
 preserving existing values, including the earlier 32-character Rust IDs. GUID
 reads and writes serialize between storage instances in the same process;

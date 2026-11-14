@@ -80,14 +80,15 @@ impl Storage {
     }
 
     pub fn set_item(&self, key: &str, value: Value) -> Result<()> {
-        {
-            let mut guard = self
-                .kv
-                .lock()
-                .map_err(|_| AppError::msg("local-storage lock poisoned"))?;
-            guard.insert(key.to_string(), value);
-        }
-        self.flush_kv()
+        let mut guard = self
+            .kv
+            .lock()
+            .map_err(|_| AppError::msg("local-storage lock poisoned"))?;
+        guard.insert(key.to_string(), value);
+        // Keep the snapshot and its publication ordered with later updates.
+        // Otherwise an older snapshot can finish after a newer one and silently
+        // discard keys from the persisted local storage.
+        write_json(&self.paths.key_value_file(), &*guard)
     }
 
     pub fn get_boolean(&self, key: &str, default: bool) -> bool {
@@ -111,15 +112,6 @@ impl Storage {
         self.get_item(key)
             .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
             .unwrap_or_default()
-    }
-
-    fn flush_kv(&self) -> Result<()> {
-        let snapshot = self
-            .kv
-            .lock()
-            .map_err(|_| AppError::msg("local-storage lock poisoned"))?
-            .clone();
-        write_json(&self.paths.key_value_file(), &snapshot)
     }
 
     pub fn get_guid(&self) -> Result<String> {
@@ -375,6 +367,32 @@ mod guid_tests {
                     0o600
                 );
             }
+        }
+    }
+
+    #[test]
+    fn concurrent_local_storage_updates_are_all_persisted() {
+        let fixture = Fixture::new();
+        let storage = Arc::new(fixture.storage());
+        let barrier = Arc::new(Barrier::new(16));
+        std::thread::scope(|scope| {
+            for index in 0..16 {
+                let storage = storage.clone();
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    storage
+                        .set_item(&format!("key-{index}"), Value::from(index))
+                        .unwrap();
+                });
+            }
+        });
+        let reopened = fixture.storage();
+        for index in 0..16 {
+            assert_eq!(
+                reopened.get_item(&format!("key-{index}")),
+                Some(Value::from(index))
+            );
         }
     }
 
