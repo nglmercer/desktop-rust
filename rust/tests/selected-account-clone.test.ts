@@ -201,6 +201,63 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1' || process.platform !
     }
   }, 90_000)
 
+  it('waits for a cancelled checkout hook in selected-account staging', async () => {
+    const destination = path.join(suite.root, 'cancelled-checkout')
+    const template = path.join(suite.root, 'cancelled-checkout-template')
+    const hooks = path.join(template, 'hooks')
+    const started = path.join(suite.root, 'cancelled-checkout-started')
+    const release = path.join(suite.root, 'cancelled-checkout-release')
+    const late = path.join(suite.root, 'cancelled-checkout-late')
+    mkdirSync(hooks, { recursive: true })
+    writeFileSync(path.join(hooks, 'post-checkout'), '#!/bin/sh\ntrap "" INT\nprintf started > "$DESKTOP_CLONE_HOOK_STARTED"\nwhile [ ! -e "$DESKTOP_CLONE_HOOK_RELEASE" ]; do sleep 0.05; done\nprintf late > "$DESKTOP_CLONE_HOOK_LATE"\n', { mode: 0o700 })
+    const set = spawnSync(suite.realGit, ['config', '--file', suite.globalConfig, 'init.templateDir', template], { encoding: 'utf8' })
+    assert.equal(set.status, 0, set.stderr)
+    suite.clearTransport()
+    const child = spawn(prototype, [suite.registry, url, destination, suite.service.host, 'AliceCase', '101'], { env: { ...suite.env, DESKTOP_CLONE_HOOK_STARTED: started, DESKTOP_CLONE_HOOK_RELEASE: release, DESKTOP_CLONE_HOOK_LATE: late }, stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    child.stderr.on('data', chunk => { stderr += chunk.toString() })
+    const closed = new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', resolve)
+    })
+    try {
+      const deadline = Date.now() + 30_000
+      while (!existsSync(started) && child.exitCode === null && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      assert.ok(existsSync(started), `Git did not reach the staged checkout hook: ${stderr}`)
+      const pending = intents().find(item => item.destination === destination)
+      assert.equal(pending?.phase, 'checkout')
+      assert.equal(existsSync(destination), false)
+      assert.equal(typeof pending?.stage, 'string')
+      const stage = String(pending?.stage)
+      assert.equal(readFileSync(path.join(stage, 'file'), 'utf8'), 'base\n')
+      assert.equal(child.kill('SIGINT'), true)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const code = await Promise.race([
+        closed,
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('checkout cancellation timed out')), 15_000) }),
+      ]).finally(() => clearTimeout(timer))
+      assert.notEqual(code, 0)
+      writeFileSync(release, 'release')
+      await new Promise(resolve => setTimeout(resolve, 500))
+      assert.equal(existsSync(late), false, 'checkout hook wrote after cancellation completed')
+      assert.equal(existsSync(destination), false)
+      assert.equal(readFileSync(path.join(stage, 'file'), 'utf8'), 'base\n')
+      assert.equal(intents().find(item => item.destination === destination)?.phase, 'checkout')
+      clean(stderr)
+      suite.assertActor()
+    } finally {
+      writeFileSync(release, 'release')
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+      }
+      await closed.catch(() => {})
+      const reset = spawnSync(suite.realGit, ['config', '--file', suite.globalConfig, '--unset-all', 'init.templateDir'], { encoding: 'utf8' })
+      assert.equal(reset.status, 0, reset.stderr)
+    }
+  }, 90_000)
+
   it('does not publish when the selected account signs out during transfer', async () => {
     const destination = path.join(suite.root, 'account-changed')
     rmSync(suite.service.started, { force: true })
