@@ -115,6 +115,8 @@ impl RuntimeInfo {
 pub struct CopilotCapability {
     pub available: bool,
     pub reason: String,
+    /// The runtime executable the host selected, when one is available.
+    pub runtime_path: Option<String>,
     pub sdk_version: &'static str,
     pub min_protocol_version: u32,
 }
@@ -124,6 +126,7 @@ impl CopilotCapability {
         Self {
             available: false,
             reason: reason.into(),
+            runtime_path: None,
             sdk_version: COPILOT_SDK_VERSION,
             min_protocol_version: COPILOT_MIN_PROTOCOL_VERSION,
         }
@@ -133,6 +136,7 @@ impl CopilotCapability {
         Self {
             available: true,
             reason: format!("runtime at {}", runtime.binary.display()),
+            runtime_path: Some(runtime.binary.to_string_lossy().into_owned()),
             sdk_version: COPILOT_SDK_VERSION,
             min_protocol_version: COPILOT_MIN_PROTOCOL_VERSION,
         }
@@ -489,6 +493,22 @@ mod tests {
         verify_runtime(&RuntimeInfo::discover(&root).unwrap())
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn capability_reports_the_selected_runtime_path_only_when_available() {
+        let info = RuntimeInfo {
+            root: std::path::PathBuf::from("/runtime"),
+            binary: std::path::PathBuf::from("/runtime/prebuilds/linux-x64/copilot-runtime"),
+            platform: "linux".to_owned(),
+            arch: "x64".to_owned(),
+        };
+        let available = CopilotCapability::available(&info);
+        assert_eq!(
+            available.runtime_path.as_deref(),
+            Some("/runtime/prebuilds/linux-x64/copilot-runtime")
+        );
+        assert!(CopilotCapability::unavailable("missing").runtime_path.is_none());
     }
 
     #[test]

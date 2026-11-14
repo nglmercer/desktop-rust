@@ -349,7 +349,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 bridge.handle_ipc(request.body());
             }
         })
-        .with_initialization_script(host_env_script())
+        .with_initialization_script(host_env_script(app.paths.copilot_dir.as_deref()))
         .with_initialization_script(INIT_SCRIPT)
         .with_navigation_handler(|url| {
             if navigation::internal(&url) {
@@ -774,7 +774,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
 /// Host facts the renderer used to read from Node's `os` and `process`.
 /// Injected before any page script so the `os` shim answers synchronously.
-fn host_env_script() -> String {
+fn host_env_script(copilot_runtime_root: Option<&std::path::Path>) -> String {
     let platform = match std::env::consts::OS {
         "windows" => "win32",
         "macos" => "darwin",
@@ -794,6 +794,8 @@ fn host_env_script() -> String {
         "arch": arch,
         "homedir": home,
         "tmpdir": std::env::temp_dir().to_string_lossy(),
+        // Where the host found the Copilot runtime; absent when it has none.
+        "copilotRuntimeRoot": copilot_runtime_root.map(|root| root.to_string_lossy().into_owned()),
     });
     format!("window.__desktopEnv = Object.freeze({});", js_literal(&env))
 }
@@ -874,5 +876,23 @@ mod packaged_shutdown_tests {
         assert!(super::write_package_shutdown_result(&directory.join("quit"), "drained").is_err());
         assert_eq!(std::fs::read_to_string(&result).unwrap(), "keep");
         std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod host_env_tests {
+    use super::host_env_script;
+    use std::path::Path;
+
+    #[test]
+    fn the_page_learns_the_copilot_runtime_root_the_host_selected() {
+        let script = host_env_script(Some(Path::new("/opt/desktop/copilot-sdk")));
+        assert!(script.contains("\"copilotRuntimeRoot\":\"/opt/desktop/copilot-sdk\""));
+        assert!(script.starts_with("window.__desktopEnv = Object.freeze("));
+    }
+
+    #[test]
+    fn the_runtime_root_is_null_when_the_host_has_none() {
+        assert!(host_env_script(None).contains("\"copilotRuntimeRoot\":null"));
     }
 }

@@ -1005,8 +1005,8 @@ export class CopilotStore extends BaseStore {
     ),
     options: Pick<CopilotClientOptions, 'logLevel' | 'env'> = {}
   ): Promise<CopilotClient> {
-    const runtimePath = getCopilotRuntimePath(join(__dirname, 'copilot'))
-    if (!(await pathExists(runtimePath))) {
+    const runtimePath = await this.resolveRuntimePath()
+    if (runtimePath === null) {
       throw new Error(
         'Cannot create Copilot client: Runtime entry point not found'
       )
@@ -1083,9 +1083,26 @@ export class CopilotStore extends BaseStore {
     })
   }
 
+  /**
+   * The Copilot runtime executable. The desktop host reports the runtime
+   * directory it selected (its explicit install, the one beside the
+   * executable, or the development tree's package); without one the packaged
+   * layout next to the renderer is used.
+   */
+  private async resolveRuntimePath(): Promise<string | null> {
+    const hostRoot: unknown = (globalThis as any).__desktopEnv
+      ?.copilotRuntimeRoot
+    const root =
+      typeof hostRoot === 'string' && hostRoot.length > 0
+        ? hostRoot
+        : join(__dirname, 'copilot')
+    const runtimePath = getCopilotRuntimePath(root)
+    return (await pathExists(runtimePath)) ? runtimePath : null
+  }
+
   /** Whether the packaged SDK runtime needed for assisted commit planning is installed. */
   public async isAssistedCommitRuntimeAvailable(): Promise<boolean> {
-    return pathExists(getCopilotRuntimePath(join(__dirname, 'copilot')))
+    return (await this.resolveRuntimePath()) !== null
   }
 
   /** Reuse current session-bound authentication with the planner's isolated runtime policy. */
