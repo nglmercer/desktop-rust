@@ -2273,6 +2273,21 @@ and Rust's PATH-based discovery does not cover all Electron-discovered Windows
 registry entries or macOS bundles. Tests exercise both transports with real Git
 and a controlled editor process; platform-specific catalogs remain unverified.
 
+The WebSocket renderer's repository context action can open a registered
+repository through a fixed host command, without changing the selected repository.
+Linux uses `/usr/bin/xdg-open` with a system-only PATH and without `BROWSER`;
+this can fail on systems whose file-manager helpers are installed elsewhere.
+macOS uses `/usr/bin/open -R`, selecting the folder in Finder rather than opening
+it, so application bundles are not executed; this path has not been tested on
+a native macOS host. Windows and Android currently
+report that this operation is unsupported. The root is canonicalized and
+checked against the registry before launching, but another process can replace
+it between the final check and the file manager resolving the path. A cancelled
+request can already have launched the file manager and must not be retried
+automatically. A Linux WebSocket integration test uses a private bind mount to
+check the opener's arguments, environment, error and cancellation handling;
+it does not launch the user's actual file manager.
+
 `stage_conflict` stages the saved working file through a temporary index. Its
 certificate binds selected conflict entries, working content/mode, repository
 identity, HEAD/branch, operation state, attributes and relevant conversion

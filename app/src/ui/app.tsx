@@ -13,7 +13,7 @@ import {
 import { Dispatcher } from './dispatcher'
 import { AppStore, GitHubUserStore, IssuesStore } from '../lib/stores'
 import { assertNever } from '../lib/fatal-error'
-import { shell } from '../lib/app-shell'
+import { showRepositoryInFileManager } from '../lib/app-shell'
 import { updateStore, UpdateStatus } from './lib/update-store'
 import { RetryAction } from '../models/retry-actions'
 import { FetchType } from '../models/fetch'
@@ -3565,7 +3565,9 @@ export class App extends React.Component<IAppProps, IAppState> {
       return
     }
 
-    shell.showFolderContents(repository.path)
+    void showRepositoryInFileManager(repository.path, error =>
+      this.props.dispatcher.postError(error)
+    )
   }
 
   private onRepositoryDropdownStateChanged = (newState: DropdownState) => {

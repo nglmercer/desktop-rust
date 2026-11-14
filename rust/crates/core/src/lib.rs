@@ -22,6 +22,8 @@ pub use repo_rules::{NameRuleFailure, NameRulesActor, NameRulesPolicy};
 mod branch_policy;
 mod terminals;
 pub use terminals::{available_terminals, open_registered_terminal};
+mod file_manager;
+pub use file_manager::reveal_registered_repository;
 pub mod cancellation;
 pub mod comparison_snapshots;
 pub mod hook_decision;

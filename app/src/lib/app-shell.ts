@@ -8,6 +8,7 @@ import {
   moveItemToTrash,
 } from '../ui/main-process-proxy'
 import { openPath } from './open-path'
+import { backend } from '../backend/client'
 
 export interface IAppShell {
   readonly moveItemToTrash: (path: string) => Promise<void>
@@ -48,6 +49,29 @@ export const shell: IAppShell = {
   showItemInFolder,
   showFolderContents,
   openPath,
+}
+
+/** Open a saved repository in the host file manager from either renderer. */
+export async function showRepositoryInFileManager(
+  path: string,
+  onError: (error: Error) => void | Promise<void>
+): Promise<void> {
+  try {
+    if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
+      await backend().revealRegisteredRepository(path)
+      return
+    }
+    await showFolderContents(path)
+  } catch (error) {
+    try {
+      await onError(error instanceof Error ? error : new Error(String(error)))
+    } catch (reportingError) {
+      log.error(
+        'Failed to report the file manager error',
+        reportingError instanceof Error ? reportingError : new Error(String(reportingError))
+      )
+    }
+  }
 }
 
 /**

@@ -1453,6 +1453,23 @@ export class BackendClient {
     }
   }
 
+  /** Reveal a saved repository with the host's fixed file manager command. */
+  async revealRegisteredRepository(repositoryPath: string, options: BackendRequestOptions = {}): Promise<void> {
+    if (this.transport !== 'ws') {
+      throw new BackendError({ code: 'unsupported', message: 'Repository reveal requires the browser bridge', retryable: false })
+    }
+    try {
+      const value = await this.request('reveal_repository', { repository_path: repositoryPath }, options)
+      if (!isRecord(value) || value.launched !== true) {
+        throw new BackendError({ code: 'invalid_response', message: 'Invalid file manager response. The file manager may have opened; check before retrying.', retryable: false })
+      }
+    } catch (error) {
+      const result = toBackendError(error)
+      if (!result.retryable && !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(result.code)) throw error
+      throw new BackendError({ code: result.code, message: `${result.message}. The file manager may have opened; check before retrying.`, retryable: false })
+    }
+  }
+
   /** Find graphical editors using the Rust host's fixed discovery list. */
   async availableRustEditors(): Promise<ReadonlyArray<{ editor: string; path: string }>> {
     const value = this.transport === 'wry'
