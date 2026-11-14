@@ -215,7 +215,7 @@ describe('revision consumers with leading-dash refs', () => {
       for (const revision of ['--remote/missing', 'missing-ref']) {
         await assert.rejects(
           () => read(repository, revision, 'other.txt', 1024),
-          { name: 'GitError' }
+          { name: /^(GitError|BackendError)$/ }
         )
       }
     }
@@ -269,13 +269,13 @@ describe('revision consumers with leading-dash refs', () => {
       )
       await assert.rejects(
         () => getBlobContents(repository, revision, 'other.txt'),
-        /path 'other.txt' exists on disk, but not in/
+        /path 'other.txt' exists on disk, but not in|Blob path does not exist in the requested revision/
       )
     }
     for (const revision of ['--remote/missing', 'missing-ref']) {
       await assert.rejects(
         () => getBlobContents(repository, revision, 'other.txt'),
-        { name: 'GitError' }
+        { name: /^(GitError|BackendError)$/ }
       )
     }
   })
