@@ -3,18 +3,40 @@ import Fs from 'node:fs'
 import { appendFile, stat, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { join } from 'node:path'
-import { describe, it, TestContext } from 'node:test'
+import { beforeEach, describe, it, mock, TestContext } from 'node:test'
+import { vi } from 'vitest'
 
 import { tailByLine } from '../../src/lib/file-system'
 import { Tailer } from '../../src/lib/tailer'
 import { createTempDirectory } from '../helpers/temp'
+
+// The tailer calls `watch` through the `node:fs` namespace, which cannot be
+// patched in place under Vitest. Route it through a spy that calls the real
+// watcher, and reset it per test.
+const realWatch = Fs.watch
+const watchSpy = mock.fn((...args: Parameters<typeof Fs.watch>) =>
+  (realWatch as (...a: Array<unknown>) => unknown)(...args)
+)
+const statSpy = mock.fn((...args: Array<unknown>) =>
+  (Fs.stat as unknown as (...a: Array<unknown>) => unknown)(...args)
+)
+const createReadStreamSpy = mock.fn((...args: Array<unknown>) =>
+  (Fs.createReadStream as unknown as (...a: Array<unknown>) => unknown)(...args)
+)
+vi.mock('node:fs', async importOriginal => ({
+  ...(await importOriginal<typeof import('node:fs')>()),
+  watch: (...args: Parameters<typeof Fs.watch>) => watchSpy(...args),
+  stat: (...args: Array<unknown>) => (statSpy as any)(...args),
+  createReadStream: (...args: Array<unknown>) =>
+    (createReadStreamSpy as any)(...args),
+}))
 
 async function setupTailer(t: TestContext) {
   const directory = await createTempDirectory(t)
   const path = join(directory, 'progress')
   await writeFile(path, 'first\n')
 
-  const watch = t.mock.method(Fs, 'watch')
+  const watch = (watchSpy.mock.resetCalls(), watchSpy)
   const tailer = new Tailer(path)
   t.after(() => tailer.stop())
   tailer.start()
@@ -28,9 +50,8 @@ async function setupTailer(t: TestContext) {
   const pendingStats: Array<
     (error: NodeJS.ErrnoException | null, stats: Fs.Stats) => void
   > = []
-  t.mock.method(
-    Fs,
-    'stat',
+  statSpy.mock.resetCalls()
+  statSpy.mock.mockImplementation(
     (
       _path: Fs.PathLike,
       callback: (error: NodeJS.ErrnoException | null, stats: Fs.Stats) => void
@@ -38,7 +59,8 @@ async function setupTailer(t: TestContext) {
       pendingStats.push(callback)
     }
   )
-  const read = t.mock.method(Fs, 'createReadStream')
+  createReadStreamSpy.mock.resetCalls()
+  const read = createReadStreamSpy
   const completeStat = (size = stats.size, error: Error | null = null) => {
     const callback = pendingStats.shift()
     assert.ok(callback, 'Expected a pending stat')
@@ -76,6 +98,19 @@ async function consume(stream: Fs.ReadStream) {
   await closed
   return Buffer.concat(chunks).toString()
 }
+
+// Each test starts from the real file-system functions; a test that replaces
+// them does so for its own duration only.
+beforeEach(() => {
+  statSpy.mock.mockImplementation((...args: Array<unknown>) =>
+    (Fs.stat as unknown as (...a: Array<unknown>) => unknown)(...args)
+  )
+  createReadStreamSpy.mock.mockImplementation((...args: Array<unknown>) =>
+    (Fs.createReadStream as unknown as (...a: Array<unknown>) => unknown)(
+      ...args
+    )
+  )
+})
 
 describe('Tailer', { timeout: 5000 }, () => {
   it('reports read stream errors and stops watching', async t => {
@@ -304,13 +339,13 @@ describe('tailByLine', { timeout: 5000 }, () => {
           close: Fs.close,
         },
       })
-    t.mock.method(Fs, 'createReadStream', failOpen)
+    createReadStreamSpy.mock.mockImplementation(failOpen)
     const warning = new Promise<Error | undefined>(resolve => {
       t.mock.method(log, 'warn', (_message: string, error?: Error) => {
         resolve(error)
       })
     })
-    const watch = t.mock.method(Fs, 'watch')
+    const watch = (watchSpy.mock.resetCalls(), watchSpy)
     const onLine = t.mock.fn()
     const disposable = tailByLine(path, onLine)
     t.after(() => disposable.dispose())

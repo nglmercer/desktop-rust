@@ -443,5 +443,6 @@
   "app/test/unit/git/assisted-commit-selected-fence-test.ts",
   "app/test/unit/stores/assisted-commit-reader-publication-test.ts",
   "app/test/unit/stores/assisted-commit-run-hooks-test.ts",
-  "app/test/unit/ui/helper-side-effect-surfaces-test.tsx"
+  "app/test/unit/ui/helper-side-effect-surfaces-test.tsx",
+  "app/test/unit/tailer-test.ts"
 ]
