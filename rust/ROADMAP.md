@@ -181,20 +181,20 @@ The migration is complete (on Linux) when all of these hold:
 ### Node test runner exception (decided: end the migration now)
 
 The `node:test` → Vitest migration of the unit suites is closed. Everything that
-passes on Vitest with the Rust backend is on Vitest (369 files). These
-32 files stay on `node:test`, as a documented exception, because
-they depend on `mock.module`, on patching Node's built-in modules, or on
-Rust-backend behaviour that is not implemented yet. They run in the same suite
-(`pnpm test`) and must stay green on `node:test`; no test is skipped to hide a
-failure. Each file leaves this list when it is rewritten to pass on Vitest.
+passes on Vitest with the Rust backend is on Vitest (371 files). These
+30 files stay on `node:test`, as a documented exception, because they
+depend on `mock.module`, on patching Node's built-in modules, or on Rust-backend
+behaviour that is not implemented yet. They run in the same suite (`pnpm test`)
+and must stay green on `node:test`; no test is skipped to hide a failure. Each
+file leaves this list when it is rewritten to pass on Vitest.
 
-Verified state: Vitest 369 files / 3514 tests pass; `node:test` 792 pass / 0 fail.
+Verified state (full `pnpm test`): Vitest 371 files / 3544 tests pass;
+`node:test` 762 tests pass / 0 fail.
 
 Exceptions (remaining on `node:test`):
   - `account-token-lifecycle-test.ts`
   - `git/assisted-commit-cleanup-test.ts`
   - `git/assisted-commit-hooks-test.ts`
-  - `git/assisted-commit-push-destination-test.ts`
   - `git/assisted-commit-selected-fence-test.ts`
   - `git/assisted-commit-snapshot-test.ts`
   - `git/assisted-commit-test.ts`
@@ -206,7 +206,6 @@ Exceptions (remaining on `node:test`):
   - `stores/assisted-commit-cleanup-test.tsx`
   - `stores/assisted-commit-push-boundary-test.ts`
   - `stores/assisted-commit-push-hooks-test.ts`
-  - `stores/assisted-commit-push-lifecycle-test.ts`
   - `stores/assisted-commit-push-test.ts`
   - `stores/assisted-commit-reader-publication-test.ts`
   - `stores/assisted-commit-run-hooks-test.ts`
