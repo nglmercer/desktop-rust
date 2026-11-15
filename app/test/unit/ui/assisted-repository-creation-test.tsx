@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { before, describe, it, mock } from 'node:test'
 import { join } from 'path'
@@ -18,12 +19,8 @@ import { fireEvent, render, screen, waitFor } from '../../helpers/ui/render'
 let creation: typeof import('../../../src/ui/add-repository/create-repository')
 
 before(async () => {
-  mock.module('../../../src/ui/add-repository/gitignores.ts', {
-    namedExports: { ...GitIgnores, getGitIgnoreNames: async () => [] },
-  })
-  mock.module('../../../src/ui/add-repository/licenses.ts', {
-    namedExports: { ...Licenses, getLicenses: async () => [] },
-  })
+  vi.doMock('../../../src/ui/add-repository/gitignores.ts', async () => ({ ...GitIgnores, getGitIgnoreNames: async () => [] }))
+  vi.doMock('../../../src/ui/add-repository/licenses.ts', async () => ({ ...Licenses, getLicenses: async () => [] }))
   creation = await import('../../../src/ui/add-repository/create-repository')
 })
 

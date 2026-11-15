@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { after, before, describe, it, mock } from 'node:test'
 import { Account, IAccountIdentity } from '../../src/models/account'
@@ -81,22 +82,18 @@ describe('repository-aware credential trampoline', () => {
     const environment = await import(
       '../../src/lib/trampoline/trampoline-environment'
     )
-    mock.module('../../src/lib/trampoline/trampoline-environment', {
-      namedExports: {
+    vi.doMock('../../src/lib/trampoline/trampoline-environment', async () => ({
         ...environment,
         getTrampolineEnvironmentPath: () => path,
         getIsBackgroundTaskEnvironment: () => background,
         getTrampolineFallbackAccount: () => fallbackAccount,
-      },
-    })
-    mock.module('../../src/lib/trampoline/trampoline-ui-helper', {
-      namedExports: {
+      }))
+    vi.doMock('../../src/lib/trampoline/trampoline-ui-helper', async () => ({
         trampolineUIHelper: {
           promptForRepositoryAccount: prompt,
           associateRepositoryWithEndpoint: associate,
         },
-      },
-    })
+      }))
     createHandler = (
       await import('../../src/lib/trampoline/trampoline-credential-helper')
     ).createCredentialHelperTrampolineHandler

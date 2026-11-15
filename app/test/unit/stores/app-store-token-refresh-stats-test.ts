@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { after, before, describe, it, mock } from 'node:test'
 import type { AppStore } from '../../../src/lib/stores/app-store'
@@ -20,13 +21,11 @@ describe('AppStore token refresh usage stats wiring', () => {
   })
 
   before(async () => {
-    mock.module('../../../src/ui/main-process-proxy', {
-      namedExports: {
-        ...(await import('../../../src/ui/main-process-proxy')),
+    vi.doMock('../../../src/ui/main-process-proxy', async () => ({
+        ...(await vi.importActual('../../../src/ui/main-process-proxy')),
         getAppMenu: () => {},
         updateAccounts: () => {},
-      },
-    })
+      }))
     const { AppStore } = await import('../../../src/lib/stores/app-store')
     const { AccountsStore } = await import(
       '../../../src/lib/stores/accounts-store'

@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { after, before, describe, it, mock } from 'node:test'
 import type { AppStore } from '../../../src/lib/stores/app-store'
@@ -25,12 +26,10 @@ describe('AppStore repository indicators', () => {
   })
 
   before(async () => {
-    mock.module('../../../src/ui/main-process-proxy', {
-      namedExports: {
-        ...(await import('../../../src/ui/main-process-proxy')),
+    vi.doMock('../../../src/ui/main-process-proxy', async () => ({
+        ...(await vi.importActual('../../../src/ui/main-process-proxy')),
         getAppMenu: () => {},
-      },
-    })
+      }))
     const { AppStore } = await import('../../../src/lib/stores/app-store')
     const { AliveStore } = await import('../../../src/lib/stores/alive-store')
     const { CopilotStore } = await import(

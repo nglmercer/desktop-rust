@@ -1,12 +1,11 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { describe, it, mock, TestContext } from 'node:test'
 import { DesktopAliveEvent } from '../../src/lib/stores/alive-store'
 
 let notificationShown = false
 const show = mock.fn(async () => notificationShown)
-mock.module('../../src/lib/notifications/show-notification', {
-  namedExports: { showNotification: show },
-})
+vi.doMock('../../src/lib/notifications/show-notification', async () => ({ showNotification: show }))
 
 describe('NotificationsStore', async () => {
   const { NotificationsStore } = await import(

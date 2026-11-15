@@ -428,5 +428,14 @@
   "app/test/unit/format-commit-message-test.ts",
   "app/test/unit/assisted-commit-selection-test.ts",
   "app/test/unit/git/assisted-commit-push-destination-test.ts",
-  "app/test/unit/stores/assisted-commit-push-lifecycle-test.ts"
+  "app/test/unit/stores/assisted-commit-push-lifecycle-test.ts",
+  "app/test/unit/notifications-store-test.ts",
+  "app/test/unit/stores/app-store-indicators-test.ts",
+  "app/test/unit/stores/app-store-token-refresh-stats-test.ts",
+  "app/test/unit/stores/copilot-store-credentials-test.ts",
+  "app/test/unit/trampoline-credential-helper-test.ts",
+  "app/test/unit/ui/assisted-repository-creation-test.tsx",
+  "app/test/unit/ui/notification-checks-account-test.tsx",
+  "app/test/unit/ui/repository-directory-exceptions-test.tsx",
+  "app/test/unit/ui/repository-settings-account-test.tsx"
 ]

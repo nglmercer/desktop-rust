@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { before, beforeEach, describe, it, mock } from 'node:test'
 import * as React from 'react'
@@ -28,20 +29,19 @@ const remote = {
 }
 
 before(() => {
-  mock.module('../../../src/lib/git/index.ts', {
-    namedExports: { readGitIgnoreAtRoot: async () => '' },
-  })
-  mock.module('../../../src/lib/git/config.ts', {
-    namedExports: {
-      getConfigValue: async () => null,
+  vi.doMock('../../../src/lib/git/index.ts', async () => ({
+  ...(await vi.importActual('../../../src/lib/git/index.ts')),
+  readGitIgnoreAtRoot: async () => '' }))
+  vi.doMock('../../../src/lib/git/config.ts', async () => ({
+  ...(await vi.importActual('../../../src/lib/git/config.ts')),
+  getConfigValue: async () => null,
       getGlobalConfigValue: async () => '',
       setConfigValue,
       removeConfigValue: async () => {},
-    },
-  })
-  mock.module('../../../src/ui/main-process-proxy.ts', {
-    namedExports: { sendDialogDidOpen: () => {} },
-  })
+    }))
+  vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({
+  ...(await vi.importActual('../../../src/ui/main-process-proxy.ts')),
+  sendDialogDidOpen: () => {} }))
 })
 
 beforeEach(() => setConfigValue.mock.resetCalls())

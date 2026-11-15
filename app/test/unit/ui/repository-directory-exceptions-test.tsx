@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { before, beforeEach, describe, it, mock } from 'node:test'
 import * as Path from 'path'
@@ -21,15 +22,14 @@ const getRepositoryType = mock.fn(
 const addSafeDirectory = mock.fn(async (_path: string) => {})
 
 before(() => {
-  mock.module('../../../src/lib/git/index.ts', {
-    namedExports: { getRepositoryType, addSafeDirectory },
-  })
-  mock.module('../../../src/ui/main-process-proxy.ts', {
-    namedExports: {
-      sendDialogDidOpen: () => {},
+  vi.doMock('../../../src/lib/git/index.ts', async () => ({
+  ...(await vi.importActual('../../../src/lib/git/index.ts')),
+  getRepositoryType, addSafeDirectory }))
+  vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({
+  ...(await vi.importActual('../../../src/ui/main-process-proxy.ts')),
+  sendDialogDidOpen: () => {},
       showOpenDialog: async () => null,
-    },
-  })
+    }))
 })
 
 function createDispatcher() {

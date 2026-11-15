@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import * as copilotSdk from '@github/copilot-sdk'
 import type {
   CopilotClientOptions,
@@ -175,18 +176,14 @@ function resolveConflicts(
 
 describe('CopilotStore session credential wiring', () => {
   before(async () => {
-    mock.module('@github/copilot-sdk', {
-      namedExports: {
+    vi.doMock('@github/copilot-sdk', async () => ({
         ...copilotSdk,
         CopilotClient: function (options: CopilotClientOptions) {
           clientOptions.push(options)
           return new copilotSdk.CopilotClient(options)
         },
-      },
-    })
-    mock.module('../../../src/lib/path-exists', {
-      namedExports: { pathExists: () => runtimePathExists() },
-    })
+      }))
+    vi.doMock('../../../src/lib/path-exists', async () => ({ pathExists: () => runtimePathExists() }))
     const {
       CopilotStore,
       CommitMessageGenerationCancelledError,

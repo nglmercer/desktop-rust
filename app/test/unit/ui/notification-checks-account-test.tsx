@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { before, beforeEach, describe, it, mock } from 'node:test'
 import * as React from 'react'
@@ -50,16 +51,12 @@ const logs = mock.fn<
 >(async (_api, _owner, _name, original) => original)
 
 before(() => {
-  mock.module('../../../src/ui/main-process-proxy.ts', {
-    namedExports: { sendDialogDidOpen: () => {} },
-  })
-  mock.module('../../../src/lib/ci-checks/ci-checks.ts', {
-    namedExports: {
+  vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({ sendDialogDidOpen: () => {} }))
+  vi.doMock('../../../src/lib/ci-checks/ci-checks.ts', async () => ({
       ...checksModule,
       getCheckRunActionsWorkflowRuns: workflows,
       getLatestPRWorkflowRunsLogsForCheckRun: logs,
-    },
-  })
+    }))
 })
 
 beforeEach(() => {
