@@ -180,26 +180,23 @@ The migration is complete (on Linux) when all of these hold:
 
 ### Node test runner exception
 
-The `node:test` → Vitest migration of the unit suites is closed except for the
-files below. Migrated so far: 18 of 32 remaining at the start
-of the final pass. Everything listed is still green on `node:test`; no test is
-skipped to hide a failure. Each file leaves this list when it passes on Vitest.
+Still on `node:test`, with the reason each one does not pass on Vitest yet. Each
+file leaves this list when it passes on Vitest. Nothing is skipped to hide a
+failure; all of them are green on `node:test`.
 
-Verified state (full `pnpm test`): Vitest 387 files pass; `node:test` 602 tests
+Verified state (full `pnpm test`): Vitest 389 files pass; `node:test` 557 tests
 pass / 0 fail.
 
-Exceptions (still on `node:test`, with the reason each one does not pass on Vitest yet):
-  - `account-token-lifecycle-test.ts` — fake timers: the revoke timer is not cancelled on completion under Vitest (4 tests)
+Exceptions (12):
   - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
   - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
   - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
-  - `stores/app-store-add-accounts-test.ts` — conflict review unavailable under the backend (2 tests)
+  - `stores/app-store-add-accounts-test.ts` — 44 of 45 pass on Vitest; the last one (`refuses to rename the worktree while a fetch is running`) fails on a repository-selection race: a long fetch on one repository changes the shared connection between a binding and its read (harness/server contract)
   - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
   - `stores/assisted-commit-run-test.ts` — planner unsafe-split path differs under the backend (1 test)
   - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
-  - `ui/assisted-commit-details-test.tsx` — react-confetti cannot resolve react/jsx-runtime under pnpm + Vitest
   - `ui/assisted-commit-history-test.tsx` — context menu actions not reported under Vitest (26 tests)
   - `ui/commit-message-test.tsx` — RPC queue overflow (QUEUE_FULL, 32 pending) under the backend (9 tests)

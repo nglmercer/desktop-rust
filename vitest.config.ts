@@ -71,5 +71,8 @@ export default defineConfig({
     environment: 'jsdom',
     environmentOptions: { jsdom: { url: 'http://localhost/' } },
     setupFiles: ['./app/test/vitest-setup.ts'],
+    // react-confetti imports `react/jsx-runtime` without an extension; Node's
+    // ESM resolver rejects that for React 16 (no `exports` map), Vite does not.
+    server: { deps: { inline: ['react-confetti'] } },
   },
 })

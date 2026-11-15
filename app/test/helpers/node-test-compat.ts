@@ -99,9 +99,14 @@ class MockTimers {
     apis?: ReadonlyArray<TimerApi>
     now?: number | Date
   }) {
-    const toFake = (options?.apis ?? ['setTimeout', 'setInterval', 'Date']).map(
-      api => api
-    )
+    // Node's `mock.timers` fakes a timer together with its cancel function, so
+    // a `clearTimeout` after a faked `setTimeout` cancels the fake timer.
+    const requested = options?.apis ?? ['setTimeout', 'setInterval', 'Date']
+    const toFake = [
+      ...requested,
+      ...(requested.includes('setTimeout') ? ['clearTimeout'] : []),
+      ...(requested.includes('setInterval') ? ['clearInterval'] : []),
+    ]
     vi.useFakeTimers({
       toFake: toFake as Parameters<typeof vi.useFakeTimers>[0] extends infer O
         ? O extends { toFake?: infer T }
