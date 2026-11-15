@@ -177,3 +177,53 @@ The migration is complete (on Linux) when all of these hold:
 3. The nine removal gates in `MIGRATION.md` are ticked with the evidence recorded there.
 4. The full suite passes with no `todo` or capability-skipped suites other than documented external tools.
 5. `pnpm start`, `pnpm build:prod` and `pnpm package` work from a clean checkout.
+
+### Node test runner exception (decided: end the migration now)
+
+The `node:test` → Vitest migration of the unit suites is closed. Everything that
+passes on Vitest with the Rust backend is on Vitest (369 files). These
+32 files stay on `node:test`, as a documented exception, because
+they depend on `mock.module`, on patching Node's built-in modules, or on
+Rust-backend behaviour that is not implemented yet. They run in the same suite
+(`pnpm test`) and must stay green on `node:test`; no test is skipped to hide a
+failure. Each file leaves this list when it is rewritten to pass on Vitest.
+
+Verified state: Vitest 369 files / 3514 tests pass; `node:test` 792 pass / 0 fail.
+
+Exceptions (remaining on `node:test`):
+  - `account-token-lifecycle-test.ts`
+  - `git/assisted-commit-cleanup-test.ts`
+  - `git/assisted-commit-hooks-test.ts`
+  - `git/assisted-commit-push-destination-test.ts`
+  - `git/assisted-commit-selected-fence-test.ts`
+  - `git/assisted-commit-snapshot-test.ts`
+  - `git/assisted-commit-test.ts`
+  - `notifications-store-test.ts`
+  - `stores/app-store-accounts-test.ts`
+  - `stores/app-store-add-accounts-test.ts`
+  - `stores/app-store-indicators-test.ts`
+  - `stores/app-store-token-refresh-stats-test.ts`
+  - `stores/assisted-commit-cleanup-test.tsx`
+  - `stores/assisted-commit-push-boundary-test.ts`
+  - `stores/assisted-commit-push-hooks-test.ts`
+  - `stores/assisted-commit-push-lifecycle-test.ts`
+  - `stores/assisted-commit-push-test.ts`
+  - `stores/assisted-commit-reader-publication-test.ts`
+  - `stores/assisted-commit-run-hooks-test.ts`
+  - `stores/assisted-commit-run-test.ts`
+  - `stores/assisted-commit-selection-test.ts`
+  - `stores/copilot-store-credentials-test.ts`
+  - `tailer-test.ts`
+  - `trampoline-credential-helper-test.ts`
+  - `ui/assisted-commit-details-test.tsx`
+  - `ui/assisted-commit-history-test.tsx`
+  - `ui/assisted-repository-creation-test.tsx`
+  - `ui/commit-message-test.tsx`
+  - `ui/helper-side-effect-surfaces-test.tsx`
+  - `ui/notification-checks-account-test.tsx`
+  - `ui/repository-directory-exceptions-test.tsx`
+  - `ui/repository-settings-account-test.tsx`
+
+Known causes to fix when rewriting them: `mock.module` (vi.mock per file), an
+RPC queue overflow (`QUEUE_FULL`, 32 pending) in `commit-message-test`, and the
+Rust-backend behaviour gaps in the assisted-commit suites listed above.
