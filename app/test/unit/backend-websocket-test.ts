@@ -174,37 +174,30 @@ describe('WebSocket backend transport', () => {
   it('allows a fetch mutation to run beyond the ordinary request timeout', async () => {
     const { client: value, socket } = await connected()
     const pending = value.fetchRepositoryRemote('/repo', 'origin', '/source', false)
-    socket.message({ id: 1, result: { root_id: 'repo-1' } })
-    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch_preview'))
-    socket.message({ id: 2, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
-    await vi.waitFor(() => expect(socket.sent[3]?.method).toBe('repository_binding'))
-    socket.message({ id: 3, result: { root_id: 'repo-1' } })
-    await vi.waitFor(() => expect(socket.sent[4]?.method).toBe('renderer_fetch'))
+    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_fetch_preview'))
+    socket.message({ id: 1, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
+    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch'))
     await vi.advanceTimersByTimeAsync(170_001)
     expect(socket.sent.some(message => message.method === 'cancel')).toBe(false)
-    socket.message({ id: 4, result: { code: 0, error_kind: null } })
+    socket.message({ id: 2, result: { code: 0, error_kind: null } })
     await expect(pending).resolves.toBeUndefined()
   })
 
   it.each([0, 1, 128])('accepts remote HEAD refresh exit code %s', async code => {
     const { client: value, socket } = await connected()
     const pending = value.refreshRepositoryRemoteHead('/repo', 'origin', '/source', false)
-    socket.message({ id: 1, result: { root_id: 'repo-1' } })
-    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_remote_head_preview'))
-    socket.message({ id: 2, result: { remote: 'origin', basis: 'a'.repeat(64) } })
-    await vi.waitFor(() => expect(socket.sent[3]?.method).toBe('repository_binding'))
-    socket.message({ id: 3, result: { root_id: 'repo-1' } })
-    await vi.waitFor(() => expect(socket.sent[4]?.method).toBe('renderer_remote_head'))
-    socket.message({ id: 4, result: { code } })
+    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_remote_head_preview'))
+    socket.message({ id: 1, result: { remote: 'origin', basis: 'a'.repeat(64) } })
+    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_remote_head'))
+    socket.message({ id: 2, result: { code } })
     await expect(pending).resolves.toBeUndefined()
   })
 
   it('does not retry unsupported remote HEAD refresh over the browser bridge', async () => {
     const { client: value, socket } = await connected()
     const pending = value.refreshRepositoryRemoteHead('/repo', 'origin', '/source', false)
-    socket.message({ id: 1, result: { root_id: 'repo-1' } })
-    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_remote_head_preview'))
-    socket.message({ id: 2, result: { kind: 'unsupported' } })
+    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_remote_head_preview'))
+    socket.message({ id: 1, result: { kind: 'unsupported' } })
     await expect(pending).rejects.toMatchObject({ code: 'unsupported', retryable: false })
     expect(socket.sent.some(message => message.method === 'renderer_remote_head')).toBe(false)
   })
@@ -213,16 +206,13 @@ describe('WebSocket backend transport', () => {
     const { client: value, socket } = await connected()
     const pending = value.fetchRepositoryRemote('/repo', 'origin', '/source', false)
     const result = expect(pending).rejects.toMatchObject({ code: 'timeout', retryable: false })
-    socket.message({ id: 1, result: { root_id: 'repo-1' } })
-    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch_preview'))
-    socket.message({ id: 2, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
-    await vi.waitFor(() => expect(socket.sent[3]?.method).toBe('repository_binding'))
-    socket.message({ id: 3, result: { root_id: 'repo-1' } })
-    await vi.waitFor(() => expect(socket.sent[4]?.method).toBe('renderer_fetch'))
+    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_fetch_preview'))
+    socket.message({ id: 1, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
+    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch'))
     await vi.advanceTimersByTimeAsync(3_600_001)
     await result
     expect(socket.sent.filter(message => message.method === 'renderer_fetch')).toHaveLength(1)
-    expect(socket.sent).toContainEqual(expect.objectContaining({ method: 'cancel', request_id: 4 }))
+    expect(socket.sent).toContainEqual(expect.objectContaining({ method: 'cancel', request_id: 2 }))
   })
 
   it('allows a long Copilot turn to finish before the transport deadline', async () => {
@@ -254,25 +244,20 @@ describe('WebSocket backend transport', () => {
       paths: ['selected.txt'],
       remove_paths: ['old-name.txt'],
     })
-    expect(socket.sent[1]).toEqual({
-      id: 1,
-      method: 'repository_binding',
-      path: '/repo-a',
-    })
-    socket.message({ id: 1, result: { root_id: 'repo-a-id' } })
-    for (let i = 0; i < 10 && socket.sent.length < 3; i++) {
+    for (let i = 0; i < 10 && socket.sent.length < 2; i++) {
       await Promise.resolve()
     }
-    expect(socket.sent[2]).toEqual({
-      id: 2,
+    expect(socket.sent.some(message => message.method === 'repository_binding')).toBe(false)
+    expect(socket.sent[1]).toEqual({
+      id: 1,
       method: 'copilot_generate_commit_message',
-      repository_id: 'repo-a-id',
+      repository_path: '/repo-a',
       account: { host: 'github.com', login: 'Alice', id: 42 },
       paths: ['selected.txt'],
       remove_paths: ['old-name.txt'],
     })
     socket.message({
-      id: 2,
+      id: 1,
       result: {
         summary: 'fix: example',
         description: '',
