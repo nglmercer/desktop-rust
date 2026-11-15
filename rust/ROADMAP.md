@@ -232,5 +232,5 @@ Exceptions (9):
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
-  - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
+  - `stores/assisted-commit-selection-test.ts` — 23 of 24 pass on Vitest. The failing case (`never remaps certified Manual partial masks onto a fresh diff after admission`) partially selects the second hunk; on the backend the commit keeps the original line 50 and drops the selected `selected suffix` line, while `node:test` commits it. Likely the partial-selection line mapping on the Rust side (the selected hunk's line numbers vs the TypeScript diff); not yet confirmed
   - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests)
