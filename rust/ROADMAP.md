@@ -178,6 +178,30 @@ The migration is complete (on Linux) when all of these hold:
 4. The full suite passes with no `todo` or capability-skipped suites other than documented external tools.
 5. `pnpm start`, `pnpm build:prod` and `pnpm package` work from a clean checkout.
 
+### Bridge selection contract (blocks the app-store and harness races)
+
+Facts checked in the code, so the next change starts from them:
+
+- The server keeps one selected repository per session (`state.repo` in
+  `rust/crates/bridge/src/lib.rs`). `repository_binding` returns a `root_id`
+  only when the requested path is the selected repository.
+- A bound read (`ApplicationOperation::Repository`) checks `repo.id() == expected`
+  while it holds the selection lock, and holds the lock during execution, so bound
+  operations already run one at a time.
+- The window that breaks is between a client's binding and its read: another
+  request can select a different repository in between, and the read fails with
+  "Selected repository does not match". `app-store-add-accounts` (one test) and
+  the harness hit this when a background fetch on one repository overlaps a
+  request on another.
+- Path-based operations (`Repository { path, ... }` variants) open or reuse the
+  repository per request under the same lock, so they have no binding window.
+
+Two fixes are possible; choose one before changing code:
+1. Route bound reads through the path-based variants (atomic; server change for
+   every bound method the renderer uses).
+2. Serialize binding and read per client (client change; no server change; the
+   server already serializes execution, so no extra waiting for bound operations).
+
 ### Node test runner exception
 
 Still on `node:test`, with the reason each one does not pass on Vitest yet. Each
