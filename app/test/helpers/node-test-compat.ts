@@ -113,6 +113,10 @@ class MockTimers {
     this.enabled = true
   }
 
+  public setTime(milliseconds: number) {
+    vi.setSystemTime(milliseconds)
+  }
+
   public tick(milliseconds: number = 1) {
     vi.advanceTimersByTime(milliseconds)
   }

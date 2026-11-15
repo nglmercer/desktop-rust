@@ -1,4 +1,4 @@
-import { mock } from '../node-test-compat'
+import { mock } from 'node:test'
 import { act } from '@testing-library/react'
 
 type TimerApi = 'Date' | 'setTimeout'

@@ -1,4 +1,4 @@
-import type { TestContext } from './node-test-compat'
+import { TestContext } from 'node:test'
 
 /** Replaces the HTML5 notification API and restores it after the test. */
 export function mockNotification(t: TestContext, value: unknown) {

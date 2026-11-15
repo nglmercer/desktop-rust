@@ -5,7 +5,7 @@ import type {
   SessionEventPayload,
 } from '@github/copilot-sdk'
 import type { Model } from '../../src/lib/copilot/types'
-import type { TestContext } from './node-test-compat'
+import { TestContext } from 'node:test'
 import { Account } from '../../src/models/account'
 import {
   IAssistedCommitAnalysis,

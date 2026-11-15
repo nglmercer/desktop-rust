@@ -21,6 +21,14 @@ if (process.env.DESKTOP_TEST_RUST_BACKEND === undefined && rustBackendDefault) {
 export default defineConfig({
   resolve: {
     alias: [
+      // Suites and helpers written for `node:test` run on Vitest through a
+      // compatible surface (see app/test/helpers/node-test-compat.ts).
+      {
+        find: /^node:test$/,
+        replacement: fileURLToPath(
+          new URL('./app/test/helpers/node-test-compat.ts', import.meta.url)
+        ),
+      },
       // Native Node addons are not installed; use the renderer's web shims.
       ...['keytar', 'registry-js'].map(name => ({
         find: new RegExp(`^${name}$`),

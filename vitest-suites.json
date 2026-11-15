@@ -423,5 +423,9 @@
   "app/test/unit/ui/publish-repository-test.tsx",
   "app/test/unit/ui/multi-account-pickers-test.tsx",
   "app/test/unit/ui/clone-repository-test.tsx",
-  "app/test/unit/git-config-isolation-test.ts"
+  "app/test/unit/git-config-isolation-test.ts",
+  "app/test/unit/wrap-rich-text-commit-message-test.ts",
+  "app/test/unit/copilot-commit-message-test.ts",
+  "app/test/unit/format-commit-message-test.ts",
+  "app/test/unit/assisted-commit-selection-test.ts"
 ]
