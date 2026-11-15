@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from '../../helpers/node-test-compat'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { hostIpc } from '../../../src/web/host-bridge'

@@ -1,4 +1,10 @@
-import { afterEach, beforeEach, describe, it, mock } from 'node:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+  mock,
+} from '../helpers/node-test-compat'
 import assert from 'node:assert'
 import { hostIpc } from '../../src/web/host-bridge'
 import { TestStatsDatabase } from '../helpers/databases'

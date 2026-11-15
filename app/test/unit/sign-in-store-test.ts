@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test'
+import { describe, it, beforeEach } from '../helpers/node-test-compat'
 import assert from 'node:assert'
 import {
   SignInStore,

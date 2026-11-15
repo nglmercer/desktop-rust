@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { it } from 'node:test'
+import { it } from '../helpers/node-test-compat'
 import { showNotification } from 'desktop-notifications'
 
 it(

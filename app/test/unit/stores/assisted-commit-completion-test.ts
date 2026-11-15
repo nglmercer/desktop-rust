@@ -1,4 +1,4 @@
-import { it, describe } from 'node:test'
+import { it, describe } from '../../helpers/node-test-compat'
 import { seed, count } from '../../helpers/assisted-commit'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'

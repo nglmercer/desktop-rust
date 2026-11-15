@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+} from '../../helpers/node-test-compat'
 import * as React from 'react'
 import { Account, getAccountKey } from '../../../src/models/account'
 import { IAccountTokenExpiration } from '../../../src/lib/credential-sessions'

@@ -7,7 +7,7 @@ import {
   wholeSelectionResponse,
 } from '../helpers/copilot-assisted-commit'
 import { createTempDirectory } from '../helpers/temp'
-import { describe, it } from 'node:test'
+import { describe, it } from '../helpers/node-test-compat'
 import assert from 'node:assert'
 import { RepositoryStateCache } from '../../src/lib/stores/repository-state-cache'
 import { Repository } from '../../src/models/repository'

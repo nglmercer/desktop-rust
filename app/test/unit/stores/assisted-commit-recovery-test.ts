@@ -1,4 +1,4 @@
-import { TestContext, it, describe } from 'node:test'
+import { TestContext, it, describe } from '../../helpers/node-test-compat'
 import {
   partialSelectionFixture,
   createAssistedCommitRunHarness,

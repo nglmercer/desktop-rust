@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it } from '../helpers/node-test-compat'
 import assert from 'node:assert/strict'
 import { Account } from '../../src/models/account'
 import { AccountsStore } from '../../src/lib/stores/accounts-store'

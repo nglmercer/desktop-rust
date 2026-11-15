@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from '../helpers/node-test-compat'
 import { setImmediate } from 'node:timers/promises'
 import {
   API,

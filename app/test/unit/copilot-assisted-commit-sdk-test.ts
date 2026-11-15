@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from '../helpers/node-test-compat'
 import { chmod, mkdir, readFile, readdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {

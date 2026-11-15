@@ -1,4 +1,4 @@
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from '../../helpers/node-test-compat'
 import assert from 'node:assert/strict'
 import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { AddressInfo } from 'net'

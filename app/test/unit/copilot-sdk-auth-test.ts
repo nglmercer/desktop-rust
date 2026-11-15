@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { it, TestContext } from 'node:test'
+import { it, TestContext } from '../helpers/node-test-compat'
 import { createServer } from 'http'
 import { dirname } from 'path'
 import {

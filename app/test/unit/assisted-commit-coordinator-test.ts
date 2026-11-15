@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { describe, it } from '../helpers/node-test-compat'
 import { AssistedCommitCoordinator } from '../../src/lib/assisted-commit/coordinator'
 import { IAssistedCommitRepository } from '../../src/lib/assisted-commit/types'
 import { readAssistedCommitHead } from '../../src/lib/git/assisted-commit'

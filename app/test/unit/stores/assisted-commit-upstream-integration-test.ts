@@ -1,7 +1,7 @@
 import { getCopilotAccountCacheKey } from '../../../src/lib/stores/copilot-store'
 import { TokenStore } from '../../../src/lib/stores/token-store'
 import assert from 'node:assert/strict'
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from '../../helpers/node-test-compat'
 import { access, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { AccountsStore } from '../../../src/lib/stores/accounts-store'

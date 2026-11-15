@@ -1,6 +1,6 @@
 import { deferred } from '../../helpers/copilot-assisted-commit'
 import assert from 'node:assert/strict'
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from '../../helpers/node-test-compat'
 import * as React from 'react'
 import { rm, writeFile } from 'fs/promises'
 import { join } from 'path'

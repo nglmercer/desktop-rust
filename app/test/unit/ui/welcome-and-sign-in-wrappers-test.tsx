@@ -1,5 +1,10 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+} from '../../helpers/node-test-compat'
 import * as React from 'react'
 
 import type {

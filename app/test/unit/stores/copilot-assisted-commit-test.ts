@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { setImmediate } from 'node:timers/promises'
-import { describe, it } from 'node:test'
+import { describe, it } from '../../helpers/node-test-compat'
 import type { Model } from '../../../src/lib/copilot/types'
 import {
   AssistedCommitCleanupTimeoutMs,

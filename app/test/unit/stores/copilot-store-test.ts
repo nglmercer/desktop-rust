@@ -4,7 +4,7 @@ import type {
   Model,
 } from '../../../src/lib/copilot/types'
 import assert from 'node:assert'
-import { after, before, describe, it } from 'node:test'
+import { after, before, describe, it } from '../../helpers/node-test-compat'
 import { getDotComAPIEndpoint } from '../../../src/lib/api'
 import { AccountsStore } from '../../../src/lib/stores/accounts-store'
 import {

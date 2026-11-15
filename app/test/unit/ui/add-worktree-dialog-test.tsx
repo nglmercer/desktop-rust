@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it } from '../../helpers/node-test-compat'
 import * as React from 'react'
 import { join } from 'path'
 import { AddWorktreeDialog } from '../../../src/ui/worktrees/add-worktree-dialog'
