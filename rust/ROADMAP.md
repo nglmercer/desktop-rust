@@ -220,7 +220,7 @@ Exceptions (11):
   - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
   - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
   - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
-  - `stores/app-store-add-accounts-test.ts` — 45 of 45 pass on Vitest, but the run exits 1: after `keeps the latest draft when switching back to a previous account`, the app's background repository refresh (`_refreshRepository` → `recoverMissingRepository` → `_loadStatus`) runs after the test deletes its directory, and its `git` spawn rejects unhandled (`start git; … No such file or directory`). A test-side wait on the selection queue did not cover it. Needs the app's fire-and-forget refresh to handle its own errors, or an explicit await in the store API.
+  - `stores/app-store-add-accounts-test.ts` — 45 of 45 pass on Vitest; the run still exits 1 from one unhandled rejection (`open_repository` → "start git" after the test removed its directory). Fixed so far: the background refresh after selection, the branch-protection update, the forked-remote pruning, and the selection queue now treats an unawaited selection as handled. The last rejection's request is traced (`open_repository` from `RepositorySelectionQueue`) but no awaiting caller is found yet
   - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)

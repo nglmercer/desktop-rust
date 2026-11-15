@@ -2435,7 +2435,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // This is now purely for metrics collection for `commitsToRepositoryWithBranchProtections`
     // Understanding how many users actually contribute to repos with branch protections gives us
     // insight into who our users are and what kinds of work they do
-    this.updateBranchProtectionsFromAPI(repository)
+    this.updateBranchProtectionsFromAPI(repository).catch(error =>
+      log.warn('Could not update branch protections', error)
+    )
 
     this.notificationsStore.selectRepository(repository)
 
@@ -2480,7 +2482,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
     repository: Repository,
     previouslySelectedRepository: Repository | CloningRepository | null
   ): Promise<Repository | null> {
-    this._refreshRepository(repository)
+    // Background refresh: a failure (for example, the repository was removed)
+    // is reported here instead of becoming an unhandled rejection.
+    this._refreshRepository(repository).catch(error =>
+      log.warn('Background refresh after selection failed', error)
+    )
 
     if (isRepositoryWithGitHubRepository(repository)) {
       // Load issues from the upstream or fork depending
@@ -4148,7 +4154,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
         // The commit failed, but we should still refresh to ensure we
         // accurately reflect the repository state post failure. See
         // https://github.com/desktop/desktop/issues/21229
-        this._refreshRepository(repository)
+        this._refreshRepository(repository).catch(error =>
+          log.warn('Background refresh after a failed commit failed', error)
+        )
       }
 
       return result !== undefined
@@ -10933,7 +10941,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
 
     this.updateCurrentPullRequest(repository)
-    this.gitStoreCache.get(repository).pruneForkedRemotes(openPullRequests)
+    // Background cleanup: a failure is reported, not left unhandled.
+    this.gitStoreCache
+      .get(repository)
+      .pruneForkedRemotes(openPullRequests)
+      .catch(error => log.warn('Could not prune forked remotes', error))
 
     const selectedState = this.getSelectedState()
 

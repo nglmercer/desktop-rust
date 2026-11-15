@@ -30,6 +30,9 @@ export class RepositorySelectionQueue {
       () => undefined,
       () => undefined
     )
+    // Callers that await the result receive the error. A caller that does not
+    // await it must not turn a failed selection into an unhandled rejection.
+    result.catch(() => undefined)
     return result
   }
 }
