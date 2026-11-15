@@ -196,7 +196,10 @@ Facts checked in the code, so the next change starts from them:
 - Path-based operations (`Repository { path, ... }` variants) open or reuse the
   repository per request under the same lock, so they have no binding window.
 
-Two fixes are possible; choose one before changing code:
+Decision taken: option 1. A bound read now carries `repository_path` (the
+server resolves it for that request under the selection lock, with the expected id
+checked when given). Option 2 (client-side serialization) was tried and broke seven
+websocket tests that need concurrency, so it was reverted. Options considered:
 1. Route bound reads through the path-based variants (atomic; server change for
    every bound method the renderer uses).
 2. Serialize binding and read per client (client change; no server change; the

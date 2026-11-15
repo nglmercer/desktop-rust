@@ -286,6 +286,9 @@ struct Auth {
 struct Rpc {
     id: u64,
     repository_id: Option<String>,
+    /// Resolves the repository for this request alone, without the selection.
+    #[serde(default)]
+    repository_path: Option<String>,
     #[serde(flatten)]
     operation: ApplicationOperation,
 }
@@ -520,12 +523,55 @@ fn retained_staging_path_value(path: &std::path::Path) -> serde_json::Value {
     json!(value)
 }
 
+/// Run one repository operation against the repository at `path`, resolved for
+/// this request alone. The selection lock is held through the operation, as for
+/// selected repositories, so a concurrent selection cannot change between the
+/// resolution and the execution. `expected_repository`, when present, must match
+/// the resolved repository's id.
+async fn execute_repository_at_path(
+    state: &Bridge,
+    path: String,
+    operation: Operation,
+    expected_repository: Option<String>,
+) -> anyhow::Result<serde_json::Value> {
+    let requested = desktop_core::directory_path(desktop_core::GitPath::Text(path))?;
+    anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
+    let canonical = cancellation::blocking(move || Ok(requested.canonicalize()?)).await?;
+    let current = cancellation::wait(state.repo.lock()).await?;
+    let repo = if let Some(repo) = current.as_ref().filter(|repo| repo.path() == canonical) {
+        repo.clone()
+    } else {
+        let repo = Repository::open(&canonical).await?;
+        anyhow::ensure!(
+            repo.path() == canonical,
+            "select a repository root, not a nested path"
+        );
+        repo
+    };
+    if !matches!(operation, Operation::Snapshot)
+        && let Some(expected) = expected_repository
+    {
+        anyhow::ensure!(
+            repo.id() == expected,
+            "Repository selection changed; refresh before retrying"
+        );
+    }
+    repo.execute(operation).await
+}
+
 async fn execute(
     state: &Bridge,
     operation: ApplicationOperation,
     expected_repository: Option<String>,
+    repository_path: Option<String>,
 ) -> anyhow::Result<serde_json::Value> {
     use ManagementOperation::*;
+    if let Some(path) = repository_path {
+        let ApplicationOperation::Repository(operation) = operation else {
+            anyhow::bail!("A repository path can only accompany a repository operation");
+        };
+        return execute_repository_at_path(state, path, operation, expected_repository).await;
+    }
     let registry = state.registry.clone();
     match operation {
         ApplicationOperation::Control(_) => {
@@ -1384,7 +1430,15 @@ impl Active {
                     request_id,
                     async move {
                         let result = match request_cancellation.check() {
-                            Ok(()) => execute(&state, rpc.operation, rpc.repository_id).await,
+                            Ok(()) => {
+                                execute(
+                                    &state,
+                                    rpc.operation,
+                                    rpc.repository_id,
+                                    rpc.repository_path,
+                                )
+                                .await
+                            }
                             Err(error) => Err(error),
                         };
                         if request_cancellation.is_cancelled() {

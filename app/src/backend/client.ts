@@ -31,6 +31,8 @@ import type { ReleaseMetadata } from '../models/release-notes'
 
 export interface BackendRequestOptions {
   readonly repositoryId?: string
+  /** A repository the server resolves for this request alone (no selection). */
+  readonly repositoryPath?: string
   readonly accountId?: string
   readonly deadlineMs?: number
   readonly signal?: AbortSignal
@@ -1077,6 +1079,8 @@ class WebSocketTransport {
     }
     if (opts.repositoryId !== undefined)
       payload.repository_id = opts.repositoryId
+    if (opts.repositoryPath !== undefined)
+      payload.repository_path = opts.repositoryPath
     return new Promise<unknown>((resolve, reject) => {
       let onAbort: (() => void) | undefined
       const cleanup = () => {
@@ -1399,35 +1403,11 @@ export class BackendClient {
         options
       )
     } else if (this.transport === 'ws') {
-      const started = Date.now()
-      const binding = await this.request(
-        'repository_binding',
-        { path: repositoryPath },
-        {
-          signal: options.signal,
-          deadlineMs: options.deadlineMs,
-        }
-      )
-      if (!isRecord(binding) || typeof binding.root_id !== 'string') {
-        throw new BackendError({
-          code: 'repository_changed',
-          message:
-            'Selected repository does not match the requested repository',
-          retryable: true,
-        })
-      }
-      const remaining = (options.deadlineMs ?? 170_000) - (Date.now() - started)
-      if (remaining <= 0) {
-        throw new BackendError({
-          code: 'timeout',
-          message: 'Bridge request deadline exceeded before repository read',
-          retryable: true,
-        })
-      }
+      // The request names its repository, so the server resolves it for this
+      // request alone; no selection is read or changed in between.
       return this.request(method, params, {
         ...options,
-        deadlineMs: remaining,
-        repositoryId: binding.root_id,
+        repositoryPath,
       })
     } else {
       throw new BackendError({
