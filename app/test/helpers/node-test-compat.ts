@@ -63,13 +63,16 @@ function createMock<F extends AnyFunction>(
       error: undefined as unknown,
       this: this,
     }
-    calls.push(call)
+    // Like node:test, a call is recorded once it has run: inside the
+    // implementation, `callCount()` does not yet include the current call.
     try {
       const result = run.apply(this, args)
       call.result = result
+      calls.push(call)
       return result
     } catch (error) {
       call.error = error
+      calls.push(call)
       throw error
     }
   } as Mocked<F>

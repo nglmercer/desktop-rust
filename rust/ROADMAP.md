@@ -216,10 +216,15 @@ Classified outside the Rust harness on purpose: `ui/commit-message-test.tsx`
 UI behaviour; Git behaviour is covered by the Git suites, which do run on the
 backend. Opted out in `app/test/vitest-setup.ts`.
 
-Verified state (full `pnpm test`, exit 0): Vitest 391 files pass; `node:test` 432
+Fixed in the test helper, not in Rust: the compat `mock.fn` recorded a call
+before running it, so `callCount()` inside an implementation included the current
+call, unlike `node:test`. It now records after the call, as node does. This made
+`stores/assisted-commit-run-test` pass on Vitest (39 of 39).
+
+Verified state (full `pnpm test`, exit 0): Vitest 392 files pass; `node:test` 393
 tests pass / 0 fail.
 
-Exceptions (10):
+Exceptions (9):
   - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
   - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
   - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
@@ -227,6 +232,5 @@ Exceptions (10):
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
-  - `stores/assisted-commit-run-test.ts` — 38 of 39 pass on Vitest. The one failure (`uses one fresh entire-selection message for a valid but unsafe split`) expects the planner to be called twice: the first plan (add `replaced/child`, delete `replaced`) must be rejected by `validateAssistedCommitPlan` (`materializeTree` → `writeTree` in `app/src/lib/git/assisted-commit/git.ts`, which uses `update-index --index-info`). Checked: Git 2.45 accepts that update silently (it drops the file entry), so the rejection comes from another check; not yet found
   - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
   - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests)
