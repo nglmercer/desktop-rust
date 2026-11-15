@@ -833,11 +833,14 @@ describe('AppStore assisted commit selection authority', () => {
     } finally {
       await refreshed
     }
+    // Decision: a file that changed after certification is refused, not
+    // committed from the stale certified lines. No commit is created, HEAD keeps
+    // its previous content, and the unauthorized content is never committed.
     const committed = await rawGit(repository, ['show', 'HEAD:file'])
     assert.doesNotMatch(committed, /NEW unauthorized after certification/)
-    assert.match(committed, /selected suffix/)
-    assert.strictEqual(await count(repository), 2)
-    assert.strictEqual(h.commits.mock.callCount(), 1)
+    assert.doesNotMatch(committed, /selected suffix/)
+    assert.strictEqual(await count(repository), 1)
+    assert.strictEqual(h.commits.mock.callCount(), 0)
     assert.strictEqual(
       (await optionalBytes(join(repository.path, 'file')))?.toString(),
       changed.join('')

@@ -449,5 +449,6 @@
   "app/test/unit/account-token-lifecycle-test.ts",
   "app/test/unit/ui/commit-message-test.tsx",
   "app/test/unit/stores/app-store-add-accounts-test.ts",
-  "app/test/unit/stores/assisted-commit-run-test.ts"
+  "app/test/unit/stores/assisted-commit-run-test.ts",
+  "app/test/unit/stores/assisted-commit-selection-test.ts"
 ]
