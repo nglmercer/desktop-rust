@@ -1717,7 +1717,16 @@ export async function prepareAssistedCommitPushDestination(
       },
     }
   )
-  if (pinned.stdout !== `${destination.pushURL}\n`) {
+  // Git lists a URL reset (an empty value) as a blank line in `--all` output on
+  // some versions (2.56) and omits it on others (2.45). Git also lists a URL
+  // once per matching entry, so a `pushInsteadOf` rewrite can repeat the same
+  // destination (2.45). Only entries after the last reset count; the distinct
+  // remaining destinations must be exactly the reviewed one.
+  const listed = pinned.stdout.endsWith('\n')
+    ? pinned.stdout.slice(0, -1).split('\n')
+    : pinned.stdout.split('\n')
+  const destinations = [...new Set(listed.slice(listed.lastIndexOf('') + 1))]
+  if (destinations.length !== 1 || destinations[0] !== destination.pushURL) {
     throw new AssistedCommitPushError(
       'The configured URL cannot be preserved for assisted push. Local commits were kept. Review repository settings.'
     )
