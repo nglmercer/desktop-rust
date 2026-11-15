@@ -1,5 +1,11 @@
 import { createAssistedCommitRunHarness } from '../../helpers/assisted-commit-run'
-import { afterEach, beforeEach, describe, it, TestContext } from 'node:test'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+  TestContext,
+} from '../../helpers/node-test-compat'
 import assert from 'node:assert'
 import * as path from 'path'
 import { existsSync } from 'fs'

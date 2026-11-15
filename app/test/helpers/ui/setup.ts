@@ -1,5 +1,5 @@
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'node:test'
+import { afterEach } from '../node-test-compat'
 import './setup-environment'
 
 afterEach(() => cleanup())

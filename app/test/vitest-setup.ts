@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto'
 import { expect, vi } from 'vitest'
 import { JSDOM } from 'jsdom'
 import packageInfo from '../package.json'

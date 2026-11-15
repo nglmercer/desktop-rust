@@ -98,6 +98,13 @@ impl Repository {
             crate::RendererDiffBase::Empty => {
                 // Snapshot the file before invoking Git; `--no-index` must not
                 // follow a renderer-supplied path outside the repository.
+                // An untracked directory (for example a nested repository) has
+                // no file content of its own to compare.
+                if std::fs::symlink_metadata(self.path.join(&path))
+                    .is_ok_and(|metadata| metadata.is_dir())
+                {
+                    return Ok(json!({"stdout":"","stderr":""}));
+                }
                 let side = self.worktree_side(&path).await?;
                 if side.entry.is_none() {
                     bail!("working file no longer exists");

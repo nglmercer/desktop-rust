@@ -1,4 +1,4 @@
-import { TestContext } from 'node:test'
+import type { TestContext } from './node-test-compat'
 import { Repository } from '../../src/models/repository'
 import { rawGit, tip } from './assisted-commit'
 import { createTempDirectory } from './temp'
