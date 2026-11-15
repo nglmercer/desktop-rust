@@ -220,7 +220,7 @@ Exceptions (11):
   - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
   - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
   - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
-  - `stores/app-store-add-accounts-test.ts` — 44 of 45 pass on Vitest; the last (`refuses to rename the worktree while a fetch is running`) fails on a repository-selection race: a long fetch on one repository changes the shared connection between a binding and its read
+  - `stores/app-store-add-accounts-test.ts` — 45 of 45 pass on Vitest, but the run exits 1: after `keeps the latest draft when switching back to a previous account`, the app's background repository refresh (`_refreshRepository` → `recoverMissingRepository` → `_loadStatus`) runs after the test deletes its directory, and its `git` spawn rejects unhandled (`start git; … No such file or directory`). A test-side wait on the selection queue did not cover it. Needs the app's fire-and-forget refresh to handle its own errors, or an explicit await in the store API.
   - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
