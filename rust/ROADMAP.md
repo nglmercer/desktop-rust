@@ -227,6 +227,6 @@ Exceptions (10):
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
-  - `stores/assisted-commit-run-test.ts` — planner unsafe-split path differs under the backend (1 test)
+  - `stores/assisted-commit-run-test.ts` — 38 of 39 pass on Vitest. The one failure (`uses one fresh entire-selection message for a valid but unsafe split`) expects the planner to be called twice: the first plan (add `replaced/child`, delete `replaced`) must be rejected by `validateAssistedCommitPlan` (`materializeTree` → `writeTree` in `app/src/lib/git/assisted-commit/git.ts`, which uses `update-index --index-info`). Checked: Git 2.45 accepts that update silently (it drops the file entry), so the rejection comes from another check; not yet found
   - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
   - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests)
