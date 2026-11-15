@@ -25,31 +25,12 @@ export async function createBranch(
   startPoint: string | null,
   noTrack?: boolean
 ): Promise<void> {
-  // Still needed by the `node:test` suites, which run without a Rust backend;
-  // it goes when they move to Vitest (rust/ROADMAP.md, R2).
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () => backend().createRepositoryBranch(repository.path, name, startPoint, noTrack ?? false),
-      true
-    )
-  }
-  const args = ['branch']
-
-  // if we're branching directly from a remote branch, we don't want to track it
-  // tracking it will make the rest of desktop think we want to push to that
-  // remote branch's upstream (which would likely be the upstream of the fork)
-  if (noTrack) {
-    args.push('--no-track')
-  }
-
-  args.push('--', name)
-  if (startPoint !== null) {
-    args.push(startPoint)
-  }
-
-  await git(args, repository.path, 'createBranch')
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().createRepositoryBranch(repository.path, name, startPoint, noTrack ?? false),
+    true
+  )
 }
 
 export const getBranchNames = ({ path }: Repository): Promise<string[]> => {
