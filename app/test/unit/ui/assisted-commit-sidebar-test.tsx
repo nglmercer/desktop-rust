@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { before, describe, it } from 'node:test'
+import { before, describe, it } from '../../helpers/node-test-compat'
 import { hostIpc } from '../../../src/web/host-bridge'
 import * as React from 'react'
 import { writeFile } from 'fs/promises'

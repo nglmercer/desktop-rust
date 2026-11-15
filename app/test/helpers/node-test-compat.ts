@@ -223,18 +223,21 @@ interface ICompatContext {
   ): Promise<void>
 }
 
-function createContext(name: string): TestContext {
+function createContext(name: string, nested = false): TestContext {
   const mock = new MockTracker()
   const controller = new AbortController()
   const cleanups: Array<() => void | Promise<void>> = []
-  // Cleanups run last-in-first-out after the test, like node's `t.after`.
-  onTestFinished(async () => {
+  // Cleanups run last-in-first-out, like node's `t.after`.
+  const finish = async () => {
     for (const cleanup of cleanups.reverse()) {
       await cleanup()
     }
     mock.reset()
     controller.abort()
-  })
+  }
+  if (!nested) {
+    onTestFinished(finish)
+  }
   const context: ICompatContext = {
     mock,
     name,
@@ -243,12 +246,19 @@ function createContext(name: string): TestContext {
       cleanups.push(fn)
     },
     diagnostic: () => {},
-    // A nested node subtest runs inside its parent; here it is a plain call
-    // with a child context whose cleanups run when the parent finishes.
+    // A nested subtest runs to completion inside its parent and cleans up
+    // before the parent continues.
     test: async (childName, fn) => {
-      const child = createContext(`${name} > ${childName}`)
-      await fn(child)
+      const child = createContext(`${name} > ${childName}`, true)
+      try {
+        await fn(child)
+      } finally {
+        await (child as unknown as { __finish(): Promise<void> }).__finish()
+      }
     },
+  }
+  if (nested) {
+    Object.defineProperty(context, '__finish', { value: finish })
   }
   return context as unknown as TestContext
 }

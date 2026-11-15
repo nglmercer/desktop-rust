@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from '../../helpers/node-test-compat'
 import * as React from 'react'
 
 import { API, IAPIOrganization } from '../../../src/lib/api'

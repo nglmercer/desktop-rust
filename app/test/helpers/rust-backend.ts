@@ -149,6 +149,17 @@ async function openSession(directory: string): Promise<ISession> {
     JSDOM: new (html: string, options: { url: string }) => IDom
   }
   const dom = new JSDOM('', { url })
+  // UI suites render components that read these from `window`; give the
+  // bridge's window the stubs the test setup installs on the shared one.
+  const shared = globalThis as unknown as {
+    ResizeObserver?: unknown
+  }
+  Object.assign(dom.window, { ResizeObserver: shared.ResizeObserver })
+  dom.window.Element.prototype.getClientRects = function () {
+    return [
+      { x: 0, y: 0, width: 1, height: 1, top: 0, left: 0, right: 1, bottom: 1 },
+    ] as unknown as DOMRectList
+  }
   vi.stubGlobal('window', dom.window)
   vi.stubGlobal('sessionStorage', dom.window.sessionStorage)
   vi.stubGlobal('WebSocket', dom.window.WebSocket)

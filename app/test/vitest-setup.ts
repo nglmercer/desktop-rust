@@ -30,6 +30,28 @@ vi.stubGlobal(
   new JSDOM('', { url: 'http://localhost/' }).window.localStorage
 )
 
+// jsdom does no layout, so focus-trap's tabbable check (which treats elements
+// without client rects as hidden) finds no tabbable nodes. Report one rect, as
+// the legacy Node test preload does.
+if (typeof window !== 'undefined') {
+  window.Element.prototype.getClientRects = function () {
+    return [
+      { x: 0, y: 0, width: 1, height: 1, top: 0, left: 0, right: 1, bottom: 1 },
+    ] as unknown as DOMRectList
+  }
+  class TestResizeObserver {
+    public observe() {}
+    public unobserve() {}
+    public disconnect() {}
+  }
+  if (globalThis.ResizeObserver === undefined) {
+    Object.assign(globalThis, { ResizeObserver: TestResizeObserver })
+  }
+  if (window.ResizeObserver === undefined) {
+    Object.assign(window, { ResizeObserver: globalThis.ResizeObserver })
+  }
+}
+
 // Opt-in: run every test file against a real Rust server, so the renderer takes
 // its Rust code paths instead of the Node fallbacks (see rust/ROADMAP.md, R1).
 if (process.env.DESKTOP_TEST_RUST_BACKEND === '1') {

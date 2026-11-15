@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import { mkdir, realpath, writeFile } from 'fs/promises'
 import * as Path from 'path'
-import { describe, it, TestContext } from 'node:test'
+import { describe, it, TestContext } from '../../helpers/node-test-compat'
 import * as React from 'react'
 
 import { API, IAPIRepositoryCloneInfo } from '../../../src/lib/api'

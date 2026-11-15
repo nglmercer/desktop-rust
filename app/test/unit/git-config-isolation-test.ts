@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { readFile } from 'node:fs/promises'
-import { describe, it } from 'node:test'
+import { describe, it } from '../helpers/node-test-compat'
 import { isolateGitConfig } from '../helpers/git-config'
 
 describe('Git configuration isolation', () => {
