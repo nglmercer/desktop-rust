@@ -178,51 +178,28 @@ The migration is complete (on Linux) when all of these hold:
 4. The full suite passes with no `todo` or capability-skipped suites other than documented external tools.
 5. `pnpm start`, `pnpm build:prod` and `pnpm package` work from a clean checkout.
 
-### Node test runner exception (decided: end the migration now)
+### Node test runner exception
 
-The `node:test` → Vitest migration of the unit suites is closed. Everything that
-passes on Vitest with the Rust backend is on Vitest (371 files). These
-30 files stay on `node:test`, as a documented exception, because they
-depend on `mock.module`, on patching Node's built-in modules, or on Rust-backend
-behaviour that is not implemented yet. They run in the same suite (`pnpm test`)
-and must stay green on `node:test`; no test is skipped to hide a failure. Each
-file leaves this list when it is rewritten to pass on Vitest.
+The `node:test` → Vitest migration of the unit suites is closed except for the
+files below. Migrated so far: 18 of 32 remaining at the start
+of the final pass. Everything listed is still green on `node:test`; no test is
+skipped to hide a failure. Each file leaves this list when it passes on Vitest.
 
-Verified state (full `pnpm test`): Vitest 371 files / 3544 tests pass;
-`node:test` 762 tests pass / 0 fail.
+Verified state (full `pnpm test`): Vitest 387 files pass; `node:test` 602 tests
+pass / 0 fail.
 
-Exceptions (remaining on `node:test`):
-  - `account-token-lifecycle-test.ts`
-  - `git/assisted-commit-cleanup-test.ts`
-  - `git/assisted-commit-hooks-test.ts`
-  - `git/assisted-commit-selected-fence-test.ts`
-  - `git/assisted-commit-snapshot-test.ts`
-  - `git/assisted-commit-test.ts`
-  - `notifications-store-test.ts`
-  - `stores/app-store-accounts-test.ts`
-  - `stores/app-store-add-accounts-test.ts`
-  - `stores/app-store-indicators-test.ts`
-  - `stores/app-store-token-refresh-stats-test.ts`
-  - `stores/assisted-commit-cleanup-test.tsx`
-  - `stores/assisted-commit-push-boundary-test.ts`
-  - `stores/assisted-commit-push-hooks-test.ts`
-  - `stores/assisted-commit-push-test.ts`
-  - `stores/assisted-commit-reader-publication-test.ts`
-  - `stores/assisted-commit-run-hooks-test.ts`
-  - `stores/assisted-commit-run-test.ts`
-  - `stores/assisted-commit-selection-test.ts`
-  - `stores/copilot-store-credentials-test.ts`
-  - `tailer-test.ts`
-  - `trampoline-credential-helper-test.ts`
-  - `ui/assisted-commit-details-test.tsx`
-  - `ui/assisted-commit-history-test.tsx`
-  - `ui/assisted-repository-creation-test.tsx`
-  - `ui/commit-message-test.tsx`
-  - `ui/helper-side-effect-surfaces-test.tsx`
-  - `ui/notification-checks-account-test.tsx`
-  - `ui/repository-directory-exceptions-test.tsx`
-  - `ui/repository-settings-account-test.tsx`
-
-Known causes to fix when rewriting them: `mock.module` (vi.mock per file), an
-RPC queue overflow (`QUEUE_FULL`, 32 pending) in `commit-message-test`, and the
-Rust-backend behaviour gaps in the assisted-commit suites listed above.
+Exceptions (still on `node:test`, with the reason each one does not pass on Vitest yet):
+  - `account-token-lifecycle-test.ts` — fake timers: the revoke timer is not cancelled on completion under Vitest (4 tests)
+  - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
+  - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
+  - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
+  - `stores/app-store-add-accounts-test.ts` — conflict review unavailable under the backend (2 tests)
+  - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
+  - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
+  - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
+  - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
+  - `stores/assisted-commit-run-test.ts` — planner unsafe-split path differs under the backend (1 test)
+  - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
+  - `ui/assisted-commit-details-test.tsx` — react-confetti cannot resolve react/jsx-runtime under pnpm + Vitest
+  - `ui/assisted-commit-history-test.tsx` — context menu actions not reported under Vitest (26 tests)
+  - `ui/commit-message-test.tsx` — RPC queue overflow (QUEUE_FULL, 32 pending) under the backend (9 tests)
