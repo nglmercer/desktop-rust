@@ -11,6 +11,13 @@ Object.assign(
   parseEnv(readFileSync(new URL('.test.env', import.meta.url), 'utf8'))
 )
 
+// Tests start a real Rust backend on Linux (see app/test/vitest-setup.ts); a
+// loaded machine can take a few seconds for a Git round trip through it.
+const rustBackendDefault = process.platform === 'linux'
+if (process.env.DESKTOP_TEST_RUST_BACKEND === undefined && rustBackendDefault) {
+  process.env.DESKTOP_TEST_RUST_BACKEND = '1'
+}
+
 export default defineConfig({
   resolve: {
     alias: [
@@ -51,6 +58,8 @@ export default defineConfig({
   test: {
     include: suites,
     maxWorkers: 2,
+    testTimeout: 15_000,
+    hookTimeout: 60_000,
     environment: 'jsdom',
     environmentOptions: { jsdom: { url: 'http://localhost/' } },
     setupFiles: ['./app/test/vitest-setup.ts'],

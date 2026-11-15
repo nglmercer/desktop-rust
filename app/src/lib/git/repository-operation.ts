@@ -116,14 +116,15 @@ async function repositoryOperations(
   if (existing !== undefined) {
     return existing
   }
-  const canonical = typeof window !== 'undefined' && backend().transportKind !== 'none'
-    ? await canonicalMutationPath(path)
-    : await realpath(path).catch(error => {
-        if (isErrnoException(error) && error.code === 'ENOENT') {
-          return resolve(path)
-        }
-        throw error
-      })
+  const canonical =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
+      ? await canonicalMutationPath(path)
+      : await realpath(path).catch(error => {
+          if (isErrnoException(error) && error.code === 'ENOENT') {
+            return resolve(path)
+          }
+          throw error
+        })
   const key = pathKey(canonical)
   const repository = repositories.get(key) ?? {
     path: canonical,
@@ -427,10 +428,21 @@ function parseAlternateObjectDirectory(value: string): string {
 
 /** Resolve working directory and both linked/common Git metadata without reading selected content. */
 export async function getAssistedCommitProtectedPaths(
-  path: string
+  path: string,
+  options?: {
+    /**
+     * Do not fail when an alternate object directory cannot be resolved.
+     * Reading status and committing locally never use the alternate; the push
+     * stage re-reads the resources strictly and reports it there.
+     */
+    readonly tolerateObjectRoutingDiagnostics?: boolean
+  }
 ): Promise<ReadonlyArray<string>> {
   const resources = await getAssistedCommitProtectedResources(path)
-  if (resources.objectRoutingDiagnostics.length > 0) {
+  if (
+    resources.objectRoutingDiagnostics.length > 0 &&
+    options?.tolerateObjectRoutingDiagnostics !== true
+  ) {
     throw new Error(
       `Cannot verify all Git object stores: ${resources.objectRoutingDiagnostics}`
     )
@@ -458,7 +470,10 @@ export async function getAssistedCommitProtectedResources(
     }
     if (resources.objectRoutingDiagnostics.length === 0) {
       repositoryResourcePaths.set(pathKey(path), resources.paths)
-      repositoryResourcePaths.set(pathKey(resources.paths[canonicalIndex]), resources.paths)
+      repositoryResourcePaths.set(
+        pathKey(resources.paths[canonicalIndex]),
+        resources.paths
+      )
     }
     return resources
   }

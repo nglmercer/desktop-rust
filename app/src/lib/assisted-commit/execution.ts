@@ -90,7 +90,12 @@ export async function executeAssistedCommitRun(
     state.intents.delete(request.intent)
   }
   context.assertInputs(run)
-  state.protect(run, await getAssistedCommitProtectedPaths(repository.path))
+  state.protect(
+    run,
+    await getAssistedCommitProtectedPaths(repository.path, {
+      tolerateObjectRoutingDiagnostics: true,
+    })
+  )
   run.originalResourceProtection = run.resourceProtection
   const verifiedVersions = await readers.read(repository, run, async () => {
     if (run.pushAfterAssistedCommit && run.pushDestination === undefined) {
@@ -140,7 +145,12 @@ export async function executeAssistedCommitRun(
     cancelRequested: false,
   })
   context.check(run)
-  state.protect(run, await getAssistedCommitProtectedPaths(repository.path))
+  state.protect(
+    run,
+    await getAssistedCommitProtectedPaths(repository.path, {
+      tolerateObjectRoutingDiagnostics: true,
+    })
+  )
   context.check(run)
   run.lease = await acquireAssistedCommitGitLease(
     repository.path,

@@ -247,7 +247,9 @@ export class AssistedCommitState {
         }
         const paths =
           run.protectedPaths ??
-          (await getAssistedCommitProtectedPaths(run.repository.path))
+          (await getAssistedCommitProtectedPaths(run.repository.path, {
+            tolerateObjectRoutingDiagnostics: true,
+          }))
         if (paths.some(path => repositoryPathsOverlap(path, removingPath))) {
           throw new AssistedCommitError(
             'busy',

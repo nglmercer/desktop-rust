@@ -476,7 +476,9 @@ export class AssistedCommitReaders {
       return null
     }
     if (supportsRepositoryGitAsyncOwnership()) {
-      await getAssistedCommitProtectedPaths(repository.path)
+      await getAssistedCommitProtectedPaths(repository.path, {
+        tolerateObjectRoutingDiagnostics: true,
+      })
     } else if (
       assistedRun !== undefined ||
       this.state.cache

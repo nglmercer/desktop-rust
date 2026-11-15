@@ -42,9 +42,6 @@ import { AccountRequiresSignInError } from '../../../src/lib/credential-sessions
 import { AsyncInMemoryStore, InMemoryStore } from '../../helpers/stores'
 import { PushProgressParser } from '../../../src/lib/progress'
 import { GitLFSProgressParser } from '../../../src/lib/progress/lfs'
-import { gitReportsMissingAlternateAsError } from '../../../../script/test-capabilities'
-
-const reportsMissingAlternateAsError = gitReportsMissingAlternateAsError()
 
 describe('AppStore assisted push with real local remotes', () => {
   it('keeps weighted push progress finite, bounded and nondecreasing across native context and LFS events', async t => {
@@ -510,89 +507,78 @@ describe('AppStore assisted push with real local remotes', () => {
 
   for (const transitive of [false, true]) {
     for (const empty of [false, true]) {
-      it(
-        `keeps valid local commits without pushing an ignored missing alternate, transitive ${transitive}, empty ${empty}`,
-        {
-          todo: reportsMissingAlternateAsError
-            ? 'newer Git reports the missing alternate as an error that the status load treats as fatal before the push stage'
-            : false,
-        },
-        async t => {
-          const source = await seed(t, { file: 'before\n' })
-          const remote = await addBareRemote(t, source)
-          const alternate = await seed(t, { alternate: 'Alternate objects\n' })
-          const missing = join(await createTempDirectory(t), 'missing-objects')
-          const sourceInfo = join(source.path, '.git', 'objects', 'info')
-          const alternateInfo = join(alternate.path, '.git', 'objects', 'info')
-          await mkdir(sourceInfo, { recursive: true })
-          if (transitive) {
-            await mkdir(alternateInfo, { recursive: true })
-            await writeFile(join(alternateInfo, 'alternates'), `${missing}\n`)
-          }
-          await writeFile(
-            join(sourceInfo, 'alternates'),
-            `${
-              transitive ? join(alternate.path, '.git', 'objects') : missing
-            }\n`
-          )
-          const discovery = await exec(['count-objects', '-v'], source.path)
-          assert.strictEqual(discovery.exitCode, 0)
-          assert.match(
-            discovery.stderr,
-            /does not exist|unable to normalize alternate/
-          )
-          if (!empty) {
-            await writeFile(join(source.path, 'file'), 'after\n')
-          }
-          const h = await createAssistedCommitRunHarness(t)
-          const repository = await h.register(source)
-          await h.dispatcher.setCommitMessage(repository, {
-            summary: 'Manual draft stays',
-            description: 'Manual details stay',
-            timestamp: Date.now(),
-          })
-          h.dispatcher.setPushAfterAssistedCommit(repository, true)
-          h.dispatcher.updateCommitOptions(repository, {
-            allowEmptyCommit: empty,
-          })
-          const request =
-            await h.dispatcher.prepareCopilotAssistedCommitRequest(
-              repository,
-              h.request(repository)
+      it(`keeps valid local commits without pushing an ignored missing alternate, transitive ${transitive}, empty ${empty}`, async t => {
+        const source = await seed(t, { file: 'before\n' })
+        const remote = await addBareRemote(t, source)
+        const alternate = await seed(t, { alternate: 'Alternate objects\n' })
+        const missing = join(await createTempDirectory(t), 'missing-objects')
+        const sourceInfo = join(source.path, '.git', 'objects', 'info')
+        const alternateInfo = join(alternate.path, '.git', 'objects', 'info')
+        await mkdir(sourceInfo, { recursive: true })
+        if (transitive) {
+          await mkdir(alternateInfo, { recursive: true })
+          await writeFile(join(alternateInfo, 'alternates'), `${missing}\n`)
+        }
+        await writeFile(
+          join(sourceInfo, 'alternates'),
+          `${transitive ? join(alternate.path, '.git', 'objects') : missing}\n`
+        )
+        const discovery = await exec(['count-objects', '-v'], source.path)
+        assert.strictEqual(discovery.exitCode, 0)
+        assert.match(
+          discovery.stderr,
+          /does not exist|unable to normalize alternate/
+        )
+        if (!empty) {
+          await writeFile(join(source.path, 'file'), 'after\n')
+        }
+        const h = await createAssistedCommitRunHarness(t)
+        const repository = await h.register(source)
+        await h.dispatcher.setCommitMessage(repository, {
+          summary: 'Manual draft stays',
+          description: 'Manual details stay',
+          timestamp: Date.now(),
+        })
+        h.dispatcher.setPushAfterAssistedCommit(repository, true)
+        h.dispatcher.updateCommitOptions(repository, {
+          allowEmptyCommit: empty,
+        })
+        const request = await h.dispatcher.prepareCopilotAssistedCommitRequest(
+          repository,
+          h.request(repository)
+        )
+        const outcome = await h.dispatcher.createCopilotAssistedCommits(
+          repository,
+          request
+        )
+        assert.ok(outcome.kind === 'push-error')
+        assert.strictEqual(outcome.attempted, false)
+        assert.strictEqual(await count(repository), 2)
+        assert.strictEqual(await remote.tip(), remote.originalTip)
+        assert.strictEqual(h.propose.mock.callCount(), empty ? 0 : 1)
+        assert.match(
+          assistedCommitErrorCauses(outcome.error)
+            .map(error =>
+              error instanceof Error ? error.message : String(error)
             )
-          const outcome = await h.dispatcher.createCopilotAssistedCommits(
-            repository,
-            request
-          )
-          assert.ok(outcome.kind === 'push-error')
-          assert.strictEqual(outcome.attempted, false)
-          assert.strictEqual(await count(repository), 2)
-          assert.strictEqual(await remote.tip(), remote.originalTip)
-          assert.strictEqual(h.propose.mock.callCount(), empty ? 0 : 1)
-          assert.match(
-            assistedCommitErrorCauses(outcome.error)
-              .map(error =>
-                error instanceof Error ? error.message : String(error)
-              )
-              .join('\n'),
-            /does not exist|unable to normalize alternate/
-          )
-          if (empty) {
-            assert.strictEqual(
-              await rawGit(repository, ['show', '-s', '--format=%s', 'HEAD']),
-              'Empty commit'
-            )
-          }
+            .join('\n'),
+          /does not exist|unable to normalize alternate/
+        )
+        if (empty) {
           assert.strictEqual(
-            h.state(repository).changesState.commitMessage.summary,
-            'Manual draft stays'
-          )
-          assert.strictEqual(
-            h.state(repository).changesState.commitMessage.description,
-            'Manual details stay'
+            await rawGit(repository, ['show', '-s', '--format=%s', 'HEAD']),
+            'Empty commit'
           )
         }
-      )
+        assert.strictEqual(
+          h.state(repository).changesState.commitMessage.summary,
+          'Manual draft stays'
+        )
+        assert.strictEqual(
+          h.state(repository).changesState.commitMessage.description,
+          'Manual details stay'
+        )
+      })
     }
   }
 
