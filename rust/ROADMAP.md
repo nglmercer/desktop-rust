@@ -184,19 +184,20 @@ Still on `node:test`, with the reason each one does not pass on Vitest yet. Each
 file leaves this list when it passes on Vitest. Nothing is skipped to hide a
 failure; all of them are green on `node:test`.
 
-Verified state (full `pnpm test`): Vitest 389 files pass; `node:test` 557 tests
-pass / 0 fail.
+Classified outside the Rust harness on purpose: `ui/commit-message-test.tsx`
+(80 of 80 pass on Vitest). It renders with fabricated repository paths to test
+UI behaviour; Git behaviour is covered by the Git suites, which do run on the
+backend. Opted out in `app/test/vitest-setup.ts`.
 
-Exceptions (12):
+Exceptions (11):
   - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
   - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
   - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
-  - `stores/app-store-add-accounts-test.ts` — 44 of 45 pass on Vitest; the last one (`refuses to rename the worktree while a fetch is running`) fails on a repository-selection race: a long fetch on one repository changes the shared connection between a binding and its read (harness/server contract)
+  - `stores/app-store-add-accounts-test.ts` — 44 of 45 pass on Vitest; the last (`refuses to rename the worktree while a fetch is running`) fails on a repository-selection race: a long fetch on one repository changes the shared connection between a binding and its read
   - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
   - `stores/assisted-commit-run-test.ts` — planner unsafe-split path differs under the backend (1 test)
   - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
-  - `ui/assisted-commit-history-test.tsx` — context menu actions not reported under Vitest (26 tests)
-  - `ui/commit-message-test.tsx` — RPC queue overflow (QUEUE_FULL, 32 pending) under the backend (9 tests)
+  - `ui/assisted-commit-history-test.tsx` — uses a real repository; the context menu is not shown under the Rust backend (26 tests, 26 pass with the backend off)
