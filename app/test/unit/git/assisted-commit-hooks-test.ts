@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { afterEach, before, beforeEach, describe, it, mock } from 'node:test'
 import * as FileSystem from 'fs/promises'
@@ -29,9 +30,9 @@ before(async () => {
   const resolveExecPath = Dugite.resolveGitExecPath
   const originalExec = Dugite.exec
   nativeExec = originalExec
-  mock.module('fs/promises', {
-    namedExports: {
-      ...FileSystem,
+  vi.doMock('fs/promises', async () => ({
+  ...(await vi.importActual('fs/promises')),
+  ...FileSystem,
       cp: (source: string, destination: string, options?: CopyOptions) =>
         copy(
           ['process-proxy', 'process-proxy.exe'].includes(basename(source))
@@ -40,11 +41,10 @@ before(async () => {
           destination,
           options
         ),
-    },
-  })
-  mock.module('dugite', {
-    namedExports: {
-      ...Dugite,
+    }))
+  vi.doMock('dugite', async () => ({
+  ...(await vi.importActual('dugite')),
+  ...Dugite,
       exec: (
         args: string[],
         cwd: string,
@@ -53,11 +53,10 @@ before(async () => {
         nativeExecFault?.(args, cwd, options) ??
         originalExec(args, cwd, options),
       resolveGitBinary: () => resolveBinary(),
-    },
-  })
-  mock.module('../../../src/lib/hooks/get-shell-env.ts', {
-    namedExports: {
-      getShellEnv: async () => ({
+    }))
+  vi.doMock('../../../src/lib/hooks/get-shell-env.ts', async () => ({
+  ...(await vi.importActual('../../../src/lib/hooks/get-shell-env.ts')),
+  getShellEnv: async () => ({
         kind: 'success',
         env: {
           ...process.env,
@@ -67,8 +66,7 @@ before(async () => {
             : { GIT_CONFIG_PARAMETERS: loginGitParameters }),
         },
       }),
-    },
-  })
+    }))
   ;[engine, fixtures, config] = await Promise.all([
     import('../../../src/lib/git/assisted-commit'),
     import('../../helpers/assisted-commit'),

@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { before, describe, it, mock } from 'node:test'
 import * as FileSystem from 'fs/promises'
@@ -15,9 +16,9 @@ let afterStat:
 before(async () => {
   const read = FileSystem.readFile
   const stat = FileSystem.lstat
-  mock.module('fs/promises', {
-    namedExports: {
-      ...FileSystem,
+  vi.doMock('fs/promises', async () => ({
+  ...(await vi.importActual('fs/promises')),
+  ...FileSystem,
       readFile: async (...args: Parameters<typeof FileSystem.readFile>) => {
         await beforeRead?.(args[0])
         return read(...args)
@@ -27,8 +28,7 @@ before(async () => {
         await afterStat?.(args[0])
         return result
       },
-    },
-  })
+    }))
   ;[transactions, fixtures] = await Promise.all([
     import('../../../src/lib/git/assisted-commit'),
     import('../../helpers/assisted-commit'),

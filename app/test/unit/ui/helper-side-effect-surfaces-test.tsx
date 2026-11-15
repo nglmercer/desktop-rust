@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
 import { afterEach, describe, it, mock } from 'node:test'
 import * as React from 'react'
@@ -10,11 +11,10 @@ type TUnlinkBehavior = (path: string) => Promise<void>
 
 let unlinkBehavior: TUnlinkBehavior = async () => {}
 
-mock.module('fs/promises', {
-  namedExports: {
-    unlink: (path: string) => unlinkBehavior(path),
-  },
-})
+vi.doMock('fs/promises', async () => ({
+  ...(await vi.importActual('fs/promises')),
+  unlink: (path: string) => unlinkBehavior(path),
+  }))
 
 async function getConfigLockFileExists() {
   return (await import('../../../src/ui/lib/config-lock-file-exists'))

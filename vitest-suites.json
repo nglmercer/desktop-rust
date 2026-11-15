@@ -437,5 +437,11 @@
   "app/test/unit/ui/assisted-repository-creation-test.tsx",
   "app/test/unit/ui/notification-checks-account-test.tsx",
   "app/test/unit/ui/repository-directory-exceptions-test.tsx",
-  "app/test/unit/ui/repository-settings-account-test.tsx"
+  "app/test/unit/ui/repository-settings-account-test.tsx",
+  "app/test/unit/git/assisted-commit-snapshot-test.ts",
+  "app/test/unit/git/assisted-commit-hooks-test.ts",
+  "app/test/unit/git/assisted-commit-selected-fence-test.ts",
+  "app/test/unit/stores/assisted-commit-reader-publication-test.ts",
+  "app/test/unit/stores/assisted-commit-run-hooks-test.ts",
+  "app/test/unit/ui/helper-side-effect-surfaces-test.tsx"
 ]

@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { writeFile, rename, mkdir } from 'fs/promises'
 import { createTempDirectory } from '../../helpers/temp'
 import { Repository } from '../../../src/models/repository'
@@ -23,16 +24,15 @@ let afterStat:
 
 before(async () => {
   const stat = FileSystem.lstat
-  mock.module('fs/promises', {
-    namedExports: {
-      ...FileSystem,
+  vi.doMock('fs/promises', async () => ({
+  ...(await vi.importActual('fs/promises')),
+  ...FileSystem,
       lstat: async (...args: Parameters<typeof FileSystem.lstat>) => {
         const result = await stat(...args)
         await afterStat?.(args[0])
         return result
       },
-    },
-  })
+    }))
   ;[harness, fixtures, models, diffs, diffModels, operations, runErrors] =
     await Promise.all([
       import('../../helpers/assisted-commit-run'),

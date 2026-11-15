@@ -5,7 +5,7 @@ import packageInfo from '../package.json'
 
 vi.mock('../src/web/host-bridge', () => ({
   hostShell: { readShortcutLink: vi.fn(() => ({})) },
-  hostIpc: { invoke: vi.fn(async () => {}), on: vi.fn() },
+  hostIpc: { invoke: vi.fn(async () => {}), on: vi.fn(), send: vi.fn() },
 }))
 
 Object.assign(globalThis, {
