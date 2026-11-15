@@ -58,7 +58,7 @@ Effort: S = a day or less, M = a few days, L = a week or more.
 ### R1 — Make tests drive the Rust backend (M, blocks R2–R5)
 - [x] Shared harness `app/test/helpers/rust-backend.ts` (real `desktop-rs serve`, WebSocket client). Proven on `pathExists` / `directoryExists`.
 - [x] `DESKTOP_TEST_RUST_BACKEND=1` runs every Vitest file against a real Rust server.
-- [ ] Build `desktop-cli` before Vitest in the default test script so the harness never skips locally (today it skips when the binary is missing).
+- [x] Build `desktop-cli` before Vitest in the default test script (`script/test.mts`). A failed build warns and the harness skips; the warning is the only signal, so keep the build step green.
 - [x] `useRustBackend()` routes `backend()` to the harness for a test file (and selects the repository each request is about).
 - [ ] Add a reusable Rust-backed repository fixture (replaces `setupEmptyRepository`/`makeCommit` for tests that need a repository registered with the server).
 - [ ] Decide server lifetime: one server per test file (simple) vs a shared worker (fast). Measure; target < 1 s overhead per file.
