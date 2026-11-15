@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { writeFile } from 'fs/promises'
 import assert from 'node:assert'
-import { before, describe, it, mock } from 'node:test'
+import { before, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import type { CopyOptions } from 'fs'
 import * as Dugite from 'dugite'
@@ -25,25 +25,28 @@ before(async () => {
   const resolveBinary = Dugite.resolveGitBinary
   const resolveExecPath = Dugite.resolveGitExecPath
   vi.doMock('fs/promises', async () => ({
-  ...(await vi.importActual('fs/promises')),
-  ...FileSystem,
-      cp: (source: string, destination: string, options?: CopyOptions) =>
-        copy(
-          ['process-proxy', 'process-proxy.exe'].includes(basename(source))
-            ? getProxyCommandPath()
-            : source,
-          destination,
-          options
-        ),
-    }))
-  vi.doMock('dugite', async () => ({ ...Dugite, resolveGitBinary: () => resolveBinary() }))
+    ...(await vi.importActual('fs/promises')),
+    ...FileSystem,
+    cp: (source: string, destination: string, options?: CopyOptions) =>
+      copy(
+        ['process-proxy', 'process-proxy.exe'].includes(basename(source))
+          ? getProxyCommandPath()
+          : source,
+        destination,
+        options
+      ),
+  }))
+  vi.doMock('dugite', async () => ({
+    ...Dugite,
+    resolveGitBinary: () => resolveBinary(),
+  }))
   vi.doMock('../../../src/lib/hooks/get-shell-env.ts', async () => ({
-  ...(await vi.importActual('../../../src/lib/hooks/get-shell-env.ts')),
-  getShellEnv: async () => ({
-        kind: 'success',
-        env: { ...process.env, GIT_EXEC_PATH: resolveExecPath() },
-      }),
-    }))
+    ...(await vi.importActual('../../../src/lib/hooks/get-shell-env.ts')),
+    getShellEnv: async () => ({
+      kind: 'success',
+      env: { ...process.env, GIT_EXEC_PATH: resolveExecPath() },
+    }),
+  }))
   ;[harness, fixtures, models, hooks, popupTypes] = await Promise.all([
     import('../../helpers/assisted-commit-run'),
     import('../../helpers/assisted-commit'),

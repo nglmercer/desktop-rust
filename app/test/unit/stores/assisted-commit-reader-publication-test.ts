@@ -7,7 +7,7 @@ import {
   AppFileStatusKind,
 } from '../../../src/models/status'
 import assert from 'node:assert'
-import { before, describe, it, mock } from 'node:test'
+import { before, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import { join } from 'path'
 
@@ -25,14 +25,14 @@ let afterStat:
 before(async () => {
   const stat = FileSystem.lstat
   vi.doMock('fs/promises', async () => ({
-  ...(await vi.importActual('fs/promises')),
-  ...FileSystem,
-      lstat: async (...args: Parameters<typeof FileSystem.lstat>) => {
-        const result = await stat(...args)
-        await afterStat?.(args[0])
-        return result
-      },
-    }))
+    ...(await vi.importActual('fs/promises')),
+    ...FileSystem,
+    lstat: async (...args: Parameters<typeof FileSystem.lstat>) => {
+      const result = await stat(...args)
+      await afterStat?.(args[0])
+      return result
+    },
+  }))
   ;[harness, fixtures, models, diffs, diffModels, operations, runErrors] =
     await Promise.all([
       import('../../helpers/assisted-commit-run'),
@@ -338,7 +338,7 @@ describe('assisted commit reader settlement and publication', () => {
     const loadDiff = h.assisted.readers['updateDiffCore'].bind(
       h.assisted.readers
     )
-    let owned: ReturnType<typeof h.assisted.state['runs']['get']>
+    let owned: ReturnType<(typeof h.assisted.state)['runs']['get']>
     let paused = false
     h.assisted.readers['updateDiffCore'] = async repo => {
       if (!paused && owned !== undefined && owned.lease === undefined) {
@@ -406,7 +406,7 @@ describe('assisted commit reader settlement and publication', () => {
     const gitStore = h.appStore['gitStoreCache'].get(repository)
     const load = gitStore.loadStatus.bind(gitStore)
     const failure = new Error('Synthetic released status failure')
-    let owned: ReturnType<typeof h.assisted.state['runs']['get']>
+    let owned: ReturnType<(typeof h.assisted.state)['runs']['get']>
     gitStore.loadStatus = async (...args) => {
       if (owned !== undefined && owned.lease === undefined) {
         throw failure
@@ -447,7 +447,7 @@ describe('assisted commit reader settlement and publication', () => {
     const entered = models.deferred<void>()
     const finish = models.deferred<void>()
     const load = h.assisted.readers['updateDiffCore'].bind(h.assisted.readers)
-    let owned: ReturnType<typeof h.assisted.state['runs']['get']>
+    let owned: ReturnType<(typeof h.assisted.state)['runs']['get']>
     let paused = false
     h.assisted.readers['updateDiffCore'] = async repo => {
       if (

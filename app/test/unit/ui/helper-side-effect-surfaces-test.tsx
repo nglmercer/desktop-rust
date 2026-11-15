@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import assert from 'node:assert'
-import { afterEach, describe, it, mock } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import * as React from 'react'
 
 import { AppTheme } from '../../../src/ui/app-theme'
@@ -14,7 +14,7 @@ let unlinkBehavior: TUnlinkBehavior = async () => {}
 vi.doMock('fs/promises', async () => ({
   ...(await vi.importActual('fs/promises')),
   unlink: (path: string) => unlinkBehavior(path),
-  }))
+}))
 
 async function getConfigLockFileExists() {
   return (await import('../../../src/ui/lib/config-lock-file-exists'))

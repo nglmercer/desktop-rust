@@ -14,14 +14,27 @@ import { createTempDirectory } from '../helpers/temp'
 // patched in place under Vitest. Route it through a spy that calls the real
 // watcher, and reset it per test.
 const realWatch = Fs.watch
-const watchSpy = mock.fn((...args: Parameters<typeof Fs.watch>) =>
-  (realWatch as (...a: Array<unknown>) => unknown)(...args)
+const watchSpy = mock.fn(
+  (...args: Parameters<typeof Fs.watch>): Fs.FSWatcher =>
+    (realWatch as unknown as (...a: Array<unknown>) => Fs.FSWatcher)(...args)
 )
-const statSpy = mock.fn((...args: Array<unknown>) =>
-  (Fs.stat as unknown as (...a: Array<unknown>) => unknown)(...args)
+const statSpy = mock.fn(
+  (
+    path: Fs.PathLike,
+    callback: (error: NodeJS.ErrnoException | null, stats: Fs.Stats) => void
+  ): void => {
+    ;(Fs.stat as unknown as (...a: Array<unknown>) => void)(path, callback)
+  }
 )
-const createReadStreamSpy = mock.fn((...args: Array<unknown>) =>
-  (Fs.createReadStream as unknown as (...a: Array<unknown>) => unknown)(...args)
+const createReadStreamSpy = mock.fn(
+  (
+    path: Fs.PathLike,
+    options?: Parameters<typeof Fs.createReadStream>[1]
+  ): Fs.ReadStream =>
+    (Fs.createReadStream as unknown as (...a: Array<unknown>) => Fs.ReadStream)(
+      path,
+      options
+    )
 )
 vi.mock('node:fs', async importOriginal => ({
   ...(await importOriginal<typeof import('node:fs')>()),
@@ -102,12 +115,13 @@ async function consume(stream: Fs.ReadStream) {
 // Each test starts from the real file-system functions; a test that replaces
 // them does so for its own duration only.
 beforeEach(() => {
-  statSpy.mock.mockImplementation((...args: Array<unknown>) =>
-    (Fs.stat as unknown as (...a: Array<unknown>) => unknown)(...args)
-  )
-  createReadStreamSpy.mock.mockImplementation((...args: Array<unknown>) =>
-    (Fs.createReadStream as unknown as (...a: Array<unknown>) => unknown)(
-      ...args
+  statSpy.mock.mockImplementation((path, callback) => {
+    ;(Fs.stat as unknown as (...a: Array<unknown>) => void)(path, callback)
+  })
+  createReadStreamSpy.mock.mockImplementation((path, options) =>
+    (Fs.createReadStream as unknown as (...a: Array<unknown>) => Fs.ReadStream)(
+      path,
+      options
     )
   )
 })

@@ -200,4 +200,4 @@ Exceptions (11):
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
   - `stores/assisted-commit-run-test.ts` — planner unsafe-split path differs under the backend (1 test)
   - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
-  - `ui/assisted-commit-history-test.tsx` — uses a real repository; the context menu is not shown under the Rust backend (26 tests, 26 pass with the backend off)
+  - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests). Replacing its placeholder commits with real ones did not change that: the event does not get to `onRowContextMenu`, so the cause is in how the list renders under Vitest, not in the commit data

@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, describe, it, mock } from 'node:test'
+import { before, describe, it } from 'node:test'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {
@@ -18,14 +18,14 @@ let operations: string[] | undefined
 
 before(async () => {
   vi.doMock('../../../src/ui/lib/git-perf.ts', async () => ({
-  ...(await vi.importActual('../../../src/ui/lib/git-perf.ts')),
-  start: () => {},
-      stop: () => {},
-      measure: <T>(name: string, operation: () => Promise<T>) => {
-        operations?.push(name.split(': git ')[0])
-        return operation()
-      },
-    }))
+    ...(await vi.importActual('../../../src/ui/lib/git-perf.ts')),
+    start: () => {},
+    stop: () => {},
+    measure: <T>(name: string, operation: () => Promise<T>) => {
+      operations?.push(name.split(': git ')[0])
+      return operation()
+    },
+  }))
   ;[engine, fixtures, diff, config] = await Promise.all([
     import('../../../src/lib/git/assisted-commit'),
     import('../../helpers/assisted-commit'),

@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import assert from 'node:assert'
-import { afterEach, before, beforeEach, describe, it, mock } from 'node:test'
+import { afterEach, before, beforeEach, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import type { CopyOptions } from 'fs'
 import * as Dugite from 'dugite'
@@ -31,42 +31,41 @@ before(async () => {
   const originalExec = Dugite.exec
   nativeExec = originalExec
   vi.doMock('fs/promises', async () => ({
-  ...(await vi.importActual('fs/promises')),
-  ...FileSystem,
-      cp: (source: string, destination: string, options?: CopyOptions) =>
-        copy(
-          ['process-proxy', 'process-proxy.exe'].includes(basename(source))
-            ? getProxyCommandPath()
-            : source,
-          destination,
-          options
-        ),
-    }))
+    ...(await vi.importActual('fs/promises')),
+    ...FileSystem,
+    cp: (source: string, destination: string, options?: CopyOptions) =>
+      copy(
+        ['process-proxy', 'process-proxy.exe'].includes(basename(source))
+          ? getProxyCommandPath()
+          : source,
+        destination,
+        options
+      ),
+  }))
   vi.doMock('dugite', async () => ({
-  ...(await vi.importActual('dugite')),
-  ...Dugite,
-      exec: (
-        args: string[],
-        cwd: string,
-        options?: Dugite.IGitExecutionOptions
-      ) =>
-        nativeExecFault?.(args, cwd, options) ??
-        originalExec(args, cwd, options),
-      resolveGitBinary: () => resolveBinary(),
-    }))
+    ...(await vi.importActual('dugite')),
+    ...Dugite,
+    exec: (
+      args: string[],
+      cwd: string,
+      options?: Dugite.IGitExecutionOptions
+    ) =>
+      nativeExecFault?.(args, cwd, options) ?? originalExec(args, cwd, options),
+    resolveGitBinary: () => resolveBinary(),
+  }))
   vi.doMock('../../../src/lib/hooks/get-shell-env.ts', async () => ({
-  ...(await vi.importActual('../../../src/lib/hooks/get-shell-env.ts')),
-  getShellEnv: async () => ({
-        kind: 'success',
-        env: {
-          ...process.env,
-          GIT_EXEC_PATH: resolveExecPath(),
-          ...(loginGitParameters === undefined
-            ? {}
-            : { GIT_CONFIG_PARAMETERS: loginGitParameters }),
-        },
-      }),
-    }))
+    ...(await vi.importActual('../../../src/lib/hooks/get-shell-env.ts')),
+    getShellEnv: async () => ({
+      kind: 'success',
+      env: {
+        ...process.env,
+        GIT_EXEC_PATH: resolveExecPath(),
+        ...(loginGitParameters === undefined
+          ? {}
+          : { GIT_CONFIG_PARAMETERS: loginGitParameters }),
+      },
+    }),
+  }))
   ;[engine, fixtures, config] = await Promise.all([
     import('../../../src/lib/git/assisted-commit'),
     import('../../helpers/assisted-commit'),
