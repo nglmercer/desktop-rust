@@ -230,7 +230,7 @@ Exceptions (9):
   - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
   - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
-  - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
+  - `stores/assisted-commit-push-hooks-test.ts` — 2 of 5 pass on Vitest. The push itself succeeds (`… -> master`), then a Git call after it fails with `fatal: no path specified; see 'git help pull'`, the same failure as the shadow-`GIT_CONFIG` case in `assisted-commit-push-test`: a post-push Git call does not find the remote under the Rust backend. Diagnosed, not fixed
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
   - (removed from this list) `stores/assisted-commit-selection-test.ts` now passes on Vitest, 24 of 24. Decision for the partial-hunk case: a file changed after certification is refused, not committed from the stale certified lines. The test asserts that refusal: no commit, HEAD unchanged, unauthorized content never committed
   - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests)
