@@ -216,15 +216,17 @@ Classified outside the Rust harness on purpose: `ui/commit-message-test.tsx`
 UI behaviour; Git behaviour is covered by the Git suites, which do run on the
 backend. Opted out in `app/test/vitest-setup.ts`.
 
-Exceptions (11):
+Verified state (full `pnpm test`, exit 0): Vitest 391 files pass; `node:test` 432
+tests pass / 0 fail.
+
+Exceptions (10):
   - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
   - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
   - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
-  - `stores/app-store-add-accounts-test.ts` — 45 of 45 pass on Vitest; the run still exits 1 from one unhandled rejection (`open_repository` → "start git" after the test removed its directory). Fixed so far: the background refresh after selection, the branch-protection update, the forked-remote pruning, and the selection queue now treats an unawaited selection as handled. The last rejection's request is traced (`open_repository` from `RepositorySelectionQueue`) but no awaiting caller is found yet
   - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
   - `stores/assisted-commit-push-hooks-test.ts` — native pre-push hook outcome differs under the Rust backend (3 tests)
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
   - `stores/assisted-commit-run-test.ts` — planner unsafe-split path differs under the backend (1 test)
   - `stores/assisted-commit-selection-test.ts` — selection authority after admission differs under the backend (3 tests)
-  - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests). Replacing its placeholder commits with real ones did not change that: the event does not get to `onRowContextMenu`, so the cause is in how the list renders under Vitest, not in the commit data
+  - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests)

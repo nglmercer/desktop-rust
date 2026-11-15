@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { after, before, describe, it, mock, TestContext } from 'node:test'
 import { setImmediate } from 'node:timers/promises'
@@ -44,14 +45,12 @@ describe('AppStore explicitly adding repositories', () => {
   }
 
   before(async () => {
-    mock.module('../../../src/ui/main-process-proxy', {
-      namedExports: {
-        ...(await import('../../../src/ui/main-process-proxy')),
+    vi.doMock('../../../src/ui/main-process-proxy', async () => ({
+        ...(await vi.importActual('../../../src/ui/main-process-proxy')),
         getAppMenu: () => {},
         updateAccounts: () => {},
         updatePreferredAppMenuItemLabels: () => {},
-      },
-    })
+      }))
     const { AppStore } = await import('../../../src/lib/stores/app-store')
     const { createTestStores } = await import(
       '../../helpers/app-store-test-harness'
@@ -153,6 +152,13 @@ describe('AppStore explicitly adding repositories', () => {
         null,
         false
       )
+      const { backend } = await import('../../../src/backend/client')
+      const { basis } = await backend().repositoryCopilotConflictBasis(
+        repository.path,
+        PathspecMagicFileName,
+        10_485_760,
+        false
+      )
       stores.repositoryStateCache.updateMultiCommitOperationState(
         repository,
         () => ({
@@ -161,6 +167,7 @@ describe('AppStore explicitly adding repositories', () => {
               path: PathspecMagicFileName,
               resolvedContent: 'resolved\n',
               reasoning: 'Combine both versions',
+              conflictBasis: basis,
             },
           ],
         })

@@ -3280,7 +3280,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
       (selectedRepository && !newSelectedRepository) ||
       (!selectedRepository && newSelectedRepository)
     if (repositoryChanged) {
-      this._selectRepository(newSelectedRepository)
+      // Not awaited here, so a failed re-selection must be handled locally.
+      this._selectRepository(newSelectedRepository).catch(error =>
+        log.warn('Could not reselect the repository', error)
+      )
       this.emitUpdate()
     }
   }

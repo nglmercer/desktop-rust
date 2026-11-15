@@ -447,5 +447,6 @@
   "app/test/unit/tailer-test.ts",
   "app/test/unit/ui/assisted-commit-details-test.tsx",
   "app/test/unit/account-token-lifecycle-test.ts",
-  "app/test/unit/ui/commit-message-test.tsx"
+  "app/test/unit/ui/commit-message-test.tsx",
+  "app/test/unit/stores/app-store-add-accounts-test.ts"
 ]
