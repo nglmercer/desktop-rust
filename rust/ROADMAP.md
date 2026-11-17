@@ -15,10 +15,10 @@ pnpm migration:status
 
 | Measure | Now | Done when |
 |---|---|---|
-| Fallback checks (`transportKind`) in the renderer | **224** in 65 files | 0 |
-| Legacy Git runner calls (`await git(`) in `lib/git` | **145** in 43 files | 0 |
+| Fallback checks (`transportKind`) in the renderer | **219** in 62 files | 0 |
+| Legacy Git runner calls (`await git(`) in `lib/git` | **143** in 41 files | 0 |
 | Renderer files importing `dugite` | 26 | 0 |
-| Renderer files importing `fs` | 52 | 0 (host operations only) |
+| Renderer files importing `fs` | 51 | 0 (host operations only) |
 | Renderer files importing `child_process` | 16 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 10 / 8 / 1 | 0 |
 | Unit test files still on the Node runner | **0** of 413 | 0 |
@@ -87,7 +87,7 @@ Worklist (failing files, with the first cause each hits):
 - [x] `git/rev-parse-test`: passes with the Rust backend on. The earlier "cannot add Git directory exception" failures were a harness bug (a restarted backend session was not wrapped, so no repository was selected), not a Rust fault. `git/remote-management-test` was the same bug plus a vanished-remote contract that `updateRemoteHEAD` now tolerates.
 - [x] `git/merge-test` and `git/commit-test` pass with the Rust backend on (they accept the Rust error text; a conflict resolution is committed with `createMergeCommit`, as the app does).
 - [x] **The Vitest suites now run against the Rust backend by default on Linux** (`pnpm test` builds `desktop-cli` and sets `DESKTOP_TEST_RUST_BACKEND=1`; `DESKTOP_TEST_RUST_BACKEND=0` opts out, but tests of code whose fallback is already deleted then fail). Full default run: Vitest 339 files / 2951 tests pass, `node:test` 1353 pass / 0 fail / 4 todo.
-- [x] Wave 1 fallbacks retired: `description` (2 checks), `stage` (1) and `merge-tree` (1). Their functional tests pass with `DESKTOP_TEST_RUST_BACKEND=1` and the dedicated `rust-*-routing-test` files assert the Rust path is used exclusively, so the Node/`dugite` branches and their imports were deleted. `rust-git-description-test.ts` was updated to drop the now-removed `transport: 'none'` fallback case. Metrics: transport checks 228→224, `dugite` 27→26, `fs` 53→52; baseline lowered. Full `pnpm test` green: Vitest 393 files / 3936 tests pass (11 files / 32 tests skipped), `node:test` 369 pass / 0 fail. `reflog` was also tried and reverted: `git-store` calls `getRecentBranches` during app-store startup, so any suite running without the Rust harness takes the Rust path with no server attached and fails. It was first blocked by the backend-less `node:test` suites; after those moved to Vitest it was retried and is still blocked by the suites that opt out of the Rust harness (`assisted-commit-push-boundary-test` fails broadly). Its fallback cannot go until those suites either gain a backend or their app-store reads are rewritten.
+- [x] Wave 1 fallbacks retired: `description` (2 checks), `stage` (1) and `merge-tree` (1). Their functional tests pass with `DESKTOP_TEST_RUST_BACKEND=1` and the dedicated `rust-*-routing-test` files assert the Rust path is used exclusively, so the Node/`dugite` branches and their imports were deleted. `rust-git-description-test.ts` was updated to drop the now-removed `transport: 'none'` fallback case. Metrics: transport checks 228→224, `dugite` 27→26, `fs` 53→52; baseline lowered. Full `pnpm test` green: Vitest 393 files / 3936 tests pass (11 files / 32 tests skipped), `node:test` 369 pass / 0 fail. A second slice retired `gitignore` (3 checks), `revert` (1), and `init` (1): transport checks 224→219, legacy Git calls 145→143, `fs` 52→51; `rust-git-init-test.ts` dropped its `transport: 'none'` case like the description test. Full `pnpm test` green: Vitest 401 files / 4303 tests pass. `reflog` was also tried and reverted: `git-store` calls `getRecentBranches` during app-store startup, so any suite running without the Rust harness takes the Rust path with no server attached and fails. It was first blocked by the backend-less `node:test` suites; after those moved to Vitest it was retried and is still blocked by the suites that opt out of the Rust harness (`assisted-commit-push-boundary-test` fails broadly). Its fallback cannot go until those suites either gain a backend or their app-store reads are rewritten.
 - Kept on the Git/Node path under the Rust backend, each with a stated reason: pull in a repository with submodules (Rust answers `unsupported_submodules`; blocks deleting the pull fallback), two LFS tests when the system Git has no git-lfs (environment), `pull-hook-callbacks-test` (it mocks the legacy runner), and free-form history filters such as `--grep` (the app uses only `--first-parent` and `--not --remotes`).
 - First fallbacks deleted (`rename` and `delete` branch): transport checks 231→229, legacy Git calls 148→146. `createBranch` keeps its fallback because two `node:test` suites (`repository-operation-test`) exercise it without a backend: the `node:test` files are the gate for most remaining deletions, so moving them to Vitest (which has the Rust backend) comes first. `app/test/helpers/node-test-compat.ts` (aliased as `node:test` under Vitest) lets a suite move without rewriting its mocks; 63 → 32 files remain on `node:test` (see `pnpm migration:status`): the ones using `mock.module`, CJS patching of built-in modules (`tailer-test`), fake timers that differ under Vitest (`account-token-lifecycle-test`), and the assisted-commit suites that need the Rust destination guard or hit real Rust/legacy behavior differences (partial-selection commits).
 - Stripping the guarded Node fallbacks across `app/src` (a mechanical transform) was tried and reverted: it broke the `node:test` assisted-commit suites (hook interception, push lifecycle, reader publication, run/hooks), which still run without the Rust backend. Those suites must move to Vitest (or gain a backend) before their fallbacks can go. Do not retry the bulk strip until then.
@@ -114,7 +114,7 @@ Order is lowest risk first. Counts are `legacy git calls / transport checks /
 test files`.
 
 **Wave 1 — small, mostly reads (S each)**
-- [ ] `description` 0/0/2 · `init` 1/1/2 · `var` 1/1/1 · `revert` 1/1/1 · `rev-parse` 1/1/3 · `add` 1/0/2 · `clone` 1/0/2 · `stage` 0/0/7 · `checkout-index` 1/1/1 · `merge-tree` 0/0/1 · `diff-check` 1/0/2 · `gitignore` 0/3/1 · `refs` 1/2/4 · `pull` 1/1/4 · `push` 1/2/5 · `status` 1/3/4 · `update-index` 1/3/9
+- [ ] `description` 0/0/2 · `init` 0/0/2 · `var` 1/1/1 · `revert` 0/0/1 · `rev-parse` 1/1/3 · `add` 1/0/2 · `clone` 1/0/2 · `stage` 0/0/7 · `checkout-index` 1/1/1 · `merge-tree` 0/0/1 · `diff-check` 1/0/2 · `gitignore` 0/0/1 · `refs` 1/2/4 · `pull` 1/1/4 · `push` 1/2/5 · `status` 1/3/4 · `update-index` 1/3/9
 
 **Wave 2 — medium (S–M each)**
 - [ ] `commit` 2/3/3 · `show` 1/4/5 · `reflog` 2/4/1 · `for-each-ref` 2/4/4 · `rev-list` 2/6/5 · `rm` 2/1/3 · `diff-index` 2/2/1 · `interpret-trailers` 2/2/3 · `fetch` 3/4/5 · `checkout` 4/3/5 · `reset` 4/3/5 · `tag` 3/4/2 · `merge` 4/4/6 · `cherry-pick` 4/5/4 · `submodule` 4/4/3 · `update-ref` 6/1/4 · `apply` 5/1/2
@@ -223,7 +223,7 @@ call, unlike `node:test`. It now records after the call, as node does. This made
 `stores/assisted-commit-run-test` pass on Vitest (39 of 39).
 
 Verified state (full `pnpm test`, exit 0): Vitest 401 files pass / 11 skipped,
-4305 tests pass / 32 skipped. There is no `node:test` run at all any more.
+4303 tests pass / 32 skipped. There is no `node:test` run at all any more.
 
 All 63 former `node:test` files are now Vitest suites. Conversions in this
 slice: `app-store-accounts` (15), `assisted-commit-push-hooks` (5),
