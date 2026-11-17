@@ -1,4 +1,3 @@
-import { git } from './core'
 import { Repository } from '../../models/repository'
 import { DiffSelectionType, DiffType, ITextDiff, ILargeTextDiff } from '../../models/diff'
 import { applyPatchToIndex } from './apply'
@@ -96,7 +95,6 @@ export async function preparePartialStagingDiffs(
   files: ReadonlyArray<WorkingDirectoryFileChange>,
   certified?: ReadonlyMap<string, ITextDiff | ILargeTextDiff>
 ): Promise<ReadonlyMap<string, ITextDiff | ILargeTextDiff> | undefined> {
-  if (typeof window === 'undefined' || backend().transportKind === 'none') return certified
   orderPartialSelections(files)
   const diffs = new Map(certified)
   for (const file of files) {
@@ -126,39 +124,12 @@ async function updateIndex(
     return
   }
 
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none' && options.add !== false && options.remove !== false && options.replace !== false) {
-    const batches = batchIndexPaths(paths)
-    await withRepositoryGitOperation(repository.path, 'mutation', async () => {
-      for (const selected of batches) {
-        await backend().repositoryUpdateIndex(repository.path, selected, options.forceRemove === true)
-      }
-    }, true)
-    return
-  }
-
-  const args = ['update-index']
-
-  if (options.add !== false) {
-    args.push('--add')
-  }
-
-  if (options.remove !== false || options.forceRemove === true) {
-    args.push('--remove')
-  }
-
-  if (options.forceRemove) {
-    args.push('--force-remove')
-  }
-
-  if (options.replace !== false) {
-    args.push('--replace')
-  }
-
-  args.push('-z', '--stdin')
-
-  await git(args, repository.path, 'updateIndex', {
-    stdin: paths.join('\0'),
-  })
+  const batches = batchIndexPaths(paths)
+  await withRepositoryGitOperation(repository.path, 'mutation', async () => {
+    for (const selected of batches) {
+      await backend().repositoryUpdateIndex(repository.path, selected, options.forceRemove === true)
+    }
+  }, true)
 }
 
 /**
@@ -196,9 +167,7 @@ export async function stageFiles(
     }
   }
 
-  const orderedPartial = typeof window !== 'undefined' && backend().transportKind !== 'none'
-    ? orderPartialSelections(files)
-    : partial
+  const orderedPartial = orderPartialSelections(files)
 
   // Staging files happens in three steps.
   //
