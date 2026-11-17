@@ -1,13 +1,9 @@
-import { git } from './core'
-import { GitError } from 'dugite'
 import { Repository } from '../../models/repository'
 import {
   Branch,
   BranchType,
-  IBranchTip,
   ITrackingBranch,
 } from '../../models/branch'
-import { createForEachRefParser } from './git-delimiter-parser'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -16,24 +12,21 @@ export async function getBranches(
   repository: Repository,
   ...prefixes: string[]
 ): Promise<ReadonlyArray<Branch>> {
-  const { formatArgs, parse } = createForEachRefParser({
-    fullName: '%(refname)',
-    shortName: '%(refname:short)',
-    upstreamShortName: '%(upstream:short)',
-    sha: '%(objectname)',
-    symRef: '%(symref)',
-  })
-
   if (!prefixes || !prefixes.length) {
     prefixes = ['refs/heads', 'refs/remotes']
   }
 
-  if (backend().transportKind === 'ws') {
-    const branches = await backend().repositoryBranches(
-      repository.path,
-      prefixes
-    )
-    return branches.map(
+  const read = () =>
+    backend().repositoryBranches(repository.path, prefixes)
+  const mapBranches = (
+    branches: ReadonlyArray<{
+      readonly name: string
+      readonly upstream: string | null
+      readonly oid: string
+      readonly ref: string
+    }>
+  ) =>
+    branches.map(
       branch =>
         new Branch(
           branch.name,
@@ -45,98 +38,36 @@ export async function getBranches(
           branch.ref
         )
     )
-  }
 
-  if (backend().transportKind === 'wry') {
-    return withRepositoryGitOperation(
-      repository.path,
-      'read',
-      async () => {
-        const branches = await backend().repositoryBranches(
-          repository.path,
-          prefixes
-        )
-        return branches.map(
-          branch =>
-            new Branch(
-              branch.name,
-              branch.upstream,
-              { sha: branch.oid },
-              branch.ref.startsWith('refs/heads')
-                ? BranchType.Local
-                : BranchType.Remote,
-              branch.ref
-            )
-        )
-      },
-      true
-    )
-  }
-
-  // TODO: use expectedErrors here to handle a specific error
-  // see https://github.com/desktop/desktop/pull/5299#discussion_r206603442 for
-  // discussion about what needs to change
-  const result = await git(
-    ['for-each-ref', ...formatArgs, ...prefixes],
-    repository.path,
-    'getBranches',
-    { expectedErrors: new Set([GitError.NotAGitRepository]) }
-  )
-
-  if (result.gitError === GitError.NotAGitRepository) {
-    return []
-  }
-
-  const branches = []
-
-  for (const ref of parse(result.stdout)) {
-    // excude symbolic refs from the branch list
-    if (ref.symRef.length > 0) {
-      continue
-    }
-
-    const tip: IBranchTip = { sha: ref.sha }
-
-    const type = ref.fullName.startsWith('refs/heads')
-      ? BranchType.Local
-      : BranchType.Remote
-
-    const upstream =
-      ref.upstreamShortName.length > 0 ? ref.upstreamShortName : null
-
-    branches.push(new Branch(ref.shortName, upstream, tip, type, ref.fullName))
-  }
-
-  return branches
+  return backend().transportKind === 'wry'
+    ? withRepositoryGitOperation(
+        repository.path,
+        'read',
+        async () => mapBranches(await read()),
+        true
+      )
+    : mapBranches(await read())
 }
 
 /**
  * Gets all branches that differ from their upstream (i.e. they're ahead,
  * behind or both), excluding the current branch.
- * Useful to narrow down a list of branches that could potentially be fast
- * forwarded.
- *
- * @param repository Repository to get the branches from.
  */
 export async function getBranchesDifferingFromUpstream(
   repository: Repository
 ): Promise<ReadonlyArray<ITrackingBranch>> {
-  const { formatArgs, parse } = createForEachRefParser({
-    fullName: '%(refname)',
-    sha: '%(objectname)', // SHA
-    upstream: '%(upstream)',
-    symref: '%(symref)',
-    head: '%(HEAD)',
-  })
-
   const prefixes = ['refs/heads', 'refs/remotes']
 
-  if (backend().transportKind === 'ws') {
-    const branches = await backend().repositoryBranches(
-      repository.path,
-      prefixes
-    )
-    return trackingBranches(
+  const read = () => backend().repositoryBranches(repository.path, prefixes)
+  const mapBranches = (
+    branches: ReadonlyArray<{
+      readonly ref: string
+      readonly oid: string
+      readonly upstream_ref: string | null
+      readonly current: boolean
+    }>
+  ) =>
+    trackingBranches(
       branches.map(branch => ({
         fullName: branch.ref,
         sha: branch.oid,
@@ -145,43 +76,15 @@ export async function getBranchesDifferingFromUpstream(
         head: branch.current ? '*' : ' ',
       }))
     )
-  }
 
-  if (backend().transportKind === 'wry') {
-    return withRepositoryGitOperation(
-      repository.path,
-      'read',
-      async () => {
-        const branches = await backend().repositoryBranches(
-          repository.path,
-          prefixes
-        )
-        return trackingBranches(
-          branches.map(branch => ({
-            fullName: branch.ref,
-            sha: branch.oid,
-            upstream: branch.upstream_ref ?? '',
-            symref: '',
-            head: branch.current ? '*' : ' ',
-          }))
-        )
-      },
-      true
-    )
-  }
-
-  const result = await git(
-    ['for-each-ref', ...formatArgs, ...prefixes],
-    repository.path,
-    'getBranchesDifferingFromUpstream',
-    { expectedErrors: new Set([GitError.NotAGitRepository]) }
-  )
-
-  if (result.gitError === GitError.NotAGitRepository) {
-    return []
-  }
-
-  return trackingBranches(parse(result.stdout))
+  return backend().transportKind === 'wry'
+    ? withRepositoryGitOperation(
+        repository.path,
+        'read',
+        async () => mapBranches(await read()),
+        true
+      )
+    : mapBranches(await read())
 }
 
 interface ITrackingRef {

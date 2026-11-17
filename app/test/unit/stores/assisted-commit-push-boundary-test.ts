@@ -3,6 +3,7 @@ import assert from 'node:assert'
 import { before, describe, it, type TestContext } from 'node:test'
 import { vi } from 'vitest'
 import { backend, overrideBackendForTests } from '../../../src/backend/client'
+import { createForEachRefParser } from '../../../src/lib/git/git-delimiter-parser'
 import * as Dugite from 'dugite'
 import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
@@ -426,6 +427,29 @@ let rustClient: ReturnType<typeof backend>
 function nodeBackend(t: TestContext) {
   overrideBackendForTests(new Proxy({
     transportKind: 'none',
+    repositoryBranches: async (path: string, prefixes: ReadonlyArray<string>) => {
+      const { formatArgs, parse } = createForEachRefParser({
+        fullName: '%(refname)',
+        shortName: '%(refname:short)',
+        upstreamShortName: '%(upstream:short)',
+        upstream: '%(upstream)',
+        sha: '%(objectname)',
+        symref: '%(symref)',
+        head: '%(HEAD)',
+      })
+      const result = await actualExec(
+        ['for-each-ref', ...formatArgs, ...prefixes],
+        path
+      )
+      return parse(result.stdout).map(ref => ({
+        ref: ref.fullName,
+        name: ref.shortName,
+        upstream: ref.upstreamShortName.length > 0 ? ref.upstreamShortName : null,
+        upstream_ref: ref.upstream.length > 0 ? ref.upstream : null,
+        oid: ref.sha,
+        current: ref.head === '*',
+      }))
+    },
     repositoryRendererTagRefs: async (path: string) => {
       const result = await actualExec(
         ['show-ref', '--tags', '-d'],
@@ -468,7 +492,7 @@ function nodeBackend(t: TestContext) {
         throw new Error(`missing backend method ${String(prop)}`)
       }
     },
-  }) as ReturnType<typeof backend>)
+  }) as unknown as ReturnType<typeof backend>)
   t.after(() => overrideBackendForTests(rustClient))
 }
 
