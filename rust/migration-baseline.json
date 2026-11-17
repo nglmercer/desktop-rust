@@ -1,6 +1,6 @@
 {
-  "transportChecks": 215,
-  "legacyGitCalls": 141,
+  "transportChecks": 214,
+  "legacyGitCalls": 139,
   "nodeTestFiles": 0,
   "imports.dugite": 26,
   "imports.fs": 51,

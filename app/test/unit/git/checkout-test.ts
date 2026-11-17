@@ -27,7 +27,7 @@ import { getStatusOrThrow } from '../../helpers/status'
 import { exec } from 'dugite'
 import { TestStatsStore } from '../../helpers/test-stats-store'
 import { pathExists } from '../../../src/lib/path-exists'
-import { removeConflictedFile } from '../../../src/lib/git/rm'
+import { rawGit } from '../../helpers/assisted-commit'
 import { ManualConflictResolution } from '../../../src/models/manual-conflict-resolution'
 
 describe('git/checkout', () => {
@@ -91,7 +91,7 @@ describe('git/checkout', () => {
       ).workingDirectory.files.find(file => file.path === PathspecMagicFileName)
       assert.ok(file, 'Expected the pathspec-magic file to be conflicted')
 
-      await removeConflictedFile(repository, file)
+      await rawGit(repository, ['--literal-pathspecs', 'rm', '--', file.path])
 
       assert.equal(
         await pathExists(Path.join(repository.path, PathspecMagicFileName)),
