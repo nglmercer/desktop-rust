@@ -1,4 +1,3 @@
-import { git } from './core'
 import type { Repository } from '../../models/repository'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
@@ -15,8 +14,7 @@ export async function createTag(
   name: string,
   targetCommitSha: string
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(
+  return withRepositoryGitOperation(
       repository.path,
       'mutation',
       () =>
@@ -26,11 +24,7 @@ export async function createTag(
           target: targetCommitSha,
         }),
       true
-    )
-  }
-  const args = ['tag', '-a', '-m', '', name, targetCommitSha]
-
-  await git(args, repository.path, 'createTag')
+  )
 }
 
 /**
@@ -43,8 +37,7 @@ export async function deleteTag(
   repository: Repository,
   name: string
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(
+  return withRepositoryGitOperation(
       repository.path,
       'mutation',
       () =>
@@ -53,11 +46,7 @@ export async function deleteTag(
           name,
         }),
       true
-    )
-  }
-  const args = ['tag', '-d', name]
-
-  await git(args, repository.path, 'deleteTag')
+  )
 }
 
 /**
@@ -68,24 +57,10 @@ export async function deleteTag(
 export async function getAllTags(
   repository: Repository
 ): Promise<Map<string, string>> {
-  let stdout: string
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryRendererTagRefs(repository.path)
-    stdout =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-  } else {
-    const tags = await git(
-      ['show-ref', '--tags', '-d'],
-      repository.path,
-      'getAllTags',
-      {
-        successExitCodes: new Set([0, 1]),
-      }
-    )
-    stdout = tags.stdout
-  }
+  const read = () => backend().repositoryRendererTagRefs(repository.path)
+  const stdout: string = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+    : await read()
 
   const tagsArray: Array<[string, string]> = stdout
     .split('\n')

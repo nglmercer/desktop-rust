@@ -426,6 +426,14 @@ let rustClient: ReturnType<typeof backend>
 function nodeBackend(t: TestContext) {
   overrideBackendForTests(new Proxy({
     transportKind: 'none',
+    repositoryRendererTagRefs: async (path: string) => {
+      const result = await actualExec(
+        ['show-ref', '--tags', '-d'],
+        path,
+        { successExitCodes: new Set([0, 1]) } as any
+      )
+      return result.stdout
+    },
     repositorySymbolicRef: async (path: string, ref: string) => {
       const result = await actualExec(
         ['symbolic-ref', '-q', ref],
