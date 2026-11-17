@@ -76,15 +76,4 @@ describe('symbolic refs', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('preserves the non-Rust path', async () => {
-    mocks.transport = 'none'
-    mocks.git.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: 'refs/heads/main\n',
-    })
-    await expect(getSymbolicRef(repository, 'HEAD')).resolves.toBe(
-      'refs/heads/main'
-    )
-    expect(mocks.read).not.toHaveBeenCalled()
-  })
 })
