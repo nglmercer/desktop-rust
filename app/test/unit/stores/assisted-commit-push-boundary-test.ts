@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { before, describe, it, type TestContext } from 'node:test'
 import { vi } from 'vitest'
 import { backend, overrideBackendForTests } from '../../../src/backend/client'
-import { createForEachRefParser } from '../../../src/lib/git/git-delimiter-parser'
+import { createForEachRefParser, createLogParser } from '../../../src/lib/git/git-delimiter-parser'
 import * as Dugite from 'dugite'
 import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
@@ -427,6 +427,41 @@ let rustClient: ReturnType<typeof backend>
 function nodeBackend(t: TestContext) {
   overrideBackendForTests(new Proxy({
     transportKind: 'none',
+    repositoryRendererCommit: async (path: string, ref: string) => {
+      await afterHistoryRead?.()
+      const { formatArgs } = createLogParser({
+        sha: '%H', shortSha: '%h', summary: '%s', body: '%b',
+        author: '%an <%ae> %ad', committer: '%cn <%ce> %cd',
+        parents: '%P', trailers: '%(trailers:unfold,only)', refs: '%D',
+      })
+      const result = await actualExec(
+        ['log', '--date=raw', ...formatArgs, '--no-show-signature', '--no-color', '--end-of-options', ref, '--'],
+        path,
+        { successExitCodes: new Set([0, 128]) } as any
+      )
+      return Buffer.from(result.stdout).toString('base64')
+    },
+    repositoryRendererCommitChanges: async (path: string, sha: string) => {
+      await afterHistoryRead?.()
+      const result = await actualExec(
+        ['log', sha, '-C', '-M', '-m', '-1', '--no-show-signature', '--first-parent', '--raw', '--format=format:', '--numstat', '-z', '--'],
+        path
+      )
+      return result.stdout
+    },
+    repositoryAuthors: async (path: string, revisions: ReadonlyArray<string>) => {
+      const result = await actualExec(
+        ['log', '--format=%H%x00%an <%ae> %ad', '--no-walk=unsorted', '--date=raw', '-z', '--stdin'],
+        path,
+        { stdin: revisions.join('\n') } as any
+      )
+      const parts = result.stdout.split('\0')
+      const entries = []
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        entries.push({ oid: parts[i], identity: parts[i + 1] })
+      }
+      return entries
+    },
     repositoryBranches: async (path: string, prefixes: ReadonlyArray<string>) => {
       const { formatArgs, parse } = createForEachRefParser({
         fullName: '%(refname)',

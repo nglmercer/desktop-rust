@@ -247,34 +247,13 @@ export async function getChangedFiles(
   repository: Repository,
   sha: string
 ): Promise<IChangesetData> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryRendererCommitChanges(repository.path, sha)
-    const stdout = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
-    return parseRawLogWithNumstat(stdout, sha, `${sha}^`)
-  }
-  // opt-in for rename detection (-M) and copies detection (-C)
-  // this is equivalent to the user configuring 'diff.renames' to 'copies'
-  // NOTE: order here matters - doing -M before -C means copies aren't detected
-  const args = [
-    'log',
-    sha,
-    '-C',
-    '-M',
-    '-m',
-    '-1',
-    '--no-show-signature',
-    '--first-parent',
-    '--raw',
-    '--format=format:',
-    '--numstat',
-    '-z',
-    '--',
-  ]
-
-  const { stdout } = await git(args, repository.path, 'getChangesFiles')
+  const read = () =>
+    backend().repositoryRendererCommitChanges(repository.path, sha)
+  const stdout = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+    : await read()
   return parseRawLogWithNumstat(stdout, sha, `${sha}^`)
+
 }
 
 /**
@@ -371,20 +350,13 @@ export async function getCommit(
   repository: Repository,
   ref: string
 ): Promise<Commit | null> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryRendererCommit(repository.path, ref)
-    const encoded = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
-    if (encoded === null) return null
-    return parseCommitLog(Buffer.from(encoded, 'base64'))[0] ?? null
-  }
-  const commits = await getCommits(repository, ref, 1)
-  if (commits.length < 1) {
-    return null
-  }
+  const read = () => backend().repositoryRendererCommit(repository.path, ref)
+  const encoded = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+    : await read()
+  if (encoded === null) return null
+  return parseCommitLog(Buffer.from(encoded, 'base64'))[0] ?? null
 
-  return commits[0]
 }
 
 /** Get the author identity for the given shas */
@@ -393,59 +365,36 @@ export async function getAuthors(repository: Repository, shas: string[]) {
     return []
   }
 
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const authors: CommitIdentity[] = []
-    const seen = new Set<string>()
-    const encoder = new TextEncoder()
-    let batch: string[] = []
-    let size = 0
-    const flush = async () => {
-      if (batch.length === 0) return
-      const revisions = batch
-      batch = []
-      size = 0
-      const read = () => backend().repositoryAuthors(repository.path, revisions)
-      const entries = backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-      for (const entry of entries) {
-        if (!seen.has(entry.oid)) {
-          seen.add(entry.oid)
-          authors.push(CommitIdentity.parseIdentity(entry.identity))
-        }
+  const authors: CommitIdentity[] = []
+  const seen = new Set<string>()
+  const encoder = new TextEncoder()
+  let batch: string[] = []
+  let size = 0
+  const flush = async () => {
+    if (batch.length === 0) return
+    const revisions = batch
+    batch = []
+    size = 0
+    const read = () => backend().repositoryAuthors(repository.path, revisions)
+    const entries = backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+    for (const entry of entries) {
+      if (!seen.has(entry.oid)) {
+        seen.add(entry.oid)
+        authors.push(CommitIdentity.parseIdentity(entry.identity))
       }
     }
-    for (const sha of shas) {
-      const bytes = encoder.encode(JSON.stringify(sha)).length + 1
-      if (bytes > 32768) throw new Error('Invalid author revision')
-      if (batch.length >= 500 || size + bytes > 32768) await flush()
-      batch.push(sha)
-      size += bytes
-    }
-    await flush()
-    assert.equal(authors.length, shas.length, 'Commit to author mismatch')
-    return authors
   }
-
-  const { stdout } = await git(
-    [
-      'log',
-      '--format=format:%an <%ae> %ad',
-      '--no-walk=unsorted',
-      '--date=raw',
-      '-z',
-      '--stdin',
-    ],
-    repository.path,
-    'getAuthors',
-    { stdin: shas.join('\n') }
-  )
-
-  const authors = stdout.split('\0').map(CommitIdentity.parseIdentity)
-
-  // This can happen if there are duplicate shas in the input, git log will only
-  // return the author once for each sha.
+  for (const sha of shas) {
+    const bytes = encoder.encode(JSON.stringify(sha)).length + 1
+    if (bytes > 32768) throw new Error('Invalid author revision')
+    if (batch.length >= 500 || size + bytes > 32768) await flush()
+    batch.push(sha)
+    size += bytes
+  }
+  await flush()
   assert.equal(authors.length, shas.length, 'Commit to author mismatch')
-
   return authors
+
 }
