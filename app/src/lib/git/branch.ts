@@ -117,49 +117,12 @@ export async function getBranchesPointedAt(
   repository: Repository,
   commitish: string
 ): Promise<Array<string> | null> {
-  if (backend().transportKind === 'ws') {
-    const branches = await backend().branchesPointingAt(
-      repository.path,
-      commitish
-    )
-    return branches === null ? null : Array.from(branches)
-  }
-  if (backend().transportKind === 'wry') {
-    return withRepositoryGitOperation(
-      repository.path,
-      'read',
-      async () => {
-        const branches = await backend().branchesPointingAt(
-          repository.path,
-          commitish
-        )
-        return branches === null ? null : Array.from(branches)
-      },
-      true
-    )
-  }
-  const args = [
-    'branch',
-    `--points-at=${commitish}`,
-    '--format=%(refname:short)',
-  ]
-  // this command has an implicit \n delimiter
-  const { stdout, exitCode } = await git(
-    args,
-    repository.path,
-    'branchPointedAt',
-    {
-      // - 1 is returned if a common ancestor cannot be resolved
-      // - 129 is returned if ref is malformed
-      //   "warning: ignoring broken ref refs/remotes/origin/main."
-      successExitCodes: new Set([0, 1, 129]),
-    }
-  )
-  if (exitCode === 1 || exitCode === 129) {
-    return null
-  }
-  // split (and remove trailing element cause its always an empty string)
-  return stdout.split('\n').slice(0, -1)
+  const read = () => backend().branchesPointingAt(repository.path, commitish)
+  const branches = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+    : await read()
+  return branches === null ? null : Array.from(branches)
+
 }
 
 /**
@@ -174,51 +137,14 @@ export async function getMergedBranches(
   branchName: string
 ): Promise<Map<string, string>> {
   const canonicalBranchRef = formatAsLocalRef(branchName)
-  if (backend().transportKind === 'ws') {
-    const branches = await backend().mergedRepositoryBranches(
-      repository.path,
-      branchName
-    )
-    return new Map(
-      branches
-        .filter(branch => branch.ref !== canonicalBranchRef)
-        .map(branch => [branch.ref, branch.oid])
-    )
-  }
-  if (backend().transportKind === 'wry') {
-    return withRepositoryGitOperation(
-      repository.path,
-      'read',
-      async () => {
-        const branches = await backend().mergedRepositoryBranches(
-          repository.path,
-          branchName
-        )
-        return new Map(
-          branches
-            .filter(branch => branch.ref !== canonicalBranchRef)
-            .map(branch => [branch.ref, branch.oid])
-        )
-      },
-      true
-    )
-  }
-  const { formatArgs, parse } = createForEachRefParser({
-    sha: '%(objectname)',
-    canonicalRef: '%(refname)',
-  })
+  const read = () => backend().mergedRepositoryBranches(repository.path, branchName)
+  const branches = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+    : await read()
+  return new Map(
+    branches
+      .filter(branch => branch.ref !== canonicalBranchRef)
+      .map(branch => [branch.ref, branch.oid])
+  )
 
-  const args = ['branch', ...formatArgs, '--merged', branchName]
-  const mergedBranches = new Map<string, string>()
-  const { stdout } = await git(args, repository.path, 'mergedBranches')
-
-  for (const branch of parse(stdout)) {
-    // Don't include the branch we're using to compare against
-    // in the list of branches merged into that branch.
-    if (branch.canonicalRef !== canonicalBranchRef) {
-      mergedBranches.set(branch.canonicalRef, branch.sha)
-    }
-  }
-
-  return mergedBranches
 }
