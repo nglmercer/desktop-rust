@@ -1,5 +1,6 @@
+import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, describe, it, mock } from 'node:test'
+import { before, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import type { CopyOptions } from 'fs'
 import * as Dugite from 'dugite'
@@ -18,30 +19,27 @@ before(async () => {
   const copy = FileSystem.cp
   const resolveBinary = Dugite.resolveGitBinary
   const resolveExecPath = Dugite.resolveGitExecPath
-  mock.module('fs/promises', {
-    namedExports: {
-      ...FileSystem,
-      cp: (source: string, destination: string, options?: CopyOptions) =>
-        copy(
-          ['process-proxy', 'process-proxy.exe'].includes(basename(source))
-            ? getProxyCommandPath()
-            : source,
-          destination,
-          options
-        ),
-    },
-  })
-  mock.module('dugite', {
-    namedExports: { ...Dugite, resolveGitBinary: () => resolveBinary() },
-  })
-  mock.module('../../../src/lib/hooks/get-shell-env.ts', {
-    namedExports: {
-      getShellEnv: async () => ({
-        kind: 'success',
-        env: { ...process.env, GIT_EXEC_PATH: resolveExecPath() },
-      }),
-    },
-  })
+  vi.doMock('fs/promises', async () => ({
+    ...(await vi.importActual('fs/promises')),
+    cp: (source: string, destination: string, options?: CopyOptions) =>
+      copy(
+        ['process-proxy', 'process-proxy.exe'].includes(basename(source))
+          ? getProxyCommandPath()
+          : source,
+        destination,
+        options
+      ),
+  }))
+  vi.doMock('dugite', async () => ({
+    ...(await vi.importActual('dugite')),
+    resolveGitBinary: () => resolveBinary(),
+  }))
+  vi.doMock('../../../src/lib/hooks/get-shell-env.ts', async () => ({
+    getShellEnv: async () => ({
+      kind: 'success',
+      env: { ...process.env, GIT_EXEC_PATH: resolveExecPath() },
+    }),
+  }))
   ;[harness, fixtures, remotes, models, hooks, popupTypes] = await Promise.all([
     import('../../helpers/assisted-commit-run'),
     import('../../helpers/assisted-commit'),

@@ -21,7 +21,7 @@ pnpm migration:status
 | Renderer files importing `fs` | 52 | 0 (host operations only) |
 | Renderer files importing `child_process` | 16 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 10 / 8 / 1 | 0 |
-| Unit test files still on the Node runner | **8** of 413 | 0 |
+| Unit test files still on the Node runner | **6** of 415 | 0 |
 | Rust code (crates, non-test) | 89,197 lines | — |
 
 Removed and verified on Linux: Electron, Webpack and esbuild (build, packages,
@@ -62,7 +62,7 @@ Effort: S = a day or less, M = a few days, L = a week or more.
 - [x] `useRustBackend()` routes `backend()` to the harness for a test file (and selects the repository each request is about).
 - [ ] Add a reusable Rust-backed repository fixture (replaces `setupEmptyRepository`/`makeCommit` for tests that need a repository registered with the server).
 - [ ] Decide server lifetime: one server per test file (simple) vs a shared worker (fast). Measure; target < 1 s overhead per file.
-- [ ] Move the 63 Node-runner test files to Vitest (needed anyway so there is one runner). By folder: `stores` 21, `ui` 17, top level 15, `git` 10. Drop `script/ts-register.cjs` and `app/test/globals.cjs` when the last one moves.
+- [ ] Move the 63 Node-runner test files to Vitest (needed anyway so there is one runner). 63 → 6 remain; by folder the original split was `stores` 21, `ui` 17, top level 15, `git` 10. Drop `script/ts-register.cjs` and `app/test/globals.cjs` when the last one moves.
 
 ### R2 — Retire fallbacks, module by module (L; the bulk of the work)
 
@@ -222,16 +222,23 @@ before running it, so `callCount()` inside an implementation included the curren
 call, unlike `node:test`. It now records after the call, as node does. This made
 `stores/assisted-commit-run-test` pass on Vitest (39 of 39).
 
-Verified state (full `pnpm test`, exit 0): Vitest 392 files pass; `node:test` 393
+Verified state (full `pnpm test`, exit 0): Vitest 395 files pass; `node:test` 349
 tests pass / 0 fail.
 
-Exceptions (9):
+`stores/app-store-accounts-test.ts` (15 tests) and
+`stores/assisted-commit-push-hooks-test.ts` (5 tests) now run on Vitest with the
+Rust backend. Both needed their `mock.module` calls converted to `vi.doMock`;
+the accounts suite also reinstalls its method mocks in `beforeEach` because the
+Vitest compat tracker restores module-level mocks after every test (node:test
+keeps them until `mock.restoreAll()` in `after`). The earlier unconfirmed
+`fatal: no path specified` hypothesis for the push-hooks suite is resolved: all
+5 tests pass with the real hook proxies once the module mocks are converted.
+
+Exceptions (6 active, each still on `node:test`):
   - `git/assisted-commit-cleanup-test.ts` — Rust backend behaviour: assisted-commit cleanup (17 tests)
   - `git/assisted-commit-test.ts` — Rust backend behaviour: assisted-commit (19 tests)
-  - `stores/app-store-accounts-test.ts` — popup flow under the Rust backend: prompts never reach the popup list (7 tests)
   - `stores/assisted-commit-cleanup-test.tsx` — Rust backend behaviour: assisted-commit cleanup UI (11 tests)
   - `stores/assisted-commit-push-boundary-test.ts` — Rust backend behaviour: push boundary, 95 of 114 fail once it runs
-  - `stores/assisted-commit-push-hooks-test.ts` — 2 of 5 pass on Vitest. The failing Git calls are legacy `git push origin <sha>:refs/heads/master` runs, from `AssistedCommitPush.execute` (app/src/lib/assisted-commit/push.ts:130) → `performPushBranch` → `push` (app/src/lib/git/push.ts:469). The test enables hooks (`setHooksEnvEnabled(true)`), so `withHooksEnv` points `core.hooksPath` at a temporary directory of hook proxies, and the proxy spawns a child `git hook run <name>` (app/src/lib/hooks/hooks-proxy.ts:196-257) whose output is merged into the push output. Hypothesis, not yet confirmed: that child Git emits `fatal: no path specified`. Verify by running the child with the same arguments and environment
   - `stores/assisted-commit-push-test.ts` — push outcomes differ under the Rust backend: credential rotation, post-push refresh, tracking (14 tests)
   - (removed from this list) `stores/assisted-commit-selection-test.ts` now passes on Vitest, 24 of 24. Decision for the partial-hunk case: a file changed after certification is refused, not committed from the stale certified lines. The test asserts that refusal: no commit, HEAD unchanged, unauthorized content never committed
   - `ui/assisted-commit-history-test.tsx` — uses a real repository; the row context-menu handler is never reached under the Rust backend, while the same tests pass with the backend off (26 tests)

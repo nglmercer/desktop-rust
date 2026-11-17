@@ -1,5 +1,6 @@
+import { vi } from 'vitest'
 import assert from 'node:assert/strict'
-import { after, before, describe, it, mock } from 'node:test'
+import { after, before, beforeEach, describe, it, mock } from 'node:test'
 import type { TestContext } from 'node:test'
 import { setImmediate } from 'node:timers/promises'
 import type { AppStore } from '../../../src/lib/stores/app-store'
@@ -30,27 +31,47 @@ describe('AppStore repository accounts', () => {
   const bob = new Account('bob', endpoint, 'bob-token', [], '', 2, 'Bob')
   const popups: Popup[] = []
 
+  let aliveStorePrototype: { setEnabled: (enabled: boolean) => void }
+
+  // The Vitest compat tracker restores module-level mocks after every test,
+  // unlike node:test which leaves them until `mock.restoreAll()` in `after`.
+  // Reinstall the method mocks before each test so the shared AppStore keeps
+  // recording popups for the whole suite.
+  function installMethodMocks() {
+    mock.method(aliveStorePrototype, 'setEnabled', () => {})
+    mock.method(window, 'setTimeout', () => 0)
+    mock.method(window, 'requestAnimationFrame', () => 0)
+    mock.method(window, 'addEventListener', () => {})
+    mock.method(appStore, '_showPopup', async (popup: Popup) => {
+      popups.push(popup)
+    })
+    const popupManager = appStore['popupManager']
+    const addPopup = popupManager.addPopup.bind(popupManager)
+    mock.method(popupManager, 'addPopup', (popup: Popup) => {
+      const added = addPopup(popup)
+      popups.push(added)
+      return added
+    })
+    mock.method(appStore, '_selectRepository', async () => null)
+  }
+
   before(async () => {
-    mock.module('../../../src/lib/api', {
-      namedExports: {
-        ...(await import('../../../src/lib/api')),
-        deleteToken: async () => true,
-      },
-    })
-    mock.module('../../../src/ui/main-process-proxy', {
-      namedExports: {
-        ...(await import('../../../src/ui/main-process-proxy')),
-        getAppMenu: () => {},
-        updateAccounts: () => {},
-      },
-    })
+    vi.doMock('../../../src/lib/api', async () => ({
+      ...(await vi.importActual('../../../src/lib/api')),
+      deleteToken: async () => true,
+    }))
+    vi.doMock('../../../src/ui/main-process-proxy', async () => ({
+      ...(await vi.importActual('../../../src/ui/main-process-proxy')),
+      getAppMenu: () => {},
+      updateAccounts: () => {},
+    }))
     const { AppStore } = await import('../../../src/lib/stores/app-store')
     const { createTestStores } = await import(
       '../../helpers/app-store-test-harness'
     )
     stores = createTestStores()
     const { AliveStore } = await import('../../../src/lib/stores/alive-store')
-    mock.method(AliveStore.prototype, 'setEnabled', () => {})
+    aliveStorePrototype = AliveStore.prototype
     const { CopilotStore } = await import(
       '../../../src/lib/stores/copilot-store'
     )
@@ -68,9 +89,6 @@ describe('AppStore repository accounts', () => {
       '../../helpers/test-activity-monitor'
     )
     const { fakePost } = await import('../../fake-stats-post')
-    mock.method(window, 'setTimeout', () => 0)
-    mock.method(window, 'requestAnimationFrame', () => 0)
-    mock.method(window, 'addEventListener', () => {})
     statsDb = new TestStatsDatabase()
     await statsDb.reset()
     const stats = new StatsStore(statsDb, new TestActivityMonitor(), fakePost)
@@ -98,20 +116,13 @@ describe('AppStore repository accounts', () => {
       ),
       new CopilotStore(stores.accountsStore)
     )
-    mock.method(appStore, '_showPopup', async (popup: Popup) => {
-      popups.push(popup)
-    })
-    const popupManager = appStore['popupManager']
-    const addPopup = popupManager.addPopup.bind(popupManager)
-    mock.method(popupManager, 'addPopup', (popup: Popup) => {
-      const added = addPopup(popup)
-      popups.push(added)
-      return added
-    })
-    mock.method(appStore, '_selectRepository', async () => null)
     await stores.accountsStore.getAll()
     await stores.accountsStore.addAccount(alice)
     await stores.accountsStore.addAccount(bob)
+  })
+
+  beforeEach(() => {
+    installMethodMocks()
   })
 
   after(async () => {
