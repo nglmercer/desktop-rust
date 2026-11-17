@@ -1,5 +1,4 @@
-import { GitError as DugiteError } from 'dugite'
-import { git, GitError } from './core'
+import { git } from './core'
 import { Repository } from '../../models/repository'
 import {
   IStashEntry,
@@ -12,9 +11,8 @@ import {
 } from '../../models/status'
 import { parseRawLogWithNumstat } from './log'
 import { stageFiles } from './update-index'
-import { Branch } from '../../models/branch'
 import { createLogParser } from './git-delimiter-parser'
-import { coerceToString } from './coerce-to-string'
+import { Branch } from '../../models/branch'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -45,42 +43,20 @@ type StashResult = {
  * as well as the total amount of stash entries.
  */
 export async function getStashes(repository: Repository): Promise<StashResult> {
-  const { formatArgs, parse } = createLogParser({
-    name: '%gD',
-    stashSha: '%H',
-    message: '%gs',
-    tree: '%T',
-    parents: '%P',
-  })
-
-  let stdout: string
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryRendererReflog(repository.path, 'stash')
-    const result =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    if (result === null) return { desktopEntries: [], stashEntryCount: 0 }
-    stdout = result
-  } else {
-    const result = await git(
-      ['log', '-g', ...formatArgs, 'refs/stash', '--'],
-      repository.path,
-      'getStashEntries',
-      { successExitCodes: new Set([0, 128]) }
-    )
-
-    // There's no refs/stashes reflog in the repository or it's not
-    // even a repository. In either case we don't care
-    if (result.exitCode === 128) {
-      return { desktopEntries: [], stashEntryCount: 0 }
-    }
-    stdout = result.stdout
-  }
+  const read = () => backend().repositoryRendererReflog(repository.path, 'stash')
+  const result =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+  if (result === null) return { desktopEntries: [], stashEntryCount: 0 }
+  const stdout = result
 
   const desktopEntries: Array<IStashEntry> = []
   const files: StashedFileChanges = { kind: StashedChangesLoadStates.NotLoaded }
 
+  const { parse } = createLogParser({
+    name: '%gD', stashSha: '%H', message: '%gs', tree: '%T', parents: '%P',
+  })
   const entries = parse(stdout)
 
   for (const { name, message, stashSha, tree, parents } of entries) {
@@ -169,63 +145,7 @@ export async function createDesktopStashEntry(
   await stageFiles(repository, fullySelectedUntrackedFiles)
 
   const branchName = typeof branch === 'string' ? branch : branch.name
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().saveDesktopStash(repository.path, branchName), true)
-  }
-  const message = createDesktopStashMessage(branchName)
-  const args = ['stash', 'push', '-m', message]
-
-  const result = await git(args, repository.path, 'createStashEntry').catch(
-    e => {
-      // Note: 2024: Here be dragons. As I converted this code to get rid of the
-      // successExitCode use I got curious about the assumptions made in the
-      // following logic. It assumes that as long as the exit code for `git
-      // stash push` is 1 and there are no lines beginning with "error: " then
-      // a stash was created. That didn't hold up to a quick read of the stash
-      // code. For example, running git stash push in an unborn repository will
-      // get you an exit code of 1 but no stash was created:
-      //
-      // % git stash push -m foo ; echo $?
-      // You do not have the initial commit yet
-      // 1
-      //
-      // I'm not going to mess with this now but I felt the need to document
-      // my findings should I or any other brave soul choose to tackle this in
-      // the future.
-      if (e instanceof GitError && e.result.exitCode === 1) {
-        // search for any line starting with `error:` -  /m here to ensure this is
-        // applied to each line, without needing to split the text
-        const errorPrefixRe = /^error: /m
-
-        const matches = errorPrefixRe.exec(coerceToString(e.result.stderr))
-        if (matches !== null && matches.length > 0) {
-          // rethrow, because these messages should prevent the stash from being created
-          return Promise.reject(e)
-        }
-
-        // if no error messages were emitted by Git, we should log but continue because
-        // a valid stash was created and this should not interfere with the checkout
-
-        log.info(
-          `[createDesktopStashEntry] a stash was created successfully but exit code ${result.exitCode} reported. stderr: ${result.stderr}`
-        )
-        return e.result
-      }
-      return Promise.reject(e)
-    }
-  )
-
-  // Stash doesn't consider it an error that there aren't any local changes to save.
-  if (result.stdout === 'No local changes to save\n') {
-    return false
-  }
-
-  return true
-}
-
-async function getStashEntryMatchingSha(repository: Repository, sha: string) {
-  const stash = await getStashes(repository)
-  return stash.desktopEntries.find(e => e.stashSha === sha) || null
+  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().saveDesktopStash(repository.path, branchName), true)
 }
 
 /**
@@ -237,15 +157,8 @@ export async function dropDesktopStashEntry(
   repository: Repository,
   stashSha: string
 ) {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'drop'), true)
-  }
-  const entryToDelete = await getStashEntryMatchingSha(repository, stashSha)
+  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'drop'), true)
 
-  if (entryToDelete !== null) {
-    const args = ['stash', 'drop', entryToDelete.name]
-    await git(args, repository.path, 'dropStashEntry')
-  }
 }
 
 /**
@@ -259,38 +172,8 @@ export async function popStashEntry(
   repository: Repository,
   stashSha: string
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'pop'), true)
-  }
-  // ignoring these git errors for now, this will change when we start
-  // implementing the stash conflict flow
-  const expectedErrors = new Set<DugiteError>([DugiteError.MergeConflicts])
-  const stashToPop = await getStashEntryMatchingSha(repository, stashSha)
+  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'pop'), true)
 
-  if (stashToPop !== null) {
-    const args = ['stash', 'pop', '--quiet', `${stashToPop.name}`]
-    await git(args, repository.path, 'popStashEntry', {
-      expectedErrors,
-    }).catch(e => {
-      // popping a stashes that create conflicts in the working directory
-      // report an exit code of `1` and are not dropped after being applied.
-      // so, we check for this case and drop them manually unless there's
-      // anything in stderr as that could have prevented the stash from being
-      // popped. Not the greatest approach but stash isn't very communicative
-      if (
-        e instanceof GitError &&
-        e.result.exitCode === 1 &&
-        e.result.stderr.length === 0
-      ) {
-        log.info(
-          `[popStashEntry] a stash was popped successfully but exit code ${e.result.exitCode} reported.`
-        )
-        // bye bye
-        return dropDesktopStashEntry(repository, stashSha)
-      }
-      return Promise.reject(e)
-    })
-  }
 }
 
 function extractBranchFromMessage(message: string): string | null {
@@ -303,26 +186,10 @@ export async function getStashedFiles(
   repository: Repository,
   stashSha: string
 ): Promise<ReadonlyArray<CommittedFileChange>> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryStashChanges(repository.path, stashSha)
-    const stdout = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
-    return parseRawLogWithNumstat(stdout, stashSha, `${stashSha}^`).files
-  }
-  const args = [
-    'stash',
-    'show',
-    stashSha,
-    '--raw',
-    '--numstat',
-    '-z',
-    '--format=format:',
-    '--no-show-signature',
-    '--',
-  ]
-
-  const { stdout } = await git(args, repository.path, 'getStashedFiles')
-
+  const read = () => backend().repositoryStashChanges(repository.path, stashSha)
+  const stdout = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+    : await read()
   return parseRawLogWithNumstat(stdout, stashSha, `${stashSha}^`).files
+
 }
