@@ -1,6 +1,34 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it, TestContext } from 'node:test'
+import { afterEach, before, beforeEach, describe, it, TestContext } from 'node:test'
+import { vi } from 'vitest'
 import { promises as FileSystem } from 'fs'
+
+// Under Vitest the ESM namespace of `fs/promises` cannot be patched in place
+// with `t.mock.method`, so route the four methods the fault injection needs
+// through spies that delegate to the real functions by default.
+const fsSpies = vi.hoisted(() => ({
+  mkdtemp: vi.fn(),
+  writeFile: vi.fn(),
+  rm: vi.fn(),
+  lstat: vi.fn(),
+}))
+let realFs: typeof import('fs/promises')
+vi.mock('fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs/promises')>()
+  fsSpies.mkdtemp.mockImplementation(actual.mkdtemp)
+  fsSpies.writeFile.mockImplementation(actual.writeFile)
+  fsSpies.rm.mockImplementation(actual.rm)
+  fsSpies.lstat.mockImplementation(actual.lstat)
+  return {
+    ...actual,
+    mkdtemp: (...args: Parameters<typeof actual.mkdtemp>) =>
+      fsSpies.mkdtemp(...args),
+    writeFile: (...args: Parameters<typeof actual.writeFile>) =>
+      fsSpies.writeFile(...args),
+    rm: (...args: Parameters<typeof actual.rm>) => fsSpies.rm(...args),
+    lstat: (...args: Parameters<typeof actual.lstat>) => fsSpies.lstat(...args),
+  }
+})
 import { basename, join } from 'path'
 import {
   AssistedCommitError,
@@ -81,9 +109,9 @@ async function fixture(t: TestContext) {
   const original = await tip(repository)
   const index = await indexPath(repository)
   const originalIndex = await FileSystem.readFile(index)
-  const remove = FileSystem.rm
-  const makeTemporaryDirectory = FileSystem.mkdtemp
-  const write = FileSystem.writeFile
+  const remove = realFs.rm
+  const makeTemporaryDirectory = realFs.mkdtemp
+  const write = realFs.writeFile
   const state: ICleanupFaultState = {
     directory: '',
     fail: true,
@@ -98,9 +126,7 @@ async function fixture(t: TestContext) {
       await remove(directory, { recursive: true, force: true })
     }
   })
-  t.mock.method(
-    FileSystem,
-    'mkdtemp',
+  fsSpies.mkdtemp.mockImplementation(
     async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
       const directory = await makeTemporaryDirectory(...args)
       if (basename(directory).startsWith('desktop-assisted-commit-')) {
@@ -115,9 +141,7 @@ async function fixture(t: TestContext) {
       return directory
     }
   )
-  t.mock.method(
-    FileSystem,
-    'writeFile',
+  fsSpies.writeFile.mockImplementation(
     async (...args: Parameters<typeof FileSystem.writeFile>) => {
       if (
         state.captureError !== undefined &&
@@ -128,9 +152,7 @@ async function fixture(t: TestContext) {
       return write(...args)
     }
   )
-  t.mock.method(
-    FileSystem,
-    'rm',
+  fsSpies.rm.mockImplementation(
     async (...args: Parameters<typeof FileSystem.rm>) => {
       if (await matchesDirectory?.(args[0])) {
         state.attempts++
@@ -166,7 +188,17 @@ async function fixture(t: TestContext) {
 }
 
 describe('git/assisted-commit cleanup-only retry', () => {
-  beforeEach(() => setHooksEnvEnabled(false))
+  before(async () => {
+    realFs = await vi.importActual('fs/promises')
+  })
+
+  beforeEach(() => {
+    setHooksEnvEnabled(false)
+    fsSpies.mkdtemp.mockReset().mockImplementation(realFs.mkdtemp)
+    fsSpies.writeFile.mockReset().mockImplementation(realFs.writeFile)
+    fsSpies.rm.mockReset().mockImplementation(realFs.rm)
+    fsSpies.lstat.mockReset().mockImplementation(realFs.lstat)
+  })
   afterEach(() => localStorage.removeItem('git-hooks-env-enabled'))
 
   for (const failure of ['capture', 'capture-cancellation']) {
@@ -575,13 +607,11 @@ describe('git/assisted-commit cleanup-only retry', () => {
 
   it('retains a pre-snapshot obligation when initial directory identity cannot be observed', async t => {
     const { repository, input, state, assertUnchanged } = await fixture(t)
-    const stat = FileSystem.lstat
+    const stat = realFs.lstat
     const observationError = new Error('Injected initial temporary inode EIO')
     let matchesDirectory: ((path: unknown) => Promise<boolean>) | undefined
     let failed = false
-    t.mock.method(
-      FileSystem,
-      'lstat',
+    fsSpies.lstat.mockImplementation(
       async (...args: Parameters<typeof FileSystem.lstat>) => {
         if (state.directory.length > 0 && matchesDirectory === undefined) {
           matchesDirectory = await createPathMatcher(state.directory)

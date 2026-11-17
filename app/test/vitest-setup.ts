@@ -59,7 +59,7 @@ if (process.env.DESKTOP_TEST_RUST_BACKEND === '1') {
   // These tests install their own `window`, bridge or transport, which is what
   // the harness does too, so they cannot share it.
   const ownsItsBackend =
-    /(?:^|\/)(?:script\/|web-open-path-test|web-host-bridge-loader-test|web-fs-|backend-|pull-hook-callbacks-test|commit-message-test)/.test(
+    /(?:^|\/)(?:script\/|web-open-path-test|web-host-bridge-loader-test|web-fs-|backend-|pull-hook-callbacks-test|commit-message-test|assisted-commit-history-test|assisted-commit-test|assisted-commit-push-boundary-test)/.test(
       expect.getState().testPath ?? ''
     )
   if (harness.rustBackendAvailable && !ownsItsBackend) {

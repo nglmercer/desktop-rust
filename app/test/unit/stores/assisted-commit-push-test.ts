@@ -1,6 +1,30 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { before, beforeEach, describe, it } from 'node:test'
+import { vi } from 'vitest'
 import { exec } from 'dugite'
+
+// Route the fault-injected fs/promises methods through spies: `t.mock.method`
+// cannot patch the ESM namespace under Vitest.
+const fsSpies = vi.hoisted(() => ({
+  mkdtemp: vi.fn(),
+  writeFile: vi.fn(),
+  rm: vi.fn(),
+}))
+let realFs: typeof import('fs/promises')
+vi.mock('fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs/promises')>()
+  fsSpies.mkdtemp.mockImplementation(actual.mkdtemp)
+  fsSpies.writeFile.mockImplementation(actual.writeFile)
+  fsSpies.rm.mockImplementation(actual.rm)
+  return {
+    ...actual,
+    mkdtemp: (...args: Parameters<typeof actual.mkdtemp>) =>
+      fsSpies.mkdtemp(...args),
+    writeFile: (...args: Parameters<typeof actual.writeFile>) =>
+      fsSpies.writeFile(...args),
+    rm: (...args: Parameters<typeof actual.rm>) => fsSpies.rm(...args),
+  }
+})
 import {
   readFile,
   writeFile,
@@ -44,6 +68,16 @@ import { PushProgressParser } from '../../../src/lib/progress'
 import { GitLFSProgressParser } from '../../../src/lib/progress/lfs'
 
 describe('AppStore assisted push with real local remotes', () => {
+  before(async () => {
+    realFs = await vi.importActual('fs/promises')
+  })
+
+  beforeEach(() => {
+    fsSpies.mkdtemp.mockReset().mockImplementation(realFs.mkdtemp)
+    fsSpies.writeFile.mockReset().mockImplementation(realFs.writeFile)
+    fsSpies.rm.mockReset().mockImplementation(realFs.rm)
+  })
+
   it('keeps weighted push progress finite, bounded and nondecreasing across native context and LFS events', async t => {
     const source = await seed(t, { file: 'before\n' })
     await addBareRemote(t, source)
@@ -136,17 +170,15 @@ describe('AppStore assisted push with real local remotes', () => {
       })
       const originalHead = await tip(source)
       const originalIndex = await optionalBytes(await indexPath(source))
-      const makeDirectory = FileSystem.mkdtemp
-      const remove = FileSystem.rm
-      const write = FileSystem.writeFile
+      const makeDirectory = realFs.mkdtemp
+      const remove = realFs.rm
+      const write = realFs.writeFile
       let directory = ''
       let cleanupFails = true
       const captureError = new Error('Synthetic opted-in capture EIO')
       const cleanupError = new Error('Synthetic opted-in cleanup EIO')
-      t.mock.method(
-        FileSystem,
-        'mkdtemp',
-        async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
+      fsSpies.mkdtemp.mockImplementation(
+      async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
           const result = await makeDirectory(...args)
           if (basename(result).startsWith('desktop-assisted-commit-')) {
             directory = result
@@ -154,20 +186,16 @@ describe('AppStore assisted push with real local remotes', () => {
           return result
         }
       )
-      t.mock.method(
-        FileSystem,
-        'writeFile',
-        async (...args: Parameters<typeof FileSystem.writeFile>) => {
+      fsSpies.writeFile.mockImplementation(
+      async (...args: Parameters<typeof FileSystem.writeFile>) => {
           if (directory !== '' && args[0] === join(directory, 'config')) {
             throw captureError
           }
           return write(...args)
         }
       )
-      t.mock.method(
-        FileSystem,
-        'rm',
-        async (...args: Parameters<typeof FileSystem.rm>) => {
+      fsSpies.rm.mockImplementation(
+      async (...args: Parameters<typeof FileSystem.rm>) => {
           if (args[0] === directory && cleanupFails) {
             throw cleanupError
           }

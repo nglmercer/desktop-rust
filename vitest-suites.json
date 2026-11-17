@@ -452,5 +452,11 @@
   "app/test/unit/stores/assisted-commit-run-test.ts",
   "app/test/unit/stores/assisted-commit-selection-test.ts",
   "app/test/unit/stores/app-store-accounts-test.ts",
-  "app/test/unit/stores/assisted-commit-push-hooks-test.ts"
+  "app/test/unit/stores/assisted-commit-push-hooks-test.ts",
+  "app/test/unit/ui/assisted-commit-history-test.tsx",
+  "app/test/unit/git/assisted-commit-cleanup-test.ts",
+  "app/test/unit/git/assisted-commit-test.ts",
+  "app/test/unit/stores/assisted-commit-cleanup-test.tsx",
+  "app/test/unit/stores/assisted-commit-push-test.ts",
+  "app/test/unit/stores/assisted-commit-push-boundary-test.ts"
 ]

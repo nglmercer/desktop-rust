@@ -3,9 +3,39 @@ import { createHash } from 'crypto'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { pathToFileURL } from 'url'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, before, beforeEach, describe, it } from 'node:test'
+import { vi } from 'vitest'
 import { exec, IGitResult } from 'dugite'
 import { promises as FileSystem } from 'fs'
+
+// `t.mock.method` cannot patch the ESM namespace of `fs/promises` under Vitest.
+// Route the fault-injected methods through spies that delegate to the real
+// functions by default.
+const fsSpies = vi.hoisted(() => ({
+  rename: vi.fn(),
+  open: vi.fn(),
+  readFile: vi.fn(),
+  unlink: vi.fn(),
+  rm: vi.fn(),
+}))
+let realFs: typeof import('fs/promises')
+vi.mock('fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs/promises')>()
+  fsSpies.rename.mockImplementation(actual.rename)
+  fsSpies.open.mockImplementation(actual.open)
+  fsSpies.readFile.mockImplementation(actual.readFile)
+  fsSpies.unlink.mockImplementation(actual.unlink)
+  fsSpies.rm.mockImplementation(actual.rm)
+  return {
+    ...actual,
+    rename: (...args: Parameters<typeof actual.rename>) => fsSpies.rename(...args),
+    open: (...args: Parameters<typeof actual.open>) => fsSpies.open(...args),
+    readFile: (...args: Parameters<typeof actual.readFile>) =>
+      fsSpies.readFile(...args),
+    unlink: (...args: Parameters<typeof actual.unlink>) => fsSpies.unlink(...args),
+    rm: (...args: Parameters<typeof actual.rm>) => fsSpies.rm(...args),
+  }
+})
 import {
   chmod,
   cp,
@@ -75,7 +105,18 @@ const FilterDirectoryIdentityCheck = [
 ].join('\n')
 
 describe('git/assisted-commit', () => {
-  beforeEach(() => setHooksEnvEnabled(false))
+  before(async () => {
+    realFs = await vi.importActual('fs/promises')
+  })
+
+  beforeEach(() => {
+    setHooksEnvEnabled(false)
+    fsSpies.rename.mockReset().mockImplementation(realFs.rename)
+    fsSpies.open.mockReset().mockImplementation(realFs.open)
+    fsSpies.readFile.mockReset().mockImplementation(realFs.readFile)
+    fsSpies.unlink.mockReset().mockImplementation(realFs.unlink)
+    fsSpies.rm.mockReset().mockImplementation(realFs.rm)
+  })
   afterEach(() => localStorage.removeItem('git-hooks-env-enabled'))
 
   it('matches only the exact physical fault target across aliases and missing suffixes', async t => {
@@ -2449,11 +2490,9 @@ describe('git/assisted-commit', () => {
       const realIndex =
         spelling === 'directory-alias' ? join(alias, 'index') : actualIndex
       const matchesIndex = await createPathMatcher(realIndex)
-      const originalRename = FileSystem.rename
+      const originalRename = realFs.rename
       let attemptCode: number | undefined
-      t.mock.method(
-        FileSystem,
-        'rename',
+      fsSpies.rename.mockImplementation(
         async (
           source: Parameters<typeof FileSystem.rename>[0],
           destination: Parameters<typeof FileSystem.rename>[1]
@@ -2605,12 +2644,10 @@ describe('git/assisted-commit', () => {
         'reference-transaction',
         'if test "$1" = prepared; then printf "%s" "$PPID" > guarding-process; fi'
       )
-      const originalOpen = FileSystem.open
+      const originalOpen = realFs.open
       let checked = false
       let ioSettled = false
-      t.mock.method(
-        FileSystem,
-        'open',
+      fsSpies.open.mockImplementation(
         async (...args: Parameters<typeof FileSystem.open>) => {
           const handle = await originalOpen(...args)
           if (await matchesLock(args[0])) {
@@ -2700,12 +2737,10 @@ describe('git/assisted-commit', () => {
     const matchesIndex = await createPathMatcher(realIndex)
     const externalLock = `${realIndex}.lock`
     const controller = new AbortController()
-    const originalRename = FileSystem.rename
+    const originalRename = realFs.rename
     let interrupted = false
-    t.mock.method(
-      FileSystem,
-      'rename',
-      async (
+    fsSpies.rename.mockImplementation(
+        async (
         source: Parameters<typeof FileSystem.rename>[0],
         destination: Parameters<typeof FileSystem.rename>[1]
       ) => {
@@ -2958,12 +2993,10 @@ describe('git/assisted-commit', () => {
               '--git-path',
               target === 'HEAD' ? 'HEAD' : 'refs/heads/master',
             ])}.lock`
-      const originalOpen = FileSystem.open
+      const originalOpen = realFs.open
       const matchesLock = await createPathMatcher(path)
       let failed = false
-      t.mock.method(
-        FileSystem,
-        'open',
+      fsSpies.open.mockImplementation(
         async (...args: Parameters<typeof FileSystem.open>) => {
           const handle = await originalOpen(...args)
           if ((await matchesLock(args[0])) && !failed) {
@@ -3371,12 +3404,10 @@ describe('git/assisted-commit', () => {
     const matchesAttributes = await createPathMatcher(attributes)
     await writeFile(join(repository.path, 'a.txt'), 'SELECTED\r\n')
     const input = await request(repository, ['a.txt'])
-    const originalRead = FileSystem.readFile
+    const originalRead = realFs.readFile
     let reads = 0
-    t.mock.method(
-      FileSystem,
-      'readFile',
-      async (...args: Parameters<typeof FileSystem.readFile>) => {
+    fsSpies.readFile.mockImplementation(
+        async (...args: Parameters<typeof FileSystem.readFile>) => {
         if (await matchesAttributes(args[0])) {
           reads++
           return Buffer.from(
@@ -3461,7 +3492,7 @@ describe('git/assisted-commit', () => {
     const originalIndex = await readFile(await indexPath(repository))
     const realLock = `${await indexPath(repository)}.lock`
     const matchesLock = await createPathMatcher(realLock)
-    const originalOpen = FileSystem.open
+    const originalOpen = realFs.open
     let closes = 0
     let descriptor: (() => number) | undefined
     let closeOwnedHandle: (() => Promise<void>) | undefined
@@ -3470,10 +3501,8 @@ describe('git/assisted-commit', () => {
         await closeOwnedHandle?.()
       }
     })
-    t.mock.method(
-      FileSystem,
-      'open',
-      async (...args: Parameters<typeof FileSystem.open>) => {
+    fsSpies.open.mockImplementation(
+        async (...args: Parameters<typeof FileSystem.open>) => {
         const handle = await originalOpen(...args)
         if (await matchesLock(args[0])) {
           const close = handle.close.bind(handle)
@@ -3556,11 +3585,9 @@ describe('git/assisted-commit', () => {
         }
       })
       if (fault === 'index-unlink') {
-        const originalUnlink = FileSystem.unlink
-        t.mock.method(
-          FileSystem,
-          'unlink',
-          async (...args: Parameters<typeof FileSystem.unlink>) => {
+        const originalUnlink = realFs.unlink
+        fsSpies.unlink.mockImplementation(
+        async (...args: Parameters<typeof FileSystem.unlink>) => {
             if ((await matchesLock(args[0])) && failCleanup) {
               injected++
               throw new Error('Injected persistent owned-lock unlink EIO')
@@ -3569,11 +3596,9 @@ describe('git/assisted-commit', () => {
           }
         )
       } else {
-        const originalOpen = FileSystem.open
-        t.mock.method(
-          FileSystem,
-          'open',
-          async (...args: Parameters<typeof FileSystem.open>) => {
+        const originalOpen = realFs.open
+        fsSpies.open.mockImplementation(
+        async (...args: Parameters<typeof FileSystem.open>) => {
             const handle = await originalOpen(...args)
             if (await matchesLock(args[0])) {
               const close = handle.close.bind(handle)
@@ -3656,8 +3681,8 @@ describe('git/assisted-commit', () => {
       const path =
         target === 'index' ? `${realIndex}.lock` : join(directory, 'HEAD.lock')
       const matchesLock = await createPathMatcher(path)
-      const originalOpen = FileSystem.open
-      const originalUnlink = FileSystem.unlink
+      const originalOpen = realFs.open
+      const originalUnlink = realFs.unlink
       let failFirstStat = true
       let failCleanup = true
       let failedUnlinks = 0
@@ -3666,9 +3691,7 @@ describe('git/assisted-commit', () => {
           await originalUnlink(path)
         }
       })
-      t.mock.method(
-        FileSystem,
-        'open',
+      fsSpies.open.mockImplementation(
         async (...args: Parameters<typeof FileSystem.open>) => {
           const handle = await originalOpen(...args)
           if (await matchesLock(args[0])) {
@@ -3684,9 +3707,7 @@ describe('git/assisted-commit', () => {
           return handle
         }
       )
-      t.mock.method(
-        FileSystem,
-        'unlink',
+      fsSpies.unlink.mockImplementation(
         async (...args: Parameters<typeof FileSystem.unlink>) => {
           if ((await matchesLock(args[0])) && failCleanup) {
             failedUnlinks++
@@ -3729,7 +3750,7 @@ describe('git/assisted-commit', () => {
     await writeFile(join(repository.path, 'file'), 'SELECTED\n')
     const input = await request(repository, ['file'])
     const originalIndex = await readFile(await indexPath(repository))
-    const originalRemove = FileSystem.rm
+    const originalRemove = realFs.rm
     const directories = new Set<string>()
     let failCleanup = true
     t.after(async () => {
@@ -3737,10 +3758,8 @@ describe('git/assisted-commit', () => {
         await originalRemove(directory, { recursive: true, force: true })
       }
     })
-    t.mock.method(
-      FileSystem,
-      'rm',
-      async (...args: Parameters<typeof FileSystem.rm>) => {
+    fsSpies.rm.mockImplementation(
+        async (...args: Parameters<typeof FileSystem.rm>) => {
         if (
           typeof args[0] === 'string' &&
           basename(args[0]).startsWith('desktop-assisted-commit-')
@@ -3796,7 +3815,7 @@ describe('git/assisted-commit', () => {
     const originalIndex = await readFile(realIndex)
     const target = `${realIndex}.lock`
     const matchesLock = await createPathMatcher(target)
-    const originalOpen = FileSystem.open
+    const originalOpen = realFs.open
     let failStat = true
     let failedStats = 0
     let descriptor: (() => number) | undefined
@@ -3806,10 +3825,8 @@ describe('git/assisted-commit', () => {
         await closeOwnedHandle?.()
       }
     })
-    t.mock.method(
-      FileSystem,
-      'open',
-      async (...args: Parameters<typeof FileSystem.open>) => {
+    fsSpies.open.mockImplementation(
+        async (...args: Parameters<typeof FileSystem.open>) => {
         const handle = await originalOpen(...args)
         if (await matchesLock(args[0])) {
           const stat = handle.stat.bind(handle)
@@ -3950,7 +3967,7 @@ describe('git/assisted-commit', () => {
         timeout: 60_000,
       }
     )
-    assert.match(child.stdout, /tests 1\b/)
+    assert.match(child.stdout, /(?:tests 1\b|Tests\s+1 passed\b)/)
     const expected = [...base]
     expected[1] = 'SELECTED\n'
     assert.strictEqual(await count(repository), 2)

@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict'
-import { TestContext, describe, it } from 'node:test'
+import { before, beforeEach, TestContext, describe, it } from 'node:test'
+import { vi } from 'vitest'
 import { promises as FileSystem } from 'fs'
 import ChildProcess from 'child_process'
+
+// Route the fault-injected fs/promises methods through spies: `t.mock.method`
+// cannot patch the ESM namespace under Vitest.
+const fsSpies = vi.hoisted(() => ({
+  mkdtemp: vi.fn(),
+  writeFile: vi.fn(),
+  rm: vi.fn(),
+}))
+let realFs: typeof import('fs/promises')
+vi.mock('fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs/promises')>()
+  fsSpies.mkdtemp.mockImplementation(actual.mkdtemp)
+  fsSpies.writeFile.mockImplementation(actual.writeFile)
+  fsSpies.rm.mockImplementation(actual.rm)
+  return {
+    ...actual,
+    mkdtemp: (...args: Parameters<typeof actual.mkdtemp>) =>
+      fsSpies.mkdtemp(...args),
+    writeFile: (...args: Parameters<typeof actual.writeFile>) =>
+      fsSpies.writeFile(...args),
+    rm: (...args: Parameters<typeof actual.rm>) => fsSpies.rm(...args),
+  }
+})
 import * as React from 'react'
 import { basename, join } from 'path'
 import {
@@ -43,9 +67,9 @@ async function fixture(t: TestContext) {
   const originalHead = await tip(repository)
   const index = await indexPath(repository)
   const originalIndex = await optionalBytes(index)
-  const remove = FileSystem.rm
-  const makeDirectory = FileSystem.mkdtemp
-  const write = FileSystem.writeFile
+  const remove = realFs.rm
+  const makeDirectory = realFs.mkdtemp
+  const write = realFs.writeFile
   const captureError = new Error('Injected snapshot configuration EIO')
   const removalError = new Error('Injected owned snapshot removal EIO')
   const state: {
@@ -74,9 +98,7 @@ async function fixture(t: TestContext) {
       await remove(directory, { recursive: true, force: true })
     }
   })
-  t.mock.method(
-    FileSystem,
-    'mkdtemp',
+  fsSpies.mkdtemp.mockImplementation(
     async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
       const directory = await makeDirectory(...args)
       if (basename(directory).startsWith('desktop-assisted-commit-')) {
@@ -91,9 +113,7 @@ async function fixture(t: TestContext) {
       return directory
     }
   )
-  t.mock.method(
-    FileSystem,
-    'writeFile',
+  fsSpies.writeFile.mockImplementation(
     async (...args: Parameters<typeof FileSystem.writeFile>) => {
       if (state.failCapture && (await matchesConfiguration?.(args[0]))) {
         throw state.captureError
@@ -101,9 +121,7 @@ async function fixture(t: TestContext) {
       return write(...args)
     }
   )
-  t.mock.method(
-    FileSystem,
-    'rm',
+  fsSpies.rm.mockImplementation(
     async (...args: Parameters<typeof FileSystem.rm>) => {
       if (await matchesDirectory?.(args[0])) {
         state.attempts++
@@ -162,6 +180,16 @@ async function fixture(t: TestContext) {
 }
 
 describe('AppStore owned temporary cleanup retry', () => {
+  before(async () => {
+    realFs = await vi.importActual('fs/promises')
+  })
+
+  beforeEach(() => {
+    fsSpies.mkdtemp.mockReset().mockImplementation(realFs.mkdtemp)
+    fsSpies.writeFile.mockReset().mockImplementation(realFs.writeFile)
+    fsSpies.rm.mockReset().mockImplementation(realFs.rm)
+  })
+
   it('retains a pre-callback cleanup capability, retries the same owned directory and drains waiting readers', async t => {
     const h = await fixture(t)
     h.faults.failCapture = true

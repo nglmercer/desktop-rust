@@ -1,6 +1,7 @@
 /* eslint-disable no-sync */
 import assert from 'node:assert'
-import { before, describe, it, mock } from 'node:test'
+import { before, describe, it } from 'node:test'
+import { vi } from 'vitest'
 import * as Dugite from 'dugite'
 import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
@@ -108,12 +109,12 @@ before(async () => {
       return openSync(...args)
     },
   }
-  mock.module('fs', {
-    defaultExport: { ...syncExports },
-    namedExports: syncExports,
-  })
-  mock.module('dugite', {
-    namedExports: {
+  vi.doMock('fs', async () => ({
+    default: syncExports,
+    ...syncExports,
+  }))
+  vi.doMock('dugite', async () => ({
+
       ...Dugite,
       exec: async (
         args: string[],
@@ -232,10 +233,10 @@ before(async () => {
         }
         return result
       },
-    },
-  })
-  mock.module('fs/promises', {
-    namedExports: {
+
+  }))
+  vi.doMock('fs/promises', async () => ({
+
       ...FileSystem,
       realpath: async (...args: Parameters<typeof FileSystem.realpath>) => {
         const result = await resolvePath(...args)
@@ -349,8 +350,8 @@ before(async () => {
         }
         return result
       },
-    },
-  })
+
+  }))
   ;[
     harness,
     fixtures,
