@@ -62,7 +62,7 @@ Effort: S = a day or less, M = a few days, L = a week or more.
 - [x] `useRustBackend()` routes `backend()` to the harness for a test file (and selects the repository each request is about).
 - [ ] Add a reusable Rust-backed repository fixture (replaces `setupEmptyRepository`/`makeCommit` for tests that need a repository registered with the server).
 - [ ] Decide server lifetime: one server per test file (simple) vs a shared worker (fast). Measure; target < 1 s overhead per file.
-- [x] Move the 63 Node-runner test files to Vitest (needed anyway so there is one runner). 63 → 0 remain. The last six were converted by replacing `mock.module` with `vi.doMock`, routing CJS-patched `fs/promises` methods through `vi.mock`-backed spies (the `tailer-test` pattern), and reinstalling method mocks in `beforeEach`. Three suites whose assertions target Node-path behavior (`assisted-commit-test`, `assisted-commit-history-test`, `assisted-commit-push-boundary-test`) run on Vitest but opt out of the Rust harness, like `commit-message-test`. `script/ts-register.cjs` is still used by build/release scripts, so it remains; `app/test/globals.cjs` is no longer used by the test runner.
+- [x] Move the 63 Node-runner test files to Vitest (needed anyway so there is one runner). 63 → 0 remain. The last six were converted by replacing `mock.module` with `vi.doMock`, routing CJS-patched `fs/promises` methods through `vi.mock`-backed spies (the `tailer-test` pattern), and reinstalling method mocks in `beforeEach`. Two suites whose assertions target Node-path behavior (`commit-message-test`, `assisted-commit-push-boundary-test`) run on Vitest but opt out of the Rust harness; `assisted-commit-test` and `assisted-commit-history-test` were later brought onto the harness by capturing the browser context-menu path and forwarding `GIT_ATTR_SOURCE`. `script/ts-register.cjs` is still used by build/release scripts, so it remains; `app/test/globals.cjs` is no longer used by the test runner.
 
 ### R2 — Retire fallbacks, module by module (L; the bulk of the work)
 
@@ -238,11 +238,14 @@ module-level mocks after every test. The previously unconfirmed `fatal: no path
 specified` push-hooks hypothesis is resolved — all 5 tests pass with the real
 hook proxies once the module mocks are converted.
 
-Suites that opt out of the Rust harness on purpose (they assert Node-path
-behavior, with Git behavior covered elsewhere): `commit-message-test`,
-`assisted-commit-history-test`, `assisted-commit-test` (one fixture expects the
-Node diff's two hunks where Rust produces one), and
-`assisted-commit-push-boundary-test` (its shadow-config and alias-fence
-assertions target the legacy push path). Previously resolved:
+`assisted-commit-history-test` and `assisted-commit-test` now run against the
+Rust backend: the former mocks `showBrowserContextMenu` (the active path when a
+transport is attached) in addition to `hostIpc.invoke`, and the harness now
+forwards `GIT_ATTR_SOURCE` to the server so the Rust diff honours the attribute
+source the fixture sets (122/122 pass). Suites that opt out of the Rust harness
+on purpose: `commit-message-test` and `assisted-commit-push-boundary-test` (its
+shadow-config and alias-fence assertions target the legacy push path, which the
+separate Rust process cannot observe through the test's module mocks).
+Previously resolved:
 `stores/assisted-commit-selection-test` passes on Vitest 24/24; a file changed
 after certification is refused, not committed from stale certified lines.

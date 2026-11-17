@@ -1,6 +1,22 @@
 import assert from 'node:assert'
 import { describe, it, TestContext } from 'node:test'
+import { vi } from 'vitest'
 import * as React from 'react'
+
+// `showContextualMenu` uses the browser menu when a Rust transport is active;
+// capture that path as well as the hostIpc path so the suite works with or
+// without the backend harness.
+const menuState = vi.hoisted(() => ({
+  menus: [] as ReadonlyArray<ISerializableMenuItem>[],
+}))
+vi.mock('../../../src/ui/lib/browser-context-menu', () => ({
+  showBrowserContextMenu: async (
+    items: ReadonlyArray<ISerializableMenuItem>
+  ) => {
+    menuState.menus.push(items)
+    return null
+  },
+}))
 import { act } from '@testing-library/react'
 import { hostIpc } from '../../../src/web/host-bridge'
 import { join } from 'path'
@@ -39,7 +55,8 @@ async function renderHistory(t: TestContext) {
   t.mock.method(h.dispatcher, 'initializeCompare', async () => {})
   t.mock.method(h.dispatcher, 'loadNextCommitBatch', async () => {})
   t.mock.method(h.dispatcher, 'updateCompareForm', () => {})
-  const menus = new Array<ReadonlyArray<ISerializableMenuItem>>()
+  menuState.menus.length = 0
+  const menus = menuState.menus
   t.mock.method(
     hostIpc,
     'invoke',
