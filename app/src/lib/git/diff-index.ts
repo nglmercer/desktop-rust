@@ -1,4 +1,3 @@
-import { git } from './core'
 import type { Repository } from '../../models/repository'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
@@ -81,48 +80,12 @@ export const NullTreeSHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 export async function getIndexChanges(
   repository: Repository
 ): Promise<Map<string, NoRenameIndexStatus>> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryIndexChanges(repository.path)
-    const entries =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    return new Map(
-      entries.map(entry => [entry.path, getNoRenameIndexStatus(entry.status)])
-    )
-  }
-  const args = ['diff-index', '--cached', '--name-status', '--no-renames', '-z']
-
-  let result = await git(
-    [...args, 'HEAD', '--'],
-    repository.path,
-    'getIndexChanges',
-    {
-      successExitCodes: new Set([0, 128]),
-    }
+  const read = () => backend().repositoryIndexChanges(repository.path)
+  const entries =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+  return new Map(
+    entries.map(entry => [entry.path, getNoRenameIndexStatus(entry.status)])
   )
-
-  // 128 from diff-index either means that the path isn't a repository or (more
-  // likely) that the repository HEAD is unborn. If HEAD is unborn we'll diff
-  // the index against the null tree instead.
-  if (result.exitCode === 128) {
-    result = await git(
-      [...args, NullTreeSHA],
-      repository.path,
-      'getIndexChanges'
-    )
-  }
-
-  const map = new Map<string, NoRenameIndexStatus>()
-
-  const pieces = result.stdout.split('\0')
-
-  for (let i = 0; i < pieces.length - 1; i += 2) {
-    const status = getNoRenameIndexStatus(pieces[i])
-    const path = pieces[i + 1]
-
-    map.set(path, status)
-  }
-
-  return map
 }
