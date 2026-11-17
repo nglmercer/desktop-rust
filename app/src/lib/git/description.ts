@@ -1,8 +1,4 @@
-import * as Path from 'path'
-import { readFile, writeFile } from 'fs/promises'
 import { backend } from '../../backend/client'
-
-const GitDescriptionPath = '.git/description'
 
 export const DefaultGitDescription =
   "Unnamed repository; edit this file 'description' to name the repository.\n"
@@ -11,20 +7,7 @@ export const DefaultGitDescription =
 export async function getGitDescription(
   repositoryPath: string
 ): Promise<string> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return backend().repositoryGitDescription(repositoryPath)
-  }
-  const path = Path.join(repositoryPath, GitDescriptionPath)
-
-  try {
-    const data = await readFile(path, 'utf8')
-    if (data === DefaultGitDescription) {
-      return ''
-    }
-    return data
-  } catch {
-    return ''
-  }
+  return backend().repositoryGitDescription(repositoryPath)
 }
 
 /** Write a .git/description file to the repository. */
@@ -32,10 +15,5 @@ export async function writeGitDescription(
   repositoryPath: string,
   description: string
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await backend().setRepositoryGitDescription(repositoryPath, description)
-    return
-  }
-  const fullPath = Path.join(repositoryPath, GitDescriptionPath)
-  await writeFile(fullPath, description)
+  await backend().setRepositoryGitDescription(repositoryPath, description)
 }

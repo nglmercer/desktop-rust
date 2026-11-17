@@ -7,9 +7,6 @@ import {
 } from '../../models/status'
 import { ManualConflictResolution } from '../../models/manual-conflict-resolution'
 import { assertNever } from '../fatal-error'
-import { removeConflictedFile } from './rm'
-import { checkoutConflictedFile } from './checkout'
-import { addConflictedFile } from './add'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -49,40 +46,23 @@ export async function stageManualConflictResolution(
     status.entry.us === GitStatusEntry.Added &&
     status.entry.them === GitStatusEntry.Added
 
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    let choice: 'ours' | 'theirs' | 'delete' | 'edited'
-    switch (chosen) {
-      case GitStatusEntry.Deleted:
-        choice = 'delete'
-        break
-      case GitStatusEntry.Added:
-        choice = addedInBoth ? manualResolution : 'edited'
-        break
-      case GitStatusEntry.UpdatedButUnmerged:
-        choice = manualResolution
-        break
-      default:
-        return assertNever(chosen, 'unaccounted for git status entry possibility')
-    }
-    await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().repositoryResolveManualConflict(repository.path, file.path, choice, {
-        ours: status.entry.us !== GitStatusEntry.Deleted,
-        theirs: status.entry.them !== GitStatusEntry.Deleted,
-      }), true)
-    return
-  }
-
-  if (chosen === GitStatusEntry.UpdatedButUnmerged || addedInBoth) {
-    await checkoutConflictedFile(repository, file, manualResolution)
-  }
-
+  let choice: 'ours' | 'theirs' | 'delete' | 'edited'
   switch (chosen) {
     case GitStatusEntry.Deleted:
-      return removeConflictedFile(repository, file)
+      choice = 'delete'
+      break
     case GitStatusEntry.Added:
+      choice = addedInBoth ? manualResolution : 'edited'
+      break
     case GitStatusEntry.UpdatedButUnmerged:
-      return addConflictedFile(repository, file)
+      choice = manualResolution
+      break
     default:
-      assertNever(chosen, 'unaccounted for git status entry possibility')
+      return assertNever(chosen, 'unaccounted for git status entry possibility')
   }
+  await withRepositoryGitOperation(repository.path, 'mutation', () =>
+    backend().repositoryResolveManualConflict(repository.path, file.path, choice, {
+      ours: status.entry.us !== GitStatusEntry.Deleted,
+      theirs: status.entry.them !== GitStatusEntry.Deleted,
+    }), true)
 }
