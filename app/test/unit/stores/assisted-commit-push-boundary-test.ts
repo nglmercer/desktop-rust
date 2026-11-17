@@ -1,7 +1,8 @@
 /* eslint-disable no-sync */
 import assert from 'node:assert'
-import { before, describe, it } from 'node:test'
+import { before, describe, it, type TestContext } from 'node:test'
 import { vi } from 'vitest'
+import { backend, overrideBackendForTests } from '../../../src/backend/client'
 import * as Dugite from 'dugite'
 import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
@@ -64,6 +65,7 @@ let duringConfigWrite:
   | undefined
 
 before(async () => {
+  rustClient = backend()
   actualExec = Dugite.exec
   const unlink = FileSystem.unlink
   const remove = FileSystem.rm
@@ -412,6 +414,46 @@ function reset() {
   denyRemove = undefined
   denyConfigKey = undefined
   duringConfigWrite = undefined
+}
+
+let rustClient: ReturnType<typeof backend>
+
+/**
+ * These cases inject faults by patching module objects or Git env vars that the
+ * separate Rust process cannot observe. Run only them through the renderer Node
+ * path; the rest of the suite exercises the real Rust backend.
+ */
+function nodeBackend(t: TestContext) {
+  overrideBackendForTests(new Proxy({
+    transportKind: 'none',
+    repositoryRendererReflog: async (path: string, kind: string) => {
+      if (kind !== 'branches') return null
+      const result = await actualExec(
+        ['log', '-g', '--no-abbrev-commit', '--pretty=oneline', 'HEAD', '-n', '2500', '--'],
+        path,
+        { successExitCodes: new Set([0, 128]) } as any
+      )
+      return result.exitCode === 128 ? null : result.stdout
+    },
+    repositoryBranchCheckouts: async (path: string, afterDate: Date) => {
+      const result = await actualExec(
+        ['reflog', '--date=iso', `--after="${afterDate.toISOString()}"`,
+          '--pretty=%H %gd %gs', '--grep-reflog=checkout: moving from .* to .*$', '--'],
+        path,
+        { successExitCodes: new Set([0, 128]) } as any
+      )
+      return result.exitCode === 128 ? null : result.stdout
+    },
+  }, {
+    get(target, prop) {
+      if (prop in target) return (target as any)[prop]
+      return (...args: unknown[]) => {
+        console.error('MISSING BACKEND METHOD', String(prop), JSON.stringify(args).slice(0, 200))
+        throw new Error(`missing backend method ${String(prop)}`)
+      }
+    },
+  }) as ReturnType<typeof backend>)
+  t.after(() => overrideBackendForTests(rustClient))
 }
 
 describe('assisted native push boundary', () => {
@@ -1256,6 +1298,7 @@ describe('assisted native push boundary', () => {
     } commits`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const defaultObjects = join(source.path, '.git', 'objects')
@@ -2469,6 +2512,7 @@ describe('assisted native push boundary', () => {
   it('rejects an alias changed after canonical lookup but before capture', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -2519,6 +2563,7 @@ describe('assisted native push boundary', () => {
   it('never installs a foreign untracked image during accepted reader settlement', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -2702,6 +2747,7 @@ describe('assisted native push boundary', () => {
     it(`rejects a substituted accepted ${reader} alias before waiting on a foreign lease`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const foreign = await fixtures.seed(t, { foreign: 'Foreign checkout\n' })
@@ -2807,6 +2853,7 @@ describe('assisted native push boundary', () => {
   it('rejects canonical checkout substitution during accepted reader registration before foreign admission', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const foreign = await fixtures.seed(t, { foreign: 'Foreign checkout\n' })
@@ -2893,6 +2940,7 @@ describe('assisted native push boundary', () => {
     it(`refuses canonical substitution during ${retry} retry admission without waiting on foreign recovery`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const foreign = await fixtures.seed(t, { foreign: 'Foreign checkout\n' })
@@ -3046,6 +3094,7 @@ describe('assisted native push boundary', () => {
     it(`returns acknowledged push with actual ${phase} settlement error`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -3114,6 +3163,7 @@ describe('assisted native push boundary', () => {
     it(`returns actual final deferred History error after acknowledged push, retry ${retry}`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -3192,6 +3242,7 @@ describe('assisted native push boundary', () => {
   it('checks accepted History ownership before installing an awaited changeset result', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -3464,6 +3515,7 @@ describe('assisted native push boundary', () => {
   it('rejects a changed requested recovery alias without reading another checkout', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, { foreign: 'before\n' })
@@ -3599,6 +3651,7 @@ describe('assisted native push boundary', () => {
   it('never installs another checkout into assisted state when Retry refresh owner changed', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -3794,6 +3847,7 @@ describe('assisted native push boundary', () => {
     it(`never fetches or fast-forwards a checkout substituted after acknowledged ${after}`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const replacement = join(

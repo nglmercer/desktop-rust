@@ -1,4 +1,3 @@
-import { git } from './core'
 import { Repository } from '../../models/repository'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
@@ -17,39 +16,14 @@ export async function getRecentBranches(
     /.*? (renamed|checkout)(?:: moving from|\s*) (?:refs\/heads\/|\s*)(.*?) to (?:refs\/heads\/|\s*)(.*?)$/i
   )
 
-  let stdout: string
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () =>
-      backend().repositoryRendererReflog(repository.path, 'branches')
-    const result =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    if (result === null) return []
-    stdout = result
-  } else {
-    const result = await git(
-      [
-        'log',
-        '-g',
-        '--no-abbrev-commit',
-        '--pretty=oneline',
-        'HEAD',
-        '-n',
-        '2500',
-        '--',
-      ],
-      repository.path,
-      'getRecentBranches',
-      { successExitCodes: new Set([0, 128]) }
-    )
-
-    if (result.exitCode === 128) {
-      // error code 128 is returned if the branch is unborn
-      return []
-    }
-    stdout = result.stdout
-  }
+  const read = () =>
+    backend().repositoryRendererReflog(repository.path, 'branches')
+  const result =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
+  if (result === null) return []
+  const stdout = result
 
   const lines = stdout.split('\n')
   const names = new Set<string>()
@@ -80,10 +54,6 @@ export async function getRecentBranches(
   return [...names]
 }
 
-const noCommitsOnBranchRe = new RegExp(
-  "fatal: your current branch '.*' does not have any commits yet"
-)
-
 /**
  * Gets the distinct list of branches that have been checked out after a specific date
  * Returns a map keyed on branch names
@@ -100,35 +70,13 @@ export async function getBranchCheckouts(
   const regex = new RegExp(
     /^(?:[a-f0-9]{40}|[a-f0-9]{64})\sHEAD@{(.*)}\scheckout: moving from\s.*\sto\s(.*)$/
   )
-  let stdout: string
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryBranchCheckouts(repository.path, afterDate)
-    const result = backend().transportKind === 'wry'
+  const read = () => backend().repositoryBranchCheckouts(repository.path, afterDate)
+  const result =
+    backend().transportKind === 'wry'
       ? await withRepositoryGitOperation(repository.path, 'read', read, true)
       : await read()
-    if (result === null) return new Map()
-    stdout = result
-  } else {
-    const result = await git(
-      [
-        'reflog',
-        '--date=iso',
-        `--after="${afterDate.toISOString()}"`,
-        '--pretty=%H %gd %gs',
-        `--grep-reflog=checkout: moving from .* to .*$`,
-        '--',
-      ],
-      repository.path,
-      'getCheckoutsAfterDate',
-      { successExitCodes: new Set([0, 128]) }
-    )
-
-    // Git reports an error when the current branch is unborn.
-    if (result.exitCode === 128 && noCommitsOnBranchRe.test(result.stderr)) {
-      return new Map()
-    }
-    stdout = result.stdout
-  }
+  if (result === null) return new Map()
+  const stdout = result
 
   const checkouts = new Map<string, Date>()
   const lines = stdout.split('\n')
