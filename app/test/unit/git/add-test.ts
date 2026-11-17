@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'fs/promises'
 import * as path from 'path'
 import { exec } from 'dugite'
 
-import { addConflictedFile } from '../../../src/lib/git/add'
+import { rawGit } from '../../helpers/assisted-commit'
 import { pathExists } from '../../../src/lib/path-exists'
 import { getStatusOrThrow } from '../../helpers/status'
 import {
@@ -39,7 +39,7 @@ describe('git/add', () => {
       )
 
       // Stage the resolved file
-      await addConflictedFile(repo, file)
+      await rawGit(repo, ['--literal-pathspecs', 'add', '--', file.path])
 
       // Verify the file is no longer conflicted in status
       const afterStatus = await getStatusOrThrow(repo)
@@ -75,7 +75,7 @@ describe('git/add', () => {
           path.join(repo.path, PathspecMagicFileName),
           'resolved content\n'
         )
-        await addConflictedFile(repo, file)
+        await rawGit(repo, ['--literal-pathspecs', 'add', '--', file.path])
 
         const stagedFiles = await exec(
           ['diff', '--cached', '--name-only', '-z'],
