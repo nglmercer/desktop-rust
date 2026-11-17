@@ -1,5 +1,3 @@
-import { GitError } from 'dugite'
-import { git } from './core'
 import type { Repository } from '../../models/repository'
 import { type Branch, BranchType, type IAheadBehind } from '../../models/branch'
 import type { CommitOneLine } from '../../models/commit'
@@ -57,55 +55,15 @@ export async function getAheadBehind(
   repository: Repository,
   range: string
 ): Promise<IAheadBehind | null> {
-  if (backend().transportKind === 'ws') {
-    return backend().repositoryAheadBehind(repository.path, range)
-  }
-  if (backend().transportKind === 'wry') {
-    return withRepositoryGitOperation(
-      repository.path,
-      'read',
-      () => backend().repositoryAheadBehind(repository.path, range),
-      true
-    )
-  }
-  // `--left-right` annotates the list of commits in the range with which side
-  // they're coming from. When used with `--count`, it tells us how many
-  // commits we have from the two different sides of the range.
-  const args = [
-    'rev-list',
-    '--left-right',
-    '--count',
-    '--end-of-options',
-    range,
-    '--',
-  ]
-  const result = await git(args, repository.path, 'getAheadBehind', {
-    expectedErrors: new Set([GitError.BadRevision]),
-  })
-
-  // This means one of the refs (most likely the upstream branch) no longer
-  // exists. In that case we can't be ahead/behind at all.
-  if (result.gitError === GitError.BadRevision) {
-    return null
-  }
-
-  const stdout = result.stdout
-  const pieces = stdout.split('\t')
-  if (pieces.length !== 2) {
-    return null
-  }
-
-  const ahead = parseInt(pieces[0], 10)
-  if (Number.isNaN(ahead)) {
-    return null
-  }
-
-  const behind = parseInt(pieces[1], 10)
-  if (Number.isNaN(behind)) {
-    return null
-  }
-
-  return { ahead, behind }
+  const read = () => backend().repositoryAheadBehind(repository.path, range)
+  return backend().transportKind === 'wry'
+    ? withRepositoryGitOperation(
+        repository.path,
+        'read',
+        read,
+        true
+      )
+    : read()
 }
 
 /** Calculate the number of commits `branch` is ahead/behind its upstream. */
@@ -159,47 +117,15 @@ export async function getCommitsInRange(
   repository: Repository,
   range: string
 ): Promise<ReadonlyArray<CommitOneLine> | null> {
-  let stdout: string | null | undefined
-  if (backend().transportKind === 'ws') {
-    stdout = await backend().repositoryRevisionList(repository.path, range)
-  }
-  if (backend().transportKind === 'wry') {
-    stdout = await withRepositoryGitOperation(
-      repository.path,
-      'read',
-      () => backend().repositoryRevisionList(repository.path, range),
-      true
-    )
-  }
-  const args = [
-    'rev-list',
-    '--reverse',
-    // the combination of these two arguments means each line of the stdout
-    // will contain the full commit sha and a commit summary
-    `--oneline`,
-    `--no-abbrev-commit`,
-    '--end-of-options',
-    range,
-    '--',
-  ]
-
-  const options = {
-    expectedErrors: new Set<GitError>([GitError.BadRevision]),
-  }
-
-  if (stdout === undefined) {
-    const result = await git(
-      args,
-      repository.path,
-      'getCommitsInRange',
-      options
-    )
-    if (result.gitError === GitError.BadRevision) {
-      return null
-    }
-    stdout = result.stdout
-  }
-
+  const read = () => backend().repositoryRevisionList(repository.path, range)
+  const stdout: string | null = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(
+        repository.path,
+        'read',
+        read,
+        true
+      )
+    : await read()
   if (stdout === null) return null
 
   const lines = stdout.split('\n')
@@ -234,28 +160,13 @@ export async function doMergeCommitsExistAfterCommit(
   commitRef: string | null
 ): Promise<boolean> {
   const revision = commitRef === null ? 'HEAD' : revRange(commitRef, 'HEAD')
-  if (backend().transportKind === 'ws') {
-    return backend().repositoryHasMergeCommits(repository.path, revision)
-  }
-  if (backend().transportKind === 'wry') {
-    return withRepositoryGitOperation(
-      repository.path,
-      'read',
-      () => backend().repositoryHasMergeCommits(repository.path, revision),
-      true
-    )
-  }
-  const args = [
-    'rev-list',
-    '-1',
-    '--merges',
-    '--end-of-options',
-    revision,
-    '--',
-  ]
-
-  return git(args, repository.path, 'doMergeCommitsExistAfterCommit', {
-    // 128 here means there's no HEAD, i.e we're on an unborn branch
-    successExitCodes: new Set([0, 128]),
-  }).then(x => x.stdout.length > 0)
+  const read = () => backend().repositoryHasMergeCommits(repository.path, revision)
+  return backend().transportKind === 'wry'
+    ? withRepositoryGitOperation(
+        repository.path,
+        'read',
+        read,
+        true
+      )
+    : read()
 }
