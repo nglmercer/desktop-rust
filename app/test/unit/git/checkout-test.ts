@@ -15,7 +15,6 @@ import {
 import { Repository } from '../../../src/models/repository'
 import {
   checkoutBranch,
-  checkoutConflictedFile,
   checkoutPaths,
   getBranches,
   createBranch,
@@ -28,7 +27,6 @@ import { exec } from 'dugite'
 import { TestStatsStore } from '../../helpers/test-stats-store'
 import { pathExists } from '../../../src/lib/path-exists'
 import { rawGit } from '../../helpers/assisted-commit'
-import { ManualConflictResolution } from '../../../src/models/manual-conflict-resolution'
 
 describe('git/checkout', () => {
   it.skipIf(process.platform === 'win32')(
@@ -62,11 +60,7 @@ describe('git/checkout', () => {
         throw new Error('Expected the pathspec-magic file to be conflicted')
       }
 
-      await checkoutConflictedFile(
-        repository,
-        file,
-        ManualConflictResolution.ours
-      )
+      await rawGit(repository, ['--literal-pathspecs', 'checkout', '--ours', '--', file.path])
 
       assert.equal(
         await readFile(
