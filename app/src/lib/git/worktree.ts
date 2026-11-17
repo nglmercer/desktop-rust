@@ -2,7 +2,6 @@ import * as Path from 'path'
 import type { Repository } from '../../models/repository'
 import type { WorktreeEntry, WorktreeType } from '../../models/worktree'
 import { pathExists } from '../path-exists'
-import { git } from './core'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -61,39 +60,23 @@ export async function listWorktrees(
   const repositoryPath = typeof repositoryOrPath === 'string'
     ? repositoryOrPath
     : repositoryOrPath.path
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryWorktrees(repositoryPath)
-    const entries = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repositoryPath, 'read', read, true)
-      : await read()
-    return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
-  }
-  const result = await git(
-    ['worktree', 'list', '--porcelain', '-z'],
-    repositoryPath,
-    'listWorktrees'
-  )
+  const read = () => backend().repositoryWorktrees(repositoryPath)
+  const entries = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(repositoryPath, 'read', read, true)
+    : await read()
+  return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
 
-  return parseWorktreePorcelainOutput(result.stdout)
 }
 
 export async function listWorktreesFromGitDir(
   gitDir: string
 ): Promise<ReadonlyArray<WorktreeEntry>> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryWorktrees(gitDir, true)
-    const entries = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(gitDir, 'read', read, true)
-      : await read()
-    return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
-  }
-  const result = await git(
-    ['--git-dir', gitDir, 'worktree', 'list', '--porcelain', '-z'],
-    gitDir,
-    'listWorktreesFromGitDir'
-  )
+  const read = () => backend().repositoryWorktrees(gitDir, true)
+  const entries = backend().transportKind === 'wry'
+    ? await withRepositoryGitOperation(gitDir, 'read', read, true)
+    : await read()
+  return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
 
-  return parseWorktreePorcelainOutput(result.stdout)
 }
 
 /**
@@ -147,22 +130,8 @@ export async function addWorktree(
   path: string,
   options: IAddWorktreeOptions = {}
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'add', path, create_branch: options.createBranch || null, commitish: options.commitish || null }), true)
-  }
-  const args = ['worktree', 'add']
+  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'add', path, create_branch: options.createBranch || null, commitish: options.commitish || null }), true)
 
-  if (options.createBranch) {
-    args.push('-b', options.createBranch)
-  }
-
-  args.push('--', path)
-
-  if (options.commitish) {
-    args.push(options.commitish)
-  }
-
-  await git(args, repository.path, 'addWorktree')
 }
 
 export async function removeWorktree(
@@ -170,16 +139,8 @@ export async function removeWorktree(
   worktreePath: string,
   force: boolean = false
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(repositoryPath, 'mutation', () => backend().mutateRepositoryWorktree(repositoryPath, { kind: 'remove', path: worktreePath, force }), true)
-  }
-  const args = ['worktree', 'remove']
-  if (force) {
-    args.push('--force')
-  }
-  args.push(worktreePath)
+  return withRepositoryGitOperation(repositoryPath, 'mutation', () => backend().mutateRepositoryWorktree(repositoryPath, { kind: 'remove', path: worktreePath, force }), true)
 
-  await git(args, repositoryPath, 'removeWorktree')
 }
 
 /**
@@ -194,20 +155,6 @@ export async function moveWorktree(
   oldPath: string,
   newPath: string
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'move', from: oldPath, to: newPath }), true)
-  }
-  const mainWorktree = (await listWorktrees(repository)).find(
-    wt => wt.type === 'main'
-  )
+  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'move', from: oldPath, to: newPath }), true)
 
-  if (mainWorktree === undefined) {
-    throw new Error('Could not determine the main worktree of the repository')
-  }
-
-  await git(
-    ['worktree', 'move', '--', oldPath, newPath],
-    mainWorktree.path,
-    'moveWorktree'
-  )
 }
