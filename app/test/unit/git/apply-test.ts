@@ -2,10 +2,8 @@ import { describe, it } from 'vitest'
 import assert from 'node:assert'
 import { setupFixtureRepository } from '../../helpers/repositories'
 import { Repository } from '../../../src/models/repository'
-import {
-  getWorkingDirectoryDiff,
-  discardChangesFromSelection,
-} from '../../../src/lib/git'
+import { getWorkingDirectoryDiff } from '../../../src/lib/git'
+import { discardReviewedSelection } from '../../../src/lib/git/reviewed-discard'
 import {
   WorkingDirectoryFileChange,
   AppFileStatusKind,
@@ -21,7 +19,7 @@ import * as Path from 'path'
 import { structuredPatch } from 'diff'
 
 describe('git/apply', () => {
-  describe('discardChangesFromSelection()', () => {
+  describe('discardReviewedSelection()', () => {
     async function getDiff(repository: Repository, filePath: string) {
       const file = new WorkingDirectoryFileChange(
         filePath,
@@ -38,7 +36,7 @@ describe('git/apply', () => {
       const filePath = 'modified-file.md'
       const previousDiff = await getDiff(repository, filePath)
 
-      await discardChangesFromSelection(
+      await discardReviewedSelection(
         repository,
         filePath,
         previousDiff,
@@ -55,7 +53,7 @@ describe('git/apply', () => {
       const repository = new Repository(testRepoPath, -1, null, false)
 
       const filePath = 'modified-file.md'
-      await discardChangesFromSelection(
+      await discardReviewedSelection(
         repository,
         filePath,
         await getDiff(repository, filePath),
@@ -83,7 +81,7 @@ describe('git/apply', () => {
         'utf8'
       )
 
-      await discardChangesFromSelection(
+      await discardReviewedSelection(
         repository,
         filePath,
         await getDiff(repository, filePath),
@@ -124,7 +122,7 @@ describe('git/apply', () => {
         'utf8'
       )
 
-      await discardChangesFromSelection(repository, filePath, diff, selection)
+      await discardReviewedSelection(repository, filePath, diff, selection)
 
       const fileContents = await readFile(
         Path.join(repository.path, filePath),
@@ -155,7 +153,7 @@ describe('git/apply', () => {
         'utf8'
       )
 
-      await discardChangesFromSelection(
+      await discardReviewedSelection(
         repository,
         filePath,
         await getDiff(repository, filePath),
@@ -195,7 +193,7 @@ describe('git/apply', () => {
         'utf8'
       )
 
-      await discardChangesFromSelection(
+      await discardReviewedSelection(
         repository,
         filePath,
         await getDiff(repository, filePath),

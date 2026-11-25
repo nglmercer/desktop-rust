@@ -3,17 +3,15 @@ import assert from 'node:assert'
 import * as path from 'path'
 
 import { Repository } from '../../../src/models/repository'
-import { reset, resetPaths, GitResetMode } from '../../../src/lib/git/reset'
-import { getStatusOrThrow } from '../../helpers/status'
+import { reset, GitResetMode } from '../../../src/lib/git/reset'
 import {
-  PathspecMagicFileName,
   setupEmptyRepository,
   setupFixtureRepository,
-  setupRepositoryWithPathspecMagicFile,
 } from '../../helpers/repositories'
 import { exec } from 'dugite'
+import { getStatusOrThrow } from '../../helpers/status'
 
-import { readFile, unlink, writeFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 
 describe('git/reset', () => {
   describe('reset', () => {
@@ -32,111 +30,38 @@ describe('git/reset', () => {
       const status = await getStatusOrThrow(repository)
       assert.equal(status.workingDirectory.files.length, 0)
     })
-  })
 
-  describe('resetPaths', () => {
-    it('unstages only the requested files with Windows-compatible names', async t => {
+    it('can soft reset a repository to its parent', async t => {
       const repository = await setupEmptyRepository(t)
-      const selectedPaths = ['selected file.txt', '-selected.txt']
-      const paths = [...selectedPaths, 'unrelated.txt']
-      for (const filePath of paths) {
-        await writeFile(path.join(repository.path, filePath), 'original\n')
-      }
-      for (const args of [
-        ['add', '--all'],
-        ['commit', '-m', 'Initial files'],
-      ]) {
-        const result = await exec(args, repository.path)
-        assert.strictEqual(result.exitCode, 0, result.stderr)
-      }
-      for (const filePath of paths) {
-        await writeFile(path.join(repository.path, filePath), 'modified\n')
-      }
-      const staged = await exec(['add', '--all'], repository.path)
-      assert.strictEqual(staged.exitCode, 0, staged.stderr)
+      const filePath = path.join(repository.path, 'file.txt')
+      await writeFile(filePath, 'one\n')
+      let result = await exec(['add', 'file.txt'], repository.path)
+      assert.strictEqual(result.exitCode, 0, result.stderr)
+      result = await exec(['commit', '-m', 'one'], repository.path)
+      assert.strictEqual(result.exitCode, 0, result.stderr)
+      const first = await exec(['rev-parse', 'HEAD'], repository.path)
+      assert.strictEqual(first.exitCode, 0, first.stderr)
+      await writeFile(filePath, 'two\n')
+      result = await exec(['commit', '-am', 'two'], repository.path)
+      assert.strictEqual(result.exitCode, 0, result.stderr)
 
-      await resetPaths(repository, GitResetMode.Mixed, 'HEAD', selectedPaths)
+      await reset(repository, GitResetMode.Soft, 'HEAD~1')
 
-      const remaining = await exec(
-        ['diff', '--cached', '--name-only', '-z'],
+      const head = await exec(['rev-parse', 'HEAD'], repository.path)
+      assert.strictEqual(head.stdout.trim(), first.stdout.trim())
+      const parent = await exec(['rev-parse', 'HEAD^'], repository.path)
+      assert.strictEqual(parent.exitCode, 128)
+      const staged = await exec(
+        ['diff', '--cached', '--name-only'],
         repository.path
       )
-      assert.strictEqual(remaining.exitCode, 0, remaining.stderr)
-      assert.deepStrictEqual(remaining.stdout.split('\0').filter(Boolean), [
-        'unrelated.txt',
-      ])
-      for (const filePath of paths) {
-        const index = await exec(['show', `:${filePath}`], repository.path)
-        assert.strictEqual(index.exitCode, 0, index.stderr)
-        assert.strictEqual(
-          index.stdout,
-          selectedPaths.includes(filePath) ? 'original\n' : 'modified\n'
-        )
-        assert.strictEqual(
-          await readFile(path.join(repository.path, filePath), 'utf8'),
-          'modified\n'
-        )
-      }
-    })
-
-    it.skipIf(process.platform === 'win32')(
-      'resets only the requested path when its name contains pathspec magic',
-      async t => {
-        const repository = await setupRepositoryWithPathspecMagicFile(t)
-        const specialFilePath = path.join(
-          repository.path,
-          PathspecMagicFileName
-        )
-        const unrelatedFilePath = path.join(repository.path, 'unrelated.txt')
-
-        await writeFile(specialFilePath, 'modified special content\n')
-        await writeFile(unrelatedFilePath, 'modified unrelated content\n')
-        await exec(['add', '--all'], repository.path)
-
-        await resetPaths(repository, GitResetMode.Mixed, 'HEAD', [
-          PathspecMagicFileName,
-        ])
-
-        const stagedFiles = await exec(
-          ['diff', '--cached', '--name-only', '-z'],
-          repository.path
-        )
-        assert.deepEqual(stagedFiles.stdout.split('\0').filter(Boolean), [
-          'unrelated.txt',
-        ])
-        assert.equal(
-          await readFile(specialFilePath, 'utf8'),
-          'modified special content\n'
-        )
-        assert.equal(
-          await readFile(unrelatedFilePath, 'utf8'),
-          'modified unrelated content\n'
-        )
-      }
-    )
-
-    it.skip('resets discarded staged file', async t => {
-      const testRepoPath = await setupFixtureRepository(t, 'test-repo')
-      const repository = new Repository(testRepoPath, -1, null, false)
-
-      const repoPath = repository.path
-      const fileName = 'README.md'
-      const filePath = path.join(repoPath, fileName)
-
-      // modify the file
-      await writeFile(filePath, 'Hi world\n')
-
-      // stage the file, then delete it to mimic discarding
-      exec(['add', fileName], repoPath)
-      await unlink(filePath)
-
-      await resetPaths(repository, GitResetMode.Mixed, 'HEAD', [filePath])
-
-      // then checkout the version from the index to restore it
-      await exec(['checkout-index', '-f', '-u', '-q', '--', fileName], repoPath)
-
-      const status = await getStatusOrThrow(repository)
-      assert.equal(status.workingDirectory.files.length, 0)
+      assert.strictEqual(staged.stdout, 'file.txt\n')
+      assert.strictEqual(
+        await readFile(filePath, 'utf8'),
+        'two\n',
+        'soft reset preserves working tree content'
+      )
+      assert.strictEqual(head.exitCode, 0)
     })
   })
 })

@@ -733,6 +733,7 @@ mod tests {
         fs::write(f.target().join(".git/config.lock"), "locked").unwrap();
         let output = Command::new("git")
             .current_dir(f.target())
+            .env("LC_ALL", "C")
             .args(["config", "--local", "test.key", "value"])
             .output()
             .unwrap();

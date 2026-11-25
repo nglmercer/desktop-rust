@@ -29,7 +29,5 @@ export async function getSymbolicRef(
 ): Promise<string | null> {
   const read = () =>
     backend().repositorySymbolicRef(resolve(repository.path), ref)
-  return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(repository.path, 'read', read, true)
-    : read()
+  return withRepositoryGitOperation(repository.path, 'read', read, true)
 }

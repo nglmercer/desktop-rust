@@ -34,14 +34,12 @@ export async function getBranches(
         )
     )
 
-  return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(
-        repository.path,
-        'read',
-        async () => mapBranches(await read()),
-        true
-      )
-    : mapBranches(await read())
+  return withRepositoryGitOperation(
+    repository.path,
+    'read',
+    async () => mapBranches(await read()),
+    true
+  )
 }
 
 /**
@@ -72,14 +70,12 @@ export async function getBranchesDifferingFromUpstream(
       }))
     )
 
-  return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(
-        repository.path,
-        'read',
-        async () => mapBranches(await read()),
-        true
-      )
-    : mapBranches(await read())
+  return withRepositoryGitOperation(
+    repository.path,
+    'read',
+    async () => mapBranches(await read()),
+    true
+  )
 }
 
 interface ITrackingRef {

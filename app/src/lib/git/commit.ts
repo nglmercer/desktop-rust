@@ -1,8 +1,7 @@
-import { git, HookCallbackOptions, parseCommitSHA } from './core'
-import { preparePartialStagingDiffs, stageFiles } from './update-index'
+import { HookCallbackOptions } from './core'
+import { stageFiles } from './update-index'
 import { Repository } from '../../models/repository'
 import { WorkingDirectoryFileChange } from '../../models/status'
-import { unstageAll } from './reset'
 import { ManualConflictResolution } from '../../models/manual-conflict-resolution'
 import { stageManualConflictResolution } from './stage'
 import { ITextDiff, ILargeTextDiff } from '../../models/diff'
@@ -37,160 +36,85 @@ export async function createCommit(
     readonly allowLargeFiles?: boolean
   } & HookCallbackOptions
 ): Promise<string> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const review = options?.selectedReview
-    if (review === undefined) {
-      throw new Error(
-        'The selected changes must be reviewed before committing.'
-      )
-    }
-    if (
-      backend().transportKind === 'wry' &&
-      (window as any).__desktop?.supportsCommitRequestProgress !== true
-    ) {
-      throw new Error(
-        'Request-owned commit progress requires a matching desktop backend'
-      )
-    }
-    const controller = new AbortController()
-    const listeners = new Set<(chunk: string | Buffer | Buffer[]) => void>()
-    const buffered: Buffer[] = []
-    let bufferedBytes = 0
-    let failedHook: string | undefined
-    const notify = (operation: () => void) => {
-      try {
-        withoutRepositoryGitAccess(operation)
-      } catch (error) {
-        log.error('Commit observer failed', error)
-      }
-    }
-    notify(() =>
-      options?.onTerminalOutputAvailable?.(callback => {
-        for (const chunk of buffered) notify(() => callback(chunk))
-        listeners.add(callback)
-        return { unsubscribe: () => listeners.delete(callback) }
-      })
-    )
-    const checkpoint = await backend().prepareSelectedCommit(
-      repository.path,
-      review.selection,
-      review.basis,
-      { signal: controller.signal }
-    )
+  const review = options?.selectedReview
+  if (review === undefined) {
+    throw new Error('The selected changes must be reviewed before committing.')
+  }
+  const controller = new AbortController()
+  const listeners = new Set<(chunk: string | Buffer | Buffer[]) => void>()
+  const buffered: Buffer[] = []
+  let bufferedBytes = 0
+  let failedHook: string | undefined
+  const notify = (operation: () => void) => {
     try {
-      const result = await backend().publishSelectedCommit(
-        repository.path,
-        checkpoint,
-        message,
-        {
-          noVerify: options?.noVerify,
-          signOff: options?.signOff,
-          allowLargeFiles: options?.allowLargeFiles,
-          signal: controller.signal,
-          onHookProgress: progress => {
-            if (progress.status === 'failed') failedHook = progress.hookName
-            notify(() =>
-              options?.onHookProgress?.(
-                progress.status === 'started'
-                  ? {
-                      hookName: progress.hookName,
-                      status: 'started',
-                      abort: () => controller.abort(),
-                    }
-                  : {
-                      hookName: progress.hookName,
-                      status: progress.status as 'finished' | 'failed',
-                    }
-              )
-            )
-          },
-          onOutput: output => {
-            const chunk = Buffer.from(output.bytes)
-            if (bufferedBytes + chunk.length <= 256 * 1024) {
-              buffered.push(chunk)
-              bufferedBytes += chunk.length
-            }
-            for (const listener of listeners) notify(() => listener(chunk))
-          },
-        }
-      )
-      return result.oid
+      withoutRepositoryGitAccess(operation)
     } catch (error) {
-      if (failedHook !== undefined) {
-        throw new Error(
-          `The ${failedHook} hook failed. Inspect commit checkpoint ${checkpoint} before retrying. Ignoring an individual failed hook is not supported by the native backend.`,
-          { cause: error }
-        )
+      log.error('Commit observer failed', error)
+    }
+  }
+  notify(() =>
+    options?.onTerminalOutputAvailable?.(callback => {
+      for (const chunk of buffered) notify(() => callback(chunk))
+      listeners.add(callback)
+      return { unsubscribe: () => listeners.delete(callback) }
+    })
+  )
+  const checkpoint = await backend().prepareSelectedCommit(
+    repository.path,
+    review.selection,
+    review.basis,
+    { signal: controller.signal }
+  )
+  try {
+    const result = await backend().publishSelectedCommit(
+      repository.path,
+      checkpoint,
+      message,
+      {
+        noVerify: options?.noVerify,
+        signOff: options?.signOff,
+        allowLargeFiles: options?.allowLargeFiles,
+        signal: controller.signal,
+        onHookProgress: progress => {
+          if (progress.status === 'failed') failedHook = progress.hookName
+          notify(() =>
+            options?.onHookProgress?.(
+              progress.status === 'started'
+                ? {
+                    hookName: progress.hookName,
+                    status: 'started',
+                    abort: () => controller.abort(),
+                  }
+                : {
+                    hookName: progress.hookName,
+                    status: progress.status as 'finished' | 'failed',
+                  }
+            )
+          )
+        },
+        onOutput: output => {
+          const chunk = Buffer.from(output.bytes)
+          if (bufferedBytes + chunk.length <= 256 * 1024) {
+            buffered.push(chunk)
+            bufferedBytes += chunk.length
+          }
+          for (const listener of listeners) notify(() => listener(chunk))
+        },
       }
+    )
+    return result.oid
+  } catch (error) {
+    if (failedHook !== undefined) {
       throw new Error(
-        `Commit outcome may be uncertain. Inspect commit checkpoint ${checkpoint} before retrying.`,
+        `The ${failedHook} hook failed. Inspect commit checkpoint ${checkpoint} before retrying. Ignoring an individual failed hook is not supported by the native backend.`,
         { cause: error }
       )
     }
-  }
-  // Clear the staging area, our diffs reflect the difference between the
-  // working directory and the last commit (if any) so our commits should
-  // do the same thing.
-  const partialDiffs = await preparePartialStagingDiffs(
-    repository,
-    files,
-    options?.certifiedPartialDiffs
-  )
-  await unstageAll(repository)
-
-  await stageFiles(repository, files, partialDiffs)
-
-  if (
-    options?.selectedReview !== undefined &&
-    !(await backend().verifySelectedIndex(
-      repository.path,
-      options.selectedReview
-    ))
-  ) {
     throw new Error(
-      'Selected changes or HEAD changed since review. Inspect the index, then review and try again.'
+      `Commit outcome may be uncertain. Inspect commit checkpoint ${checkpoint} before retrying.`,
+      { cause: error }
     )
   }
-
-  const args = ['-F', '-']
-
-  if (options?.amend) {
-    args.push('--amend')
-  }
-
-  if (options?.noVerify) {
-    args.push('--no-verify')
-  }
-
-  if (options?.signOff) {
-    args.push('--signoff')
-  }
-
-  if (options?.allowEmpty) {
-    args.push('--allow-empty')
-  }
-
-  const result = await git(
-    ['commit', ...args],
-    repository.path,
-    'createCommit',
-    {
-      stdin: message,
-      // https://git-scm.com/docs/githooks/2.46.1
-      interceptHooks: [
-        'pre-commit',
-        'prepare-commit-msg',
-        'commit-msg',
-        'post-commit',
-        ...(options?.amend ? ['post-rewrite'] : []),
-        'pre-auto-gc',
-      ],
-      onHookProgress: options?.onHookProgress,
-      onHookFailure: options?.onHookFailure,
-      onTerminalOutputAvailable: options?.onTerminalOutputAvailable,
-    }
-  )
-  return parseCommitSHA(result)
 }
 
 /**
@@ -221,47 +145,11 @@ export async function createMergeCommit(
   const otherFiles = files.filter(f => !manualResolutions.has(f.path))
 
   await stageFiles(repository, otherFiles)
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const stdout = await withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () => backend().finishRepositoryMergeCommit(repository.path),
-      true
-    )
-    return stdout.split(']')[0].split(' ')[1]
-  }
-  const result = await git(
-    [
-      'commit',
-      // no-edit here ensures the app does not accidentally invoke the user's editor
-      '--no-edit',
-      // By default Git merge commits do not contain any commentary (which
-      // are lines prefixed with `#`). This works because the Git CLI will
-      // prompt the user to edit the file in `.git/COMMIT_MSG` before
-      // committing, and then it will run `--cleanup=strip`.
-      //
-      // This clashes with our use of `--no-edit` above as Git will now change
-      // it's behavior to invoke `--cleanup=whitespace` as it did not ask
-      // the user to edit the COMMIT_MSG as part of creating a commit.
-      //
-      // From the docs on git-commit (https://git-scm.com/docs/git-commit) I'll
-      // quote the relevant section:
-      // --cleanup=<mode>
-      //     strip
-      //        Strip leading and trailing empty lines, trailing whitespace,
-      //        commentary and collapse consecutive empty lines.
-      //     whitespace
-      //        Same as `strip` except #commentary is not removed.
-      //     default
-      //        Same as `strip` if the message is to be edited. Otherwise `whitespace`.
-      //
-      // We should emulate the behavior in this situation because we don't
-      // let the user view or change the commit message before making the
-      // commit.
-      '--cleanup=strip',
-    ],
+  const stdout = await withRepositoryGitOperation(
     repository.path,
-    'createMergeCommit'
+    'mutation',
+    () => backend().finishRepositoryMergeCommit(repository.path),
+    true
   )
-  return parseCommitSHA(result)
+  return stdout.split(']')[0].split(' ')[1]
 }

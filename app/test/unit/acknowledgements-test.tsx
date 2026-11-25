@@ -4,13 +4,8 @@ import { act } from 'react-dom/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const readNotices = vi.hoisted(() => vi.fn())
-const getAppPath = vi.hoisted(() => vi.fn(async () => '/app'))
-vi.mock('fs', async importOriginal => ({
-  ...(await importOriginal<typeof import('fs')>()),
-  readFile: readNotices,
-}))
-vi.mock('../../src/ui/lib/app-proxy', () => ({
-  getAppPath,
+vi.mock('../../src/ui/add-repository/bundled-templates', () => ({
+  readBundledTemplate: readNotices,
 }))
 vi.mock('../../src/ui/lib/link-button', () => ({
   LinkButton: (props: React.PropsWithChildren<{ uri?: string }>) => (
@@ -36,8 +31,6 @@ describe('acknowledgements', () => {
       root = undefined
     }
     readNotices.mockReset()
-    getAppPath.mockReset()
-    getAppPath.mockResolvedValue('/app')
   })
 
   const render = async () => {
@@ -53,17 +46,15 @@ describe('acknowledgements', () => {
   }
 
   it('shows Desktop separately and retains the first alphabetic dependency', async () => {
-    readNotices.mockImplementation((_path, _encoding, callback) =>
-      callback(
-        null,
-        JSON.stringify({
-          '@example/first@1': { license: 'MIT' },
-          'desktop@1': { sourceText: 'Desktop license' },
-          'z-last@1': { license: 'ISC' },
-        })
-      )
+    readNotices.mockResolvedValue(
+      JSON.stringify({
+        '@example/first@1': { license: 'MIT' },
+        'desktop@1': { sourceText: 'Desktop license' },
+        'z-last@1': { license: 'ISC' },
+      })
     )
     await render()
+    expect(readNotices).toHaveBeenCalledWith('static/licenses.json')
     expect(root?.textContent).toContain('Desktop license')
     expect(root?.textContent).toContain('@example/first@1')
     expect(root?.textContent).toContain('z-last@1')
@@ -71,40 +62,25 @@ describe('acknowledgements', () => {
   })
 
   it('shows an error instead of waiting forever when notices cannot be read', async () => {
-    readNotices.mockImplementation((_path, _encoding, callback) =>
-      callback(new Error('unavailable'))
-    )
+    readNotices.mockRejectedValue(new Error('unavailable'))
     await render()
-    expect(root?.textContent).toContain('License notices could not be loaded.')
-  })
-
-  it('shows an error if the application path cannot be obtained', async () => {
-    getAppPath.mockRejectedValueOnce(new Error('unavailable'))
-    await render()
-    expect(readNotices).not.toHaveBeenCalled()
     expect(root?.textContent).toContain('License notices could not be loaded.')
   })
 
   it('shows an error for an invalid notice file', async () => {
-    readNotices.mockImplementation((_path, _encoding, callback) =>
-      callback(null, 'not json')
-    )
+    readNotices.mockResolvedValue('not json')
     await render()
     expect(root?.textContent).toContain('License notices could not be loaded.')
   })
 
   it('rejects malformed notice entries', async () => {
-    readNotices.mockImplementation((_path, _encoding, callback) =>
-      callback(null, '{"package@1":null}')
-    )
+    readNotices.mockResolvedValue('{"package@1":null}')
     await render()
     expect(root?.textContent).toContain('License notices could not be loaded.')
   })
 
   it('handles a notice file without the Desktop entry', async () => {
-    readNotices.mockImplementation((_path, _encoding, callback) =>
-      callback(null, '{"example@1":{"license":"MIT"}}')
-    )
+    readNotices.mockResolvedValue('{"example@1":{"license":"MIT"}}')
     await render()
     expect(root?.textContent).toContain('example@1')
   })

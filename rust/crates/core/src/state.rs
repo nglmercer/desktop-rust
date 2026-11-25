@@ -24,10 +24,10 @@ fn read_operation_file(dir: &Dir, name: &str, limit: u64) -> Result<Option<Strin
         Err(error) => return Err(error.into()),
     };
     let metadata = file.metadata()?;
-    anyhow::ensure!(
-        metadata.is_file() && metadata.len() <= limit,
-        "invalid Git operation state file"
-    );
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    anyhow::ensure!(metadata.len() <= limit, "invalid Git operation state file");
     let mut bytes = Vec::new();
     file.take(limit + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(
@@ -70,7 +70,7 @@ impl Repository {
 
     pub(crate) async fn status_context(&self) -> Result<Value> {
         let directory = self.git_directory().await?;
-        let state = self.renderer_rebase_state().await?;
+        let state = self.renderer_rebase_state().await.unwrap_or(Value::Null);
         let progress = &state["progress"];
         let rebase = match (
             progress["original"].as_str(),

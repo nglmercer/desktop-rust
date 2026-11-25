@@ -61,7 +61,7 @@ import { IAssistedCommitAnalysis } from '../../models/assisted-commit'
 import { getCopilotRuntimePath } from '../copilot-runtime'
 import { startTimer } from '../../ui/lib/timing'
 import { join } from 'path'
-import { randomBytes } from 'crypto'
+import { randomUUID } from '../../web/random-uuid'
 import { BaseStore } from './base-store'
 import { IRepoRulesMetadataRule } from '../../models/repo-rules'
 import { pathExists } from '../path-exists'
@@ -491,7 +491,7 @@ export interface ICommitMessagePromptTags {
  * session. Exported for testing.
  */
 export function generateCommitMessagePromptTags(): ICommitMessagePromptTags {
-  const token = randomBytes(8).toString('hex')
+  const token = randomUUID().replaceAll('-', '').slice(0, 16)
   return {
     diffOpen: `<diff-${token}>`,
     diffClose: `</diff-${token}>`,

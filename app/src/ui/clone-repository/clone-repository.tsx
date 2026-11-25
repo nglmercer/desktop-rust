@@ -30,7 +30,6 @@ import { merge } from '../../lib/merge'
 import { ClickSource } from '../lib/list'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 import { showOpenDialog, showSaveDialog } from '../main-process-proxy'
-import { readdir } from 'fs/promises'
 import { isTopMostDialog } from '../dialog/is-top-most'
 import memoizeOne from 'memoize-one'
 import { groupAccountsByHost } from '../../lib/group-accounts-by-host'
@@ -896,7 +895,7 @@ export class CloneRepository extends React.Component<
       const generation = this.pathValidationGeneration
       const tab = this.props.selectedTab
       const nativeSelectedClone = this.state.nativeSelectedClone
-      if (backend().transportKind === 'ws') {
+      {
         // This is a UI hint only; Git still checks the destination when it
         // starts, as files or links can change after this request completes.
         const status = await backend().cloneDestinationStatus(
@@ -942,27 +941,7 @@ export class CloneRepository extends React.Component<
           'Finish or cancel the assisted commit run before cloning into this directory.'
         )
       }
-      if (requireAbsent && backend().transportKind !== 'ws') {
-        // This is only an early UI check. The native clone operation itself
-        // validates and reserves the destination before contacting a remote.
-        return (await backend().pathExists(Path.resolve(path)))
-          ? new Error(
-              'This mode requires a destination that does not yet exist.'
-            )
-          : null
-      }
-      if (backend().transportKind === 'ws') {
-        return null
-      }
-      const directoryFiles = await readdir(path)
-
-      if (directoryFiles.length === 0) {
-        return null
-      } else {
-        return new Error(
-          'This folder contains files. Git can only clone to empty folders.'
-        )
-      }
+      return null
     } catch (error) {
       if (error.code === 'ENOTDIR') {
         // path refers to a file or other file system entry

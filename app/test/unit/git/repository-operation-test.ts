@@ -769,17 +769,13 @@ describe('AppStore assisted repository operation admission', () => {
                 ancestor,
                 `${ancestor}-moved`
               )
-            : h.appStore._discardChanges(
-                repository,
-                [
-                  new WorkingDirectoryFileChange(
-                    targetRelative,
-                    { kind: AppFileStatusKind.Untracked },
-                    DiffSelection.fromInitialSelection(DiffSelectionType.All)
-                  ),
-                ],
-                true
-              )
+            : h.appStore._discardChanges(repository, [
+                new WorkingDirectoryFileChange(
+                  targetRelative,
+                  { kind: AppFileStatusKind.Untracked },
+                  DiffSelection.fromInitialSelection(DiffSelectionType.All)
+                ),
+              ])
       await assert.rejects(operation, /assisted commit run/)
       assert.strictEqual(entered, false)
     })
@@ -802,7 +798,7 @@ describe('AppStore assisted repository operation admission', () => {
       DiffSelection.fromInitialSelection(DiffSelectionType.All)
     )
     await assert.rejects(
-      h.appStore._discardChanges(repository, [file], false),
+      h.appStore._discardChanges(repository, [file]),
       /assisted commit run/
     )
     assert.strictEqual(entered, false)
@@ -885,11 +881,7 @@ describe('AppStore assisted repository operation admission', () => {
     h.appStore['discardChangesCore'] = async () => {
       entered = true
     }
-    await h.appStore._discardChanges(
-      repository,
-      h.request(repository).files,
-      false
-    )
+    await h.appStore._discardChanges(repository, h.request(repository).files)
     assert.strictEqual(entered, true)
   })
 

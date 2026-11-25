@@ -26,7 +26,7 @@ describe('repository discovery routing', () => {
     mocks.transport = 'ws'
   })
   it.each(['ws', 'wry'])(
-    'uses %s before local filesystem shims',
+    'uses %s for repository discovery',
     async transport => {
       mocks.transport = transport
       mocks.type.mockResolvedValue({ kind: 'unsafe', path: '/repo' })
@@ -40,20 +40,6 @@ describe('repository discovery routing', () => {
       await expect(getRepositoryType('')).resolves.toEqual({ kind: 'missing' })
     }
   )
-  it('preserves the legacy path without a Rust transport', async () => {
-    mocks.transport = 'none'
-    mocks.directory.mockResolvedValue(true)
-    mocks.git.mockResolvedValue({
-      exitCode: 0,
-      stdout: 'false\n../\n../.git\n',
-    })
-    await expect(getRepositoryType('/repo/nested')).resolves.toEqual({
-      kind: 'regular',
-      topLevelWorkingDirectory: '/repo',
-      gitDir: '/repo/.git',
-    })
-    expect(mocks.type).not.toHaveBeenCalled()
-  })
   it('propagates transport failures without a shell fallback', async () => {
     const failure = new Error('disconnected')
     mocks.type.mockRejectedValue(failure)

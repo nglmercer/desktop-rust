@@ -1,17 +1,10 @@
-import { git } from './core'
 import {
   WorkingDirectoryFileChange,
   AppFileStatusKind,
 } from '../../models/status'
-import {
-  DiffType,
-  ITextDiff,
-  ILargeTextDiff,
-  DiffSelection,
-} from '../../models/diff'
+import { DiffType, ITextDiff, ILargeTextDiff } from '../../models/diff'
 import { Repository } from '../../models/repository'
 import { getWorkingDirectoryDiff } from './diff'
-import { formatPatch, formatPatchToDiscardChanges } from '../patch-formatter'
 import { assertNever } from '../fatal-error'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
@@ -24,52 +17,6 @@ export async function applyPatchToIndex(
   certifiedDiff?: ITextDiff | ILargeTextDiff,
   preserveRenameSource = false
 ): Promise<void> {
-  const useRust =
-    typeof window !== 'undefined' && backend().transportKind !== 'none'
-  // If the file was a rename we have to recreate that rename since we've
-  // just blown away the index. Think of this block of weird looking commands
-  // as running `git mv`.
-  if (file.status.kind === AppFileStatusKind.Renamed && !useRust) {
-    // Make sure the index knows of the removed file. We could use
-    // update-index --force-remove here but we're not since it's
-    // possible that someone staged a rename and then recreated the
-    // original file and we don't have any guarantees for in which order
-    // partial stages vs full-file stages happen. By using git add the
-    // worst that could happen is that we re-stage a file already staged
-    // by updateIndex.
-    await git(
-      ['--literal-pathspecs', 'add', '--update', '--', file.status.oldPath],
-      repository.path,
-      'applyPatchToIndex'
-    )
-
-    // Figure out the blob oid of the removed file
-    // <mode> SP <type> SP <object> TAB <file>
-    const oldFile = await git(
-      ['--literal-pathspecs', 'ls-tree', 'HEAD', '--', file.status.oldPath],
-      repository.path,
-      'applyPatchToIndex'
-    )
-
-    const [info] = oldFile.stdout.split('\t', 1)
-    const [mode, , oid] = info.split(' ', 3)
-
-    // Add the old file blob to the index under the new name
-    await git(
-      ['update-index', '--add', '--cacheinfo', mode, oid, file.path],
-      repository.path,
-      'applyPatchToIndex'
-    )
-  }
-
-  const applyArgs: string[] = [
-    'apply',
-    '--cached',
-    '--unidiff-zero',
-    '--whitespace=nowarn',
-    '-',
-  ]
-
   const diff =
     certifiedDiff ?? (await getWorkingDirectoryDiff(repository, file))
 
@@ -91,92 +38,48 @@ export async function applyPatchToIndex(
     }
   }
 
-  if (useRust) {
-    await withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      async () => {
-        const originalPath =
-          file.status.kind === AppFileStatusKind.Renamed
-            ? file.status.oldPath
-            : undefined
-        const preview =
-          originalPath === undefined
-            ? await backend().repositoryWorkingDiff(repository.path, file.path)
-            : await backend().copilotCommitDiffForRepository(
-                repository.path,
-                file.path,
-                {},
-                originalPath
-              )
-        const lines = getReviewedDiffLines(
+  await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    async () => {
+      const originalPath =
+        file.status.kind === AppFileStatusKind.Renamed
+          ? file.status.oldPath
+          : undefined
+      const preview =
+        originalPath === undefined
+          ? await backend().repositoryWorkingDiff(repository.path, file.path)
+          : await backend().copilotCommitDiffForRepository(
+              repository.path,
+              file.path,
+              {},
+              originalPath
+            )
+      const lines = getReviewedDiffLines(
+        file.path,
+        file.selection,
+        diff,
+        preview,
+        'The selected diff changed. Review and reselect its lines before committing.'
+      )
+      if (originalPath === undefined) {
+        await backend().repositoryStageSelectedLines(
+          repository.path,
           file.path,
-          file.selection,
-          diff,
-          preview,
-          'The selected diff changed. Review and reselect its lines before committing.'
+          preview.basis,
+          lines
         )
-        if (originalPath === undefined) {
-          await backend().repositoryStageSelectedLines(
-            repository.path,
-            file.path,
-            preview.basis,
-            lines
-          )
-        } else {
-          await backend().repositoryStageRenamedLines(
-            repository.path,
-            file.path,
-            originalPath,
-            preview.basis,
-            lines,
-            preserveRenameSource
-          )
-        }
-      },
-      true
-    )
-    return
-  }
-
-  const patch = await formatPatch(file, diff)
-  await git(applyArgs, repository.path, 'applyPatchToIndex', { stdin: patch })
-
-  return Promise.resolve()
-}
-
-/**
- * Discards the local changes for the specified file based on the passed diff
- * and a selection of lines from it.
- *
- * When passed an empty selection, this method won't do anything. When passed a
- * full selection, all changes from the file will be discarded.
- *
- * @param repository The repository in which to update the working directory
- *                   with information from the index
- *
- * @param filePath   The relative path in the working directory of the file to use
- *
- * @param diff       The diff containing the file local changes
- *
- * @param selection  The selection of changes from the diff to discard
- */
-export async function discardChangesFromSelection(
-  repository: Repository,
-  filePath: string,
-  diff: ITextDiff,
-  selection: DiffSelection
-) {
-  const patch = formatPatchToDiscardChanges(filePath, diff, selection)
-
-  if (patch === null) {
-    // When the patch is null we don't need to apply it since it will be a noop.
-    return
-  }
-
-  const args = ['apply', '--unidiff-zero', '--whitespace=nowarn', '-']
-
-  await git(args, repository.path, 'discardChangesFromSelection', {
-    stdin: patch,
-  })
+      } else {
+        await backend().repositoryStageRenamedLines(
+          repository.path,
+          file.path,
+          originalPath,
+          preview.basis,
+          lines,
+          preserveRenameSource
+        )
+      }
+    },
+    true
+  )
 }

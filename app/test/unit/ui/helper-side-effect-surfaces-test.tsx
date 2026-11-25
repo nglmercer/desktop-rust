@@ -1,28 +1,12 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
 import { afterEach, describe, it } from 'node:test'
 import * as React from 'react'
 
 import { AppTheme } from '../../../src/ui/app-theme'
 import { ApplicationTheme } from '../../../src/ui/lib/application-theme'
-import { fireEvent, render } from '../../helpers/ui/render'
-
-type TUnlinkBehavior = (path: string) => Promise<void>
-
-let unlinkBehavior: TUnlinkBehavior = async () => {}
-
-vi.doMock('fs/promises', async () => ({
-  ...(await vi.importActual('fs/promises')),
-  unlink: (path: string) => unlinkBehavior(path),
-}))
-
-async function getConfigLockFileExists() {
-  return (await import('../../../src/ui/lib/config-lock-file-exists'))
-    .ConfigLockFileExists
-}
+import { render } from '../../helpers/ui/render'
 
 afterEach(async () => {
-  unlinkBehavior = async () => {}
   document.body.className = ''
   document.body.style.removeProperty('--background-color')
   document.documentElement.style.colorScheme = ''
@@ -65,85 +49,5 @@ describe('helper side-effect surfaces', () => {
     } finally {
       hostBridge.hostIpc.send = previousSend
     }
-  })
-
-  it('deletes the config lock file and retries when deletion succeeds or file is already gone', async () => {
-    const deletedPaths: Array<string> = []
-    let deletedCount = 0
-    const errors: Array<string> = []
-
-    unlinkBehavior = async path => {
-      deletedPaths.push(path)
-      if (path.endsWith('.missing.lock')) {
-        const error = Object.assign(new Error('missing'), { code: 'ENOENT' })
-        throw error
-      }
-    }
-
-    const ConfigLockFileExists = await getConfigLockFileExists()
-    const view = render(
-      <ConfigLockFileExists
-        lockFilePath="/tmp/repo.lock"
-        onLockFileDeleted={() => {
-          deletedCount++
-        }}
-        onError={(error: Error) => {
-          errors.push(error.message)
-        }}
-      />
-    )
-
-    fireEvent.click(view.container.querySelector('.link-button-component')!)
-    await Promise.resolve()
-
-    view.rerender(
-      <ConfigLockFileExists
-        lockFilePath="/tmp/repo.missing.lock"
-        onLockFileDeleted={() => {
-          deletedCount++
-        }}
-        onError={(error: Error) => {
-          errors.push(error.message)
-        }}
-      />
-    )
-
-    fireEvent.click(view.container.querySelector('.link-button-component')!)
-    await Promise.resolve()
-
-    assert.deepEqual(deletedPaths, ['/tmp/repo.lock', '/tmp/repo.missing.lock'])
-    assert.equal(deletedCount, 2)
-    assert.deepEqual(errors, [])
-  })
-
-  it('reports config lock deletion failures other than ENOENT', async () => {
-    let deletedCount = 0
-    const errors: Array<string> = []
-
-    unlinkBehavior = async () => {
-      const error = Object.assign(new Error('permission denied'), {
-        code: 'EACCES',
-      })
-      throw error
-    }
-
-    const ConfigLockFileExists = await getConfigLockFileExists()
-    const view = render(
-      <ConfigLockFileExists
-        lockFilePath="/tmp/repo.lock"
-        onLockFileDeleted={() => {
-          deletedCount++
-        }}
-        onError={(error: Error) => {
-          errors.push(error.message)
-        }}
-      />
-    )
-
-    fireEvent.click(view.container.querySelector('.link-button-component')!)
-    await Promise.resolve()
-
-    assert.equal(deletedCount, 0)
-    assert.deepEqual(errors, ['permission denied'])
   })
 })

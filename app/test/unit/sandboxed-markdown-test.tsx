@@ -3,15 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, waitFor } from '../helpers/ui/vitest-render'
 import { SandboxedMarkdown } from '../../src/ui/lib/sandboxed-markdown'
 
-const mocks = vi.hoisted(() => ({ readFile: vi.fn() }))
-vi.mock('fs/promises', async importOriginal => {
-  const actual = await importOriginal<typeof import('fs/promises')>()
-  return {
-    ...actual,
-    default: { ...actual, readFile: mocks.readFile },
-    readFile: mocks.readFile,
-  }
-})
+const mocks = vi.hoisted(() => ({ fetch: vi.fn() }))
 
 const emoji = new Map()
 const originalLinux = __LINUX__
@@ -27,12 +19,13 @@ beforeEach(() => {
     configurable: true,
     value: { invoke: vi.fn(), on: vi.fn() },
   })
-  mocks.readFile.mockResolvedValue('')
+  vi.stubGlobal('fetch', mocks.fetch)
+  mocks.fetch.mockImplementation(() => Promise.resolve(new Response('')))
 })
 
 afterEach(() => {
   Reflect.deleteProperty(window, '__desktop')
-  mocks.readFile.mockReset()
+  mocks.fetch.mockReset()
   Object.assign(globalThis, { __LINUX__: originalLinux })
 })
 
@@ -107,11 +100,11 @@ describe('sandboxed markdown in WebKitGTK', () => {
   })
 
   it('does not replace a newer render when an older stylesheet read finishes late', async () => {
-    let finishOld: (value: string) => void = () => {}
-    mocks.readFile.mockImplementationOnce(
+    let finishOld: () => void = () => {}
+    mocks.fetch.mockImplementationOnce(
       () =>
-        new Promise<string>(resolve => {
-          finishOld = resolve
+        new Promise<Response>(resolve => {
+          finishOld = () => resolve(new Response(''))
         })
     )
     const view = render(<SandboxedMarkdown {...props} markdown="old" />)
@@ -120,7 +113,7 @@ describe('sandboxed markdown in WebKitGTK', () => {
     await waitFor(() =>
       expect(frame.contentDocument?.body.textContent).toContain('new')
     )
-    finishOld('')
+    finishOld()
     await Promise.resolve()
     expect(frame.contentDocument?.body.textContent).toContain('new')
     expect(frame.contentDocument?.body.textContent).not.toContain('old')

@@ -1,8 +1,5 @@
 import * as Path from 'path'
-import * as Fs from 'fs'
-
 import { getProductName, getVersion } from '../app/package-info'
-import { join } from 'path'
 
 const productName = getProductName()
 const version = getVersion()
@@ -32,81 +29,10 @@ export function getExecutableName() {
   }
 }
 
-export function getOSXZipName() {
-  return `${productName}-${getDistArchitecture()}.zip`
-}
-
-export function getOSXZipPath() {
-  return Path.join(getDistPath(), '..', getOSXZipName())
-}
-
-export function getWindowsInstallerName() {
-  const productName = getExecutableName()
-  return `${productName}Setup-${getDistArchitecture()}.msi`
-}
-
-export function getWindowsInstallerPath() {
-  return Path.join(getDistPath(), '..', 'installer', getWindowsInstallerName())
-}
-
-export function getWindowsStandaloneName() {
-  const productName = getExecutableName()
-  return `${productName}Setup-${getDistArchitecture()}.exe`
-}
-
-export function getWindowsStandalonePath() {
-  return Path.join(getDistPath(), '..', 'installer', getWindowsStandaloneName())
-}
-
-export function getWindowsFullNugetPackageName(
-  includeArchitecture: boolean = false
-) {
-  const architectureInfix = includeArchitecture
-    ? `-${getDistArchitecture()}`
-    : ''
-  return `${getWindowsIdentifierName()}-${version}${architectureInfix}-full.nupkg`
-}
-
-export function getWindowsFullNugetPackagePath() {
-  return Path.join(
-    getDistPath(),
-    '..',
-    'installer',
-    getWindowsFullNugetPackageName()
-  )
-}
-
-export function getWindowsDeltaNugetPackageName(
-  includeArchitecture: boolean = false
-) {
-  const architectureInfix = includeArchitecture
-    ? `-${getDistArchitecture()}`
-    : ''
-  return `${getWindowsIdentifierName()}-${version}${architectureInfix}-delta.nupkg`
-}
-
-export function getWindowsDeltaNugetPackagePath() {
-  return Path.join(
-    getDistPath(),
-    '..',
-    'installer',
-    getWindowsDeltaNugetPackageName()
-  )
-}
-
 export function getWindowsIdentifierName() {
   return 'GitHubDesktop'
 }
 
-export function getBundleSizes() {
-  const outPath = Path.join(projectRoot, 'out')
-  return {
-    // eslint-disable-next-line no-sync
-    rendererBundleSize: Fs.statSync(Path.join(outPath, 'renderer.js')).size,
-    // eslint-disable-next-line no-sync
-    mainBundleSize: Fs.statSync(Path.join(outPath, 'main.js')).size,
-  }
-}
 export const isPublishable = () =>
   ['production', 'beta', 'test'].includes(getChannel())
 
@@ -142,36 +68,4 @@ export function getUpdatesURL() {
   // sorted out.
   const architecturePath = getDistArchitecture() === 'arm64' ? 'arm64/' : ''
   return `https://central.github.com/api/deployments/desktop/desktop/${architecturePath}latest?version=${version}&env=${getChannel()}`
-}
-
-export function shouldMakeDelta() {
-  // Only production and beta channels include deltas. Test releases aren't
-  // necessarily sequential so deltas wouldn't make sense.
-  return ['production', 'beta'].includes(getChannel())
-}
-
-/**
- * Path to the directory containing all icon assets for the current release channel.
- */
-export function getIconDirectory() {
-  const devOrProd = getChannel() === 'development' ? 'dev' : 'prod'
-  return join(projectRoot, 'app', 'static', 'logos', devOrProd)
-}
-
-export function getChannelFromReleaseBranch(): string {
-  const branchName = process.env.GITHUB_HEAD_REF ?? ''
-
-  if (!branchName.includes('releases/')) {
-    return 'development'
-  }
-
-  if (getVersion().includes('test')) {
-    return 'test'
-  }
-
-  if (getVersion().includes('beta')) {
-    return 'beta'
-  }
-
-  return 'production'
 }

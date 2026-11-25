@@ -479,19 +479,15 @@ describe('assisted commit reader settlement and publication', () => {
       parent.path
     )
     const outcome = await h.appStore
-      ._discardChanges(
-        parent,
-        [
-          new WorkingDirectoryFileChange(
-            'nested',
-            { kind: AppFileStatusKind.Untracked },
-            diffModels.DiffSelection.fromInitialSelection(
-              diffModels.DiffSelectionType.All
-            )
-          ),
-        ],
-        false
-      )
+      ._discardChanges(parent, [
+        new WorkingDirectoryFileChange(
+          'nested',
+          { kind: AppFileStatusKind.Untracked },
+          diffModels.DiffSelection.fromInitialSelection(
+            diffModels.DiffSelectionType.All
+          )
+        ),
+      ])
       .then(
         () => null,
         error => error

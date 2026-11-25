@@ -1,7 +1,4 @@
-import { realpath } from 'fs/promises'
-import { basename, dirname, isAbsolute, resolve, sep } from 'path'
-import { git } from './core'
-import { isErrnoException } from '../errno-exception'
+import { isAbsolute, resolve, sep } from 'path'
 import { AssistedCommitError } from './assisted-commit/error'
 import { createRepositoryOperationContext } from './repository-operation-context'
 import { backend } from '../../backend/client'
@@ -116,15 +113,7 @@ async function repositoryOperations(
   if (existing !== undefined) {
     return existing
   }
-  const canonical =
-    typeof window !== 'undefined' && backend().transportKind !== 'none'
-      ? await canonicalMutationPath(path)
-      : await realpath(path).catch(error => {
-          if (isErrnoException(error) && error.code === 'ENOENT') {
-            return resolve(path)
-          }
-          throw error
-        })
+  const canonical = await canonicalMutationPath(path)
   const key = pathKey(canonical)
   const repository = repositories.get(key) ?? {
     path: canonical,
@@ -367,65 +356,10 @@ export async function withRepositoryGitDestruction<T>(
 
 /** A not-yet-existing checkout target still belongs to its canonical existing parent. */
 export async function canonicalMutationPath(path: string): Promise<string> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return backend().canonicalMutationPath(
-      isAbsolute(path) ? path : resolve(path)
-    )
-  }
-  try {
-    return await realpath(path)
-  } catch (error) {
-    const parent = dirname(resolve(path))
-    if (
-      isErrnoException(error) &&
-      error.code === 'ENOENT' &&
-      parent !== resolve(path)
-    ) {
-      return resolve(await canonicalMutationPath(parent), basename(path))
-    }
-    throw error
-  }
+  return backend().canonicalMutationPath(
+    isAbsolute(path) ? path : resolve(path)
+  )
 }
-
-function parseAlternateObjectDirectory(value: string): string {
-  if (!value.startsWith('"')) {
-    return value
-  }
-  if (!value.endsWith('"')) {
-    throw new Error('Git returned an unterminated alternate object directory')
-  }
-  const escapes: Readonly<Record<string, number>> = {
-    a: 7,
-    b: 8,
-    f: 12,
-    n: 10,
-    r: 13,
-    t: 9,
-    v: 11,
-    '"': 34,
-    '\\': 92,
-  }
-  const parts = value.slice(1, -1).split(/(\\(?:[0-7]{3}|[abfnrtv"\\]))/)
-  return Buffer.concat(
-    parts.map(part => {
-      if (!part.startsWith('\\')) {
-        if (part.includes('\\')) {
-          throw new Error('Git returned unsupported alternate path quoting')
-        }
-        return Buffer.from(part)
-      }
-      const escape = part.slice(1)
-      const byte = /^[0-7]{3}$/.test(escape)
-        ? parseInt(escape, 8)
-        : escapes[escape]
-      if (byte === undefined || byte > 255) {
-        throw new Error('Git returned unsupported alternate path quoting')
-      }
-      return Buffer.from([byte])
-    })
-  ).toString('utf8')
-}
-
 /** Resolve working directory and both linked/common Git metadata without reading selected content. */
 export async function getAssistedCommitProtectedPaths(
   path: string,
@@ -458,77 +392,23 @@ export async function getAssistedCommitProtectedResources(
   readonly objectDirectories: ReadonlyArray<string>
   readonly objectRoutingDiagnostics: string
 }> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const resources = await backend().repositoryProtectedResources(path)
-    const canonicalIndex = resources.paths.length / 2
-    if (
-      !Number.isInteger(canonicalIndex) ||
-      resources.paths.some(value => !isAbsolute(value)) ||
-      resources.objectDirectories.some(value => !isAbsolute(value))
-    ) {
-      throw new Error('Invalid repository resource paths')
-    }
-    if (resources.objectRoutingDiagnostics.length === 0) {
-      repositoryResourcePaths.set(pathKey(path), resources.paths)
-      repositoryResourcePaths.set(
-        pathKey(resources.paths[canonicalIndex]),
-        resources.paths
-      )
-    }
-    return resources
+  const resources = await backend().repositoryProtectedResources(path)
+  const canonicalIndex = resources.paths.length / 2
+  if (
+    !Number.isInteger(canonicalIndex) ||
+    resources.paths.some(value => !isAbsolute(value)) ||
+    resources.objectDirectories.some(value => !isAbsolute(value))
+  ) {
+    throw new Error('Invalid repository resource paths')
   }
-  const directory = await git(
-    ['rev-parse', '--absolute-git-dir'],
-    path,
-    'assistedCommitMetadataDirectory'
-  )
-  const common = await git(
-    ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-    path,
-    'assistedCommitCommonDirectory'
-  )
-  const objects = await git(
-    ['rev-parse', '--path-format=absolute', '--git-path', 'objects'],
-    path,
-    'assistedCommitObjectDirectory'
-  )
-  // Git expands recursive alternates and its environment syntax. Do not try
-  // to reconstruct this dependency graph from just objects/info/alternates.
-  const alternates = await git(
-    ['-c', 'core.quotePath=false', 'count-objects', '-v'],
-    path,
-    'assistedCommitAlternateObjectDirectories'
-  )
-  const objectDirectories = [
-    objects.stdout.replace(/\r?\n$/, ''),
-    ...alternates.stdout
-      .split(/\r?\n/)
-      .filter(line => line.startsWith('alternate: '))
-      .map(line => parseAlternateObjectDirectory(line.slice(11))),
-  ]
-  const original = [
-    path,
-    directory.stdout.replace(/\r?\n$/, ''),
-    common.stdout.replace(/\r?\n$/, ''),
-    ...objectDirectories,
-  ]
-  const paths = [
-    ...original,
-    ...(await Promise.all(original.map(value => realpath(value)))),
-  ]
-  repositoryResourcePaths.set(pathKey(path), paths)
-  repositoryResourcePaths.set(pathKey(paths[original.length]), paths)
-  return {
-    paths,
-    objectDirectories,
-    // Garbage warnings describe non-object entries, not omitted routing edges.
-    objectRoutingDiagnostics: alternates.stderr
-      .split(/\r?\n/)
-      .filter(
-        line => line.length > 0 && !line.startsWith('warning: garbage found: ')
-      )
-      .join('\n'),
+  if (resources.objectRoutingDiagnostics.length === 0) {
+    repositoryResourcePaths.set(pathKey(path), resources.paths)
+    repositoryResourcePaths.set(
+      pathKey(resources.paths[canonicalIndex]),
+      resources.paths
+    )
   }
+  return resources
 }
 
 /** Observers and UI callbacks must never inherit transaction or draining-operation access. */

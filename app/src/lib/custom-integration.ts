@@ -1,13 +1,7 @@
 import { parseCommandLineArgv } from 'windows-argv-parser'
 import stringArgv from 'string-argv'
-import { promisify } from 'util'
-import { execFile, spawn, SpawnOptions } from 'child_process'
-import { access, lstat } from 'fs/promises'
-import * as fs from 'fs'
-import { extname } from 'path'
+import { spawn, SpawnOptions } from 'child_process'
 import { backend } from '../backend/client'
-
-const execFileAsync = promisify(execFile)
 
 /**
  * File extensions that can be invoked directly by `spawn` on Windows. Other
@@ -44,11 +38,7 @@ export function parseCustomIntegrationArguments(
 export async function parseCustomIntegrationArgumentsForRuntime(
   args: string
 ): Promise<ReadonlyArray<string>> {
-  if (
-    __WIN32__ &&
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none'
-  ) {
+  if (__WIN32__) {
     return backend().parseWindowsIntegrationArguments(args)
   }
   return parseCustomIntegrationArguments(args)
@@ -58,11 +48,7 @@ export async function parseCustomIntegrationArgumentsForRuntime(
 export function parseCustomIntegrationArgumentsForInput(
   args: string
 ): ReadonlyArray<string> {
-  if (
-    __WIN32__ &&
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none'
-  ) {
+  if (__WIN32__) {
     if (args.includes('\0') || new TextEncoder().encode(args).length > 65536) {
       throw new Error('Invalid integration arguments')
     }
@@ -71,37 +57,6 @@ export function parseCustomIntegrationArgumentsForInput(
     return [args]
   }
   return parseCustomIntegrationArguments(args)
-}
-
-// Function to retrieve, on macOS, the bundleId of an app given its path
-async function getAppBundleID(path: string) {
-  try {
-    // Ensure the path ends with `.app` for applications
-    if (!path.endsWith('.app')) {
-      throw new Error(
-        'The provided path does not point to a macOS application.'
-      )
-    }
-
-    // Use mdls to query the kMDItemCFBundleIdentifier attribute
-    const { stdout } = await execFileAsync('mdls', [
-      '-name',
-      'kMDItemCFBundleIdentifier',
-      '-raw',
-      path,
-    ])
-    const bundleId = stdout.trim()
-
-    // Check for valid output
-    if (!bundleId || bundleId === '(null)') {
-      return undefined
-    }
-
-    return bundleId
-  } catch (error) {
-    console.error('Failed to retrieve bundle ID:', error)
-    return undefined
-  }
 }
 
 /**
@@ -154,39 +109,8 @@ export async function validateCustomIntegrationPath(
     return { isValid: false }
   }
 
-  let bundleID = undefined
-
   try {
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      return await backend().validateCustomIntegrationPath(path)
-    }
-    const pathStat = await lstat(path)
-    const canBeExecuted = await access(path, fs.constants.X_OK)
-      .then(() => true)
-      .catch(() => false)
-
-    // On Windows, `X_OK` is equivalent to `F_OK` so we additionally restrict
-    // to extensions that `spawn` can launch directly. Wrappers like `.bat`
-    // or `.cmd` require a shell and would silently fail at launch time.
-    const hasLaunchableExtension =
-      !__WIN32__ ||
-      WindowsExecutableExtensions.includes(
-        extname(path).replace(/^\./, '').toLowerCase()
-      )
-
-    const isExecutableFile =
-      (pathStat.isFile() || pathStat.isSymbolicLink()) &&
-      canBeExecuted &&
-      hasLaunchableExtension
-
-    // On macOS, not only executable files are valid, but also apps (which are
-    // directories with a `.app` extension and from which we can retrieve
-    // the app bundle ID)
-    if (__DARWIN__ && !isExecutableFile && pathStat.isDirectory()) {
-      bundleID = await getAppBundleID(path)
-    }
-
-    return { isValid: isExecutableFile || !!bundleID, bundleID }
+    return await backend().validateCustomIntegrationPath(path)
   } catch (e) {
     if (e.code !== 'ENOENT') {
       log.error(`Failed to validate path: ${path}`, e)

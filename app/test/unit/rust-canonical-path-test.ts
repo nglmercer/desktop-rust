@@ -55,14 +55,7 @@ describe('canonical mutation destinations', () => {
     await expect(canonicalMutationPath('/repo/new')).rejects.toBe(error)
     expect(mocks.realpath).not.toHaveBeenCalled()
   })
-  it('retains the existing native filesystem fallback', async () => {
-    mocks.transport = 'none'
-    mocks.realpath.mockResolvedValue('/physical/repo')
-    await expect(canonicalMutationPath('/alias/repo')).resolves.toBe(
-      '/physical/repo'
-    )
-    expect(mocks.canonical).not.toHaveBeenCalled()
-  })
+
   it.each(['ws', 'wry'])(
     'admits repository operations using %s canonicalization',
     async transport => {

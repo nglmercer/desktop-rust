@@ -14,8 +14,16 @@ import {
 } from '../../helpers/repositories'
 import { findDefaultRemote } from '../../../src/lib/stores/helpers/find-default-remote'
 import { exec } from 'dugite'
-import { setConfigValue } from '../../../src/lib/git'
 import { isolateGitConfig } from '../../helpers/git-config'
+
+const setConfigValue = async (
+  repository: Repository,
+  name: string,
+  value: string
+) => {
+  const result = await exec(['config', name, value], repository.path)
+  assert.strictEqual(result.exitCode, 0, result.stderr)
+}
 
 describe('git/remote', () => {
   beforeEach(isolateGitConfig)

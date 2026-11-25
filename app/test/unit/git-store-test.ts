@@ -10,7 +10,6 @@ import {
   setupFixtureRepository,
 } from '../helpers/repositories'
 import { GitStore } from '../../src/lib/stores'
-import { AppFileStatusKind } from '../../src/models/status'
 import { Repository } from '../../src/models/repository'
 import { TipState, IValidBranch } from '../../src/models/tip'
 import { getCommit, getRemotes } from '../../src/lib/git'
@@ -43,71 +42,6 @@ describe('GitStore', () => {
       assert.equal(commits.length, 100)
       assert.equal(commits[0], '708a46eac512c7b2486da2247f116d11a100b611')
     })
-  })
-
-  it('can discard changes from a repository', async t => {
-    const repo = await setupEmptyRepository(t)
-    const gitStore = new GitStore(repo, shell, new TestStatsStore())
-
-    const readmeFile = 'README.md'
-    const readmeFilePath = Path.join(repo.path, readmeFile)
-
-    await writeFile(readmeFilePath, 'SOME WORDS GO HERE\n')
-
-    const licenseFile = 'LICENSE.md'
-    const licenseFilePath = Path.join(repo.path, licenseFile)
-
-    await writeFile(licenseFilePath, 'SOME WORDS GO HERE\n')
-
-    // commit the readme file but leave the license
-    await exec(['add', readmeFile], repo.path)
-    await exec(['commit', '-m', 'added readme file'], repo.path)
-
-    await writeFile(readmeFilePath, 'WRITING SOME NEW WORDS\n')
-    // setup requires knowing about the current tip
-    await gitStore.loadStatus()
-
-    let status = await getStatusOrThrow(repo)
-    let files = status.workingDirectory.files
-
-    assert.equal(files.length, 2)
-    assert.equal(files[0].path, 'README.md')
-    assert.equal(files[0].status.kind, AppFileStatusKind.Modified)
-
-    // discard the LICENSE.md file
-    await gitStore.discardChanges([files[1]])
-
-    status = await getStatusOrThrow(repo)
-    files = status.workingDirectory.files
-
-    assert.equal(files.length, 1)
-  })
-
-  it('can discard a renamed file', async t => {
-    const repo = await setupEmptyRepository(t)
-    const gitStore = new GitStore(repo, shell, new TestStatsStore())
-
-    const file = 'README.md'
-    const renamedFile = 'NEW-README.md'
-    const filePath = Path.join(repo.path, file)
-
-    await writeFile(filePath, 'SOME WORDS GO HERE\n')
-
-    // commit the file, and then rename it
-    await exec(['add', file], repo.path)
-    await exec(['commit', '-m', 'added file'], repo.path)
-    await exec(['mv', file, renamedFile], repo.path)
-
-    const statusBeforeDiscard = await getStatusOrThrow(repo)
-    const filesToDiscard = statusBeforeDiscard.workingDirectory.files
-
-    // discard the renamed file
-    await gitStore.discardChanges(filesToDiscard)
-
-    const status = await getStatusOrThrow(repo)
-    const files = status.workingDirectory.files
-
-    assert.equal(files.length, 0)
   })
 
   describe('undo first commit', () => {
@@ -228,29 +162,6 @@ describe('GitStore', () => {
         repository.path
       )
       assert.equal(result.stdout.length, 0)
-    })
-  })
-
-  describe('repository with HEAD file', () => {
-    it('can discard modified change cleanly', async t => {
-      const path = await setupFixtureRepository(t, 'repository-with-HEAD-file')
-      const repo = new Repository(path, 1, null, false)
-      const gitStore = new GitStore(repo, shell, new TestStatsStore())
-
-      const file = 'README.md'
-      const filePath = Path.join(repo.path, file)
-
-      await writeFile(filePath, 'SOME WORDS GO HERE\n')
-
-      let status = await getStatusOrThrow(repo)
-      let files = status.workingDirectory.files
-      assert.equal(files.length, 1)
-
-      await gitStore.discardChanges([files[0]])
-
-      status = await getStatusOrThrow(repo)
-      files = status.workingDirectory.files
-      assert.equal(files.length, 0)
     })
   })
 

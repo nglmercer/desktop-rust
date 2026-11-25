@@ -51,7 +51,7 @@ describe.each(['wry', 'ws'])('Rust file-size review via %s', transport => {
       'large',
     ])
     expect(mocks.read).toHaveBeenCalledWith('/repo', ['small', 'large'])
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+    expect(mocks.scope).toHaveBeenCalledTimes(1)
   })
   it('propagates review errors and never silently treats them as small', async () => {
     mocks.read.mockRejectedValue(new Error('unavailable'))

@@ -845,6 +845,14 @@ impl Repository {
             Operation::RendererMixedResetPreview { request } => {
                 return self.renderer_mixed_reset_preview(&request).await;
             }
+            Operation::RendererResetPreview { target, mode } => {
+                return self.renderer_reset_preview(&target, mode).await;
+            }
+            Operation::RendererReset {
+                target,
+                mode,
+                basis,
+            } => return self.renderer_reset(&target, mode, &basis).await,
             Operation::RendererFastForwardPreview { request } => {
                 return self.renderer_fast_forward_preview(&request).await;
             }
@@ -1551,6 +1559,8 @@ impl Repository {
             | RendererRebaseStartPreview { .. }
             | RendererMergeStartPreview { .. }
             | RendererMixedResetPreview { .. }
+            | RendererResetPreview { .. }
+            | RendererReset { .. }
             | RendererFastForwardPreview { .. }
             | RendererFetchPreview { .. }
             | RendererFetch { .. }

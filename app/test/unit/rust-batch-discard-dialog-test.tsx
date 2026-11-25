@@ -121,7 +121,6 @@ describe('batch discard review', () => {
       expect(mocks.discard).toHaveBeenCalledWith(
         repository,
         files,
-        true,
         'reviewed-basis'
       )
     )

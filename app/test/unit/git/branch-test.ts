@@ -4,7 +4,6 @@ import { shell } from '../../helpers/test-app-shell'
 import {
   setupEmptyRepository,
   setupFixtureRepository,
-  setupLocalForkOfRepository,
 } from '../../helpers/repositories'
 
 import { Repository } from '../../../src/models/repository'
@@ -20,10 +19,7 @@ import {
   getBranchesPointedAt,
   createBranch,
   getBranches,
-  git,
-  checkoutBranch,
   deleteLocalBranch as deleteLocalBranchAtTip,
-  deleteRemoteBranch,
 } from '../../../src/lib/git'
 import { assertNonNullable } from '../../../src/lib/fatal-error'
 import { TestStatsStore } from '../../helpers/test-stats-store'
@@ -198,89 +194,6 @@ describe('git/branch', () => {
       await deleteLocalBranch(repository, branch.name)
 
       assert.equal((await getBranches(repository, ref)).length, 0)
-    })
-  })
-
-  describe('deleteRemoteBranch', () => {
-    it('delete a local branches upstream branch', async t => {
-      const path = await setupFixtureRepository(t, 'test-repo')
-      const mockRemote = new Repository(path, -1, null, false)
-
-      const name = 'test-branch'
-      const branch = await createBranch(mockRemote, name, null)
-      const localRef = `refs/heads/${name}`
-
-      assert(branch !== null)
-
-      const mockLocal = await setupLocalForkOfRepository(t, mockRemote)
-
-      const remoteRef = `refs/remotes/origin/${name}`
-      const [remoteBranch] = await getBranches(mockLocal, remoteRef)
-      assert(remoteBranch !== undefined)
-
-      await checkoutBranch(mockLocal, remoteBranch, null)
-      await git(['checkout', '-'], mockLocal.path, 'checkoutPrevious')
-
-      assert.equal((await getBranches(mockLocal, localRef)).length, 1)
-      assert.equal((await getBranches(mockRemote, localRef)).length, 1)
-
-      const [localBranch] = await getBranches(mockLocal, localRef)
-      assert(localBranch !== undefined)
-      assert(localBranch.upstreamRemoteName !== null)
-      assert(localBranch.upstreamWithoutRemote !== null)
-
-      await deleteRemoteBranch(
-        mockLocal,
-        { name: localBranch.upstreamRemoteName, url: '' },
-        localBranch.upstreamWithoutRemote
-      )
-
-      assert.equal((await getBranches(mockLocal, localRef)).length, 1)
-      assert.equal((await getBranches(mockLocal, remoteRef)).length, 0)
-      assert.equal((await getBranches(mockRemote, localRef)).length, 0)
-    })
-
-    it('handles attempted delete of removed remote branch', async t => {
-      const path = await setupFixtureRepository(t, 'test-repo')
-      const mockRemote = new Repository(path, -1, null, false)
-
-      const name = 'test-branch'
-      const branch = await createBranch(mockRemote, name, null)
-      const localRef = `refs/heads/${name}`
-
-      assert(branch !== null)
-      assert.equal((await getBranches(mockRemote, localRef)).length, 1)
-
-      const mockLocal = await setupLocalForkOfRepository(t, mockRemote)
-
-      const remoteRef = `refs/remotes/origin/${name}`
-      const [remoteBranch] = await getBranches(mockLocal, remoteRef)
-      assert(remoteBranch !== undefined)
-
-      await checkoutBranch(mockLocal, remoteBranch, null)
-      await git(['checkout', '-'], mockLocal.path, 'checkoutPrevious')
-
-      assert.equal((await getBranches(mockLocal, localRef)).length, 1)
-      assert.equal((await getBranches(mockRemote, localRef)).length, 1)
-
-      const [upstreamBranch] = await getBranches(mockRemote, localRef)
-      assert(upstreamBranch !== undefined)
-      await deleteLocalBranch(mockRemote, upstreamBranch.name)
-      assert.equal((await getBranches(mockRemote, localRef)).length, 0)
-
-      const [localBranch] = await getBranches(mockLocal, localRef)
-      assert(localBranch !== undefined)
-      assert(localBranch.upstreamRemoteName !== null)
-      assert(localBranch.upstreamWithoutRemote !== null)
-
-      await deleteRemoteBranch(
-        mockLocal,
-        { name: localBranch.upstreamRemoteName, url: '' },
-        localBranch.upstreamWithoutRemote
-      )
-
-      assert.equal((await getBranches(mockLocal, remoteRef)).length, 0)
-      assert.equal((await getBranches(mockRemote, localRef)).length, 0)
     })
   })
 })

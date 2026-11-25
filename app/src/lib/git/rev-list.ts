@@ -56,9 +56,7 @@ export async function getAheadBehind(
   range: string
 ): Promise<IAheadBehind | null> {
   const read = () => backend().repositoryAheadBehind(repository.path, range)
-  return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(repository.path, 'read', read, true)
-    : read()
+  return withRepositoryGitOperation(repository.path, 'read', read, true)
 }
 
 /** Calculate the number of commits `branch` is ahead/behind its upstream. */
@@ -113,10 +111,12 @@ export async function getCommitsInRange(
   range: string
 ): Promise<ReadonlyArray<CommitOneLine> | null> {
   const read = () => backend().repositoryRevisionList(repository.path, range)
-  const stdout: string | null =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+  const stdout: string | null = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
+  )
   if (stdout === null) return null
 
   const lines = stdout.split('\n')
@@ -153,7 +153,5 @@ export async function doMergeCommitsExistAfterCommit(
   const revision = commitRef === null ? 'HEAD' : revRange(commitRef, 'HEAD')
   const read = () =>
     backend().repositoryHasMergeCommits(repository.path, revision)
-  return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(repository.path, 'read', read, true)
-    : read()
+  return withRepositoryGitOperation(repository.path, 'read', read, true)
 }

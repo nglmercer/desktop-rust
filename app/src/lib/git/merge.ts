@@ -79,9 +79,7 @@ export async function getMergeBase(
       firstCommitish,
       secondCommitish
     )
-  return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(repository.path, 'read', read, true)
-    : read()
+  return withRepositoryGitOperation(repository.path, 'read', read, true)
 }
 
 /** Abort a mid-flight (conflicted) merge. */

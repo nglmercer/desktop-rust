@@ -1,8 +1,7 @@
 import { Disposable } from 'event-kit'
 import { Tailer } from './tailer'
 import byline from 'byline'
-import { createReadStream } from 'fs'
-import { randomBytes } from 'crypto'
+import { randomUUID } from '../web/random-uuid'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -11,7 +10,7 @@ import { tmpdir } from 'os'
  * will not be created.
  */
 export const getTempFilePath = (name: string) =>
-  join(tmpdir(), `${name}-${randomBytes(8).toString('hex')}`)
+  join(tmpdir(), `${name}-${randomUUID().replaceAll('-', '').slice(0, 16)}`)
 
 /**
  * Tail the file and call the callback on every line.
@@ -46,33 +45,5 @@ export function tailByLine(
     onDataDisposable.dispose()
     onErrorDisposable.dispose()
     tailer.stop()
-  })
-}
-
-/**
- * Read a specific region from a file.
- *
- * @param path  Path to the file
- * @param start First index relative to the start of the file to
- *              read from
- * @param end   Last index (inclusive) relative to the start of the
- *              file to read to
- */
-export async function readPartialFile(
-  path: string,
-  start: number,
-  end: number
-): Promise<Buffer> {
-  return await new Promise<Buffer>((resolve, reject) => {
-    const chunks = new Array<Buffer>()
-    let total = 0
-
-    createReadStream(path, { start, end })
-      .on('data', (chunk: Buffer) => {
-        chunks.push(chunk)
-        total += chunk.length
-      })
-      .on('error', reject)
-      .on('end', () => resolve(Buffer.concat(chunks, total)))
   })
 }

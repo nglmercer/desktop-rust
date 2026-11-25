@@ -1330,7 +1330,7 @@ export class CommitMessage extends React.Component<
       )
     )
 
-    showContextualMenu(items, true)
+    showContextualMenu(items)
   }
 
   private getCommitSpellcheckEnabilityMenuItem(isEnabled: boolean): IMenuItem {

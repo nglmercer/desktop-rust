@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   transport: 'ws',
   snapshot: vi.fn(),
-  legacyRead: vi.fn(),
   blob: vi.fn(),
   scope: vi.fn(
     async (_path: string, _kind: string, action: () => Promise<unknown>) =>
@@ -19,9 +18,6 @@ vi.mock('../../src/backend/client', () => ({
 }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
-}))
-vi.mock('../../src/lib/file-system', () => ({
-  readPartialFile: mocks.legacyRead,
 }))
 vi.mock('../../src/lib/git/show', () => ({
   getPartialBlobContents: mocks.blob,
@@ -69,8 +65,7 @@ describe('Rust working file highlighting', () => {
           prefix: true,
         }
       )
-      expect(mocks.legacyRead).not.toHaveBeenCalled()
-      expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+      expect(mocks.scope).toHaveBeenCalledTimes(1)
     })
   }
 
@@ -86,6 +81,5 @@ describe('Rust working file highlighting', () => {
     const result = await getFileContents(repository, file)
     expect(result.newContents).toEqual([])
     expect(result.canBeExpanded).toBe(false)
-    expect(mocks.legacyRead).not.toHaveBeenCalled()
   })
 })

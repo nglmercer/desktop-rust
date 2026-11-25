@@ -1,7 +1,3 @@
-import { Repository } from '../../models/repository'
-import { backend } from '../../backend/client'
-import { withRepositoryGitOperation } from './repository-operation'
-
 /** Prepare bounded literal-path batches before starting an index mutation. */
 export function batchIndexPaths(
   paths: ReadonlyArray<string>
@@ -25,44 +21,4 @@ export function batchIndexPaths(
   }
   if (batch.length > 0) batches.push(batch)
   return batches
-}
-
-/**
- * Forcefully updates the working directory with information from the index
- * for a given set of files.
- *
- * This method is essentially the same as running `git checkout -- files`
- * except by using `checkout-index` we can pass the files we want updated
- * on stdin, avoiding all issues with too long arguments.
- *
- * Note that this function will not yield errors for paths that don't
- * exist in the index (-q).
- *
- * @param repository The repository in which to update the working directory
- *                   with information from the index
- *
- * @param paths      The relative paths in the working directory to update
- *                   with information from the index.
- */
-export async function checkoutIndex(
-  repository: Repository,
-  paths: ReadonlyArray<string>
-) {
-  if (!paths.length) {
-    return
-  }
-
-  // Keep requests below the bridge limit while preserving the order of the
-  // original selection. Prepare every batch before changing any files.
-  const batches = batchIndexPaths(paths)
-  await withRepositoryGitOperation(
-    repository.path,
-    'mutation',
-    async () => {
-      for (const selected of batches) {
-        await backend().repositoryCheckoutIndex(repository.path, selected)
-      }
-    },
-    true
-  )
 }

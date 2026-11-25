@@ -163,16 +163,28 @@ fn status_context_reads_worktree_markers_and_rebase_metadata() {
     fs::write(gitdir.join("MERGE_HEAD"), b"merge\n").unwrap();
     fs::write(gitdir.join("SQUASH_MSG"), b"squash\n").unwrap();
     fs::write(gitdir.join("CHERRY_PICK_HEAD"), b"pick\n").unwrap();
-    fs::write(gitdir.join("REBASE_HEAD"), b"rebase\n").unwrap();
+    fs::write(
+        gitdir.join("REBASE_HEAD"),
+        b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    )
+    .unwrap();
     let rebase = gitdir.join("rebase-merge");
     fs::create_dir(&rebase).unwrap();
-    fs::write(rebase.join("orig-head"), b"original\n").unwrap();
+    fs::write(
+        rebase.join("orig-head"),
+        b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+    )
+    .unwrap();
     fs::write(rebase.join("head-name"), b"refs/heads/topic\n").unwrap();
-    fs::write(rebase.join("onto"), b"base\n").unwrap();
+    fs::write(
+        rebase.join("onto"),
+        b"cccccccccccccccccccccccccccccccccccccccc\n",
+    )
+    .unwrap();
     let context = f.rpc(json!({"method":"status_context"}));
     assert_eq!(
         context,
-        json!({"mergeHeadFound":true,"squashMsgFound":true,"isCherryPickingHeadFound":true,"rebaseInternalState":{"originalBranchTip":"original","targetBranch":"topic","baseBranchTip":"base"}})
+        json!({"mergeHeadFound":true,"squashMsgFound":true,"isCherryPickingHeadFound":true,"rebaseInternalState":{"originalBranchTip":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","targetBranch":"topic","baseBranchTip":"cccccccccccccccccccccccccccccccccccccccc"}})
     );
     #[cfg(unix)]
     {

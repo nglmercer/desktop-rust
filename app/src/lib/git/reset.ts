@@ -1,9 +1,6 @@
-import { git } from './core'
 import { Repository } from '../../models/repository'
-import { assertNever } from '../fatal-error'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
-import { batchIndexPaths } from './checkout-index'
 
 /** The reset modes which are supported. */
 export const enum GitResetMode {
@@ -27,19 +24,6 @@ export const enum GitResetMode {
   Mixed,
 }
 
-function resetModeToArgs(mode: GitResetMode, ref: string): string[] {
-  switch (mode) {
-    case GitResetMode.Hard:
-      return ['reset', '--hard', ref]
-    case GitResetMode.Mixed:
-      return ['reset', ref]
-    case GitResetMode.Soft:
-      return ['reset', '--soft', ref]
-    default:
-      return assertNever(mode, `Unknown reset mode: ${mode}`)
-  }
-}
-
 /** Reset with the mode to the ref. */
 export async function reset(
   repository: Repository,
@@ -51,11 +35,21 @@ export async function reset(
     readonly undo: boolean
   }
 ): Promise<true> {
-  if (
-    mode === GitResetMode.Mixed &&
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none'
-  ) {
+  if (mode === GitResetMode.Hard || mode === GitResetMode.Soft) {
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().resetRepository(
+          repository.path,
+          ref,
+          mode === GitResetMode.Hard ? 'hard' : 'soft'
+        ),
+      true
+    )
+    return true
+  }
+  if (mode === GitResetMode.Mixed) {
     if (expected === undefined)
       throw new Error('Refresh the current branch before resetting')
     await withRepositoryGitOperation(
@@ -70,88 +64,16 @@ export async function reset(
     )
     return true
   }
-  const args = resetModeToArgs(mode, ref)
-  await git(args, repository.path, 'reset')
-  return true
-}
-
-/**
- * Updates the index with information from a particular tree for a given
- * set of paths.
- *
- * @param repository The repository in which to reset the index.
- *
- * @param mode      Which mode to use when resetting, see the GitResetMode
- *                  enum for more information.
- *
- * @param ref       A string which resolves to a tree, for example 'HEAD' or a
- *                  commit sha.
- *
- * @param paths     The paths that should be updated in the index with information
- *                  from the given tree
- */
-export async function resetPaths(
-  repository: Repository,
-  mode: GitResetMode,
-  ref: string,
-  paths: ReadonlyArray<string>
-): Promise<void> {
-  if (!paths.length) {
-    return
-  }
-
-  if (
-    mode === GitResetMode.Mixed &&
-    ref === 'HEAD' &&
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none'
-  ) {
-    const batches = batchIndexPaths(paths)
-    await withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      async () => {
-        for (const selected of batches) {
-          await backend().repositoryResetIndex(repository.path, selected)
-        }
-      },
-      true
-    )
-    return
-  }
-
-  const baseArgs = ['--literal-pathspecs', ...resetModeToArgs(mode, ref)]
-
-  if (__WIN32__ && mode === GitResetMode.Mixed) {
-    // Git for Windows has experimental support for reading paths to reset
-    // from standard input. This is helpful in situations where your file
-    // paths are greater than 32KB in length, because of shell limitations.
-    //
-    // This hasn't made it to Git core, so we fallback to the default behaviour
-    // as macOS and Linux don't have this same shell limitation. See
-    // https://github.com/desktop/desktop/issues/2833#issuecomment-331352952
-    // for more context.
-    const args = [...baseArgs, '--stdin', '-z', '--']
-    await git(args, repository.path, 'resetPaths', {
-      stdin: paths.join('\0'),
-    })
-  } else {
-    const args = [...baseArgs, '--', ...paths]
-    await git(args, repository.path, 'resetPaths')
-  }
+  throw new Error(`Unknown reset mode: ${mode}`)
 }
 
 /** Unstage all paths. */
 export async function unstageAll(repository: Repository): Promise<true> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () => backend().repositoryUnstageAll(repository.path),
-      true
-    )
-    return true
-  }
-  await git(['reset', '--', '.'], repository.path, 'unstageAll')
+  await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().repositoryUnstageAll(repository.path),
+    true
+  )
   return true
 }

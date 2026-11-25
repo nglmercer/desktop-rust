@@ -6,7 +6,7 @@ import type { Branch } from '../../models/branch'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { Ref } from '../lib/ref'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
-import { backend, type IRemoteBranchDeletionReview } from '../../backend/client'
+import type { IRemoteBranchDeletionReview } from '../../backend/client'
 import {
   RemoteDeletionRecovery,
   RemoteDeletionReview,
@@ -47,7 +47,7 @@ export class DeleteRemoteBranch extends React.Component<
   }
 
   public componentDidMount() {
-    if (backend().transportKind !== 'none') void this.reviewBranch()
+    void this.reviewBranch()
   }
 
   public componentWillUnmount() {
@@ -123,12 +123,10 @@ export class DeleteRemoteBranch extends React.Component<
               {warning}
             </p>
           ))}
-          {backend().transportKind !== 'none' && (
-            <RemoteDeletionRecovery
-              repository={this.props.repository}
-              dispatcher={this.props.dispatcher}
-            />
-          )}
+          <RemoteDeletionRecovery
+            repository={this.props.repository}
+            dispatcher={this.props.dispatcher}
+          />
         </DialogContent>
         <DialogFooter>
           <OkCancelButtonGroup
@@ -137,11 +135,10 @@ export class DeleteRemoteBranch extends React.Component<
             okButtonDisabled={
               this.state.receipt !== null ||
               this.state.reviewing ||
-              (backend().transportKind !== 'none' &&
-                (this.state.review === null ||
-                  this.state.review.endpoints.some(
-                    endpoint => !endpoint.displaySafe
-                  )))
+              this.state.review === null ||
+              this.state.review.endpoints.some(
+                endpoint => !endpoint.displaySafe
+              )
             }
           />
         </DialogFooter>
@@ -150,12 +147,12 @@ export class DeleteRemoteBranch extends React.Component<
   }
 
   private deleteBranch = async () => {
-    const { dispatcher, repository, branch } = this.props
+    const { dispatcher, repository } = this.props
 
     if (
       this.submitting ||
       this.state.receipt !== null ||
-      (backend().transportKind !== 'none' && this.state.review === null)
+      this.state.review === null
     )
       return
     this.submitting = true
@@ -163,24 +160,18 @@ export class DeleteRemoteBranch extends React.Component<
     this.setState({ isDeleting: true })
 
     try {
-      if (backend().transportKind !== 'none') {
-        if (this.state.review === null) return
-        const result = await dispatcher.deleteReviewedRemoteBranch(
-          repository,
-          this.state.review
-        )
-        this.setState({
-          receipt: result.receipt,
-          warnings: result.warnings,
-          isDeleting: false,
-          review: null,
-        })
-        this.props.onDeleted(repository)
-      } else {
-        await dispatcher.deleteRemoteBranch(repository, branch)
-        this.props.onDeleted(repository)
-        this.props.onDismissed()
-      }
+      if (this.state.review === null) return
+      const result = await dispatcher.deleteReviewedRemoteBranch(
+        repository,
+        this.state.review
+      )
+      this.setState({
+        receipt: result.receipt,
+        warnings: result.warnings,
+        isDeleting: false,
+        review: null,
+      })
+      this.props.onDeleted(repository)
     } catch {
       this.setState({
         isDeleting: false,

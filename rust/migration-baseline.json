@@ -1,11 +1,11 @@
 {
-  "transportChecks": 181,
-  "legacyGitCalls": 104,
+  "transportChecks": 33,
+  "legacyGitCalls": 47,
   "nodeTestFiles": 0,
-  "imports.dugite": 22,
-  "imports.fs": 51,
-  "imports.child_process": 16,
-  "imports.os": 10,
-  "imports.crypto": 8,
+  "imports.dugite": 18,
+  "imports.fs": 22,
+  "imports.child_process": 14,
+  "imports.os": 9,
+  "imports.crypto": 1,
   "imports.keytar": 1
 }

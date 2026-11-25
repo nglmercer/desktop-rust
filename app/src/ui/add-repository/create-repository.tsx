@@ -4,7 +4,6 @@ import * as Path from 'path'
 import { Dispatcher } from '../dispatcher'
 import {
   initGitRepository,
-  createCommit,
   getStatus,
   getAuthorIdentity,
   getRepositoryType,
@@ -25,7 +24,6 @@ import { PopupType } from '../../models/popup'
 import { Ref } from '../lib/ref'
 import { enableReadmeOverwriteWarning } from '../../lib/feature-flag'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
-import { mkdir } from 'fs/promises'
 import { directoryExists } from '../../lib/directory-exists'
 import { FoldoutType } from '../../lib/app-state'
 import { join } from 'path'
@@ -329,34 +327,9 @@ export class CreateRepository extends React.Component<
       | 'licenses'
     >
   ): Promise<Repository | undefined> {
-    const rustBackend =
-      typeof window !== 'undefined' && backend().transportKind !== 'none'
-    if (!rustBackend) {
-      try {
-        await mkdir(fullPath, { recursive: true })
-        if (this.mounted) {
-          this.setState({ isValidPath: true })
-        }
-      } catch (e) {
-        if (e.code === 'EACCES' && e.errno === -13) {
-          if (this.mounted) {
-            this.setState({ isValidPath: false })
-          }
-          return
-        }
-
-        log.error(
-          `createRepository: the directory at ${fullPath} is not valid`,
-          e
-        )
-        this.postCreationError(e)
-        return
-      }
-    }
-
     try {
       await initGitRepository(fullPath)
-      if (rustBackend && this.mounted) {
+      if (this.mounted) {
         this.setState({ isValidPath: true })
       }
     } catch (e) {
@@ -432,12 +405,7 @@ export class CreateRepository extends React.Component<
     }
 
     try {
-      const gitAttributes = Path.join(fullPath, '.gitattributes')
-      const gitAttributesExists =
-        !rustBackend && (await pathExists(gitAttributes))
-      if (!gitAttributesExists) {
-        await writeGitAttributes(fullPath)
-      }
+      await writeGitAttributes(fullPath)
     } catch (e) {
       log.error(
         `createRepository: unable to write .gitattributes at ${fullPath}`,
@@ -460,18 +428,13 @@ export class CreateRepository extends React.Component<
       const wd = status.workingDirectory
       const files = wd.files
       if (files.length > 0) {
-        if (rustBackend) {
-          const selectedPaths = files
-            .filter(
-              file =>
-                file.selection.getSelectionType() === DiffSelectionType.All
-            )
-            .map(file => file.path)
-          if (selectedPaths.length > 0) {
-            await backend().createInitialCommit(repository.path, selectedPaths)
-          }
-        } else {
-          await createCommit(repository, 'Initial commit', files)
+        const selectedPaths = files
+          .filter(
+            file => file.selection.getSelectionType() === DiffSelectionType.All
+          )
+          .map(file => file.path)
+        if (selectedPaths.length > 0) {
+          await backend().createInitialCommit(repository.path, selectedPaths)
         }
       }
     } catch (e) {

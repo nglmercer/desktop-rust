@@ -3,7 +3,6 @@ import * as Path from 'path'
 import { assertNever } from '../../../lib/fatal-error'
 
 import { getPartialBlobContents } from '../../../lib/git/show'
-import { readPartialFile } from '../../../lib/file-system'
 import { highlight } from '../../../lib/highlighter/worker'
 import { ITokens } from '../../../lib/highlighter/types'
 
@@ -89,33 +88,23 @@ async function getNewFileContent(
   }
 
   if (file instanceof WorkingDirectoryFileChange) {
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      const read = () =>
-        backend().repositoryReadSnapshot(
-          repository.path,
-          'renderer_working_file',
-          {
-            path: file.path,
-            max_bytes: MaxHighlightContentLength,
-            prefix: true,
-          }
-        )
-      const bytes =
-        backend().transportKind === 'wry'
-          ? await withRepositoryGitOperation(
-              repository.path,
-              'read',
-              read,
-              true
-            )
-          : await read()
-      return bytes === null ? null : Buffer.from(bytes)
-    }
-    return readPartialFile(
-      Path.join(repository.path, file.path),
-      0,
-      MaxHighlightContentLength - 1
+    const read = () =>
+      backend().repositoryReadSnapshot(
+        repository.path,
+        'renderer_working_file',
+        {
+          path: file.path,
+          max_bytes: MaxHighlightContentLength,
+          prefix: true,
+        }
+      )
+    const bytes = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      read,
+      true
     )
+    return bytes === null ? null : Buffer.from(bytes)
   } else if (file instanceof CommittedFileChange) {
     return getPartialBlobContents(
       repository,

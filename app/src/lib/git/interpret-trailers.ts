@@ -103,29 +103,19 @@ export async function parseTrailers(
   repository: Repository,
   commitMessage: string
 ): Promise<ReadonlyArray<ITrailer>> {
-  const trailers =
-    typeof window !== 'undefined' && backend().transportKind !== 'none'
-      ? await withRepositoryGitOperation(
-          repository.path,
-          'mutation',
-          () =>
-            backend().repositoryInterpretTrailers(
-              repository.path,
-              commitMessage,
-              [],
-              true,
-              false
-            ),
-          true
-        )
-      : (
-          await git(
-            ['interpret-trailers', '--parse'],
-            repository.path,
-            'parseTrailers',
-            { stdin: commitMessage }
-          )
-        ).stdout
+  const trailers = await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () =>
+      backend().repositoryInterpretTrailers(
+        repository.path,
+        commitMessage,
+        [],
+        true,
+        false
+      ),
+    true
+  )
 
   if (trailers.length === 0) {
     return []
@@ -171,11 +161,7 @@ export async function mergeTrailers(
   unfold: boolean = false,
   options?: Pick<IGitExecutionOptions, 'env'>
 ) {
-  if (
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none' &&
-    options?.env === undefined
-  ) {
+  if (options?.env === undefined) {
     return withRepositoryGitOperation(
       repository.path,
       'mutation',

@@ -164,16 +164,22 @@ export class CommitMessageAvatar extends React.Component<
   }
 
   private isGitConfigLocal = async (requestID: number) => {
-    const { repository } = this.props
-    const localName = await getConfigValue(repository, 'user.name', true)
-    if (
-      requestID !== this.gitConfigLocationRequestID ||
-      this.props.isActive === false
-    ) {
+    try {
+      const { repository } = this.props
+      const localName = await getConfigValue(repository, 'user.name', true)
+      if (
+        requestID !== this.gitConfigLocationRequestID ||
+        this.props.isActive === false
+      ) {
+        return false
+      }
+      const localEmail = await getConfigValue(repository, 'user.email', true)
+      return localName !== null || localEmail !== null
+    } catch {
+      // Author attribution is advisory; an unavailable backend must not make
+      // the commit form noisy or leave an unhandled rejection behind.
       return false
     }
-    const localEmail = await getConfigValue(repository, 'user.email', true)
-    return localName !== null || localEmail !== null
   }
 
   private onButtonRef = (buttonRef: HTMLButtonElement | null) => {

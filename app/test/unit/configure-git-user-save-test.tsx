@@ -7,15 +7,8 @@ const saveSetting = vi.hoisted(() => vi.fn())
 vi.mock('../../src/lib/git/config', () => ({
   setGlobalConfigValue: saveSetting,
 }))
-vi.mock('../../src/lib/git', () => ({
-  isConfigFileLockError: () => false,
-  parseConfigLockFilePathFromError: () => null,
-}))
 vi.mock('../../src/lib/git/core', () => ({ git: vi.fn() }))
 vi.mock('../../src/lib/email', () => ({ lookupPreferredEmail: () => '' }))
-vi.mock('../../src/ui/lib/config-lock-file-exists', () => ({
-  ConfigLockFileExists: () => null,
-}))
 vi.mock('../../src/ui/lib/git-email-not-found-warning', () => ({
   GitEmailNotFoundWarning: () => null,
 }))

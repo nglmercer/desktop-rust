@@ -1,46 +1,15 @@
 import { ExternalEditorError } from './shared'
 import type { IFoundEditor } from './found-editor'
-import { getAvailableEditors as getAvailableEditorsDarwin } from './darwin'
-import { getAvailableEditors as getAvailableEditorsWindows } from './win32'
-import { getAvailableEditors as getAvailableEditorsLinux } from './linux'
 import { backend } from '../../backend/client'
 
-let editorCache: ReadonlyArray<IFoundEditor<string>> | null = null
-
 /**
- * Resolve a list of installed editors on the user's machine, using the known
- * install identifiers that each OS supports.
+ * Resolve the installed editors discovered by the Rust host. Host discovery
+ * owns platform-specific executable lookup and validation.
  */
 export async function getAvailableEditors(): Promise<
   ReadonlyArray<IFoundEditor<string>>
 > {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return backend().availableRustEditors()
-  }
-  if (editorCache && editorCache.length > 0) {
-    return editorCache
-  }
-
-  if (__DARWIN__) {
-    editorCache = await getAvailableEditorsDarwin()
-    return editorCache
-  }
-
-  if (__WIN32__) {
-    editorCache = await getAvailableEditorsWindows()
-    return editorCache
-  }
-
-  if (__LINUX__) {
-    editorCache = await getAvailableEditorsLinux()
-    return editorCache
-  }
-
-  log.warn(
-    `Platform not currently supported for resolving editors: ${process.platform}`
-  )
-
-  return []
+  return backend().availableRustEditors()
 }
 
 /**

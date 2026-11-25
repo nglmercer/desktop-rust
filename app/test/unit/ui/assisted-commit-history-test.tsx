@@ -3,27 +3,22 @@ import { describe, it, TestContext } from 'node:test'
 import { vi } from 'vitest'
 import * as React from 'react'
 
-// `showContextualMenu` uses the browser menu when a Rust transport is active;
-// capture that path as well as the hostIpc path so the suite works with or
-// without the backend harness.
+// Capture the browser context menu used by the native renderer.
 const menuState = vi.hoisted(() => ({
-  menus: [] as ReadonlyArray<ISerializableMenuItem>[],
+  menus: [] as ReadonlyArray<IMenuItem>[],
 }))
 vi.mock('../../../src/ui/lib/browser-context-menu', () => ({
-  showBrowserContextMenu: async (
-    items: ReadonlyArray<ISerializableMenuItem>
-  ) => {
+  showBrowserContextMenu: async (items: ReadonlyArray<IMenuItem>) => {
     menuState.menus.push(items)
     return null
   },
 }))
 import { act } from '@testing-library/react'
-import { hostIpc } from '../../../src/web/host-bridge'
 import { join } from 'path'
 import { RepositorySectionTab } from '../../../src/lib/app-state'
 import { ErrorWithMetadata } from '../../../src/lib/error-with-metadata'
 import { acquireAssistedCommitGitLease } from '../../../src/lib/git/repository-operation'
-import { ISerializableMenuItem } from '../../../src/lib/menu-item'
+import { IMenuItem } from '../../../src/lib/menu-item'
 import { AheadBehindStore } from '../../../src/lib/stores/ahead-behind-store'
 import { AssistedCommitRunState } from '../../../src/models/assisted-commit-run'
 import { Commit } from '../../../src/models/commit'
@@ -57,15 +52,6 @@ async function renderHistory(t: TestContext) {
   t.mock.method(h.dispatcher, 'updateCompareForm', () => {})
   menuState.menus.length = 0
   const menus = menuState.menus
-  t.mock.method(
-    hostIpc,
-    'invoke',
-    async (channel: string, items: ReadonlyArray<ISerializableMenuItem>) => {
-      assert.strictEqual(channel, 'show-contextual-menu')
-      menus.push(items)
-      return null
-    }
-  )
   h.stores.repositoryStateCache.update(repository, state => ({
     selectedSection: RepositorySectionTab.History,
     compareState: {
@@ -170,7 +156,7 @@ async function renderHistory(t: TestContext) {
     const menu = menus.at(-1)
     assert.ok(menu)
     for (const action of ['Cherry-pick', 'Squash', 'Reorder']) {
-      const item: ISerializableMenuItem | undefined = menu.find(candidate =>
+      const item: IMenuItem | undefined = menu.find(candidate =>
         candidate.label?.startsWith(action)
       )
       assert.ok(item, action)

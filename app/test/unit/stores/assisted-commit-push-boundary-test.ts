@@ -428,6 +428,9 @@ function nodeBackend(t: TestContext) {
     new Proxy(
       {
         transportKind: 'none',
+        pathExists: (path: string) => rustClient.pathExists(path),
+        directoryExists: (path: string) => rustClient.directoryExists(path),
+        repositoryType: (path: string) => rustClient.repositoryType(path),
         repositoryRendererCommit: async (path: string, ref: string) => {
           await afterHistoryRead?.()
           const { formatArgs } = createLogParser({

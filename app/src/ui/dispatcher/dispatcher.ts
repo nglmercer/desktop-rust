@@ -978,16 +978,6 @@ export class Dispatcher {
     return this.appStore._deleteBranch(repository, branch, includeUpstream)
   }
 
-  /**
-   * Delete the remote branch.
-   */
-  public deleteRemoteBranch(
-    repository: Repository,
-    branch: Branch
-  ): Promise<void> {
-    return this.appStore._deleteBranch(repository, branch)
-  }
-
   /** Review every push destination before deleting an upstream branch. */
   public previewRemoteBranchDeletion(
     repository: Repository,
@@ -1008,15 +998,9 @@ export class Dispatcher {
   public discardChanges(
     repository: Repository,
     files: ReadonlyArray<WorkingDirectoryFileChange>,
-    moveToTrash: boolean = true,
     reviewBasis?: string
   ): Promise<void> {
-    return this.appStore._discardChanges(
-      repository,
-      files,
-      moveToTrash,
-      reviewBasis
-    )
+    return this.appStore._discardChanges(repository, files, reviewBasis)
   }
 
   /** Discard the changes from the given diff selection. */
@@ -2562,11 +2546,7 @@ export class Dispatcher {
           retryAction.lastRetainedCommitRef
         )
       case RetryActionType.DiscardChanges:
-        return this.discardChanges(
-          retryAction.repository,
-          retryAction.files,
-          false
-        )
+        return this.discardChanges(retryAction.repository, retryAction.files)
       case RetryActionType.PopStash:
         return this.popStash(retryAction.repository, retryAction.stashEntry)
       default:

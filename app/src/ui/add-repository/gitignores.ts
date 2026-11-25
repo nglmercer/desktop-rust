@@ -1,5 +1,4 @@
 import * as Path from 'path'
-import { readdir, readFile, writeFile } from 'fs/promises'
 import { backend } from '../../backend/client'
 import { listBundledGitIgnores, readBundledTemplate } from './bundled-templates'
 
@@ -13,10 +12,7 @@ async function getCachedGitIgnores(): Promise<Map<string, string>> {
   if (cachedGitIgnores != null) {
     return cachedGitIgnores
   } else {
-    const files =
-      typeof window !== 'undefined' && backend().transportKind !== 'none'
-        ? await listBundledGitIgnores()
-        : await readdir(root)
+    const files = await listBundledGitIgnores()
     const ignoreFiles = files.filter(file => file.endsWith(GitIgnoreExtension))
 
     cachedGitIgnores = new Map()
@@ -48,10 +44,7 @@ async function getGitIgnoreText(name: string): Promise<string> {
     )
   }
 
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return readBundledTemplate(`static/gitignore/${Path.basename(path)}`)
-  }
-  return await readFile(path, 'utf8')
+  return readBundledTemplate(`static/gitignore/${Path.basename(path)}`)
 }
 
 /** Write the named gitignore to the repository. */
@@ -59,15 +52,6 @@ export async function writeGitIgnore(
   repositoryPath: string,
   name: string
 ): Promise<void> {
-  const fullPath = Path.join(repositoryPath, '.gitignore')
   const text = await getGitIgnoreText(name)
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await backend().writeRepositoryCreationFile(
-      repositoryPath,
-      'gitignore',
-      text
-    )
-    return
-  }
-  await writeFile(fullPath, text)
+  await backend().writeRepositoryCreationFile(repositoryPath, 'gitignore', text)
 }

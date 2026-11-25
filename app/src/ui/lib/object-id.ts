@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto'
+import { randomUUID } from '../../web/random-uuid'
 
 const idMap = new WeakMap<object, string>()
 
@@ -13,7 +13,7 @@ export function getObjectId(obj: object): string {
   let id = idMap.get(obj)
 
   if (id === undefined) {
-    id = randomBytes(8).toString('base64url')
+    id = randomUUID()
     idMap.set(obj, id)
   }
 

@@ -1,77 +1,30 @@
-import { describe, it } from 'vitest'
-import assert from 'node:assert'
-import { writeFile, rm, mkdtemp } from 'fs/promises'
-import { tmpdir } from 'os'
-import * as path from 'path'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getFileHash } from '../../src/lib/get-file-hash'
 
 describe('get-file-hash', () => {
-  it('returns consistent sha256 hash for known content', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'hash-test-'))
-    const filePath = path.join(dir, 'test-file.js')
+  const invoke = vi.fn()
 
-    await writeFile(filePath, 'hello world')
+  beforeEach(() => {
+    invoke.mockReset()
+    ;(globalThis as any).__desktop = { platform: 'wry', invoke }
+  })
 
-    const hash = await getFileHash(filePath, 'sha256')
-
-    // SHA-256 of "hello world"
-    assert.strictEqual(
-      hash,
-      'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
+  it('delegates sha256 and sha1 hashing to the Rust shell', async () => {
+    invoke
+      .mockResolvedValueOnce('a'.repeat(64))
+      .mockResolvedValueOnce('b'.repeat(40))
+    await expect(getFileHash('/key.pub', 'sha256')).resolves.toBe(
+      'a'.repeat(64)
     )
-
-    await rm(dir, { recursive: true })
+    await expect(getFileHash('/key.pub', 'sha1')).resolves.toBe('b'.repeat(40))
+    expect(invoke.mock.calls).toEqual([
+      ['desktop.io.fs-hash', { path: '/key.pub', algorithm: 'sha256' }],
+      ['desktop.io.fs-hash', { path: '/key.pub', algorithm: 'sha1' }],
+    ])
   })
 
-  it('returns different hashes for different content', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'hash-test-'))
-    const file1 = path.join(dir, 'file1.js')
-    const file2 = path.join(dir, 'file2.js')
-
-    await writeFile(file1, 'original content')
-    await writeFile(file2, 'modified content')
-
-    const hash1 = await getFileHash(file1, 'sha256')
-    const hash2 = await getFileHash(file2, 'sha256')
-
-    assert.notStrictEqual(hash1, hash2)
-
-    await rm(dir, { recursive: true })
-  })
-
-  it('returns same hash for same content in different files', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'hash-test-'))
-    const file1 = path.join(dir, 'file1.js')
-    const file2 = path.join(dir, 'file2.js')
-
-    await writeFile(file1, 'identical content')
-    await writeFile(file2, 'identical content')
-
-    const hash1 = await getFileHash(file1, 'sha256')
-    const hash2 = await getFileHash(file2, 'sha256')
-
-    assert.strictEqual(hash1, hash2)
-
-    await rm(dir, { recursive: true })
-  })
-
-  it('rejects for non-existent file', async () => {
-    await assert.rejects(getFileHash('/nonexistent/path/file.js', 'sha256'), {
-      code: 'ENOENT',
-    })
-  })
-
-  it('supports sha1 algorithm', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'hash-test-'))
-    const filePath = path.join(dir, 'test-file.js')
-
-    await writeFile(filePath, 'hello world')
-
-    const hash = await getFileHash(filePath, 'sha1')
-
-    // SHA-1 of "hello world"
-    assert.strictEqual(hash, '2aae6c35c94fcfb415dbe95f408b9ce91ee846ed')
-
-    await rm(dir, { recursive: true })
+  it('propagates host filesystem failures', async () => {
+    invoke.mockRejectedValueOnce(new Error('missing'))
+    await expect(getFileHash('/missing', 'sha256')).rejects.toThrow('missing')
   })
 })

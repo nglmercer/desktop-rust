@@ -41,7 +41,7 @@ describe('Rust branch queries', () => {
     mocks.transport = 'wry'
   })
 
-  it('uses bridge reads directly and propagates selection errors', async () => {
+  it('uses scoped bridge reads and propagates selection errors', async () => {
     mocks.transport = 'ws'
     mocks.merged.mockResolvedValueOnce([
       { ref: 'refs/heads/main', oid: 'a' },
@@ -60,7 +60,7 @@ describe('Rust branch queries', () => {
     const error = new Error('repository changed')
     mocks.pointed.mockRejectedValueOnce(error)
     await expect(getBranchesPointedAt(repository, 'HEAD')).rejects.toBe(error)
-    expect(mocks.scope).not.toHaveBeenCalled()
+    expect(mocks.scope).toHaveBeenCalled()
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

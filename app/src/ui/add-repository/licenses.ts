@@ -1,5 +1,3 @@
-import * as Path from 'path'
-import { readFile, writeFile } from 'fs/promises'
 import { backend } from '../../backend/client'
 import { readBundledTemplate } from './bundled-templates'
 
@@ -29,15 +27,7 @@ export async function getLicenses(): Promise<ReadonlyArray<ILicense>> {
   if (cachedLicenses != null) {
     return cachedLicenses
   } else {
-    const licensesMetadataPath = Path.join(
-      __dirname,
-      'static',
-      'available-licenses.json'
-    )
-    const json =
-      typeof window !== 'undefined' && backend().transportKind !== 'none'
-        ? await readBundledTemplate('static/available-licenses.json')
-        : await readFile(licensesMetadataPath, 'utf8')
+    const json = await readBundledTemplate('static/available-licenses.json')
     const licenses: Array<ILicense> = JSON.parse(json)
 
     cachedLicenses = licenses.sort((a, b) => {
@@ -85,8 +75,6 @@ export async function writeLicense(
   license: ILicense,
   fields: ILicenseFields
 ): Promise<void> {
-  const fullPath = Path.join(repositoryPath, 'LICENSE')
-
   const tokens: ReadonlyArray<keyof ILicenseFields> = [
     'fullname',
     'email',
@@ -96,9 +84,5 @@ export async function writeLicense(
   ]
 
   const body = replaceTokens(license.body, tokens, fields)
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await backend().writeRepositoryCreationFile(repositoryPath, 'license', body)
-    return
-  }
-  await writeFile(fullPath, body)
+  await backend().writeRepositoryCreationFile(repositoryPath, 'license', body)
 }

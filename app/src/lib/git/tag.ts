@@ -58,10 +58,12 @@ export async function getAllTags(
   repository: Repository
 ): Promise<Map<string, string>> {
   const read = () => backend().repositoryRendererTagRefs(repository.path)
-  const stdout: string =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+  const stdout: string = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
+  )
 
   const tagsArray: Array<[string, string]> = stdout
     .split('\n')

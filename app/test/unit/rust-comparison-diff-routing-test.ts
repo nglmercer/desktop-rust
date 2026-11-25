@@ -134,17 +134,16 @@ describe.each(['wry', 'ws'])('Rust comparison diff via %s', transport => {
     expect(mocks.unstage).toHaveBeenCalledTimes(2)
     expect(mocks.stage).toHaveBeenCalledTimes(1)
     expect(mocks.git).not.toHaveBeenCalled()
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+    expect(mocks.scope).toHaveBeenCalledTimes(1)
   })
 
-  it('retains the Git path for non-OID comparison revisions', async () => {
-    mocks.git.mockResolvedValue({ stdout: Buffer.from('legacy patch') })
+  it('rejects non-OID comparison revisions without using legacy Git', async () => {
     mocks.prepare.mockResolvedValue(new Map())
-    expect(await getFilesDiffText(repository, [], 'topic^')).toBe(
-      'legacy patch'
+    await expect(getFilesDiffText(repository, [], 'topic^')).rejects.toThrow(
+      'commit object ID'
     )
     expect(mocks.staged).not.toHaveBeenCalled()
-    expect(mocks.git).toHaveBeenCalledTimes(1)
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('loads comparison changed files through Rust and retries an initial commit', async () => {
@@ -202,7 +201,7 @@ describe.each(['wry', 'ws'])('Rust comparison diff via %s', transport => {
       true
     )
     expect(mocks.git).not.toHaveBeenCalled()
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+    expect(mocks.scope).toHaveBeenCalledTimes(1)
     const renamed = new FileChange('[b].txt', {
       kind: AppFileStatusKind.Renamed,
       oldPath: '[a].txt',

@@ -1,7 +1,6 @@
-import * as Fs from 'fs'
-import * as Path from 'path'
 import { encodePathAsUrl } from './path'
 import { Emoji } from './emoji'
+import { BundleRoot, bundleUrl } from '../web/bundle'
 
 /**
  * Type representing the contents of the gemoji json database
@@ -78,58 +77,53 @@ function getUrlFromUnicodeEmoji(emoji: string): string | null {
 }
 
 /**
- * Read the stored emoji list from JSON into an in-memory representation.
- *
- * @param rootDir - The folder containing the entry point (index.html or main.js) of the application.
+ * Read the stored emoji list from the renderer bundle into an in-memory
+ * representation.
  */
-export function readEmoji(rootDir: string): Promise<Map<string, Emoji>> {
-  return new Promise<Map<string, Emoji>>((resolve, reject) => {
-    const path = Path.join(rootDir, 'emoji.json')
-    Fs.readFile(path, 'utf8', (err, data) => {
-      if (err) {
-        reject(err)
-        return
-      }
+export async function readEmoji(): Promise<Map<string, Emoji>> {
+  const url = bundleUrl(`${BundleRoot}/emoji.json`)
+  if (url === null) {
+    throw new Error('Invalid bundled emoji database path')
+  }
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(
+      `Unable to load bundled emoji database (${response.status})`
+    )
+  }
+  const db: IGemojiDb = await response.json()
+  const tmp = new Map<string, Emoji>()
 
-      const tmp = new Map<string, Emoji>()
+  db.forEach(emoji => {
+    // Custom emoji don't have a unicode string and are instead stored
+    // on disk as their first alias.
+    const url = emoji.emoji
+      ? getUrlFromUnicodeEmoji(emoji.emoji)
+      : getEmojiImageUrlFromRelativePath(`${emoji.aliases[0]}.png`)
 
-      try {
-        const db: IGemojiDb = JSON.parse(data)
-        db.forEach(emoji => {
-          // Custom emoji don't have a unicode string and are instead stored
-          // on disk as their first alias.
-          const url = emoji.emoji
-            ? getUrlFromUnicodeEmoji(emoji.emoji)
-            : getEmojiImageUrlFromRelativePath(`${emoji.aliases[0]}.png`)
+    if (!url) {
+      log.error(`Could not calculate location of emoji: ${emoji}`)
+      return
+    }
 
-          if (!url) {
-            log.error(`Could not calculate location of emoji: ${emoji}`)
-            return
-          }
-
-          emoji.aliases.forEach(alias => {
-            tmp.set(`:${alias}:`, {
-              ...emoji,
-              url,
-            })
-          })
-        })
-      } catch (e) {
-        reject(e)
-      }
-
-      const emoji = new Map<string, Emoji>()
-
-      // Sort and insert into actual map
-      const keys = Array.from(tmp.keys()).sort()
-      keys.forEach(k => {
-        const value = tmp.get(k)
-        if (value) {
-          emoji.set(k, value)
-        }
+    emoji.aliases.forEach(alias => {
+      tmp.set(`:${alias}:`, {
+        ...emoji,
+        url,
       })
-
-      resolve(emoji)
     })
   })
+
+  const emoji = new Map<string, Emoji>()
+
+  // Sort and insert into actual map
+  const keys = Array.from(tmp.keys()).sort()
+  keys.forEach(k => {
+    const value = tmp.get(k)
+    if (value) {
+      emoji.set(k, value)
+    }
+  })
+
+  return emoji
 }

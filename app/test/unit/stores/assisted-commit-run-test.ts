@@ -276,11 +276,7 @@ describe('AppStore assisted commit runs', () => {
       /assisted commit run/
     )
     await assert.rejects(
-      h.appStore._discardChanges(
-        repository,
-        h.request(repository).files,
-        false
-      ),
+      h.appStore._discardChanges(repository, h.request(repository).files),
       /assisted commit run/
     )
     const commit = h.state(repository).commitLookup.values().next().value

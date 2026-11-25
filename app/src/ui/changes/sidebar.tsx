@@ -28,8 +28,6 @@ import { TransitionGroup, CSSTransition } from 'react-transition-group'
 import { openFile } from '../lib/open-file'
 import { Account } from '../../models/account'
 import { PopupType } from '../../models/popup'
-import { filesNotTrackedByLFS } from '../../lib/git/lfs'
-import { getLargeFilePaths } from '../../lib/large-files'
 import { isConflictedFile, hasUnresolvedConflicts } from '../../lib/status'
 import { getAccountForRepository } from '../../lib/get-account-for-repository'
 import { IAheadBehind } from '../../models/branch'
@@ -39,7 +37,6 @@ import { HookProgress } from '../../lib/git'
 import { ICopilotAssistedCommitRequest } from '../../models/copilot-assisted-commit'
 import { isAssistedCommitRunBusy } from '../../models/assisted-commit-run'
 import { isRepositoryAffectedByAssistedCommit } from '../../lib/git/repository-operation'
-import { backend } from '../../backend/client'
 import { DiscardRecovery } from './discard-recovery'
 
 /**
@@ -169,35 +166,6 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
   ): Promise<boolean> => {
     const { workingDirectory } = this.props.changes
 
-    // Rust reviews the selected blobs and asks for consent against that exact
-    // review. The legacy worktree-size check is retained for non-Rust transports.
-    if (typeof window === 'undefined' || backend().transportKind === 'none') {
-      let filesIgnoredByLFS: ReadonlyArray<string>
-      try {
-        const overSizedFiles = await getLargeFilePaths(
-          this.props.repository,
-          workingDirectory
-        )
-        filesIgnoredByLFS = await filesNotTrackedByLFS(
-          this.props.repository,
-          overSizedFiles
-        )
-      } catch (error) {
-        await this.props.dispatcher.postError(error)
-        return false
-      }
-
-      if (filesIgnoredByLFS.length !== 0) {
-        this.props.dispatcher.showPopup({
-          type: PopupType.OversizedFiles,
-          oversizedFiles: filesIgnoredByLFS,
-          context: context,
-          repository: this.props.repository,
-        })
-        return false
-      }
-    }
-
     // are any conflicted files left?
     const conflictedFilesLeft = workingDirectory.files.filter(
       f =>
@@ -276,11 +244,7 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
   private onDiscardChanges = (file: WorkingDirectoryFileChange) => {
     if (
       !this.props.askForConfirmationOnDiscardChanges &&
-      !(
-        typeof window !== 'undefined' &&
-        backend().transportKind !== 'none' &&
-        file.status.kind === AppFileStatusKind.Renamed
-      )
+      file.status.kind !== AppFileStatusKind.Renamed
     ) {
       this.props.dispatcher.discardChanges(this.props.repository, [file])
     } else {
@@ -558,15 +522,12 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
           onUpdateCommitOptions={this.props.onUpdateCommitOptions}
         />
         {this.renderUndoCommit(rebaseConflictState)}
-        {typeof window !== 'undefined' &&
-          backend().transportKind !== 'none' && (
-            <DiscardRecovery
-              key={this.props.repository.path}
-              repository={this.props.repository}
-              dispatcher={this.props.dispatcher}
-              disabled={this.props.isShowingModal || this.props.isCommitting}
-            />
-          )}
+        <DiscardRecovery
+          key={this.props.repository.path}
+          repository={this.props.repository}
+          dispatcher={this.props.dispatcher}
+          disabled={this.props.isShowingModal || this.props.isCommitting}
+        />
       </div>
     )
   }

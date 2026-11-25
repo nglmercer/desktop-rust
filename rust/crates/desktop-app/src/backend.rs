@@ -91,6 +91,9 @@ enum GitInfoOperation {
     ValidateCustomIntegration {
         path: String,
     },
+    CloneDestinationStatus {
+        path: String,
+    },
     ParseWindowsIntegrationArguments {
         arguments: String,
     },
@@ -210,6 +213,10 @@ enum GitInfoOperation {
         operation: Operation,
     },
     MixedReset {
+        repository_path: String,
+        operation: Operation,
+    },
+    Reset {
         repository_path: String,
         operation: Operation,
     },
@@ -602,6 +609,9 @@ impl Backend {
         | GitInfoOperation::MixedReset {
             repository_path, ..
         }
+        | GitInfoOperation::Reset {
+            repository_path, ..
+        }
         | GitInfoOperation::FastForwardBranches {
             repository_path, ..
         }
@@ -909,6 +919,14 @@ impl Backend {
             return Err(AppError::BadArgs(
                 "unsupported mixed reset operation".into(),
             ));
+        }
+        if let GitInfoOperation::Reset { operation, .. } = &request.operation
+            && !matches!(
+                operation,
+                Operation::RendererResetPreview { .. } | Operation::RendererReset { .. }
+            )
+        {
+            return Err(AppError::BadArgs("unsupported reset operation".into()));
         }
         if let GitInfoOperation::FastForwardBranches { operation, .. } = &request.operation
             && !matches!(
@@ -1794,6 +1812,10 @@ impl Backend {
                         operation: Operation::RendererMixedReset { .. },
                         ..
                     }
+                    | GitInfoOperation::Reset {
+                        operation: Operation::RendererReset { .. },
+                        ..
+                    }
                     | GitInfoOperation::FastForwardBranches {
                         operation: Operation::RendererFastForward { .. },
                         ..
@@ -1894,6 +1916,7 @@ impl Backend {
                             GitInfoOperation::AvailableEditors {} => desktop_backend::available_editors(desktop_backend::ExternalEditor::Automatic).await,
                             GitInfoOperation::AvailableTerminals {} => desktop_backend::available_terminals().await,
                             GitInfoOperation::ValidateCustomIntegration { path } => desktop_backend::validate_custom_integration_path(path).await,
+                            GitInfoOperation::CloneDestinationStatus { path } => desktop_backend::clone_destination_status(Path::new(&path)).await.map(|status| serde_json::json!(status)),
                             GitInfoOperation::ParseWindowsIntegrationArguments { arguments } => desktop_backend::parse_windows_integration_arguments(arguments).await.map(|args| serde_json::json!(args)),
                             GitInfoOperation::OpenTerminal { repository_path, name, directory } => {
                                 let requested = PathBuf::from(repository_path);
@@ -2078,6 +2101,13 @@ impl Backend {
                                 if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 repo.execute(operation).await
                             }
+                            GitInfoOperation::Reset { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
                             GitInfoOperation::FastForwardBranches { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
@@ -2244,7 +2274,7 @@ impl Backend {
                     .await
                     .map_err(|error| AppError::msg(error.to_string()))
             };
-            tokio::pin!(work);
+            let mut work = Box::pin(work);
             tokio::select! {
                 result = &mut work => if token.is_cancelled() { Err(AppError::Coded { code: "cancelled".into(), message: if recovery_write { "Git operation cancelled; inspect the repository before retrying" } else if identity_write { "Git identity update cancelled; inspect Git settings before retrying" } else if settings_write { "Git setting update cancelled; inspect Git settings before retrying" } else if config_path_write { "Git config preparation cancelled; check the configuration file before retrying" } else if description_write { "Description update cancelled; inspect the repository description before retrying" } else if creation_write { "Repository creation operation cancelled; inspect the repository and index before retrying" } else if discard_write { "Discard operation cancelled; inspect the file and discard recovery history before retrying" } else if checkpoint_write { "Commit operation cancelled; inspect commit checkpoints before retrying" } else if gitignore_write { "Ignore file update cancelled; inspect .gitignore before retrying" } else if remote_write { "Remote update cancelled; inspect Git configuration before retrying" } else if clone_write { "Clone cancelled; inspect the destination and recovery history before retrying" } else if initialization { "Repository initialization cancelled; inspect the destination before retrying" } else if lfs_write { "Git LFS setup cancelled; inspect Git settings and hooks before retrying" } else { "backend operation cancelled" }.into() }) } else { result },
                 _ = tokio::time::sleep(remaining) => {
@@ -2908,6 +2938,13 @@ mod tests {
             assert_eq!(git(&["rev-parse", "HEAD"]), target);
             assert_eq!(git(&["show", ":file"]), "base");
             assert_eq!(fs::read(root.join("file")).unwrap(), b"local\n");
+            let hard = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"reset","repository_path":root,"operation":operation}})]);
+            assert!(hard(json!({"method":"stage","paths":["file"]})).is_err());
+            let preview = backend.read(hard(json!({"method":"renderer_reset_preview","target":"HEAD","mode":"hard"})).unwrap()).unwrap();
+            assert!(backend.read(hard(json!({"method":"renderer_reset","target":"HEAD","mode":"hard","basis":"bad"})).unwrap()).is_err());
+            let result = backend.read(hard(json!({"method":"renderer_reset","target":"HEAD","mode":"hard","basis":preview["basis"]})).unwrap()).unwrap();
+            assert_eq!(result["code"], 0);
+            assert_eq!(fs::read(root.join("file")).unwrap(), b"base\n");
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

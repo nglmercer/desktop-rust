@@ -394,8 +394,6 @@ export const moveToApplicationsFolder = invokeProxy(
  */
 export const getAppMenu = sendProxy('get-app-menu', 0)
 
-export const invokeContextualMenu = invokeProxy('show-contextual-menu', 2)
-
 /** Update the menu item labels with the user's preferred apps. */
 export const updatePreferredAppMenuItemLabels = sendProxy(
   'update-preferred-app-menu-item-labels',

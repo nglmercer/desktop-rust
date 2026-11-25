@@ -20,16 +20,15 @@ export async function getRemotes(
   repository: Repository,
   options?: Pick<IGitStringExecutionOptions, 'env'>
 ): Promise<ReadonlyArray<IRemote>> {
-  if (
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none' &&
-    options?.env === undefined
-  ) {
+  if (options?.env === undefined) {
     const read = () =>
       backend().repositorySafeFetchRemotes(resolve(repository.path))
-    const remotes = await (backend().transportKind === 'wry'
-      ? withRepositoryGitOperation(repository.path, 'read', read, true)
-      : read())
+    const remotes = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      read,
+      true
+    )
     if (remotes !== null) return remotes
   }
   // Config queries also work outside repositories, where they can still return
@@ -164,8 +163,6 @@ async function manageRemote(
       }
     | { readonly type: 'remove'; readonly name: string }
 ): Promise<boolean> {
-  if (typeof window === 'undefined' || backend().transportKind === 'none')
-    return false
   const result = await withRepositoryGitOperation(
     repository.path,
     'mutation',
@@ -185,12 +182,15 @@ export async function getRemoteURL(
   repository: Repository,
   name: string
 ): Promise<string | null> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+  {
     const read = () =>
       backend().repositorySafeRemoteUrl(resolve(repository.path), name)
-    const result = await (backend().transportKind === 'wry'
-      ? withRepositoryGitOperation(repository.path, 'read', read, true)
-      : read())
+    const result = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      read,
+      true
+    )
     if (result.kind === 'resolved') return result.url
     if (result.kind === 'missing') return null
   }
@@ -224,7 +224,7 @@ export async function updateRemoteHEAD(
   remote: IRemote,
   isBackgroundTask: boolean
 ): Promise<void> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
+  {
     try {
       const result = await withRepositoryGitOperation(
         repository.path,

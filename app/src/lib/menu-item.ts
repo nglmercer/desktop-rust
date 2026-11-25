@@ -1,7 +1,13 @@
 import type { HostMenuItemOptions } from './host-types'
-import { invokeContextualMenu } from '../ui/main-process-proxy'
-import { backend } from '../backend/client'
 import { showBrowserContextMenu } from '../ui/lib/browser-context-menu'
+
+/**
+ * A menu item data structure that can be serialized and sent via IPC.
+ * Retained for the host IPC schema even though renderer menus are DOM-owned.
+ */
+export interface ISerializableMenuItem extends IMenuItem {
+  readonly action: undefined
+}
 
 export interface IMenuItem {
   /** The user-facing label. */
@@ -30,13 +36,6 @@ export interface IMenuItem {
    * Submenu that will appear when hovering this menu item.
    */
   readonly submenu?: ReadonlyArray<this>
-}
-
-/**
- * A menu item data structure that can be serialized and sent via IPC.
- */
-export interface ISerializableMenuItem extends IMenuItem {
-  readonly action: undefined
 }
 
 /**
@@ -80,14 +79,8 @@ export function getPlatformSpecificNameOrSymbolForModifier(
 }
 
 /** Show the given menu items in a contextual menu. */
-export async function showContextualMenu(
-  items: ReadonlyArray<IMenuItem>,
-  addSpellCheckMenu = false
-) {
-  const indices =
-    typeof window !== 'undefined' && backend().transportKind !== 'none'
-      ? await showBrowserContextMenu(items)
-      : await invokeContextualMenu(serializeMenuItems(items), addSpellCheckMenu)
+export async function showContextualMenu(items: ReadonlyArray<IMenuItem>) {
+  const indices = await showBrowserContextMenu(items)
 
   if (indices !== null) {
     const menuItem = findSubmenuItem(items, indices)
@@ -96,20 +89,6 @@ export async function showContextualMenu(
       menuItem.action()
     }
   }
-}
-
-/**
- * Remove the menu items properties that can't be serializable in
- * order to pass them via IPC.
- */
-function serializeMenuItems(
-  items: ReadonlyArray<IMenuItem>
-): ReadonlyArray<ISerializableMenuItem> {
-  return items.map(item => ({
-    ...item,
-    action: undefined,
-    submenu: item.submenu ? serializeMenuItems(item.submenu) : undefined,
-  }))
 }
 
 /**

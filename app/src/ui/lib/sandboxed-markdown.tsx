@@ -1,11 +1,9 @@
 import * as React from 'react'
-import * as Path from 'path'
 import {
   buildCustomMarkDownNodeFilterPipe,
   MarkdownContext,
 } from '../../lib/markdown-filters/node-filter'
 import { GitHubRepository } from '../../models/github-repository'
-import { readFile } from 'fs/promises'
 import { Tooltip } from './tooltip'
 import { createObservableRef } from './observable-ref'
 import { getObjectId } from './object-id'
@@ -279,10 +277,14 @@ export class SandboxedMarkdown extends React.PureComponent<
    * document body and provide them aswell.
    */
   private async getInlineStyleSheet(): Promise<string> {
-    const css = await readFile(
-      Path.join(__dirname, 'static', 'markdown.css'),
-      'utf8'
+    const response = await fetch(
+      new URL('static/markdown.css', document.baseURI),
+      { redirect: 'error' }
     )
+    if (!response.ok) {
+      throw new Error('Could not load bundled markdown stylesheet')
+    }
+    const css = await response.text()
 
     // scrape theme variables so iframe theme will match app
     const docStyle = getComputedStyle(document.body)

@@ -18,10 +18,12 @@ export async function getRecentBranches(
 
   const read = () =>
     backend().repositoryRendererReflog(repository.path, 'branches')
-  const result =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+  const result = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
+  )
   if (result === null) return []
   const stdout = result
 
@@ -72,10 +74,12 @@ export async function getBranchCheckouts(
   )
   const read = () =>
     backend().repositoryBranchCheckouts(repository.path, afterDate)
-  const result =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+  const result = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
+  )
   if (result === null) return new Map()
   const stdout = result
 

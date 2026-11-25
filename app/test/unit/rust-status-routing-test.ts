@@ -85,7 +85,7 @@ describe('Rust status integration', () => {
     expect(status?.squashMsgFound).toBe(true)
     expect(status?.isCherryPickingHeadFound).toBe(true)
     expect(status?.workingDirectory.files[0].path).toBe('new-file')
-    expect(mocks.scope).not.toHaveBeenCalled()
+    expect(mocks.scope).toHaveBeenCalledTimes(3)
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
@@ -214,7 +214,12 @@ describe('Rust status integration', () => {
       },
     ])
     const status = await getStatus(repository, false)
-    expect(mocks.backendStatus).toHaveBeenCalledWith('/repo-a', false)
+    expect(mocks.backendStatus).toHaveBeenCalledWith(
+      '/repo-a',
+      false,
+      {},
+      false
+    )
     expect(mocks.scope).toHaveBeenCalledWith(
       '/repo-a',
       'read',
@@ -292,8 +297,8 @@ describe('Rust status integration', () => {
     ])
     const status = await getStatus(repository, true, true)
     expect(status.workingDirectory.files[0].path).toBe('README.md')
-    expect(mocks.backendStatus).toHaveBeenCalledWith('/repo-a', true)
-    expect(mocks.context).toHaveBeenCalledWith('/repo-a')
+    expect(mocks.backendStatus).toHaveBeenCalledWith('/repo-a', true, {}, false)
+    expect(mocks.context).toHaveBeenCalledWith('/repo-a', false)
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

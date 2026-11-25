@@ -1,5 +1,3 @@
-import { readFile } from 'fs/promises'
-import * as Path from 'path'
 import * as semver from 'semver'
 import {
   ReleaseMetadata,
@@ -9,9 +7,9 @@ import {
 import { getVersion } from '../ui/lib/app-proxy'
 import { formatDate } from './format-date'
 import { offsetFromNow } from './offset-from'
-import { encodePathAsUrl } from './path'
 import { getUserAgent } from './http'
 import { backend } from '../backend/client'
+import { readBundledTemplate } from '../ui/add-repository/bundled-templates'
 
 // expects a release note entry to contain a header and then some text
 // example:
@@ -158,10 +156,9 @@ export async function generateDevReleaseSummary(): Promise<
     return releases
   }
 
-  const pretextDraft = await readFile(
-    Path.join(__dirname, 'static', 'pretext-draft.md'),
-    'utf8'
-  ).catch(_ => null)
+  const pretextDraft = await readBundledTemplate(
+    'static/pretext-draft.md'
+  ).catch(() => null)
 
   if (pretextDraft === null) {
     return releases
@@ -175,12 +172,3 @@ export async function generateDevReleaseSummary(): Promise<
     ...releases.slice(1),
   ]
 }
-
-export const ReleaseNoteHeaderLeftUri = encodePathAsUrl(
-  __dirname,
-  'static/release-note-header-left.svg'
-)
-export const ReleaseNoteHeaderRightUri = encodePathAsUrl(
-  __dirname,
-  'static/release-note-header-right.svg'
-)

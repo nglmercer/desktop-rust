@@ -1,13 +1,9 @@
-import * as Path from 'path'
 import {
   getNonForkGitHubRepository,
   isRepositoryWithForkedGitHubRepository,
   Repository,
 } from '../../models/repository'
-import {
-  WorkingDirectoryFileChange,
-  AppFileStatusKind,
-} from '../../models/status'
+import { AppFileStatusKind } from '../../models/status'
 import {
   Branch,
   BranchType,
@@ -25,11 +21,7 @@ import {
 import { ComparisonMode } from '../app-state'
 
 import { IAppShell } from '../app-shell'
-import {
-  DiscardChangesError,
-  ErrorWithMetadata,
-  IErrorMetadata,
-} from '../error-with-metadata'
+import { ErrorWithMetadata, IErrorMetadata } from '../error-with-metadata'
 import {
   reset,
   GitResetMode,
@@ -45,17 +37,10 @@ import {
   getStatus,
   IStatusResult,
   getCommit,
-  IndexStatus,
-  getIndexChanges,
-  checkoutIndex,
-  discardChangesFromSelection,
   checkoutPaths,
-  resetPaths,
   revertCommit,
   unstageAllFiles,
   addRemote,
-  listSubmodules,
-  resetSubmodulePaths,
   parseTrailers,
   mergeTrailers,
   getTrailerSeparatorCharacters,
@@ -94,9 +79,7 @@ import { IStashEntry, StashedChangesLoadStates } from '../../models/stash-entry'
 import { PullRequest } from '../../models/pull-request'
 import { IStatsStore } from '../stats'
 import { getTagsToPush, storeTagsToPush } from './helpers/tags-to-push-storage'
-import { DiffSelection, ITextDiff } from '../../models/diff'
 import { getDefaultBranch } from '../helpers/default-branch'
-import { rm, stat } from 'fs/promises'
 import { backend } from '../../backend/client'
 import { findForkedRemotesToPrune } from './helpers/find-forked-remotes-to-prune'
 import { findDefaultBranch } from '../find-default-branch'
@@ -169,7 +152,7 @@ export class GitStore extends BaseStore {
 
   public constructor(
     repository: Repository,
-    private readonly shell: IAppShell,
+    _shell: IAppShell,
     private readonly statsStore: IStatsStore
   ) {
     super()
@@ -1645,35 +1628,13 @@ export class GitStore extends BaseStore {
   }
 
   private async updateLastFetchedReadCore() {
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      try {
-        const result = await backend().repositoryLastFetch(this.repository.path)
-        if (result.kind === 'fetched') this._lastFetched = new Date(result.time)
-        else if (result.kind === 'unavailable') this._lastFetched = null
-      } catch {
-        /* A failed read does not establish that FETCH_HEAD is absent. */
-      }
-      this.emitUpdate()
-      return this._lastFetched
-    }
-    const fetchHeadPath = Path.join(
-      this.repository.resolvedGitDir,
-      'FETCH_HEAD'
-    )
-
     try {
-      const fstat = await stat(fetchHeadPath)
-
-      // If the file's empty then it _probably_ means the fetch failed and we
-      // shouldn't update the last fetched date.
-      if (fstat.size > 0) {
-        this._lastFetched = fstat.mtime
-      }
+      const result = await backend().repositoryLastFetch(this.repository.path)
+      if (result.kind === 'fetched') this._lastFetched = new Date(result.time)
+      else if (result.kind === 'unavailable') this._lastFetched = null
     } catch {
-      // An error most likely means the repository's never been published.
-      this._lastFetched = null
+      /* A failed read does not establish that FETCH_HEAD is absent. */
     }
-
     this.emitUpdate()
     return this._lastFetched
   }
@@ -1743,122 +1704,6 @@ export class GitStore extends BaseStore {
 
     this.emitUpdate()
     return wasSuccessful
-  }
-
-  public async discardChanges(
-    files: ReadonlyArray<WorkingDirectoryFileChange>,
-    moveToTrash: boolean = true,
-    askForConfirmationOnDiscardChangesPermanently: boolean = false
-  ): Promise<void> {
-    const pathsToCheckout = new Array<string>()
-    const pathsToReset = new Array<string>()
-
-    const submodules = await listSubmodules(this.repository)
-
-    for (const file of files) {
-      const foundSubmodule = submodules.some(s => s.path === file.path)
-
-      if (file.status.kind !== AppFileStatusKind.Deleted && !foundSubmodule) {
-        if (moveToTrash) {
-          try {
-            await this.shell.moveItemToTrash(
-              Path.resolve(this.repository.path, file.path)
-            )
-          } catch (e) {
-            if (askForConfirmationOnDiscardChangesPermanently) {
-              throw new DiscardChangesError(e, this.repository, files)
-            }
-
-            // The user has received the confirmation dialog in past and has
-            // chosen to always discard the changes permanently if trash failes.
-            // We need to remove the file manually.
-            if (file.status.kind === AppFileStatusKind.Untracked) {
-              await rm(Path.join(this.repository.path, file.path))
-            }
-          }
-        } else if (moveToTrash === false) {
-          // The user has received the confirmation dialog and has chosen to
-          // discard the changes permanently. We need to remove the file
-          // manually.
-          if (file.status.kind === AppFileStatusKind.Untracked) {
-            await rm(Path.join(this.repository.path, file.path))
-          }
-        }
-      }
-
-      if (
-        file.status.kind === AppFileStatusKind.Copied ||
-        file.status.kind === AppFileStatusKind.Renamed
-      ) {
-        // file.path is the "destination" or "new" file in a copy or rename.
-        // we've already deleted it so all we need to do is make sure the
-        // index forgets about it.
-        pathsToReset.push(file.path)
-
-        // checkout the old path too
-        pathsToCheckout.push(file.status.oldPath)
-        pathsToReset.push(file.status.oldPath)
-      } else {
-        pathsToCheckout.push(file.path)
-        pathsToReset.push(file.path)
-      }
-    }
-
-    // Check the index to see which files actually have changes there as compared to HEAD
-    const changedFilesInIndex = await getIndexChanges(this.repository)
-
-    // Only reset paths if they have changes in the index
-    const necessaryPathsToReset = pathsToReset.filter(x =>
-      changedFilesInIndex.has(x)
-    )
-
-    const submodulePaths = pathsToCheckout.filter(p =>
-      submodules.find(s => s.path === p)
-    )
-
-    // Don't attempt to checkout files that are submodules or don't exist in the index after our reset
-    const necessaryPathsToCheckout = pathsToCheckout.filter(
-      x =>
-        submodulePaths.indexOf(x) === -1 ||
-        changedFilesInIndex.get(x) !== IndexStatus.Added
-    )
-
-    // We're trying to not invoke git linearly with the number of files to discard
-    // so we're doing our discards in three conceptual steps.
-    //
-    // 1. Figure out what the index thinks has changed as compared to the previous
-    //    commit. For users who exclusive interact with Git using Desktop this will
-    //    almost always empty which, as it turns out, is great for us.
-    //
-    // 2. Figure out if any of the files that we've been asked to discard are changed
-    //    in the index and if so, reset them such that the index is set up just as
-    //    the previous commit for the paths we're discarding.
-    //
-    // 3. Checkout all the files that we've discarded that existed in the previous
-    //    commit from the index.
-    await this.performFailableOperation(async () => {
-      if (submodulePaths.length > 0) {
-        await resetSubmodulePaths(this.repository, submodulePaths)
-      }
-
-      await resetPaths(
-        this.repository,
-        GitResetMode.Mixed,
-        'HEAD',
-        necessaryPathsToReset
-      )
-      await checkoutIndex(this.repository, necessaryPathsToCheckout)
-    })
-  }
-
-  public async discardChangesFromSelection(
-    filePath: string,
-    diff: ITextDiff,
-    selection: DiffSelection
-  ) {
-    await this.performFailableOperation(() =>
-      discardChangesFromSelection(this.repository, filePath, diff, selection)
-    )
   }
 
   /** Reverts the commit with the given SHA */

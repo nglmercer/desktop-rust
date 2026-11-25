@@ -10,7 +10,6 @@ import {
 
 import { assertNever } from '../fatal-error'
 import * as GitPerf from '../../ui/lib/git-perf'
-import * as Path from 'path'
 import { isErrnoException } from '../errno-exception'
 import { withTrampolineEnv } from '../trampoline/trampoline-environment'
 import { kStringMaxLength } from 'buffer'
@@ -464,43 +463,6 @@ export function isAuthFailureError(
       return true
   }
   return false
-}
-
-/**
- * Determine whether the provided `error` is an error from Git indicating
- * that a configuration file  write failed due to a lock file already
- * existing for that config file.
- */
-export function isConfigFileLockError(error: Error): error is GitError {
-  return (
-    error instanceof GitError &&
-    error.result.gitError === DugiteError.ConfigLockFileAlreadyExists
-  )
-}
-
-const lockFilePathRe = /^error: could not lock config file (.+?): File exists$/m
-
-/**
- * If the `result` is associated with an config lock file error (as determined
- * by `isConfigFileLockError`) this method will attempt to extract an absolute
- * path (i.e. rooted) to the configuration lock file in question from the Git
- * output.
- */
-export function parseConfigLockFilePathFromError(result: IGitResult) {
-  const match = lockFilePathRe.exec(coerceToString(result.stderr))
-
-  if (match === null) {
-    return null
-  }
-
-  // Git on Windows may print the config file path using forward slashes.
-  // Luckily for us forward slashes are not allowed in Windows file or
-  // directory names so we can simply replace any instance of forward
-  // slashes with backslashes.
-  const normalized = __WIN32__ ? match[1].replace('/', '\\') : match[1]
-
-  // https://github.com/git/git/blob/232378479/lockfile.h#L117-L119
-  return Path.resolve(result.path, `${normalized}.lock`)
 }
 
 export function getDescriptionForError(

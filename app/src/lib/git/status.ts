@@ -1,4 +1,3 @@
-import { getFilesWithConflictMarkers } from './diff-check'
 import {
   WorkingDirectoryStatus,
   WorkingDirectoryFileChange,
@@ -11,7 +10,6 @@ import {
   UnmergedEntrySummary,
 } from '../../models/status'
 import {
-  parsePorcelainStatus,
   mapStatus,
   IStatusEntry,
   IStatusHeader,
@@ -26,11 +24,9 @@ import { Repository } from '../../models/repository'
 import { IAheadBehind } from '../../models/branch'
 import { fatalError } from '../../lib/fatal-error'
 import { isMergeHeadSet, isSquashMsgSet } from './merge'
-import { getBinaryPaths } from './diff'
 import { getRebaseInternalState } from './rebase'
 import { RebaseInternalState } from '../../models/rebase'
 import { isCherryPickHeadFound } from './cherry-pick'
-import { git } from '.'
 
 /** The encapsulation of the result from 'git status' */
 export interface IStatusResult {
@@ -219,90 +215,47 @@ export async function getStatus(
   rejectOnError = false,
   forCreation = false
 ): Promise<IStatusResult | null> {
-  const args = [
-    '--no-optional-locks',
-    'status',
-    ...(includeUntracked ? ['--untracked-files=all'] : []),
-    '--branch',
-    '--porcelain=2',
-    '-z',
-  ]
-
-  let parsed: ReturnType<typeof parsePorcelainStatus> | null | undefined
-  if (backend().transportKind === 'ws') {
-    parsed = statusItemsFromBackend(
-      await (forCreation
-        ? backend().detailedRepositoryStatus(
-            repository.path,
-            includeUntracked,
-            {},
-            true
-          )
-        : backend().detailedRepositoryStatus(repository.path, includeUntracked))
-    )
-  }
-  if (backend().transportKind === 'wry') {
-    parsed = await withRepositoryGitOperation(
-      repository.path,
-      'read',
-      async () => {
-        try {
-          const records = await backend().detailedRepositoryStatus(
-            repository.path,
-            includeUntracked
-          )
-          return statusItemsFromBackend(records)
-        } catch (error) {
-          if (rejectOnError) throw error
-          if (
-            error instanceof Error &&
-            'code' in error &&
-            (error.code === 'cancelled' || error.code === 'timeout')
-          ) {
-            throw error
-          }
-          const type = await backend().repositoryType(repository.path)
-          if (type.kind === 'missing' || type.kind === 'bare') return null
+  const parsed = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    async () => {
+      try {
+        const records = await backend().detailedRepositoryStatus(
+          repository.path,
+          includeUntracked,
+          {},
+          forCreation
+        )
+        return statusItemsFromBackend(records)
+      } catch (error) {
+        if (rejectOnError) throw error
+        if (
+          error instanceof Error &&
+          'code' in error &&
+          (error.code === 'cancelled' || error.code === 'timeout')
+        ) {
           throw error
         }
-      },
-      true
-    )
-  }
+        const type = await backend().repositoryType(repository.path)
+        if (type.kind === 'missing' || type.kind === 'bare') return null
+        throw error
+      }
+    },
+    true
+  )
   if (parsed === undefined) {
-    const { stdout, exitCode } = await git(args, repository.path, 'getStatus', {
-      successExitCodes: new Set(rejectOnError ? [0] : [0, 128]),
-      encoding: 'buffer',
-    })
-
-    if (exitCode === 128) {
-      log.debug(
-        `'git status' returned 128 for '${repository.path}' and is likely missing its .git directory`
-      )
-      return null
-    }
-    parsed = parsePorcelainStatus(stdout)
+    throw new Error('The Rust backend is required for repository status')
   }
   if (parsed === null) return null
   const headers = parsed.filter(isStatusHeader)
   const entries = parsed.filter(isStatusEntry)
 
-  const transport = backend().transportKind
-  let context:
-    | Awaited<ReturnType<ReturnType<typeof backend>['repositoryStatusContext']>>
-    | undefined
-  if (transport === 'ws') {
-    context = forCreation
-      ? await backend().repositoryStatusContext(repository.path, true)
-      : await backend().repositoryStatusContext(repository.path)
-  } else if (transport === 'wry') {
-    context = await withRepositoryGitOperation(
-      repository.path,
-      'read',
-      () => backend().repositoryStatusContext(repository.path),
-      true
-    )
-  }
+  const context = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () => backend().repositoryStatusContext(repository.path, forCreation),
+    true
+  )
   const mergeHeadFound =
     context?.mergeHeadFound ?? (await isMergeHeadSet(repository))
   const conflictedFilesInIndex = entries.filter(e =>
@@ -313,37 +266,19 @@ export async function getStatus(
       ? await getRebaseInternalState(repository)
       : context.rebaseInternalState
 
-  let conflictDetails: ConflictFilesDetails | undefined
-  if (transport === 'ws') {
-    conflictDetails = await getBridgeConflictDetails(
-      repository,
-      mergeHeadFound,
-      conflictedFilesInIndex,
-      rebaseInternalState,
-      forCreation
-    )
-  } else if (transport === 'wry') {
-    conflictDetails = await withRepositoryGitOperation(
-      repository.path,
-      'read',
-      () =>
-        getBridgeConflictDetails(
-          repository,
-          mergeHeadFound,
-          conflictedFilesInIndex,
-          rebaseInternalState
-        ),
-      true
-    )
-  }
-  const resolvedConflictDetails =
-    conflictDetails ??
-    (await getConflictDetails(
-      repository,
-      mergeHeadFound,
-      conflictedFilesInIndex,
-      rebaseInternalState
-    ))
+  const resolvedConflictDetails = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
+      getBridgeConflictDetails(
+        repository,
+        mergeHeadFound,
+        conflictedFilesInIndex,
+        rebaseInternalState,
+        forCreation
+      ),
+    true
+  )
 
   // Map of files keyed on their paths.
   const files = entries.reduce(
@@ -487,118 +422,6 @@ function parseStatusHeader(results: IStatusHeadersData, header: IStatusHeader) {
     currentTip,
     branchAheadBehind,
     match,
-  }
-}
-
-async function getMergeConflictDetails(
-  repository: Repository,
-  conflictedFilesInIndex: ReadonlyArray<IStatusEntry>
-) {
-  const conflictCountsByPath = await getFilesWithConflictMarkers(
-    repository.path
-  )
-  const binaryFilePaths = await getBinaryPaths(
-    repository,
-    'MERGE_HEAD',
-    conflictedFilesInIndex
-  )
-  return {
-    conflictCountsByPath,
-    binaryFilePaths,
-  }
-}
-
-async function getRebaseConflictDetails(
-  repository: Repository,
-  conflictedFilesInIndex: ReadonlyArray<IStatusEntry>
-) {
-  const conflictCountsByPath = await getFilesWithConflictMarkers(
-    repository.path
-  )
-  const binaryFilePaths = await getBinaryPaths(
-    repository,
-    'REBASE_HEAD',
-    conflictedFilesInIndex
-  )
-  return {
-    conflictCountsByPath,
-    binaryFilePaths,
-  }
-}
-
-/**
- * We need to do these operations to detect conflicts that were the result
- * of popping a stash into the index
- */
-async function getWorkingDirectoryConflictDetails(
-  repository: Repository,
-  conflictedFilesInIndex: ReadonlyArray<IStatusEntry>
-) {
-  const conflictCountsByPath = await getFilesWithConflictMarkers(
-    repository.path
-  )
-  let binaryFilePaths: ReadonlyArray<string> = []
-  try {
-    // its totally fine if HEAD doesn't exist, which throws an error
-    binaryFilePaths = await getBinaryPaths(
-      repository,
-      'HEAD',
-      conflictedFilesInIndex
-    )
-  } catch {}
-
-  return {
-    conflictCountsByPath,
-    binaryFilePaths,
-  }
-}
-
-/**
- * gets the conflicted files count and binary file paths in a given repository.
- * for computing an `IStatusResult`.
- *
- * @param repository to get details from
- * @param mergeHeadFound whether a merge conflict has been detected
- * @param conflictedFilesInIndex all files marked as being conflicted in the
- *                               index. Used to check for files using the binary
- *                               merge driver and whether it looks like a stash
- *                               has introduced conflicts
- * @param rebaseInternalState details about the current rebase operation (if
- * found)
- */
-async function getConflictDetails(
-  repository: Repository,
-  mergeHeadFound: boolean,
-  conflictedFilesInIndex: ReadonlyArray<IStatusEntry>,
-  rebaseInternalState: RebaseInternalState | null
-): Promise<ConflictFilesDetails> {
-  try {
-    if (mergeHeadFound) {
-      return await getMergeConflictDetails(repository, conflictedFilesInIndex)
-    }
-
-    if (rebaseInternalState !== null) {
-      return await getRebaseConflictDetails(repository, conflictedFilesInIndex)
-    }
-
-    // If there's conflicted files in the index but we don't have a merge head
-    // or a rebase internal state, then we're likely in a situation where a
-    // stash has introduced conflicts
-    if (conflictedFilesInIndex.length > 0) {
-      return await getWorkingDirectoryConflictDetails(
-        repository,
-        conflictedFilesInIndex
-      )
-    }
-  } catch (error) {
-    log.error(
-      'Unexpected error from git operations in getConflictDetails',
-      error
-    )
-  }
-  return {
-    conflictCountsByPath: new Map<string, number>(),
-    binaryFilePaths: new Array<string>(),
   }
 }
 

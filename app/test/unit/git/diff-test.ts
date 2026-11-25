@@ -28,16 +28,14 @@ import {
   getWorkingDirectoryDiff,
   getWorkingDirectoryImage,
   getBlobImage,
-  getBinaryPaths,
   getBranchMergeBaseChangedFiles,
   getBranchMergeBaseDiff,
   getCommitDiff,
   getCommitRangeDiff,
-  git,
 } from '../../../src/lib/git'
 import { getStatusOrThrow } from '../../helpers/status'
 
-import { GitError as DugiteError, exec } from 'dugite'
+import { exec } from 'dugite'
 import { makeCommit, switchTo } from '../../helpers/repository-scaffolding'
 import { join } from 'node:path'
 
@@ -531,89 +529,6 @@ describe('git/diff', () => {
 
       const diff = await getTextDiff(repo, files[0])
       assert.equal(diff.text, `@@ -0,0 +1 @@\n+${testString}`)
-    })
-  })
-
-  describe('getBinaryPaths', () => {
-    describe('in empty repo', () => {
-      it('throws since HEAD doesnt exist', async t => {
-        const repo = await setupEmptyRepository(t)
-        await assert.rejects(() => getBinaryPaths(repo, 'HEAD', []))
-      })
-    })
-
-    describe('with files using binary merge driver', () => {
-      it('includes plain text files using binary driver', async t => {
-        const repo = await setupEmptyRepository(t)
-        writeFile(path.join(repo.path, 'foo.bin'), 'foo\n')
-        writeFile(
-          path.join(repo.path, '.gitattributes'),
-          '*.bin merge=binary\n'
-        )
-        await git(['add', '.'], repo.path, '')
-        await git(['commit', '-m', 'initial'], repo.path, '')
-        await git(['checkout', '-b', 'branch-a'], repo.path, '')
-        await writeFile(path.join(repo.path, 'foo.bin'), 'bar\n')
-        await git(['commit', '-a', '-m', 'second'], repo.path, '')
-        await git(['checkout', '-'], repo.path, '')
-        await writeFile(path.join(repo.path, 'foo.bin'), 'foozball\n')
-        await git(['commit', '-a', '-m', 'third'], repo.path, '')
-        await git(['merge', 'branch-a'], repo.path, '', {
-          expectedErrors: new Set([DugiteError.MergeConflicts]),
-        })
-
-        assert.deepStrictEqual(
-          await getBinaryPaths(repo, 'MERGE_HEAD', [
-            {
-              kind: 'entry',
-              path: 'foo.bin',
-              statusCode: 'UU',
-              submoduleStatusCode: '????',
-            },
-          ]),
-          ['foo.bin']
-        )
-      })
-    })
-
-    describe('in repo with text only files', () => {
-      it('returns an empty array', async t => {
-        const testRepoPath = await setupFixtureRepository(
-          t,
-          'repo-with-changes'
-        )
-        const repo = new Repository(testRepoPath, -1, null, false)
-        assert.equal((await getBinaryPaths(repo, 'HEAD', [])).length, 0)
-      })
-    })
-    describe('in repo with image changes', t => {
-      it('returns all changed image files', async t => {
-        const testRepoPath = await setupFixtureRepository(
-          t,
-          'repo-with-image-changes'
-        )
-        const repo = new Repository(testRepoPath, -1, null, false)
-        assert.deepStrictEqual(await getBinaryPaths(repo, 'HEAD', []), [
-          'modified-image.jpg',
-          'new-animated-image.gif',
-          'new-image.png',
-        ])
-      })
-    })
-    describe('in repo with merge conflicts on image files', () => {
-      it('returns all conflicted image files', async t => {
-        const testRepoPath = await setupFixtureRepository(
-          t,
-          'detect-conflict-in-binary-file'
-        )
-        const repo = new Repository(testRepoPath, -1, null, false)
-        await exec(['checkout', 'make-a-change'], repo.path)
-        await exec(['merge', 'master'], repo.path)
-
-        assert.deepStrictEqual(await getBinaryPaths(repo, 'MERGE_HEAD', []), [
-          'my-cool-image.png',
-        ])
-      })
     })
   })
 

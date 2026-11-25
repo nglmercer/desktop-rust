@@ -1,6 +1,6 @@
 //! Reviewed mixed reset for undoing a commit or selecting a history point.
 //! External Git writers may race review and Git taking its own locks.
-use crate::{RendererMixedResetRequest, Repository, args, process};
+use crate::{RendererMixedResetRequest, RendererResetMode, Repository, args, process};
 use anyhow::Result;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -150,6 +150,146 @@ impl Repository {
             json!({"code":output.code,"stdout":String::from_utf8_lossy(&output.stdout),"stderr":String::from_utf8_lossy(&output.stderr),"target":request.target}),
         )
     }
+    async fn renderer_reset_review(
+        &self,
+        target: &str,
+        mode: RendererResetMode,
+    ) -> Result<(String, String, Option<String>)> {
+        for variable in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_NAMESPACE",
+            "GIT_SHALLOW_FILE",
+        ] {
+            anyhow::ensure!(
+                std::env::var_os(variable).is_none(),
+                "Cannot review reset with {variable} set"
+            );
+        }
+        anyhow::ensure!(
+            !target.is_empty() && target.len() <= 1024 && !target.contains('\0'),
+            "Invalid reset target"
+        );
+        let revision = self
+            .run(&args(&[
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                &format!("{target}^{{commit}}"),
+            ]))
+            .await?;
+        anyhow::ensure!(revision.code == 0, "Reset target does not name a commit");
+        let resolved = std::str::from_utf8(&revision.stdout)?.trim().to_owned();
+        anyhow::ensure!(
+            matches!(resolved.len(), 40 | 64)
+                && resolved
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "Reset target did not resolve to a complete commit ID"
+        );
+        anyhow::ensure!(
+            self.operation_state().await?.is_none(),
+            "Finish or abort the current Git operation first"
+        );
+        match std::fs::symlink_metadata(self.git_directory().await?.join("SQUASH_MSG")) {
+            Ok(_) => anyhow::bail!("Finish or abort the pending squash before resetting"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let capture = self.checkout_capture(0).await?;
+        let branch = capture["snapshot"]["branch"].as_str().map(str::to_owned);
+        let mut hash = Sha256::new();
+        for part in [
+            self.id().as_bytes(),
+            target.as_bytes(),
+            &serde_json::to_vec(&mode)?,
+            resolved.as_bytes(),
+            &serde_json::to_vec(&capture)?,
+        ] {
+            hash.update((part.len() as u64).to_le_bytes());
+            hash.update(part);
+        }
+        Ok((format!("{:x}", hash.finalize()), resolved, branch))
+    }
+
+    pub(crate) async fn renderer_reset_preview(
+        &self,
+        target: &str,
+        mode: RendererResetMode,
+    ) -> Result<Value> {
+        let (basis, resolved, branch) = self.renderer_reset_review(target, mode).await?;
+        Ok(json!({"target":target,"mode":mode,"resolved":resolved,"branch":branch,"basis":basis}))
+    }
+
+    pub(crate) async fn renderer_reset(
+        &self,
+        target: &str,
+        mode: RendererResetMode,
+        basis: &str,
+    ) -> Result<Value> {
+        let _lock = self.stash_lock().await?;
+        let (actual_basis, resolved, branch) = self.renderer_reset_review(target, mode).await?;
+        anyhow::ensure!(
+            actual_basis == basis,
+            "Reset context changed; refresh before continuing"
+        );
+        let mode_arg = match mode {
+            RendererResetMode::Hard => "--hard",
+            RendererResetMode::Soft => "--soft",
+        };
+        let output =
+            process::run_bound_checkout(&self.path, &args(&["reset", mode_arg, &resolved, "--"]))
+                .await?;
+        if output.code == 0 {
+            let head = self
+                .run(&args(&[
+                    "rev-parse",
+                    "--verify",
+                    "--end-of-options",
+                    "HEAD^{commit}",
+                ]))
+                .await?;
+            let actual_branch = self
+                .run(&args(&["symbolic-ref", "--quiet", "--short", "HEAD"]))
+                .await?;
+            let actual_branch = if actual_branch.code == 0 {
+                Some(
+                    std::str::from_utf8(&actual_branch.stdout)?
+                        .trim_end_matches('\n')
+                        .to_owned(),
+                )
+            } else if actual_branch.code == 1 {
+                None
+            } else {
+                anyhow::bail!("Reset outcome is uncertain; inspect HEAD and index")
+            };
+            anyhow::ensure!(
+                head.code == 0
+                    && std::str::from_utf8(&head.stdout)?.trim() == resolved
+                    && actual_branch == branch,
+                "Reset outcome is uncertain; inspect HEAD and index"
+            );
+            if matches!(mode, RendererResetMode::Hard) {
+                for arguments in [
+                    &["diff", "--quiet", "--"][..],
+                    &["diff", "--cached", "--quiet", "--"][..],
+                ] {
+                    let diff = self.run(&args(arguments)).await?;
+                    anyhow::ensure!(
+                        diff.code == 0,
+                        "Hard reset left tracked differences; inspect the repository"
+                    );
+                }
+            }
+        }
+        Ok(
+            json!({"code":output.code,"stdout":String::from_utf8_lossy(&output.stdout),"stderr":String::from_utf8_lossy(&output.stderr),"target":target,"resolved":resolved,"mode":mode}),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -283,6 +423,59 @@ mod tests {
                 .unwrap()
                 .success()
         );
+        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "commit\n");
+    }
+    #[tokio::test]
+    async fn hard_reset_accepts_a_symbolic_target_and_preserves_only_untracked_files() {
+        let (f, request) = Fixture::new();
+        fs::write(f.0.join("file"), "local\n").unwrap();
+        fs::write(f.0.join("untracked"), "keep\n").unwrap();
+        let repo = Repository::open(&f.0).await.unwrap();
+        let preview = repo
+            .renderer_reset_preview("HEAD", RendererResetMode::Hard)
+            .await
+            .unwrap();
+        assert_eq!(preview["resolved"], request.head);
+        assert!(
+            repo.renderer_reset("HEAD", RendererResetMode::Hard, "bad")
+                .await
+                .is_err()
+        );
+        let result = repo
+            .renderer_reset(
+                "HEAD",
+                RendererResetMode::Hard,
+                preview["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "commit\n");
+        assert_eq!(fs::read_to_string(f.0.join("untracked")).unwrap(), "keep\n");
+        assert_eq!(f.git(&["diff", "--quiet", "--"]), "");
+        assert_eq!(f.git(&["symbolic-ref", "HEAD"]), "refs/heads/main");
+    }
+
+    #[tokio::test]
+    async fn soft_reset_moves_head_without_touching_index_or_worktree() {
+        let (f, request) = Fixture::new();
+        let repo = Repository::open(&f.0).await.unwrap();
+        let preview = repo
+            .renderer_reset_preview("HEAD~1", RendererResetMode::Soft)
+            .await
+            .unwrap();
+        assert_eq!(preview["resolved"], request.target);
+        let result = repo
+            .renderer_reset(
+                "HEAD~1",
+                RendererResetMode::Soft,
+                preview["basis"].as_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), request.target);
+        assert_eq!(f.git(&["show", ":file"]), "commit");
         assert_eq!(fs::read_to_string(f.0.join("file")).unwrap(), "commit\n");
     }
 }

@@ -62,10 +62,12 @@ export async function listWorktrees(
       ? repositoryOrPath
       : repositoryOrPath.path
   const read = () => backend().repositoryWorktrees(repositoryPath)
-  const entries =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repositoryPath, 'read', read, true)
-      : await read()
+  const entries = await withRepositoryGitOperation(
+    repositoryPath,
+    'read',
+    read,
+    true
+  )
   return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
 }
 
@@ -73,10 +75,7 @@ export async function listWorktreesFromGitDir(
   gitDir: string
 ): Promise<ReadonlyArray<WorktreeEntry>> {
   const read = () => backend().repositoryWorktrees(gitDir, true)
-  const entries =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(gitDir, 'read', read, true)
-      : await read()
+  const entries = await withRepositoryGitOperation(gitDir, 'read', read, true)
   return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
 }
 

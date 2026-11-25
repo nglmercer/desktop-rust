@@ -7,7 +7,7 @@ import { Checkbox, CheckboxValue } from '../lib/checkbox'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { Ref } from '../lib/ref'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
-import { backend, type IRemoteBranchDeletionReview } from '../../backend/client'
+import type { IRemoteBranchDeletionReview } from '../../backend/client'
 import {
   RemoteDeletionRecovery,
   RemoteDeletionReview,
@@ -102,12 +102,10 @@ export class DeleteBranch extends React.Component<
                 {warning}
               </p>
             ))}
-            {backend().transportKind !== 'none' && (
-              <RemoteDeletionRecovery
-                repository={this.props.repository}
-                dispatcher={this.props.dispatcher}
-              />
-            )}
+            <RemoteDeletionRecovery
+              repository={this.props.repository}
+              dispatcher={this.props.dispatcher}
+            />
           </div>
         </DialogContent>
         <DialogFooter>
@@ -117,8 +115,7 @@ export class DeleteBranch extends React.Component<
             okButtonDisabled={
               this.state.receipt !== null ||
               this.state.reviewing ||
-              (backend().transportKind !== 'none' &&
-                this.state.includeRemoteBranch &&
+              (this.state.includeRemoteBranch &&
                 (this.state.review === null ||
                   this.state.review.endpoints.some(
                     endpoint => !endpoint.displaySafe
@@ -171,8 +168,7 @@ export class DeleteBranch extends React.Component<
         reviewing: false,
       },
       () => {
-        if (value && backend().transportKind !== 'none')
-          void this.reviewBranch()
+        if (value) void this.reviewBranch()
       }
     )
   }
@@ -206,19 +202,13 @@ export class DeleteBranch extends React.Component<
     if (
       this.submitting ||
       this.state.receipt !== null ||
-      (backend().transportKind !== 'none' &&
-        this.state.includeRemoteBranch &&
-        this.state.review === null)
+      (this.state.includeRemoteBranch && this.state.review === null)
     )
       return
     this.submitting = true
     this.setState({ isDeleting: true })
     try {
-      if (
-        backend().transportKind !== 'none' &&
-        this.state.includeRemoteBranch &&
-        this.state.review !== null
-      ) {
+      if (this.state.includeRemoteBranch && this.state.review !== null) {
         const result = await dispatcher.deleteReviewedRemoteBranch(
           repository,
           this.state.review

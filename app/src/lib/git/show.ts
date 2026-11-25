@@ -1,27 +1,6 @@
-import { git, isMaxBufferExceededError } from './core'
-
 import { Repository } from '../../models/repository'
-import { GitError } from 'dugite'
-import { coerceToBuffer } from './coerce-to-buffer'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
-
-/**
- * Resolve leading-dash revisions before appending a path so Git can report a
- * missing path instead of treating the unresolved revision:path as an option.
- */
-async function resolveBlobRevision(repository: Repository, commitish: string) {
-  if (!commitish.startsWith('-')) {
-    return commitish
-  }
-
-  const result = await git(
-    ['rev-parse', '--verify', '--end-of-options', commitish],
-    repository.path,
-    'resolveBlobRevision'
-  )
-  return result.stdout.trim()
-}
 
 /**
  * Retrieve the binary contents of a blob from the repository at a given
@@ -44,60 +23,46 @@ export const getBlobContents = async (
   commitish: string,
   path: string
 ) => {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = async () => {
-      const snapshot = await backend().repositoryBlobSnapshot(
+  const read = async () => {
+    const snapshot = await backend().repositoryBlobSnapshot(
+      repository.path,
+      commitish,
+      path
+    )
+    if (snapshot === null)
+      throw new Error('Blob path does not exist in the requested revision')
+    if (snapshot !== 'unsupported')
+      return Buffer.from(
+        snapshot.buffer,
+        snapshot.byteOffset,
+        snapshot.byteLength
+      )
+    const chunks: Buffer[] = []
+    let offset = 0
+    let oid: string | null = null
+    let size: number | null = null
+    do {
+      const chunk = await backend().repositoryBlobChunk(
         repository.path,
         commitish,
-        path
+        path,
+        offset,
+        1024 * 1024,
+        oid
       )
-      if (snapshot === null)
+      if (chunk === null)
         throw new Error('Blob path does not exist in the requested revision')
-      if (snapshot !== 'unsupported')
-        return Buffer.from(
-          snapshot.buffer,
-          snapshot.byteOffset,
-          snapshot.byteLength
-        )
-      const chunks: Buffer[] = []
-      let offset = 0
-      let oid: string | null = null
-      let size: number | null = null
-      do {
-        const chunk = await backend().repositoryBlobChunk(
-          repository.path,
-          commitish,
-          path,
-          offset,
-          1024 * 1024,
-          oid
-        )
-        if (chunk === null)
-          throw new Error('Blob path does not exist in the requested revision')
-        if (size !== null && chunk.size !== size)
-          throw new Error('Blob size changed during read')
-        oid = chunk.oid
-        size = chunk.size
-        const bytes = Buffer.from(chunk.data, 'base64')
-        chunks.push(bytes)
-        offset += bytes.length
-      } while (size !== null && offset < size)
-      return Buffer.concat(chunks)
-    }
-    return backend().transportKind === 'wry'
-      ? withRepositoryGitOperation(repository.path, 'read', read, true)
-      : read()
+      if (size !== null && chunk.size !== size)
+        throw new Error('Blob size changed during read')
+      oid = chunk.oid
+      size = chunk.size
+      const bytes = Buffer.from(chunk.data, 'base64')
+      chunks.push(bytes)
+      offset += bytes.length
+    } while (size !== null && offset < size)
+    return Buffer.concat(chunks)
   }
-  const revision = await resolveBlobRevision(repository, commitish)
-  return git(
-    ['show', `${revision}:${path}`],
-    repository.path,
-    'getBlobContents',
-    {
-      successExitCodes: new Set([0, 1]),
-      encoding: 'buffer',
-    }
-  ).then(r => r.stdout)
+  return withRepositoryGitOperation(repository.path, 'read', read, true)
 }
 
 /**
@@ -142,27 +107,13 @@ export async function getPartialBlobContentsCatchPathNotInRef(
   path: string,
   length: number
 ): Promise<Buffer | null> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () =>
-      backend().repositoryBlobPrefix(repository.path, commitish, path, length)
-    const result =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    return result === null ? null : Buffer.from(result, 'base64')
-  }
-  const revision = await resolveBlobRevision(repository, commitish)
-  const args = ['show', `${revision}:${path}`]
-
-  return git(args, repository.path, 'getPartialBlobContentsCatchPathNotInRef', {
-    maxBuffer: length,
-    expectedErrors: new Set([GitError.PathExistsButNotInRef]),
-    encoding: 'buffer',
-  })
-    .then(r =>
-      r.gitError === GitError.PathExistsButNotInRef ? null : r.stdout
-    )
-    .catch(e =>
-      isMaxBufferExceededError(e) ? coerceToBuffer(e.stdout) : Promise.reject(e)
-    )
+  const read = () =>
+    backend().repositoryBlobPrefix(repository.path, commitish, path, length)
+  const result = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
+  )
+  return result === null ? null : Buffer.from(result, 'base64')
 }

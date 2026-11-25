@@ -6,12 +6,24 @@ import * as Path from 'node:path'
 
 import { git } from '../../../src/lib/git/core'
 import { getRemotes, getRemoteURL } from '../../../src/lib/git/remote'
-import { getConfigValue, setConfigValue } from '../../../src/lib/git/config'
 import { isolateGitConfig } from '../../helpers/git-config'
 import {
   setupEmptyDirectory,
   setupEmptyRepository,
 } from '../../helpers/repositories'
+
+const setConfigValue = async (
+  repository: Awaited<ReturnType<typeof setupEmptyRepository>>,
+  name: string,
+  value: string
+) => {
+  const result = await git(
+    ['config', name, value],
+    repository.path,
+    'test config'
+  )
+  assert.strictEqual(result.exitCode, 0, result.stderr)
+}
 
 // The Rust backend runs the system Git, not dugite's.
 const rustBackend = process.env.DESKTOP_TEST_RUST_BACKEND === '1'
@@ -149,7 +161,13 @@ describe('git/remote discovery', () => {
         { name: 'unused', url: unusedURL },
       ])
       assert.strictEqual(
-        await getConfigValue(repository, 'transfer.credentialsInUrl'),
+        (
+          await git(
+            ['config', '--get', 'transfer.credentialsInUrl'],
+            repository.path,
+            'read test config'
+          )
+        ).stdout.trim(),
         'die'
       )
 

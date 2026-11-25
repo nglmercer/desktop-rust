@@ -1,4 +1,3 @@
-import { git } from './core'
 import {
   CommittedFileChange,
   AppFileStatusKind,
@@ -141,78 +140,32 @@ export async function getCommits(
   skip?: number,
   additionalArgs: ReadonlyArray<string> = []
 ): Promise<ReadonlyArray<Commit>> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const firstParent =
-      additionalArgs.length === 1 && additionalArgs[0] === '--first-parent'
-    const excludeRemotes =
-      additionalArgs.length === 2 &&
-      additionalArgs[0] === '--not' &&
-      additionalArgs[1] === '--remotes'
-    if (additionalArgs.length !== 0 && !firstParent && !excludeRemotes) {
-      throw new Error('Unsupported history options for the Rust backend')
-    }
-    const read = () =>
-      backend().repositoryRendererHistory(
-        repository.path,
-        revisionRange,
-        limit,
-        skip,
-        firstParent,
-        excludeRemotes
-      )
-    const encoded =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    return encoded === null
-      ? []
-      : parseCommitLog(Buffer.from(encoded, 'base64'))
+  const firstParent =
+    additionalArgs.length === 1 && additionalArgs[0] === '--first-parent'
+  const excludeRemotes =
+    additionalArgs.length === 2 &&
+    additionalArgs[0] === '--not' &&
+    additionalArgs[1] === '--remotes'
+  if (additionalArgs.length !== 0 && !firstParent && !excludeRemotes) {
+    throw new Error('Unsupported history options for the Rust backend')
   }
-  const { formatArgs } = commitLogParser
-
-  const args = ['log', '--date=raw']
-
-  if (limit !== undefined) {
-    args.push(`--max-count=${limit}`)
-  }
-
-  if (skip !== undefined) {
-    args.push(`--skip=${skip}`)
-  }
-
-  args.push(
-    ...formatArgs,
-    '--no-show-signature',
-    '--no-color',
-    ...additionalArgs
+  const read = () =>
+    backend().repositoryRendererHistory(
+      repository.path,
+      revisionRange,
+      limit,
+      skip,
+      firstParent,
+      excludeRemotes
+    )
+  const encoded = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
   )
-
-  // The explicit revision originally preceded additionalArgs, so it must not
-  // inherit an exclusion toggle left active by options such as --not --remotes.
-  if (revisionRange !== undefined) {
-    const isExcludingRevisions =
-      additionalArgs.filter(arg => arg === '--not').length % 2 === 1
-    if (isExcludingRevisions) {
-      args.push('--not')
-    }
-
-    args.push('--end-of-options', revisionRange)
-  }
-
-  args.push('--')
-  const result = await git(args, repository.path, 'getCommits', {
-    successExitCodes: new Set([0, 128]),
-    encoding: 'buffer',
-  })
-
-  // if the repository has an unborn HEAD, return an empty history of commits
-  if (result.exitCode === 128) {
-    return new Array<Commit>()
-  }
-
-  return parseCommitLog(result.stdout)
+  return encoded === null ? [] : parseCommitLog(Buffer.from(encoded, 'base64'))
 }
-
 function parseCommitLog(stdout: Buffer): ReadonlyArray<Commit> {
   const parsed = commitLogParser.parse(stdout)
   return parsed.map(commit => {
@@ -264,10 +217,12 @@ export async function getChangedFiles(
 ): Promise<IChangesetData> {
   const read = () =>
     backend().repositoryRendererCommitChanges(repository.path, sha)
-  const stdout =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+  const stdout = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
+  )
   return parseRawLogWithNumstat(stdout, sha, `${sha}^`)
 }
 
@@ -366,10 +321,12 @@ export async function getCommit(
   ref: string
 ): Promise<Commit | null> {
   const read = () => backend().repositoryRendererCommit(repository.path, ref)
-  const encoded =
-    backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+  const encoded = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    read,
+    true
+  )
   if (encoded === null) return null
   return parseCommitLog(Buffer.from(encoded, 'base64'))[0] ?? null
 }
@@ -391,10 +348,12 @@ export async function getAuthors(repository: Repository, shas: string[]) {
     batch = []
     size = 0
     const read = () => backend().repositoryAuthors(repository.path, revisions)
-    const entries =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
+    const entries = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      read,
+      true
+    )
     for (const entry of entries) {
       if (!seen.has(entry.oid)) {
         seen.add(entry.oid)

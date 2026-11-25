@@ -7,8 +7,8 @@ import {
 } from '../../helpers/ui/render'
 import assert from 'node:assert'
 import { afterEach, describe, it, type TestContext } from 'node:test'
+import { vi } from 'vitest'
 import * as React from 'react'
-import { hostIpc } from '../../../src/web/host-bridge'
 import { act } from '@testing-library/react'
 
 import { Account } from '../../../src/models/account'
@@ -29,6 +29,12 @@ import {
   AppFileStatusKind,
   WorkingDirectoryFileChange,
 } from '../../../src/models/status'
+const contextMenuMock = vi.hoisted(() => ({ invoke: vi.fn() }))
+vi.mock('../../../src/ui/lib/browser-context-menu', () => ({
+  showBrowserContextMenu: (items: ReadonlyArray<IMenuItem>) =>
+    contextMenuMock.invoke(items),
+}))
+
 import { CommitMessage } from '../../../src/ui/changes/commit-message'
 import {
   CoAuthorAutocompletionProvider,
@@ -38,7 +44,7 @@ import {
 import { CommitOptions } from '../../../src/lib/app-state'
 import { AssistedCommitRunState } from '../../../src/models/assisted-commit-run'
 import { ErrorWithMetadata } from '../../../src/lib/error-with-metadata'
-import { ISerializableMenuItem } from '../../../src/lib/menu-item'
+import { IMenuItem } from '../../../src/lib/menu-item'
 import {
   getCommitMode,
   storeCommitMode,
@@ -1675,16 +1681,12 @@ describe('CommitMessage', () => {
     })
 
     function captureOptionsMenu(t: TestContext) {
-      const menus = new Array<ReadonlyArray<ISerializableMenuItem>>()
+      const menus = new Array<ReadonlyArray<IMenuItem>>()
       let selectedLabel: string | null = null
       t.mock.method(
-        hostIpc,
+        contextMenuMock,
         'invoke',
-        async (
-          channel: string,
-          items: ReadonlyArray<ISerializableMenuItem>
-        ) => {
-          assert.strictEqual(channel, 'show-contextual-menu')
+        async (items: ReadonlyArray<IMenuItem>) => {
           menus.push(items)
           const index = items.findIndex(item => item.label === selectedLabel)
           return index < 0 ? null : [index]
@@ -1819,7 +1821,7 @@ describe('CommitMessage', () => {
         state.kind === 'error' ? `/${state.retry}` : ''
       }`, t => {
         let acted = 0
-        const menu = t.mock.method(hostIpc, 'invoke', async () => null)
+        const menu = t.mock.method(contextMenuMock, 'invoke', async () => null)
         const { view } = renderWithCommitModes({
           commitMode: 'copilot',
           isCreatingCopilotAssistedCommits: working,
@@ -1880,7 +1882,7 @@ describe('CommitMessage', () => {
     }
 
     it('keeps the panel gear disabled during pushing without exposing rollback Cancel', t => {
-      const menu = t.mock.method(hostIpc, 'invoke', async () => null)
+      const menu = t.mock.method(contextMenuMock, 'invoke', async () => null)
       const { view } = renderWithCommitModes({
         commitMode: 'copilot',
         isCreatingCopilotAssistedCommits: true,
@@ -2306,10 +2308,9 @@ describe('CommitMessage', () => {
       const updates = new Array<Partial<CommitOptions>>()
       let signOffIndex = -1
       t.mock.method(
-        hostIpc,
+        contextMenuMock,
         'invoke',
-        (channel: string, items: ReadonlyArray<ISerializableMenuItem>) => {
-          assert.strictEqual(channel, 'show-contextual-menu')
+        (items: ReadonlyArray<IMenuItem>) => {
           signOffIndex = items.findIndex(item => item.label === SignOffLabel)
           return selection
         }

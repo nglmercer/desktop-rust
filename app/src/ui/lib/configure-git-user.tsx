@@ -9,11 +9,6 @@ import { Form } from '../lib/form'
 import { Button } from '../lib/button'
 import { TextBox } from '../lib/text-box'
 import { Row } from '../lib/row'
-import {
-  isConfigFileLockError,
-  parseConfigLockFilePathFromError,
-} from '../../lib/git'
-import { ConfigLockFileExists } from './config-lock-file-exists'
 import { RadioButton } from './radio-button'
 import { Select } from './select'
 import { GitEmailNotFoundWarning } from './git-email-not-found-warning'
@@ -41,14 +36,6 @@ interface IConfigureGitUserState {
 
   readonly useGitHubAuthorInfo: boolean
 
-  /**
-   * If unable to save Git configuration values (name, email)
-   * due to an existing configuration lock file this property
-   * will contain the (fully qualified) path to said lock file
-   * such that an error may be presented and the user given a
-   * choice to delete the lock file.
-   */
-  readonly existingLockFilePath?: string
   readonly saveError?: string
 }
 
@@ -129,20 +116,10 @@ export class ConfigureGitUser extends React.Component<
   }
 
   public render() {
-    const error =
-      this.state.existingLockFilePath !== undefined ? (
-        <ConfigLockFileExists
-          lockFilePath={this.state.existingLockFilePath}
-          onLockFileDeleted={this.onLockFileDeleted}
-          onError={this.onLockFileDeleteError}
-        />
-      ) : null
-
     return (
       <div id="configure-git-user">
         {this.renderAuthorOptions()}
 
-        {error}
         {this.state.saveError !== undefined && (
           <p role="alert">{this.state.saveError}</p>
         )}
@@ -313,15 +290,6 @@ export class ConfigureGitUser extends React.Component<
     }
   }
 
-  private onLockFileDeleted = () => {
-    this.setState({ existingLockFilePath: undefined })
-  }
-
-  private onLockFileDeleteError = (e: Error) => {
-    log.error('Failed to unlink config lock file', e)
-    this.setState({ existingLockFilePath: undefined })
-  }
-
   private onUseGitHubInfoSelected = () => {
     this.setState({ useGitHubAuthorInfo: true })
   }
@@ -359,15 +327,7 @@ export class ConfigureGitUser extends React.Component<
       if (email.length > 0 && email !== this.props.globalUserEmail) {
         await setGlobalConfigValue('user.email', email)
       }
-    } catch (e) {
-      if (isConfigFileLockError(e)) {
-        const lockFilePath = parseConfigLockFilePathFromError(e.result)
-
-        if (lockFilePath !== null) {
-          this.setState({ existingLockFilePath: lockFilePath })
-          return
-        }
-      }
+    } catch {
       this.setState({
         saveError:
           'Could not save Git settings. Some changes may have been saved; check your configuration and try again.',

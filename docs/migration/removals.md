@@ -18,6 +18,40 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | Suites Python ya reemplazadas | tests Rust/Vitest equivalentes | `cargo test`, `pnpm test` |
 | `rust/Cargo.toml`/`rust/Cargo.lock` separados | workspace Cargo raíz | `cargo metadata`, `cargo test --workspace` |
 | `ipc-shim.js` fuente manual | `web/ipc-shim.ts` compilado por Vite | `pnpm vite:build` |
+| `script/run.ts` (launcher del paquete Electron) | `script/start-rust.ts` / `script/start-rust-package.ts` | `pnpm compile:script` |
+| `script/copilot.ts` y su test aislado de copia npm del runtime | empaquetado Rust en `script/package-rust.ts` | `pnpm compile:script`, `pnpm test:script` |
+| `app/src/lib/compute-bundle-hash.ts` y metadatos de instaladores/NuGet/bundle Electron en `script/dist-info.ts` | empaquetado Rust/Vite vigente | `pnpm compile:script`, `pnpm check:types` |
+| `find-toast-activator-clsid.ts`, GUIDs Electron de actualizador/main, `set-state.ts`, `logging/get-log-path.ts` y `actions-log-parser/` | sin consumidores; notificaciones/actualización/host Rust vigentes | `pnpm check:types`, `pnpm lint` |
+| fallback de tamaño de archivos por `fs.stat` | `renderer_large_files` en backend Rust | `app/test/unit/rust-large-files-routing-test.ts` |
+| lectura directa de `static/licenses.json` mediante `fs` | recurso servido por el host mediante `readBundledTemplate` | `app/test/unit/acknowledgements-test.tsx` |
+| lectura directa de `emoji.json` mediante `fs` | recurso servido por el host y `fetch` del bundle | `app/test/unit/read-emoji-test.ts` |
+| configuración Git arbitraria por shell en renderer | contratos Rust tipados y allowlist de settings consumidos por la app | `app/test/unit/rust-global-git-identity-test.ts`, `app/test/unit/git/config-test.ts` |
+| fallback backend-less de creación de commits | checkpoint Rust `prepareSelectedCommit`/`publishSelectedCommit` obligatorio | `app/test/unit/rust-native-commit-routing-test.ts`, `app/test/unit/git/commit-test.ts` |
+| descubrimiento de editores por `child_process`/archivos específicos de Darwin, Linux y Windows | descubrimiento validado del host Rust | `pnpm check:types`, integración backend `available_editors` |
+| fallback backend-less de creación de repositorios y commit inicial | inicialización, archivos y commit inicial Rust obligatorios | `app/test/unit/ui/assisted-repository-creation-test.tsx` |
+| lectura de `pretext-draft.md` mediante `fs` y constantes de imágenes sin consumidores | recurso servido por el bundle/host | `app/test/unit/release-notes-test.ts` |
+| diálogo legacy de borrado de `config.lock` y parsing de errores de config lock | escritura de configuración Rust tipada; errores genéricos sin borrado renderer | `app/test/unit/configure-git-user-save-test.tsx`, `app/test/unit/git/core-test.ts` |
+| validación backend-less de rutas/argumentos de integraciones personalizadas | validación de host Rust obligatoria | `app/test/unit/native-custom-integration-test.ts` |
+| serialización IPC de menús contextuales y fallback `show-contextual-menu` | menús contextuales DOM-owned usados siempre por el renderer | `app/test/unit/ui/commit-message-test.tsx`, `app/test/unit/ui/assisted-commit-history-test.tsx` |
+| lectura directa del destino de clone mediante `readdir` | estado de destino Rust disponible por WebSocket y Tao/Wry | `app/test/unit/clone-destination-websocket-test.tsx`, `app/test/unit/ui/clone-repository-test.tsx` |
+| lectura directa de `markdown.css` mediante `fs` | hoja servida como recurso del bundle y obtenida con `fetch` same-origin | `app/test/unit/sandboxed-markdown-test.tsx` |
+| lectura directa de emoji mediante URLs `file:` | solo emoji servidos por el origen/bundle Rust | `app/test/unit/sandboxed-markdown-test.tsx` |
+| lectura directa de archivos de trabajo para syntax highlighting | snapshot acotado `renderer_working_file` Rust obligatorio | `app/test/unit/rust-syntax-highlighting-test.ts` |
+| lectura directa de `FETCH_HEAD` para fecha de fetch | lectura Rust `repositoryLastFetch` obligatoria | `app/test/unit/stores/last-fetch-test.ts` |
+| `readPartialFile` sin consumidores de producción | lecturas acotadas Rust del archivo de trabajo | `app/test/unit/file-system-test.ts` |
+| ejecución directa de `git reset` hard/soft en renderer | reset revisado Rust por WebSocket y Tao/Wry | `app/test/unit/git/reset-test.ts`, `cargo test -p desktop-core renderer_reset`, `cargo test -p desktop-app wry_resets_a_reviewed_commit` |
+| lanzamiento backend-less de editores externos y edición de configuración global | apertura de editores validada por el host Rust | `pnpm check:types`, integración backend `open_editor` |
+| fallback backend-less de descarte de cambios y borrado directo de archivos en `GitStore` | descarte revisado/recuperable del backend Rust obligatorio | `app/test/unit/rust-reviewed-discard-test.ts`, `app/test/unit/rust-batch-discard-dialog-test.tsx`, `app/test/unit/rust-discard-recovery-test.tsx` |
+| diálogo legacy de descarte con recuperación por papelera y lista no revisada | revisión Rust obligatoria con recuperación exacta | `app/test/unit/rust-batch-discard-dialog-test.tsx` |
+| comprobación duplicada de archivos grandes en sidebar y exclusión condicional de recuperación de descartes | revisión grande integrada en `prepareSelectedCommit`; recuperación siempre disponible | `app/test/unit/ui/commit-message-test.tsx`, `app/test/unit/rust-reviewed-discard-test.ts` |
+| puerta `transportKind` del diálogo de borrado remoto de ramas | revisión y recuperación Rust obligatorias para borrado remoto | `app/test/unit/ui/rust-remote-branch-deletion-dialog-test.tsx`, `app/test/unit/rust-remote-branch-deletion-test.ts` |
+| lectura de archivos de trabajo sin lease en WebSocket para highlighting | lectura uniforme bajo lease de operación de repositorio | `app/test/unit/rust-syntax-highlighting-test.ts` |
+| fallback shell para eliminar HEAD inicial en revert del primer commit | eliminación revisada Rust obligatoria | `app/test/unit/rust-first-undo-routing-test.ts` |
+| comprobación duplicada de capacidad de progreso de commit en `createCommit` | validación única en el cliente backend tipado | `app/test/unit/git/commit-test.ts`, `app/test/unit/rust-native-commit-routing-test.ts` |
+| wrapper TypeScript sin consumidores para `diff-index`/estado del índice | operaciones de índice Rust usadas por flujos vivos; constante null-tree local a `diff.ts` | `app/test/unit/git/diff-test.ts` |
+| wrappers TypeScript sin consumidores para `checkoutIndex`, `resetPaths` y `resetSubmodulePaths` | operaciones Rust internas de descarte/checkout/staging ya revisadas; batching compartido conservado | `app/test/unit/git/reset-test.ts`, `app/test/unit/git/submodule-test.ts`, `app/test/unit/rust-submodule-routing-test.ts` |
+| `getGlobalConfigPath` sin consumidores de producción | edición de configuración global abierta directamente por el host Rust | `app/test/unit/rust-global-git-identity-test.ts`, `app/test/unit/git/config-test.ts` |
+| `DiscardChangesError` y handler legacy de fallos al mover a papelera | descarte revisado/recuperable Rust obligatorio | `pnpm check:types`, `pnpm lint` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -45,9 +79,9 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | scripts npm residuales de release | publicación/versionado verificados con pnpm/Rust sin npm CLI |
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
-La línea base numérica viva está en `pnpm migration:status` (181 comprobaciones
-`transportKind`, 104 llamadas legacy Git, 22 imports `dugite`, 0 suites en el
-runner Node a 2026-11-25). `rust/ROADMAP.md` ordena el trabajo restante.
+La línea base numérica viva está en `pnpm migration:status` (33 comprobaciones
+`transportKind`, 47 llamadas legacy Git, 18 imports `dugite`, 22 imports `fs`,
+0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva
 

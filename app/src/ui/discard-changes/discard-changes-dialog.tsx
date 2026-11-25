@@ -4,9 +4,7 @@ import type { Repository } from '../../models/repository'
 import type { Dispatcher } from '../dispatcher'
 import type { WorkingDirectoryFileChange } from '../../models/status'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
-import { PathText } from '../lib/path-text'
 import { Checkbox, CheckboxValue } from '../lib/checkbox'
-import { TrashNameLabel } from '../lib/context-menu'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 import { backend } from '../../backend/client'
 
@@ -42,19 +40,11 @@ interface IDiscardChangesState {
   readonly loadingPreview: boolean
 }
 
-/**
- * If we're discarding any more than this number, we won't bother listing them
- * all.
- */
-const MaxFilesToList = 10
-
 /** A component to confirm and then discard changes. */
 export class DiscardChanges extends React.Component<
   IDiscardChangesProps,
   IDiscardChangesState
 > {
-  private readonly useNative =
-    typeof window !== 'undefined' && backend().transportKind !== 'none'
   private mounted = false
   private previewGeneration = 0
   public constructor(props: IDiscardChangesProps) {
@@ -65,20 +55,19 @@ export class DiscardChanges extends React.Component<
       confirmDiscardChanges: this.props.confirmDiscardChanges,
       nativePreview: null,
       nativeError: null,
-      loadingPreview: this.useNative,
+      loadingPreview: true,
     }
   }
 
   public componentDidMount() {
     this.mounted = true
-    if (this.useNative) void this.loadNativePreview()
+    void this.loadNativePreview()
   }
 
   public componentDidUpdate(prevProps: IDiscardChangesProps) {
     if (
-      this.useNative &&
-      (prevProps.repository.path !== this.props.repository.path ||
-        prevProps.files !== this.props.files)
+      prevProps.repository.path !== this.props.repository.path ||
+      prevProps.files !== this.props.files
     )
       void this.loadNativePreview()
   }
@@ -149,14 +138,7 @@ export class DiscardChanges extends React.Component<
         <DialogContent>
           {this.renderFileList()}
           <p id="discard-changes-confirmation-message">
-            {this.useNative ? (
-              'A backup will be available in Recovery history.'
-            ) : (
-              <>
-                Changes can be restored by retrieving them from the{' '}
-                {TrashNameLabel}.
-              </>
-            )}
+            A backup will be available in Recovery history.
           </p>
           {this.renderConfirmDiscardChanges()}
         </DialogContent>
@@ -166,8 +148,7 @@ export class DiscardChanges extends React.Component<
             destructive={true}
             okButtonText={this.getOkButtonLabel()}
             okButtonDisabled={
-              isDiscardingChanges ||
-              (this.useNative && this.state.nativePreview === null)
+              isDiscardingChanges || this.state.nativePreview === null
             }
             cancelButtonDisabled={isDiscardingChanges}
           />
@@ -198,69 +179,43 @@ export class DiscardChanges extends React.Component<
   }
 
   private renderFileList() {
-    if (this.useNative) {
-      if (this.state.loadingPreview)
-        return (
-          <p id="discard-changes-confirmation-file-list">Reviewing changes…</p>
-        )
-      if (this.state.nativeError !== null)
-        return (
-          <p id="discard-changes-confirmation-file-list" role="alert">
-            {this.state.nativeError}
-          </p>
-        )
+    if (this.state.loadingPreview)
       return (
-        <div id="discard-changes-confirmation-file-list">
-          <p>Discard changes to these files?</p>
-          <div className="file-list">
-            <ul>
-              {this.state.nativePreview?.files.map(path => (
-                <li key={path}>
-                  <bdi
-                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                  >
-                    {path}
-                  </bdi>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        <p id="discard-changes-confirmation-file-list">Reviewing changes…</p>
       )
-    }
-    if (this.props.files.length > MaxFilesToList) {
+    if (this.state.nativeError !== null)
       return (
-        <p id="discard-changes-confirmation-file-list">
-          Are you sure you want to discard all {this.props.files.length} changed
-          files?
+        <p id="discard-changes-confirmation-file-list" role="alert">
+          {this.state.nativeError}
         </p>
       )
-    } else {
-      return (
-        <div id="discard-changes-confirmation-file-list">
-          <p>Are you sure you want to discard all changes to:</p>
-          <div className="file-list">
-            <ul>
-              {this.props.files.map(p => (
-                <li key={p.id}>
-                  <PathText path={p.path} />
-                </li>
-              ))}
-            </ul>
-          </div>
+    return (
+      <div id="discard-changes-confirmation-file-list">
+        <p>Discard changes to these files?</p>
+        <div className="file-list">
+          <ul>
+            {this.state.nativePreview?.files.map(path => (
+              <li key={path}>
+                <bdi
+                  style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                >
+                  {path}
+                </bdi>
+              </li>
+            ))}
+          </ul>
         </div>
-      )
-    }
+      </div>
+    )
   }
 
   private discard = async () => {
-    if (this.useNative && this.state.nativePreview === null) return
+    if (this.state.nativePreview === null) return
     this.setState({ isDiscardingChanges: true })
 
     await this.props.dispatcher.discardChanges(
       this.props.repository,
       this.props.files,
-      true,
       this.state.nativePreview?.basis
     )
 

@@ -654,11 +654,9 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     if let Some(reply) = reply {
                         let _ = reply.send(Ok(value));
                     }
-                    if matches!(effect, ActionEffect::Exit) {
-                        if !shutting_down {
-                            shutting_down = true;
-                            begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
-                        }
+                    if matches!(effect, ActionEffect::Exit) && !shutting_down {
+                        shutting_down = true;
+                        begin_shutdown(app_loop.clone(), host_loop.clone(), bridge_loop.clone(), proxy_loop.clone());
                     }
                 }
                 AppEvent::NativeMenu(id) => {

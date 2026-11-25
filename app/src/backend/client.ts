@@ -2176,6 +2176,50 @@ export class BackendClient {
     return value
   }
 
+  /** Read one allowlisted global Git setting through Rust. */
+  async globalGitSettingValue(
+    key: 'user.name' | 'user.email' | 'init.defaultbranch'
+  ): Promise<string | null> {
+    const result =
+      this.transport === 'wry'
+        ? await this.request('git_info', { operation: { type: 'read' } })
+        : await this.request('git_settings', { scope: 'global' })
+    if (
+      !isRecord(result) ||
+      result.scope !== 'global' ||
+      !isRecord(result.values)
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid global Git settings response',
+        retryable: false,
+      })
+    }
+    const value = result.values[key]
+    if (value !== null && typeof value !== 'string') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid global Git setting value',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
+  /** Write one allowlisted global Git setting through Rust. */
+  async setGlobalGitSetting(
+    key: 'user.name' | 'user.email' | 'init.defaultbranch',
+    value: string
+  ): Promise<void> {
+    if (this.transport === 'wry') {
+      await this.request('git_info', {
+        operation: { type: 'set', key, value },
+      })
+    } else {
+      await this.request('set_git_setting', { scope: 'global', key, value })
+    }
+  }
+
   /** Prepare the global Git config file and return the path chosen by Git. */
   async globalGitConfigPath(): Promise<string> {
     const value =
@@ -2989,14 +3033,12 @@ export class BackendClient {
     | 'dangling_symlink'
     | 'unreadable'
   > {
-    if (this.transport !== 'ws') {
-      throw new BackendError({
-        code: 'unsupported',
-        message: 'Clone destination checks are unavailable on this transport',
-        retryable: false,
-      })
-    }
-    const value = await this.request('clone_destination_status', { path })
+    const value =
+      this.transport === 'wry'
+        ? await this.request('git_info', {
+            operation: { type: 'clone_destination_status', path },
+          })
+        : await this.request('clone_destination_status', { path })
     if (
       value !== 'missing' &&
       value !== 'empty' &&
@@ -8087,6 +8129,88 @@ export class BackendClient {
       throw new BackendError({
         code: 'invalid_response',
         message: 'Fast-forward outcome is uncertain; inspect tracking branches',
+        retryable: false,
+      })
+  }
+
+  /** Reset HEAD to a reviewed commit using a destructive mode owned by Rust. */
+  async resetRepository(
+    repositoryPath: string,
+    target: string,
+    mode: 'hard' | 'soft'
+  ): Promise<void> {
+    if (
+      target.length === 0 ||
+      target.length > 1024 ||
+      target.includes('\0') ||
+      (mode !== 'hard' && mode !== 'soft')
+    )
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'A valid reset target and mode are required',
+        retryable: false,
+      })
+    const call = (
+      method: 'renderer_reset_preview' | 'renderer_reset',
+      extra: Record<string, unknown> = {}
+    ) =>
+      this.transport === 'wry'
+        ? this.request('git_info', {
+            operation: {
+              type: 'reset',
+              repository_path: repositoryPath,
+              operation: { method, target, mode, ...extra },
+            },
+          })
+        : this.repositoryRead(repositoryPath, method, {
+            target,
+            mode,
+            ...extra,
+          })
+    const preview = await call('renderer_reset_preview')
+    if (
+      !isRecord(preview) ||
+      preview.target !== target ||
+      preview.mode !== mode ||
+      typeof preview.resolved !== 'string' ||
+      !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(preview.resolved) ||
+      typeof preview.basis !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(preview.basis)
+    )
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid reset review',
+        retryable: false,
+      })
+    let result: unknown
+    try {
+      result = await call('renderer_reset', { basis: preview.basis })
+    } catch (error) {
+      const cause = toBackendError(error)
+      throw new BackendError({
+        code: cause.code,
+        message: `${cause.message}; inspect HEAD, index and working files before retrying`,
+        retryable: false,
+      })
+    }
+    if (
+      !isRecord(result) ||
+      !Number.isSafeInteger(result.code) ||
+      result.target !== target ||
+      result.mode !== mode ||
+      result.resolved !== preview.resolved ||
+      typeof result.stdout !== 'string' ||
+      typeof result.stderr !== 'string'
+    )
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Reset outcome is uncertain; inspect the repository',
+        retryable: false,
+      })
+    if (result.code !== 0)
+      throw new BackendError({
+        code: 'git_error',
+        message: `${result.stderr || 'Unable to reset'}; inspect HEAD and index before retrying`,
         retryable: false,
       })
   }

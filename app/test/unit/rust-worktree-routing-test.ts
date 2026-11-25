@@ -50,7 +50,7 @@ describe.each(['wry', 'ws'])('Rust worktree routing via %s', transport => {
     mocks.read.mockResolvedValue([entry])
     await expect(listWorktrees('/repo')).resolves.toEqual([entry])
     expect(mocks.read).toHaveBeenCalledWith('/repo')
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+    expect(mocks.scope).toHaveBeenCalledTimes(1)
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

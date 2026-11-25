@@ -1,7 +1,4 @@
-import { git } from './core'
-import { directoryExists } from '../directory-exists'
-import { dirname, resolve } from 'path'
-import { realpath } from 'fs/promises'
+import { resolve } from 'path'
 import { backend } from '../../backend/client'
 
 export type RepositoryType =
@@ -19,83 +16,7 @@ export type RepositoryType =
  * path, verified against Git's ownership diagnostic.
  */
 export async function getRepositoryType(path: string): Promise<RepositoryType> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return path.length === 0
-      ? { kind: 'missing' }
-      : backend().repositoryType(resolve(path))
-  }
-  if (!(await directoryExists(path))) {
-    return { kind: 'missing' }
-  }
-
-  try {
-    const result = await git(
-      ['rev-parse', '--is-bare-repository', '--show-cdup', '--git-dir'],
-      path,
-      'getRepositoryType',
-      { successExitCodes: new Set([0, 128]) }
-    )
-
-    if (result.exitCode === 0) {
-      // Bare repositories will not include gitdir so we handle that separately
-      if (result.stdout.startsWith('true\n')) {
-        return { kind: 'bare' }
-      }
-
-      // --is-bare-repository and --show-cdup each produce a single line but
-      // --git-dir could theoretically contain newlines so we parse the known
-      // fields first and treat the remainder as the git dir. We use [\s\S]*
-      // instead of .* for the git dir capture group because .* doesn't match
-      // newlines whereas [\s\S]* matches any character including newlines.
-      const match = result.stdout.match(/^(true|false)\n(.*)\n([\s\S]*)\n$/)
-
-      if (match) {
-        const [, isBare, cdup, gitDir] = match
-
-        return isBare === 'true'
-          ? { kind: 'bare' }
-          : {
-              kind: 'regular',
-              topLevelWorkingDirectory: resolve(path, cdup),
-              gitDir: resolve(path, gitDir),
-            }
-      }
-    }
-
-    // Trace output may precede the diagnostic. Match at line boundaries,
-    // including the first line, without splitting paths containing newlines.
-    const stderr = `\n${result.stderr}`
-    const ownershipDiagnostic =
-      '\nfatal: detected dubious ownership in repository at '
-    if (stderr.includes(ownershipDiagnostic)) {
-      // Derive candidates from the filesystem, not diagnostic text, since
-      // directory names can themselves contain quotes and newlines.
-      let candidate = await realpath(path)
-      for (;;) {
-        const gitPath = __WIN32__ ? candidate.replaceAll('\\', '/') : candidate
-        if (stderr.includes(`${ownershipDiagnostic}'${gitPath}'\n`)) {
-          return { kind: 'unsafe', path: gitPath }
-        }
-
-        const parent = dirname(candidate)
-        if (parent === candidate) {
-          throw new Error(
-            'Unable to determine the repository directory for the ownership exception.'
-          )
-        }
-        candidate = parent
-      }
-    }
-
-    return { kind: 'missing' }
-  } catch (err) {
-    // This could theoretically mean that the Git executable didn't exist but
-    // in reality it's almost always going to be that the process couldn't be
-    // launched inside of `path` meaning it didn't exist. This would constitute
-    // a race condition given that we stat the path before executing Git.
-    if (err.code === 'ENOENT') {
-      return { kind: 'missing' }
-    }
-    throw err
-  }
+  return path.length === 0
+    ? { kind: 'missing' }
+    : backend().repositoryType(resolve(path))
 }

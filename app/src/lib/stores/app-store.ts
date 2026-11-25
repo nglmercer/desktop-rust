@@ -163,7 +163,6 @@ import {
 } from '../../models/progress'
 import { Popup, PopupType } from '../../models/popup'
 import { themeChangeMonitor } from '../../ui/lib/theme-change-monitor'
-import { getAppPath } from '../../ui/lib/app-proxy'
 import {
   ApplicableTheme,
   ApplicationTheme,
@@ -222,12 +221,7 @@ import {
   ICompareState,
   CommitOptions,
 } from '../app-state'
-import {
-  findEditorOrDefault,
-  getAvailableEditors,
-  launchCustomExternalEditor,
-  launchExternalEditor,
-} from '../editors'
+import { findEditorOrDefault, getAvailableEditors } from '../editors'
 import { assertNever, fatalError, forceUnwrap } from '../fatal-error'
 
 import { formatCommitMessage } from '../format-commit-message'
@@ -265,7 +259,6 @@ import {
   MergeResult,
   getBranchesDifferingFromUpstream,
   deleteLocalBranch,
-  deleteRemoteBranch,
   fastForwardBranches,
   GitResetMode,
   reset,
@@ -289,8 +282,6 @@ import {
   getBranchMergeBaseChangedFiles,
   getBranchMergeBaseDiff,
   checkoutCommit,
-  getRemoteURL,
-  getGlobalConfigPath,
   getFilesDiffText,
   git,
 } from '../git'
@@ -377,7 +368,6 @@ import {
   getLastDesktopStashEntryForBranch,
   popStashEntry,
   dropDesktopStashEntry,
-  moveStashEntry,
 } from '../git/stash'
 import {
   UncommittedChangesStrategy,
@@ -416,11 +406,7 @@ import { RepositoryIndicatorUpdater } from './helpers/repository-indicator-updat
 import { isAttributableEmailFor } from '../email'
 import { TrashNameLabel } from '../../ui/lib/context-menu'
 import { GitError as DugiteError } from 'dugite'
-import {
-  ErrorWithMetadata,
-  CheckoutError,
-  DiscardChangesError,
-} from '../error-with-metadata'
+import { ErrorWithMetadata, CheckoutError } from '../error-with-metadata'
 import {
   ShowSideBySideDiffDefault,
   getShowSideBySideDiff,
@@ -1346,10 +1332,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
   }
 
-  /** Load the emoji from disk. */
+  /** Load the emoji from the bundled database. */
   public async loadEmoji() {
-    const rootDir = await getAppPath()
-    readEmoji(rootDir)
+    readEmoji()
       .then(emoji => {
         this.emoji = emoji
         this.emitUpdate()
@@ -5904,15 +5889,6 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const gitStore = this.gitStoreCache.get(repository)
     await gitStore.performFailableOperation(async () => {
       await renameBranch(repository, branch, newName)
-
-      // The Rust rename already transfers every Desktop-associated stash.
-      if (typeof window !== 'undefined' && backend().transportKind !== 'none')
-        return
-      const stashEntry = gitStore.desktopStashEntries.get(branch.name)
-
-      if (stashEntry) {
-        await moveStashEntry(repository, stashEntry, newName)
-      }
     })
 
     return this._refreshRepository(repository)
@@ -5994,50 +5970,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
     includeUpstream?: boolean,
     toCheckout?: Branch | null
   ): Promise<void> {
-    if (
-      typeof window !== 'undefined' &&
-      backend().transportKind !== 'none' &&
-      (branch.type === BranchType.Remote || includeUpstream === true)
-    ) {
+    if (branch.type === BranchType.Remote || includeUpstream === true) {
       throw new Error(
         'Review each push destination before deleting a remote branch'
       )
     }
     return this.withRefreshedGitHubRepository(repository, async repository => {
       const gitStore = this.gitStoreCache.get(repository)
-
-      // If solely a remote branch, there is no need to checkout a branch.
-      if (branch.type === BranchType.Remote) {
-        const { remoteName, tip, nameWithoutRemote } = branch
-        if (remoteName === null) {
-          // This is based on the branches ref. It should not be null for a
-          // remote branch
-          throw new Error(
-            `Could not determine remote name from: ${branch.ref}.`
-          )
-        }
-
-        const remote =
-          gitStore.remotes.find(r => r.name === remoteName) ??
-          (await getRemoteURL(repository, remoteName)
-            .then(url => (url ? { name: remoteName, url } : undefined))
-            .catch(e => log.debug(`Could not get remote URL`, e)))
-
-        if (remote === undefined) {
-          throw new Error(`Could not determine remote url from: ${branch.ref}.`)
-        }
-
-        await gitStore.performFailableOperation(() =>
-          deleteRemoteBranch(repository, remote, nameWithoutRemote)
-        )
-
-        // We log the remote branch's sha so that the user can recover it.
-        log.info(
-          `Deleted branch ${branch.upstreamWithoutRemote} (was ${tip.sha})`
-        )
-
-        return this._refreshRepository(repository)
-      }
 
       // If a local branch, user may have the branch to delete checked out and
       // we need to switch to a different branch (default or recent).
@@ -6071,29 +6010,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
     branch: Branch,
     includeUpstream?: boolean
   ): Promise<void> {
-    await deleteLocalBranch(repository, branch.name, branch.tip.sha)
-
-    if (
-      includeUpstream === true &&
-      branch.upstreamRemoteName !== null &&
-      branch.upstreamWithoutRemote !== null
-    ) {
-      const gitStore = this.gitStoreCache.get(repository)
-      const remoteName = branch.upstreamRemoteName
-
-      const remote =
-        gitStore.remotes.find(r => r.name === remoteName) ??
-        (await getRemoteURL(repository, remoteName)
-          .then(url => (url ? { name: remoteName, url } : undefined))
-          .catch(e => log.debug(`Could not get remote URL`, e)))
-
-      if (!remote) {
-        throw new Error(`Could not determine remote url from: ${branch.ref}.`)
-      }
-
-      await deleteRemoteBranch(repository, remote, branch.upstreamWithoutRemote)
+    if (includeUpstream === true) {
+      throw new Error(
+        'Review each push destination before deleting a remote branch'
+      )
     }
-    return
+    await deleteLocalBranch(repository, branch.name, branch.tip.sha)
   }
 
   private getBranchToCheckoutAfterDelete(
@@ -6907,7 +6829,6 @@ export class AppStore extends TypedBaseStore<IAppState> {
   public async _discardChanges(
     repository: Repository,
     files: ReadonlyArray<WorkingDirectoryFileChange>,
-    moveToTrash: boolean = true,
     reviewBasis?: string
   ) {
     this.assistedCommits.state.assertAvailable(repository)
@@ -6924,7 +6845,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const guard = (index: number): Promise<void> =>
       index === paths.length
         ? withRepositoryGitOperation(repository.path, 'mutation', () =>
-            this.discardChangesCore(repository, files, moveToTrash, reviewBasis)
+            this.discardChangesCore(repository, files, reviewBasis)
           )
         : this.assistedCommits.state.withDestruction(paths[index], () =>
             guard(index + 1)
@@ -6935,47 +6856,23 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private async discardChangesCore(
     repository: Repository,
     files: ReadonlyArray<WorkingDirectoryFileChange>,
-    moveToTrash: boolean = true,
     reviewBasis?: string
   ) {
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      try {
-        const paths = files.map(file => file.path)
-        const undoId =
-          reviewBasis === undefined
-            ? await discardBatchWithoutDialog(repository, paths)
-            : await backend().repositoryDiscardBatch(
-                repository.path,
-                paths,
-                reviewBasis
-              )
-        this.showDiscardUndoBanner(repository, undoId)
-        await this._refreshRepository(repository)
-      } catch (error) {
-        this.emitError(error)
-      }
-      return
-    }
-    const gitStore = this.gitStoreCache.get(repository)
-
-    const { askForConfirmationOnDiscardChangesPermanently } = this.getState()
-
     try {
-      await gitStore.discardChanges(
-        files,
-        moveToTrash,
-        askForConfirmationOnDiscardChangesPermanently
-      )
+      const paths = files.map(file => file.path)
+      const undoId =
+        reviewBasis === undefined
+          ? await discardBatchWithoutDialog(repository, paths)
+          : await backend().repositoryDiscardBatch(
+              repository.path,
+              paths,
+              reviewBasis
+            )
+      this.showDiscardUndoBanner(repository, undoId)
+      await this._refreshRepository(repository)
     } catch (error) {
-      if (!(error instanceof DiscardChangesError)) {
-        log.error('Failed discarding changes', error)
-      }
-
       this.emitError(error)
-      return
     }
-
-    return this._refreshRepository(repository)
   }
 
   public async _discardChangesFromSelection(
@@ -7005,27 +6902,20 @@ export class AppStore extends TypedBaseStore<IAppState> {
     diff: ITextDiff,
     selection: DiffSelection
   ) {
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      try {
-        const undoId = await discardReviewedSelection(
-          repository,
-          filePath,
-          diff,
-          selection
-        )
-        if (undoId !== null) {
-          this.showDiscardUndoBanner(repository, undoId)
-        }
-        await this._refreshRepository(repository)
-      } catch (error) {
-        this.emitError(error)
+    try {
+      const undoId = await discardReviewedSelection(
+        repository,
+        filePath,
+        diff,
+        selection
+      )
+      if (undoId !== null) {
+        this.showDiscardUndoBanner(repository, undoId)
       }
-      return
+      await this._refreshRepository(repository)
+    } catch (error) {
+      this.emitError(error)
     }
-    const gitStore = this.gitStoreCache.get(repository)
-    await gitStore.discardChangesFromSelection(filePath, diff, selection)
-
-    return this._refreshRepository(repository)
   }
 
   private showDiscardUndoBanner(repository: Repository, undoId: string): void {
@@ -9716,32 +9606,26 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   public async _editGlobalGitConfig() {
-    if (backend().transportKind !== 'none') {
-      try {
-        const { selectedExternalEditor, useCustomEditor, customEditor } =
-          this.getState()
-        if (useCustomEditor && customEditor) {
-          await backend().openCustomGlobalGitConfigEditor(
-            await this.nativeCustomEditorCommand(customEditor)
-          )
-          return
-        }
-        const match = await findEditorOrDefault(selectedExternalEditor)
-        if (match === null) {
-          throw new ExternalEditorError(
-            'No suitable editors are installed for GitHub Desktop to launch.',
-            { suggestDefaultEditor: true }
-          )
-        }
-        await backend().openGlobalGitConfigEditor(match.editor)
-      } catch (error) {
-        this.emitError(error)
+    try {
+      const { selectedExternalEditor, useCustomEditor, customEditor } =
+        this.getState()
+      if (useCustomEditor && customEditor) {
+        await backend().openCustomGlobalGitConfigEditor(
+          await this.nativeCustomEditorCommand(customEditor)
+        )
+        return
       }
-      return
+      const match = await findEditorOrDefault(selectedExternalEditor)
+      if (match === null) {
+        throw new ExternalEditorError(
+          'No suitable editors are installed for GitHub Desktop to launch.',
+          { suggestDefaultEditor: true }
+        )
+      }
+      await backend().openGlobalGitConfigEditor(match.editor)
+    } catch (error) {
+      this.emitError(error)
     }
-    await getGlobalConfigPath()
-      .then(p => this._openInExternalEditor(p))
-      .catch(e => log.error('Could not open global Git config for editing', e))
   }
 
   /** Open a path to a repository or file using the user's configured editor */
@@ -9751,11 +9635,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     try {
       if (useCustomEditor && customEditor) {
-        if (backend().transportKind !== 'none') {
-          await this.openInNativeCustomEditor(fullPath, customEditor)
-        } else {
-          await launchCustomExternalEditor(fullPath, customEditor)
-        }
+        await this.openInNativeCustomEditor(fullPath, customEditor)
       } else {
         const match = await findEditorOrDefault(selectedExternalEditor)
         if (match === null) {
@@ -9768,11 +9648,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
           return
         }
 
-        if (backend().transportKind !== 'none') {
-          await this.openInNativeEditor(fullPath, match.editor)
-        } else {
-          await launchExternalEditor(fullPath, match)
-        }
+        await this.openInNativeEditor(fullPath, match.editor)
       }
     } catch (error) {
       this.emitError(error)
@@ -9830,11 +9706,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
   ): Promise<void> {
     try {
       if (customEditor && customEditor.path) {
-        if (backend().transportKind !== 'none') {
-          await this.openInNativeCustomEditor(fullPath, customEditor)
-        } else {
-          await launchCustomExternalEditor(fullPath, customEditor)
-        }
+        await this.openInNativeCustomEditor(fullPath, customEditor)
         return
       }
 
@@ -9853,11 +9725,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
         return
       }
 
-      if (backend().transportKind !== 'none') {
-        await this.openInNativeEditor(fullPath, match.editor)
-      } else {
-        await launchExternalEditor(fullPath, match)
-      }
+      await this.openInNativeEditor(fullPath, match.editor)
     } catch (error) {
       this.emitError(error)
     }

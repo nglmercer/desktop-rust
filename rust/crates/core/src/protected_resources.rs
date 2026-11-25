@@ -20,7 +20,7 @@ fn utf8_path(path: &Path) -> Result<String> {
 }
 
 async fn git_output(path: &Path, command: &[&str]) -> Result<process::RawOutput> {
-    let output = process::run(path, &args(command)).await?;
+    let output = process::repository_discovery(path, &args(command)).await?;
     if output.code != 0 {
         bail!(
             "Git resource discovery failed: {}",

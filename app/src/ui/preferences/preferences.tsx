@@ -30,11 +30,6 @@ import {
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import {
-  isConfigFileLockError,
-  parseConfigLockFilePathFromError,
-} from '../../lib/git'
-import { ConfigLockFileExists } from '../lib/config-lock-file-exists'
-import {
   setDefaultBranch,
   getDefaultBranch,
 } from '../../lib/helpers/default-branch'
@@ -168,14 +163,6 @@ interface IPreferencesState {
   readonly availableShells: ReadonlyArray<Shell>
   readonly selectedShell: Shell
 
-  /**
-   * If unable to save Git configuration values (name, email)
-   * due to an existing configuration lock file this property
-   * will contain the (fully qualified) path to said lock file
-   * such that an error may be presented and the user given a
-   * choice to delete the lock file.
-   */
-  readonly existingLockFilePath?: string
   readonly repositoryIndicatorsEnabled: boolean
 
   readonly initiallySelectedTheme: ApplicationTheme
@@ -620,45 +607,30 @@ export class Preferences extends React.Component<
         )
         break
       case PreferencesTab.Git: {
-        const { existingLockFilePath } = this.state
-        const error =
-          existingLockFilePath !== undefined ? (
-            <DialogError>
-              <ConfigLockFileExists
-                lockFilePath={existingLockFilePath}
-                onLockFileDeleted={this.onLockFileDeleted}
-                onError={this.onLockFileDeleteError}
-              />
-            </DialogError>
-          ) : null
-
         View = (
-          <>
-            {error}
-            <Git
-              name={this.state.committerName}
-              email={this.state.committerEmail}
-              accounts={this.props.accounts}
-              defaultBranch={this.state.defaultBranch}
-              onNameChanged={this.onCommitterNameChanged}
-              onEmailChanged={this.onCommitterEmailChanged}
-              onDefaultBranchChanged={this.onDefaultBranchChanged}
-              isLoadingGitConfig={this.state.isLoadingGitConfig}
-              onEditGlobalGitConfig={this.props.onEditGlobalGitConfig}
-              selectedTabIndex={this.state.selectedGitTabIndex}
-              onSelectedTabIndexChanged={this.onSelectedGitTabIndexChanged}
-              onEnableGitHookEnvChanged={this.onEnableGitHookEnvChanged}
-              onCacheGitHookEnvChanged={this.onCacheGitHookEnvChanged}
-              onSelectedShellChanged={this.onSelectedGitHookEnvShellChanged}
-              enableGitHookEnv={
-                this.state.enableGitHookEnv ?? defaultHooksEnvEnabledValue
-              }
-              cacheGitHookEnv={this.state.cacheGitHookEnv ?? true}
-              selectedShell={
-                this.state.selectedGitHookEnvShell ?? defaultGitHookEnvShell
-              }
-            />
-          </>
+          <Git
+            name={this.state.committerName}
+            email={this.state.committerEmail}
+            accounts={this.props.accounts}
+            defaultBranch={this.state.defaultBranch}
+            onNameChanged={this.onCommitterNameChanged}
+            onEmailChanged={this.onCommitterEmailChanged}
+            onDefaultBranchChanged={this.onDefaultBranchChanged}
+            isLoadingGitConfig={this.state.isLoadingGitConfig}
+            onEditGlobalGitConfig={this.props.onEditGlobalGitConfig}
+            selectedTabIndex={this.state.selectedGitTabIndex}
+            onSelectedTabIndexChanged={this.onSelectedGitTabIndexChanged}
+            onEnableGitHookEnvChanged={this.onEnableGitHookEnvChanged}
+            onCacheGitHookEnvChanged={this.onCacheGitHookEnvChanged}
+            onSelectedShellChanged={this.onSelectedGitHookEnvShellChanged}
+            enableGitHookEnv={
+              this.state.enableGitHookEnv ?? defaultHooksEnvEnabledValue
+            }
+            cacheGitHookEnv={this.state.cacheGitHookEnv ?? true}
+            selectedShell={
+              this.state.selectedGitHookEnvShell ?? defaultGitHookEnvShell
+            }
+          />
         )
         break
       }
@@ -799,14 +771,6 @@ export class Preferences extends React.Component<
     repositoryIndicatorsEnabled: boolean
   ) => {
     this.setState({ repositoryIndicatorsEnabled })
-  }
-
-  private onLockFileDeleted = () => {
-    this.setState({ existingLockFilePath: undefined })
-  }
-
-  private onLockFileDeleteError = (e: Error) => {
-    this.props.dispatcher.postError(e)
   }
 
   private onUseWindowsOpenSSHChanged = (useWindowsOpenSSH: boolean) => {
@@ -1190,18 +1154,6 @@ export class Preferences extends React.Component<
       if (this.props.repository !== null && shouldRefreshAuthor) {
         dispatcher.refreshAuthor(this.props.repository)
       }
-      if (isConfigFileLockError(e)) {
-        const lockFilePath = parseConfigLockFilePathFromError(e.result)
-
-        if (lockFilePath !== null) {
-          this.setState({
-            existingLockFilePath: lockFilePath,
-            selectedIndex: PreferencesTab.Git,
-          })
-          return
-        }
-      }
-
       if (!savingGitSettings) {
         this.props.onDismissed()
         dispatcher.postError(e)

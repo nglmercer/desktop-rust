@@ -23,23 +23,15 @@ import {
 
 import { DiffParser } from '../diff-parser'
 import { getOldPathOrDefault } from '../get-old-path'
-import { readFile, writeFile, unlink } from 'fs/promises'
-import { getTempFilePath } from '../file-system'
 import { forceUnwrap } from '../fatal-error'
-import { git } from './core'
-import { NullTreeSHA } from './diff-index'
-import { GitError } from 'dugite'
 import { IChangesetData, parseRawLogWithNumstat } from './log'
-import { getConfigValue } from './config'
 import { backend } from '../../backend/client'
 import { getMergeBase } from './merge'
-import { IStatusEntry } from '../status-parser'
-import { createLogParser } from './git-delimiter-parser'
 import { enableImagePreviewsForDDSFiles } from '../feature-flag'
 import { unstageAll } from './reset'
 import { preparePartialStagingDiffs, stageFiles } from './update-index'
-import { isAbsolute } from 'path'
 import { withRepositoryGitOperation } from './repository-operation'
+const NullTreeSHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 
 /**
  * V8 has a limit on the size of string it can create (~256MB), and unless we want to
@@ -129,70 +121,42 @@ export async function getCommitDiff(
   commitish: string,
   hideWhitespaceInDiff: boolean = false
 ): Promise<IDiff> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const oldPath =
-      file.status.kind === AppFileStatusKind.Renamed ||
-      file.status.kind === AppFileStatusKind.Copied
-        ? file.status.oldPath
-        : undefined
-    const read = () =>
+  const oldPath =
+    file.status.kind === AppFileStatusKind.Renamed ||
+    file.status.kind === AppFileStatusKind.Copied
+      ? file.status.oldPath
+      : undefined
+  const encoded = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryRendererCommitDiff(
         repository.path,
         commitish,
         file.path,
         oldPath,
         hideWhitespaceInDiff
-      )
-    const encoded =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    if ('kind' in encoded) {
-      if (file.status.submoduleStatus === undefined)
-        return { kind: DiffType.Unrenderable }
-      return buildDiff(
-        Buffer.from(encoded.prefix),
-        repository,
-        file,
-        commitish,
-        commitish
-      )
-    }
+      ),
+    true
+  )
+  if ('kind' in encoded) {
+    if (file.status.submoduleStatus === undefined)
+      return { kind: DiffType.Unrenderable }
     return buildDiff(
-      Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+      Buffer.from(encoded.prefix),
       repository,
       file,
       commitish,
       commitish
     )
   }
-  const args = [
-    'log',
+  return buildDiff(
+    Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+    repository,
+    file,
     commitish,
-    ...(hideWhitespaceInDiff ? ['-w'] : []),
-    '-m',
-    '-1',
-    '--first-parent',
-    '--patch-with-raw',
-    '--format=',
-    '-z',
-    '--no-color',
-    '--',
-    ensureRelativePath(file.path),
-  ]
-
-  if (
-    file.status.kind === AppFileStatusKind.Renamed ||
-    file.status.kind === AppFileStatusKind.Copied
-  ) {
-    args.push(ensureRelativePath(file.status.oldPath))
-  }
-
-  const { stdout } = await git(args, repository.path, 'getCommitDiff', {
-    encoding: 'buffer',
-  })
-
-  return buildDiff(stdout, repository, file, commitish, commitish)
+    commitish
+  )
 }
 
 /**
@@ -207,13 +171,15 @@ export async function getBranchMergeBaseDiff(
   hideWhitespaceInDiff: boolean = false,
   latestCommit: string
 ): Promise<IDiff> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const oldPath =
-      file.status.kind === AppFileStatusKind.Renamed ||
-      file.status.kind === AppFileStatusKind.Copied
-        ? file.status.oldPath
-        : undefined
-    const read = () =>
+  const oldPath =
+    file.status.kind === AppFileStatusKind.Renamed ||
+    file.status.kind === AppFileStatusKind.Copied
+      ? file.status.oldPath
+      : undefined
+  const encoded = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryRendererCompareDiff(
         repository.path,
         baseBranchName,
@@ -222,57 +188,28 @@ export async function getBranchMergeBaseDiff(
         file.path,
         oldPath,
         hideWhitespaceInDiff
-      )
-    const encoded =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    if (encoded === null) throw new Error('Invalid comparison diff response')
-    if ('kind' in encoded) {
-      if (file.status.submoduleStatus === undefined)
-        return { kind: DiffType.Unrenderable }
-      return buildDiff(
-        Buffer.from(encoded.prefix),
-        repository,
-        file,
-        latestCommit,
-        latestCommit
-      )
-    }
+      ),
+    true
+  )
+  if (encoded === null) throw new Error('Invalid comparison diff response')
+  if ('kind' in encoded) {
+    if (file.status.submoduleStatus === undefined)
+      return { kind: DiffType.Unrenderable }
     return buildDiff(
-      Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+      Buffer.from(encoded.prefix),
       repository,
       file,
       latestCommit,
       latestCommit
     )
   }
-  const args = [
-    'diff',
-    '--merge-base',
-    ...(hideWhitespaceInDiff ? ['-w'] : []),
-    '--patch-with-raw',
-    '-z',
-    '--no-color',
-    '--end-of-options',
-    baseBranchName,
-    comparisonBranchName,
-    '--',
-    ensureRelativePath(file.path),
-  ]
-
-  if (
-    file.status.kind === AppFileStatusKind.Renamed ||
-    file.status.kind === AppFileStatusKind.Copied
-  ) {
-    args.push(ensureRelativePath(file.status.oldPath))
-  }
-
-  const result = await git(args, repository.path, 'getBranchMergeBaseDiff', {
-    encoding: 'buffer',
-  })
-
-  return buildDiff(result.stdout, repository, file, latestCommit, latestCommit)
+  return buildDiff(
+    Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+    repository,
+    file,
+    latestCommit,
+    latestCommit
+  )
 }
 
 /**
@@ -292,14 +229,16 @@ export async function getCommitRangeDiff(
 
   const oldestCommit = useNullTreeSHA ? NullTreeSHA : commits[0]
   const oldestCommitRef = useNullTreeSHA ? NullTreeSHA : `${commits[0]}^`
-  const latestCommit = commits.at(-1) ?? '' // can't be undefined since commits.length > 0
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const oldPath =
-      file.status.kind === AppFileStatusKind.Renamed ||
-      file.status.kind === AppFileStatusKind.Copied
-        ? file.status.oldPath
-        : undefined
-    const read = () =>
+  const latestCommit = commits.at(-1) ?? ''
+  const oldPath =
+    file.status.kind === AppFileStatusKind.Renamed ||
+    file.status.kind === AppFileStatusKind.Copied
+      ? file.status.oldPath
+      : undefined
+  const encoded = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryRendererCompareDiff(
         repository.path,
         oldestCommitRef,
@@ -308,80 +247,38 @@ export async function getCommitRangeDiff(
         file.path,
         oldPath,
         hideWhitespaceInDiff
-      )
-    const encoded =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    if (encoded === null) {
-      if (!useNullTreeSHA)
-        return getCommitRangeDiff(
-          repository,
-          file,
-          commits,
-          hideWhitespaceInDiff,
-          true
-        )
-      throw new Error('Unable to compare the selected commits')
-    }
-    if ('kind' in encoded) {
-      if (file.status.submoduleStatus === undefined)
-        return { kind: DiffType.Unrenderable }
-      return buildDiff(
-        Buffer.from(encoded.prefix),
+      ),
+    true
+  )
+  if (encoded === null) {
+    if (!useNullTreeSHA)
+      return getCommitRangeDiff(
         repository,
         file,
-        latestCommit,
-        oldestCommit
+        commits,
+        hideWhitespaceInDiff,
+        true
       )
-    }
+    throw new Error('Unable to compare the selected commits')
+  }
+  if ('kind' in encoded) {
+    if (file.status.submoduleStatus === undefined)
+      return { kind: DiffType.Unrenderable }
     return buildDiff(
-      Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+      Buffer.from(encoded.prefix),
       repository,
       file,
       latestCommit,
       oldestCommit
     )
   }
-  const args = [
-    'diff',
-    oldestCommitRef,
+  return buildDiff(
+    Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+    repository,
+    file,
     latestCommit,
-    ...(hideWhitespaceInDiff ? ['-w'] : []),
-    '--patch-with-raw',
-    '--format=',
-    '-z',
-    '--no-color',
-    '--',
-    ensureRelativePath(file.path),
-  ]
-
-  if (
-    file.status.kind === AppFileStatusKind.Renamed ||
-    file.status.kind === AppFileStatusKind.Copied
-  ) {
-    args.push(ensureRelativePath(file.status.oldPath))
-  }
-
-  const result = await git(args, repository.path, 'getCommitsDiff', {
-    encoding: 'buffer',
-    expectedErrors: new Set([GitError.BadRevision]),
-  })
-
-  // This should only happen if the oldest commit does not have a parent (ex:
-  // initial commit of a branch) and therefore `SHA^` is not a valid reference.
-  // In which case, we will retry with the null tree sha.
-  if (result.gitError === GitError.BadRevision && useNullTreeSHA === false) {
-    return getCommitRangeDiff(
-      repository,
-      file,
-      commits,
-      hideWhitespaceInDiff,
-      true
-    )
-  }
-
-  return buildDiff(result.stdout, repository, file, latestCommit, oldestCommit)
+    oldestCommit
+  )
 }
 
 /**
@@ -394,57 +291,30 @@ export async function getBranchMergeBaseChangedFiles(
   comparisonBranchName: string,
   latestComparisonBranchCommitRef: string
 ): Promise<IChangesetData | null> {
-  const baseArgs = [
-    'diff',
-    '--merge-base',
-    '-C',
-    '-M',
-    '-z',
-    '--raw',
-    '--numstat',
-    '--end-of-options',
-    baseBranchName,
-    comparisonBranchName,
-    '--',
-  ]
-
   const mergeBaseCommit = await getMergeBase(
     repository,
     baseBranchName,
     comparisonBranchName
   )
-
   if (mergeBaseCommit === null) {
     return null
   }
 
-  const stdout =
-    typeof window !== 'undefined' && backend().transportKind !== 'none'
-      ? await (async () => {
-          const read = () =>
-            backend().repositoryRendererCompareChanges(
-              repository.path,
-              baseBranchName,
-              comparisonBranchName,
-              true
-            )
-          const bytes =
-            backend().transportKind === 'wry'
-              ? await withRepositoryGitOperation(
-                  repository.path,
-                  'read',
-                  read,
-                  true
-                )
-              : await read()
-          if (bytes === null) throw new Error('Invalid merge-base comparison')
-          return Buffer.from(bytes).toString('utf8')
-        })()
-      : (await git(baseArgs, repository.path, 'getBranchMergeBaseChangedFiles'))
-          .stdout
-
+  const bytes = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
+      backend().repositoryRendererCompareChanges(
+        repository.path,
+        baseBranchName,
+        comparisonBranchName,
+        true
+      ),
+    true
+  )
+  if (bytes === null) throw new Error('Invalid merge-base comparison')
   return parseRawLogWithNumstat(
-    stdout,
+    Buffer.from(bytes).toString('utf8'),
     `${latestComparisonBranchCommitRef}`,
     mergeBaseCommit
   )
@@ -460,61 +330,29 @@ export async function getCommitRangeChangedFiles(
   }
 
   const oldestCommitRef = useNullTreeSHA ? NullTreeSHA : `${shas[0]}^`
-  const latestCommitRef = shas.at(-1) ?? '' // can't be undefined since shas.length > 0
-  const baseArgs = [
-    'diff',
-    oldestCommitRef,
-    latestCommitRef,
-    '-C',
-    '-M',
-    '-z',
-    '--raw',
-    '--numstat',
-    '--',
-  ]
-
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () =>
+  const latestCommitRef = shas.at(-1) ?? ''
+  const bytes = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryRendererCompareChanges(
         repository.path,
         oldestCommitRef,
         latestCommitRef,
         false
-      )
-    const bytes =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    if (bytes === null) {
-      if (!useNullTreeSHA)
-        return getCommitRangeChangedFiles(repository, shas, true)
-      throw new Error('Invalid commit range comparison')
-    }
-    return parseRawLogWithNumstat(
-      Buffer.from(bytes).toString('utf8'),
-      latestCommitRef,
-      oldestCommitRef
-    )
-  }
-
-  const { stdout, gitError } = await git(
-    baseArgs,
-    repository.path,
-    'getCommitRangeChangedFiles',
-    {
-      expectedErrors: new Set([GitError.BadRevision]),
-    }
+      ),
+    true
   )
-
-  // This should only happen if the oldest commit does not have a parent (ex:
-  // initial commit of a branch) and therefore `SHA^` is not a valid reference.
-  // In which case, we will retry with the null tree sha.
-  if (gitError === GitError.BadRevision && useNullTreeSHA === false) {
-    const useNullTreeSHA = true
-    return getCommitRangeChangedFiles(repository, shas, useNullTreeSHA)
+  if (bytes === null) {
+    if (!useNullTreeSHA)
+      return getCommitRangeChangedFiles(repository, shas, true)
+    throw new Error('Invalid commit range comparison')
   }
-
-  return parseRawLogWithNumstat(stdout, latestCommitRef, oldestCommitRef)
+  return parseRawLogWithNumstat(
+    Buffer.from(bytes).toString('utf8'),
+    latestCommitRef,
+    oldestCommitRef
+  )
 }
 
 /**
@@ -529,90 +367,35 @@ export async function getWorkingDirectoryDiff(
   options: { readonly noTextconv?: boolean } = {}
 ): Promise<IDiff> {
   const isSubmodule = file.status.submoduleStatus !== undefined
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const base =
-      !isSubmodule &&
-      (file.status.kind === AppFileStatusKind.New ||
-        file.status.kind === AppFileStatusKind.Untracked)
-        ? 'empty'
-        : file.status.kind === AppFileStatusKind.Renamed
-          ? 'index'
-          : 'head'
-    const read = () =>
+  const base =
+    !isSubmodule &&
+    (file.status.kind === AppFileStatusKind.New ||
+      file.status.kind === AppFileStatusKind.Untracked)
+      ? 'empty'
+      : file.status.kind === AppFileStatusKind.Renamed
+        ? 'index'
+        : 'head'
+  const result = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryRendererWorkingDiff(
         repository.path,
         file.path,
         base,
         hideWhitespaceInDiff,
         options.noTextconv === true
-      )
-    const result =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    return buildDiff(
-      Buffer.from(result.stdout, 'base64'),
-      repository,
-      file,
-      'HEAD',
-      'HEAD',
-      parseLineEndingsWarning(Buffer.from(result.stderr, 'base64'))
-    )
-  }
-  // `--no-ext-diff` should be provided wherever we invoke `git diff` so that any
-  // diff.external program configured by the user is ignored
-  const args = [
-    'diff',
-    ...(options.noTextconv === true ? ['--no-textconv'] : []),
-    ...(hideWhitespaceInDiff ? ['-w'] : []),
-    '--no-ext-diff',
-    '--patch-with-raw',
-    '-z',
-    '--no-color',
-  ]
-  const successExitCodes = new Set([0])
-
-  // For added submodules, we'll use the "default" parameters, which are able
-  // to output the submodule commit.
-  if (
-    !isSubmodule &&
-    (file.status.kind === AppFileStatusKind.New ||
-      file.status.kind === AppFileStatusKind.Untracked)
-  ) {
-    // `git diff --no-index` seems to emulate the exit codes from `diff` irrespective of
-    // whether you set --exit-code
-    //
-    // this is the behavior:
-    // - 0 if no changes found
-    // - 1 if changes found
-    // -   and error otherwise
-    //
-    // citation in source:
-    // https://github.com/git/git/blob/1f66975deb8402131fbf7c14330d0c7cdebaeaa2/diff-no-index.c#L300
-    successExitCodes.add(1)
-    args.push('--no-index', '--', '/dev/null', file.path)
-  } else if (file.status.kind === AppFileStatusKind.Renamed) {
-    // NB: Technically this is incorrect, the best kind of incorrect.
-    // In order to show exactly what will end up in the commit we should
-    // perform a diff between the new file and the old file as it appears
-    // in HEAD. By diffing against the index we won't show any changes
-    // already staged to the renamed file which differs from our other diffs.
-    // The closest I got to that was running hash-object and then using
-    // git diff <blob> <blob> but that seems a bit excessive.
-    args.push('--', ensureRelativePath(file.path))
-  } else {
-    args.push('HEAD', '--', ensureRelativePath(file.path))
-  }
-
-  const { stdout, stderr } = await git(
-    args,
-    repository.path,
-    'getWorkingDirectoryDiff',
-    { successExitCodes, encoding: 'buffer' }
+      ),
+    true
   )
-  const lineEndingsChange = parseLineEndingsWarning(stderr)
-
-  return buildDiff(stdout, repository, file, 'HEAD', 'HEAD', lineEndingsChange)
+  return buildDiff(
+    Buffer.from(result.stdout, 'base64'),
+    repository,
+    file,
+    'HEAD',
+    'HEAD',
+    parseLineEndingsWarning(Buffer.from(result.stderr, 'base64'))
+  )
 }
 
 /**
@@ -665,89 +448,23 @@ export async function getResolutionDiff(
   options: { content: string } | { stage: 'ours' | 'theirs' },
   hideWhitespaceInDiff: boolean = false
 ): Promise<IResolutionDiff> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () =>
+  const result = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryResolutionDiff(
         repository.path,
         filePath,
         options,
         hideWhitespaceInDiff
-      )
-    const result =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    return buildResolutionDiff(
-      Buffer.from(result.raw),
-      result.oldContents,
-      result.newContents
-    )
-  }
-  const gitStage =
-    'stage' in options ? (options.stage === 'ours' ? ':2' : ':3') : undefined
-
-  // Always diff against the working-tree file (which still has conflict
-  // markers). This gives a consistent baseline for all three resolution
-  // choices (Copilot, current, incoming) so the user sees exactly what each
-  // option changes relative to the file's current state on disk.
-  const baseContent = await readFile(
-    Path.join(repository.path, filePath),
-    'utf8'
+      ),
+    true
   )
-  let targetContent: string
-
-  if (gitStage === undefined) {
-    // Direct content mode (e.g. Copilot's resolved text).
-    if (!('content' in options)) {
-      return {
-        diff: { kind: DiffType.Unrenderable },
-        oldContents: baseContent,
-        newContents: '',
-      }
-    }
-    targetContent = options.content
-  } else {
-    // Stage mode — read the chosen side from the merge index.
-    // If the blob doesn't exist (e.g. file deleted on that side in a
-    // modify/delete conflict), use empty content to show full deletion.
-    try {
-      const buffer = await getBlobContents(repository, gitStage, filePath)
-      targetContent = buffer.toString('utf-8')
-    } catch {
-      targetContent = ''
-    }
-  }
-
-  const tempBase = getTempFilePath('resolution-diff-base')
-  const tempTarget = getTempFilePath('resolution-diff-target')
-
-  try {
-    await writeFile(tempBase, baseContent, 'utf8')
-    await writeFile(tempTarget, targetContent, 'utf8')
-
-    const args = [
-      'diff',
-      ...(hideWhitespaceInDiff ? ['-w'] : []),
-      '--no-ext-diff',
-      '--patch-with-raw',
-      '-z',
-      '--no-color',
-      '--no-index',
-      '--',
-      tempBase,
-      tempTarget,
-    ]
-
-    const { stdout } = await git(args, repository.path, 'getResolutionDiff', {
-      successExitCodes: new Set([0, 1]),
-      encoding: 'buffer',
-    })
-
-    return buildResolutionDiff(stdout, baseContent, targetContent)
-  } finally {
-    await unlink(tempBase).catch(() => {})
-    await unlink(tempTarget).catch(() => {})
-  }
+  return buildResolutionDiff(
+    Buffer.from(result.raw),
+    result.oldContents,
+    result.newContents
+  )
 }
 
 function buildResolutionDiff(
@@ -791,64 +508,40 @@ export async function getFilesDiffText(
   files: ReadonlyArray<WorkingDirectoryFileChange>,
   commitish?: string
 ): Promise<string> {
+  if (
+    commitish !== undefined &&
+    !/^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\^$/.test(commitish)
+  ) {
+    throw new Error('Native staged diffs require a commit object ID revision')
+  }
+
   // Clear the staging area, our diffs reflect the difference between the
   // working directory and the last commit (if any) so our commits should
   // do the same thing.
   const partialDiffs = await preparePartialStagingDiffs(repository, files)
   await unstageAll(repository)
-
   await stageFiles(repository, files, partialDiffs)
 
-  if (
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none' &&
-    (commitish === undefined ||
-      /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\^$/.test(commitish))
-  ) {
-    const read = () =>
+  const bytes = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryReadSnapshot(
         repository.path,
         'renderer_staged_diff',
         {
           amend_head: commitish === undefined ? null : commitish.slice(0, -1),
         }
-      )
-    const bytes =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    await unstageAll(repository)
-    if (bytes === null) throw new Error('Unable to read staged diff')
-    return Buffer.from(bytes).toString('utf8')
-  }
-
-  // `--no-ext-diff` should be provided wherever we invoke `git diff` so that any
-  // diff.external program configured by the user is ignored
-  const args = [
-    'diff',
-    '--no-ext-diff',
-    '--patch-with-raw',
-    '--no-color',
-    '--staged',
-    ...(commitish ? [commitish] : []),
-  ]
-  const successExitCodes = new Set([0])
-
-  const { stdout } = await git(args, repository.path, 'getFilesDiffText', {
-    successExitCodes,
-    encoding: 'buffer',
-  })
-
+      ),
+    true
+  )
   await unstageAll(repository)
-
-  // No more than 10MB
-  if (stdout.length > 10 * 1024 * 1024) {
+  if (bytes === null) throw new Error('Unable to read staged diff')
+  const output = Buffer.from(bytes).toString('utf8')
+  if (output.length > 10 * 1024 * 1024) {
     throw new Error('Diff is too large to render')
   }
-
-  // `.toString()` in a promise in case its a large buffer
-  const outputString = await (async () => stdout.toString('utf8'))()
-  return outputString
+  return output
 }
 
 async function getImageDiff(
@@ -1047,10 +740,10 @@ async function buildSubmoduleDiff(
 ): Promise<IDiff> {
   const path = file.path
   const fullPath = Path.join(repository.path, path)
-  const url =
-    typeof window !== 'undefined' && backend().transportKind !== 'none'
-      ? await backend().repositorySubmoduleDisplayUrl(repository.path, path)
-      : await getConfigValue(repository, `submodule.${path}.url`, true)
+  const url = await backend().repositorySubmoduleDisplayUrl(
+    repository.path,
+    path
+  )
 
   let oldSHA = null
   let newSHA = null
@@ -1163,29 +856,23 @@ export async function getWorkingDirectoryImage(
   repository: Repository,
   file: FileChange
 ): Promise<Image> {
-  let contents: Buffer
-  let rawContents: ArrayBufferLike
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () =>
+  const bytes = await withRepositoryGitOperation(
+    repository.path,
+    'read',
+    () =>
       backend().repositoryReadSnapshot(
         repository.path,
         'renderer_working_file',
         { path: file.path }
-      )
-    const bytes =
-      backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-    if (bytes === null) throw new Error('Working image is unavailable')
-    contents = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    rawContents =
-      bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
-        ? bytes.buffer
-        : bytes.slice().buffer
-  } else {
-    contents = await readFile(Path.join(repository.path, file.path))
-    rawContents = Uint8Array.from(contents).buffer
-  }
+      ),
+    true
+  )
+  if (bytes === null) throw new Error('Working image is unavailable')
+  const contents = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const rawContents =
+    bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+      ? bytes.buffer
+      : bytes.slice().buffer
   return new Image(
     rawContents,
     contents.toString('base64'),
@@ -1193,69 +880,3 @@ export async function getWorkingDirectoryImage(
     contents.length
   )
 }
-
-/**
- * List the modified binary files' paths in the given repository
- *
- * @param repository to run git operation in
- * @param ref ref (sha, branch, etc) to compare the working index against
- *
- * if you're mid-merge pass `'MERGE_HEAD'` to ref to get a diff of `HEAD` vs `MERGE_HEAD`,
- * otherwise you should probably pass `'HEAD'` to get a diff of the working tree vs `HEAD`
- */
-export async function getBinaryPaths(
-  repository: Repository,
-  ref: string,
-  conflictedFilesInIndex: ReadonlyArray<IStatusEntry>
-): Promise<ReadonlyArray<string>> {
-  const [detectedBinaryFiles, conflictedFilesUsingBinaryMergeDriver] =
-    await Promise.all([
-      getDetectedBinaryFiles(repository, ref),
-      getFilesUsingBinaryMergeDriver(repository, conflictedFilesInIndex),
-    ])
-
-  return Array.from(
-    new Set([...detectedBinaryFiles, ...conflictedFilesUsingBinaryMergeDriver])
-  )
-}
-
-/**
- * Runs diff --numstat to get the list of files that have changed and which
- * Git have detected as binary files
- */
-async function getDetectedBinaryFiles(repository: Repository, ref: string) {
-  const { stdout } = await git(
-    ['diff', '--numstat', '-z', ref],
-    repository.path,
-    'getBinaryPaths'
-  )
-
-  return Array.from(stdout.matchAll(binaryListRegex), m => m[1])
-}
-
-const binaryListRegex = /-\t-\t(?:\0.+\0)?([^\0]*)/gi
-
-async function getFilesUsingBinaryMergeDriver(
-  repository: Repository,
-  files: ReadonlyArray<IStatusEntry>
-) {
-  const { stdout } = await git(
-    ['check-attr', '--stdin', '-z', 'merge'],
-    repository.path,
-    'getConflictedFilesUsingBinaryMergeDriver',
-    {
-      stdin: files.map(f => f.path).join('\0'),
-    }
-  )
-
-  return createLogParser({ path: '', attr: '', value: '' })
-    .parse(stdout)
-    .filter(x => x.attr === 'merge' && x.value === 'binary')
-    .map(x => x.path)
-}
-
-// Treat filenames literally, retaining the top prefix for paths that appear
-// absolute on some platforms and not others. See
-// https://git-scm.com/docs/gitglossary#Documentation/gitglossary.txt-top
-const ensureRelativePath = (path: string) =>
-  isAbsolute(path) ? `:(top,literal)${path}` : `:(literal)${path}`

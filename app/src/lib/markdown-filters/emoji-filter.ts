@@ -1,6 +1,4 @@
 import type { INodeFilter } from './node-filter'
-import { fileURLToPath } from 'url'
-import { readFile } from 'fs/promises'
 import escapeRegExp from 'lodash/escapeRegExp'
 import type { Emoji } from '../emoji'
 
@@ -133,15 +131,7 @@ export class EmojiFilter implements INodeFilter {
     const url = new URL(filePath)
     let imageBuffer: Uint8Array
     if (url.protocol === 'file:') {
-      // A renderer loaded from file: may read emoji from disk. The Rust renderers serve it
-      // from their own origin and must not turn an emoji URL into an
-      // arbitrary filesystem read through the web filesystem shim.
-      if (document.location.protocol !== 'file:') {
-        throw new Error(
-          'File emoji URLs are not supported by the Rust renderers'
-        )
-      }
-      imageBuffer = await readFile(fileURLToPath(url))
+      throw new Error('File emoji URLs are not supported by the Rust renderers')
     } else {
       // The Rust shell serves the same bundled emoji through the renderer's
       // origin. Restrict reads to that bundle instead of fetching arbitrary

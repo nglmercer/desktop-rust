@@ -63,16 +63,9 @@ vi.mock('../../src/lib/git/authentication', () => ({
 }))
 import {
   listSubmodules,
-  resetSubmodulePaths,
   updateSubmodulesAfterOperation,
 } from '../../src/lib/git/submodule'
-import { checkoutIndex } from '../../src/lib/git/checkout-index'
-import {
-  GitResetMode,
-  reset,
-  resetPaths,
-  unstageAll,
-} from '../../src/lib/git/reset'
+import { GitResetMode, reset, unstageAll } from '../../src/lib/git/reset'
 import { unstageAllFiles } from '../../src/lib/git/rm'
 import { checkoutPaths } from '../../src/lib/git/checkout'
 import { stageFiles } from '../../src/lib/git/update-index'
@@ -98,39 +91,6 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
     ])
     await expect(listSubmodules(repository)).rejects.toThrow('status failed')
     expect(mocks.status).toHaveBeenCalledWith('/repo')
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 2 : 0)
-    expect(mocks.git).not.toHaveBeenCalled()
-  })
-  it('resets only selected literal paths in the mutation scope', async () => {
-    const repository = { path: '/repo' } as Repository
-    mocks.reset
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('reset failed'))
-    await resetSubmodulePaths(repository, [])
-    expect(mocks.reset).not.toHaveBeenCalled()
-    await resetSubmodulePaths(repository, ['*-module'])
-    expect(mocks.reset).toHaveBeenCalledWith('/repo', ['*-module'])
-    await expect(resetSubmodulePaths(repository, ['*-module'])).rejects.toThrow(
-      'reset failed'
-    )
-    expect(mocks.scope).toHaveBeenCalledTimes(2)
-    expect(mocks.git).not.toHaveBeenCalled()
-  })
-  it('restores selected index paths through the mutation scope', async () => {
-    const repository = { path: '/repo' } as Repository
-    mocks.checkoutIndex
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('checkout failed'))
-    await checkoutIndex(repository, [])
-    expect(mocks.checkoutIndex).not.toHaveBeenCalled()
-    await checkoutIndex(repository, ['one space', 'missing'])
-    expect(mocks.checkoutIndex).toHaveBeenCalledWith('/repo', [
-      'one space',
-      'missing',
-    ])
-    await expect(checkoutIndex(repository, ['one space'])).rejects.toThrow(
-      'checkout failed'
-    )
     expect(mocks.scope).toHaveBeenCalledTimes(2)
     expect(mocks.git).not.toHaveBeenCalled()
   })
@@ -148,35 +108,6 @@ describe.each(['wry', 'ws'])('Rust submodule status via %s', transport => {
     expect(mocks.checkoutHead).toHaveBeenNthCalledWith(1, '/repo', [])
     expect(mocks.checkoutHead).toHaveBeenNthCalledWith(2, '/repo', ['a\nb'])
     expect(mocks.scope).toHaveBeenCalledTimes(3)
-    expect(mocks.git).not.toHaveBeenCalled()
-  })
-  it('batches large index selections before sending them', async () => {
-    const repository = { path: '/repo' } as Repository
-    mocks.checkoutIndex.mockResolvedValue(undefined)
-    const paths = Array.from({ length: 4100 }, (_, index) => `file-${index}`)
-    await checkoutIndex(repository, paths)
-    expect(mocks.checkoutIndex).toHaveBeenCalledTimes(2)
-    expect(mocks.checkoutIndex.mock.calls.flatMap(call => call[1])).toEqual(
-      paths
-    )
-    await expect(
-      checkoutIndex(repository, ['valid', 'x'.repeat(50_000)])
-    ).rejects.toThrow('request limit')
-    expect(mocks.checkoutIndex).toHaveBeenCalledTimes(2)
-  })
-  it('resets selected paths to HEAD through Rust before restoring files', async () => {
-    const repository = { path: '/repo' } as Repository
-    mocks.resetIndex
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('reset failed'))
-    await resetPaths(repository, GitResetMode.Mixed, 'HEAD', [])
-    expect(mocks.resetIndex).not.toHaveBeenCalled()
-    await resetPaths(repository, GitResetMode.Mixed, 'HEAD', ['a\nb'])
-    expect(mocks.resetIndex).toHaveBeenCalledWith('/repo', ['a\nb'])
-    await expect(
-      resetPaths(repository, GitResetMode.Mixed, 'HEAD', ['a'])
-    ).rejects.toThrow('reset failed')
-    expect(mocks.scope).toHaveBeenCalledTimes(2)
     expect(mocks.git).not.toHaveBeenCalled()
   })
   it('stages full selections in rename, update and deletion order', async () => {

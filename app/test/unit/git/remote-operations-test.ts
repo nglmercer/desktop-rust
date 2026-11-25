@@ -12,7 +12,7 @@ import {
   merge as mergeInRepository,
   MergeResult,
 } from '../../../src/lib/git/merge'
-import { createBranch, deleteRemoteBranch } from '../../../src/lib/git/branch'
+import { createBranch } from '../../../src/lib/git/branch'
 import { getBranches } from '../../../src/lib/git/for-each-ref'
 import {
   rebase as rebaseInRepository,
@@ -337,33 +337,6 @@ describe('git/remote operations', () => {
           assert.strictEqual(branch.upstream, noTrack ? null : startPoint)
         })
       }
-
-      it('deletes a remote branch and its tracking ref', async t => {
-        const { repository, upstream, remote } = await setupRemote(
-          t,
-          remoteName
-        )
-        await git(['branch', 'topic'], upstream.path, 'create remote branch')
-        await fetch(repository, remote)
-        assert(
-          await getRefOrError(repository, `refs/remotes/${remoteName}/topic`)
-        )
-
-        await deleteRemoteBranch(repository, remote, 'topic')
-
-        for (const [path, ref] of [
-          [upstream.path, 'refs/heads/topic'],
-          [repository.path, `refs/remotes/${remoteName}/topic`],
-        ]) {
-          const result = await git(
-            ['show-ref', '--verify', '--quiet', ref],
-            path,
-            'verify deleted branch',
-            { successExitCodes: new Set([0, 1]) }
-          )
-          assert.strictEqual(result.exitCode, 1)
-        }
-      })
 
       for (const withProgress of [false, true]) {
         it(`fetches updates with progress ${withProgress}`, async t => {

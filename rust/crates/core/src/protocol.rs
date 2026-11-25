@@ -321,6 +321,15 @@ pub enum Operation {
     RendererMixedResetPreview {
         request: RendererMixedResetRequest,
     },
+    RendererResetPreview {
+        target: String,
+        mode: RendererResetMode,
+    },
+    RendererReset {
+        target: String,
+        mode: RendererResetMode,
+        basis: String,
+    },
     RendererMixedReset {
         request: RendererMixedResetRequest,
         basis: String,
@@ -1110,6 +1119,13 @@ pub struct RendererMergeStartRequest {
     pub current_head: String,
     pub squash: bool,
     pub no_verify: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RendererResetMode {
+    Hard,
+    Soft,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -1,10 +1,8 @@
-import * as Path from 'path'
-import * as Fs from 'fs'
 import * as React from 'react'
-import { getAppPath } from '../lib/app-proxy'
 import { Loading } from '../lib/loading'
 import { LinkButton } from '../lib/link-button'
 import { Dialog, DialogContent, DefaultDialogFooter } from '../dialog'
+import { readBundledTemplate } from '../add-repository/bundled-templates'
 
 const WebsiteURL = 'https://desktop.github.com'
 const RepositoryURL = 'https://github.com/desktop/desktop'
@@ -59,33 +57,17 @@ export class Acknowledgements extends React.Component<
   }
 
   public async componentDidMount() {
-    let appPath: string
     try {
-      appPath = await getAppPath()
+      const data = await readBundledTemplate('static/licenses.json')
+      const parsed = JSON.parse(data)
+      if (!isLicenses(parsed)) {
+        throw new Error('Invalid license list')
+      }
+      this.setState({ licenses: parsed })
     } catch (error) {
-      log.error('Error locating licenses', error)
+      log.error('Error loading licenses', error)
       this.setState({ failed: true })
-      return
     }
-    const path = Path.join(appPath, 'static', 'licenses.json')
-    Fs.readFile(path, 'utf8', (err, data) => {
-      if (err) {
-        log.error('Error loading licenses', err)
-        this.setState({ failed: true })
-        return
-      }
-
-      try {
-        const parsed = JSON.parse(data)
-        if (!isLicenses(parsed)) {
-          throw new Error('Invalid license list')
-        }
-        this.setState({ licenses: parsed })
-      } catch (error) {
-        log.error('Error parsing licenses', error)
-        this.setState({ failed: true })
-      }
-    })
   }
 
   private renderLicenses(licenses: Licenses) {
