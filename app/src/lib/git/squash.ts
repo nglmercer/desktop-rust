@@ -1,4 +1,4 @@
-import { appendFile, rm, writeFile } from 'fs/promises'
+import { appendFile, rm, writeFile } from '../../web/fs-promises'
 import { getCommits, revRange } from '.'
 import { Commit } from '../../models/commit'
 import { MultiCommitOperationKind } from '../../models/multi-commit-operation'

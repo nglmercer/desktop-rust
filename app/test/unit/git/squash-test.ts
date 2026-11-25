@@ -1,4 +1,4 @@
-import { describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import assert from 'node:assert'
 import { writeFile } from 'fs/promises'
 import * as Path from 'path'
@@ -14,6 +14,10 @@ import { Commit } from '../../../src/models/commit'
 import { Repository } from '../../../src/models/repository'
 import { setupEmptyRepositoryDefaultMain } from '../../helpers/repositories'
 import { makeCommit } from '../../helpers/repository-scaffolding'
+import {
+  installNodeFileBridge,
+  uninstallNodeFileBridge,
+} from '../../helpers/node-fs-bridge'
 import { squash } from '../../../src/lib/git/squash'
 import { exec } from 'dugite'
 import { getStatusOrThrow } from '../../helpers/status'
@@ -25,6 +29,8 @@ import { getTempFilePath } from '../../../src/lib/file-system'
 const customEditor = process.env.DESKTOP_TEST_RUST_BACKEND !== '1'
 
 describe('git/cherry-pick', () => {
+  beforeEach(() => installNodeFileBridge())
+  afterEach(() => uninstallNodeFileBridge())
   it('squashes one commit onto the next (non-conflicting)', async t => {
     const repository = await setupEmptyRepositoryDefaultMain(t)
     const initialCommit = await makeSquashCommit(repository, 'initialize')

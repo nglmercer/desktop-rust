@@ -3,7 +3,7 @@
   "legacyGitCalls": 18,
   "nodeTestFiles": 0,
   "imports.dugite": 2,
-  "imports.fs": 10,
+  "imports.fs": 8,
   "imports.child_process": 5,
   "imports.os": 0,
   "imports.crypto": 0,

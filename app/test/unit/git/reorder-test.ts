@@ -1,4 +1,4 @@
-import { describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import assert from 'node:assert'
 import { writeFile } from 'fs/promises'
 import * as Path from 'path'
@@ -16,6 +16,10 @@ import { makeCommit } from '../../helpers/repository-scaffolding'
 import { exec } from 'dugite'
 import { getStatusOrThrow } from '../../helpers/status'
 import { getTempFilePath } from '../../../src/lib/file-system'
+import {
+  installNodeFileBridge,
+  uninstallNodeFileBridge,
+} from '../../helpers/node-fs-bridge'
 import { reorder } from '../../../src/lib/git/reorder'
 
 // The Rust backend does not run a caller-supplied editor command when a rebase
@@ -24,6 +28,8 @@ import { reorder } from '../../../src/lib/git/reorder'
 const customEditor = process.env.DESKTOP_TEST_RUST_BACKEND !== '1'
 
 describe('git/reorder', () => {
+  beforeEach(() => installNodeFileBridge())
+  afterEach(() => uninstallNodeFileBridge())
   it('moves second commit before the first one', async t => {
     const repository = await setupEmptyRepositoryDefaultMain(t)
     const initialCommit = await makeSampleCommit(repository, 'initialize')
