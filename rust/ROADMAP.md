@@ -113,8 +113,6 @@ Follows R2. Each grep must reach zero or be explicitly host-only:
 - [ ] `fs` (currently 8 files)
 - [ ] `child_process` (5), `os` (0), `crypto` (0), `keytar` (0)
 - [ ] Delete the matching `app/src/web/*` shims only after their imports are gone.
-- [ ] Remove `app/test/globals.cjs` once the import-cycle test no longer needs
-      a Node subprocess with the old module-loader environment.
 
 ### R6 — Delete legacy code and packages (M)
 

@@ -102,6 +102,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `stream/promises.pipeline` como rechazo permanente en el shim web | promesas sobre el pipeline/finished Node-compatible usado por el bundle; necesario para stdin de hooks | `app/test/unit/web-stream-promises-test.ts` |
 | constructores vacíos `ReadStream`/`WriteStream` en el shim `stream` | eliminados por no tener consumidores; los streams de archivo viven en `web/fs` | `pnpm check:types`, `pnpm vite:build` |
 | shim `app/src/web/web-utils.ts` sin consumidores | eliminado junto a su alias Vite; archivos soltados usan `hostFiles.getPathForFile` del host bridge | `pnpm check:types`, `pnpm vite:build` |
+| loader legacy `app/test/globals.cjs` y subprocess del test de ciclo Git | eliminado; Vitest importa directamente el grafo ESM real y verifica identidad GitError | `app/test/unit/git-core-import-cycle-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
