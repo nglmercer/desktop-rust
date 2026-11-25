@@ -60,8 +60,8 @@ import {
   getRemoteHEAD,
   MergeOptions,
 } from '../git'
-import { GitError as DugiteError } from '../../lib/git'
-import { GitError } from 'dugite'
+import { GitError } from '../../lib/git'
+import { GitErrorKind } from '../git/error-kind'
 import { RetryAction, RetryActionType } from '../../models/retry-actions'
 import { UpstreamAlreadyExistsError } from './upstream-already-exists-error'
 import { forceUnwrap } from '../fatal-error'
@@ -1516,8 +1516,8 @@ export class GitStore extends BaseStore {
         await addRemote(this.repository, UpstreamRemoteName, remoteUrl)
       } catch (e) {
         if (
-          e instanceof DugiteError &&
-          e.result.gitError === GitError.RemoteAlreadyExists
+          e instanceof GitError &&
+          e.result.gitError === GitErrorKind.RemoteAlreadyExists
         ) {
           // update upstream remote if it already exists
           await setRemoteURL(this.repository, UpstreamRemoteName, remoteUrl)

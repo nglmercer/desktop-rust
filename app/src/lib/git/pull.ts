@@ -16,7 +16,7 @@ import {
   envForRemoteOperation,
 } from './environment'
 import { getConfigValue } from './config'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from './error-kind'
 import { backend, FetchPreviewUnsupported } from '../../backend/client'
 import { FetchStreamProgressParser } from '../progress/fetch-stream'
 import {
@@ -155,39 +155,39 @@ export async function pull(
       if (failure !== undefined) {
         const localErrors = {
           merge_conflicts: [
-            DugiteError.MergeConflicts,
+            GitErrorKind.MergeConflicts,
             'Resolve the merge conflicts before continuing.',
           ],
           rebase_conflicts: [
-            DugiteError.RebaseConflicts,
+            GitErrorKind.RebaseConflicts,
             'Resolve the rebase conflicts before continuing.',
           ],
           merge_local_changes: [
-            DugiteError.MergeWithLocalChanges,
+            GitErrorKind.MergeWithLocalChanges,
             'Local changes would be overwritten by the merge. Commit or stash them before pulling.',
           ],
           rebase_local_changes: [
-            DugiteError.RebaseWithLocalChanges,
+            GitErrorKind.RebaseWithLocalChanges,
             'Commit or stash your local changes before pulling with rebase.',
           ],
           local_changes_overwritten: [
-            DugiteError.LocalChangesOverwritten,
+            GitErrorKind.LocalChangesOverwritten,
             'Local changes or untracked files would be overwritten. Commit, stash, or move them before pulling.',
           ],
           unrelated_histories: [
-            DugiteError.CannotMergeUnrelatedHistories,
+            GitErrorKind.CannotMergeUnrelatedHistories,
             'Unable to merge unrelated histories in this repository.',
           ],
           config_lock_exists: [
-            DugiteError.ConfigLockFileAlreadyExists,
+            GitErrorKind.ConfigLockFileAlreadyExists,
             'A Git configuration lock already exists. Inspect the lock before retrying.',
           ],
           no_matching_remote_branch: [
-            DugiteError.NoMatchingRemoteBranch,
+            GitErrorKind.NoMatchingRemoteBranch,
             'No matching branch was fetched from the remote.',
           ],
           no_existing_remote_branch: [
-            DugiteError.NoExistingRemoteBranch,
+            GitErrorKind.NoExistingRemoteBranch,
             'The configured upstream branch was not found on the remote.',
           ],
           missing_upstream: [

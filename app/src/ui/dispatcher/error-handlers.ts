@@ -1,4 +1,4 @@
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from '../../lib/git/error-kind'
 
 import { Dispatcher } from '.'
 import { ExternalEditorError } from '../../lib/editors/shared'
@@ -112,7 +112,7 @@ export async function missingRepositoryHandler(
   const errorWithCode = asErrorWithCode(e.underlyingError)
   const gitError = asGitError(e.underlyingError)
   const missing =
-    (gitError && gitError.result.gitError === DugiteError.NotAGitRepository) ||
+    (gitError && gitError.result.gitError === GitErrorKind.NotAGitRepository) ||
     (errorWithCode && !(await pathExists(repository.path)))
 
   if (missing) {
@@ -200,7 +200,7 @@ export async function pushNeedsPullHandler(
     return error
   }
 
-  if (dugiteError !== DugiteError.PushNotFastForward) {
+  if (dugiteError !== GitErrorKind.PushNotFastForward) {
     return error
   }
 
@@ -241,7 +241,7 @@ export async function mergeConflictHandler(
     return error
   }
 
-  if (dugiteError !== DugiteError.MergeConflicts) {
+  if (dugiteError !== GitErrorKind.MergeConflicts) {
     return error
   }
 
@@ -300,7 +300,7 @@ export async function lfsAttributeMismatchHandler(
     return error
   }
 
-  if (dugiteError !== DugiteError.LFSAttributeDoesNotMatch) {
+  if (dugiteError !== GitErrorKind.LFSAttributeDoesNotMatch) {
     return error
   }
 
@@ -353,7 +353,7 @@ export async function rebaseConflictsHandler(
     return error
   }
 
-  if (dugiteError !== DugiteError.RebaseConflicts) {
+  if (dugiteError !== GitErrorKind.RebaseConflicts) {
     return error
   }
 
@@ -548,9 +548,9 @@ export async function localChangesOverwrittenHandler(
   const dugiteError = gitError.result.gitError
 
   if (
-    dugiteError !== DugiteError.LocalChangesOverwritten &&
-    dugiteError !== DugiteError.MergeWithLocalChanges &&
-    dugiteError !== DugiteError.RebaseWithLocalChanges
+    dugiteError !== GitErrorKind.LocalChangesOverwritten &&
+    dugiteError !== GitErrorKind.MergeWithLocalChanges &&
+    dugiteError !== GitErrorKind.RebaseWithLocalChanges
   ) {
     return error
   }
@@ -657,7 +657,7 @@ export async function secretScanningPushProtectionErrorHandler(
   }
 
   const gitError = asGitError(e.underlyingError)
-  if (gitError?.result.gitError !== DugiteError.PushWithSecretDetected) {
+  if (gitError?.result.gitError !== GitErrorKind.PushWithSecretDetected) {
     return error
   }
 

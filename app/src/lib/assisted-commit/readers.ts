@@ -1,5 +1,5 @@
 import { GitError } from '../git/core'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from '../git/error-kind'
 import { AssistedCommitPushError } from '../git/assisted-commit-push'
 import {
   verifyAcceptedOwner,
@@ -353,7 +353,7 @@ export class AssistedCommitReaders {
             (cause instanceof AssistedCommitPushError &&
               cause.publicationStale) ||
             (cause instanceof GitError &&
-              cause.result.gitError === DugiteError.NotAGitRepository)
+              cause.result.gitError === GitErrorKind.NotAGitRepository)
         )
         if (stale && this.deferredHistory.get(repository.id) === deferred) {
           this.deferredHistory.delete(repository.id)

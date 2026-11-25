@@ -13,7 +13,7 @@ import { OkCancelButtonGroup } from './dialog/ok-cancel-button-group'
 import { ErrorWithMetadata, getErrorCauses } from '../lib/error-with-metadata'
 import { RetryActionType, RetryAction } from '../models/retry-actions'
 import { Ref } from './lib/ref'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from '../lib/git/error-kind'
 import { LinkButton } from './lib/link-button'
 import { getFileFromExceedsError } from '../lib/helpers/regex'
 import { CopilotError, getCopilotErrorDisplayInfo } from '../lib/copilot-error'
@@ -104,7 +104,7 @@ export class AppError extends React.Component<IAppErrorProps, IAppErrorState> {
 
     if (
       isGitError(e) &&
-      e.result.gitError === DugiteError.PushWithFileSizeExceedingLimit
+      e.result.gitError === GitErrorKind.PushWithFileSizeExceedingLimit
     ) {
       const files = getFileFromExceedsError(coerceToString(e.result.stderr))
       return (
@@ -165,7 +165,7 @@ export class AppError extends React.Component<IAppErrorProps, IAppErrorState> {
     }
 
     switch (getDugiteError(error)) {
-      case DugiteError.PushWithFileSizeExceedingLimit:
+      case GitErrorKind.PushWithFileSizeExceedingLimit:
         return 'File size limit exceeded'
     }
 

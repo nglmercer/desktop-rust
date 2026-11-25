@@ -11,7 +11,7 @@ import {
   realpathSync,
   statSync,
 } from 'fs'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from './error-kind'
 import {
   basename,
   delimiter,
@@ -1305,7 +1305,7 @@ export async function completeAssistedCommitPushPublication(
     }
   }
   const resources = await readPushResources(repository).catch(error => {
-    if (!isGitError(error, DugiteError.NotAGitRepository)) {
+    if (!isGitError(error, GitErrorKind.NotAGitRepository)) {
       throw error
     }
     throw new AssistedCommitPushError(
@@ -1318,7 +1318,7 @@ export async function completeAssistedCommitPushPublication(
       !(
         (error instanceof AssistedCommitError &&
           error.code === 'unsafe-selection') ||
-        isGitError(error, DugiteError.NotAGitRepository)
+        isGitError(error, GitErrorKind.NotAGitRepository)
       )
     ) {
       throw error

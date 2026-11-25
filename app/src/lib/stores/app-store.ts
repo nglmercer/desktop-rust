@@ -404,7 +404,7 @@ import { WorkflowPreferences } from '../../models/workflow-preferences'
 import { RepositoryIndicatorUpdater } from './helpers/repository-indicator-updater'
 import { isAttributableEmailFor } from '../email'
 import { TrashNameLabel } from '../../ui/lib/context-menu'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from '../git/error-kind'
 import { ErrorWithMetadata, CheckoutError } from '../error-with-metadata'
 import {
   ShowSideBySideDiffDefault,
@@ -13566,7 +13566,7 @@ function isLocalChangesOverwrittenError(error: Error): boolean {
 
   return (
     error instanceof GitError &&
-    error.result.gitError === DugiteError.LocalChangesOverwritten
+    error.result.gitError === GitErrorKind.LocalChangesOverwritten
   )
 }
 

@@ -92,6 +92,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | wrapper compartido `exec-file` ejecutado directamente con `child_process` | ejecución a través del shim host `web/child_process`, con `timeout`, `maxBuffer`, señal de terminación y kills pendientes antes de asignar id | `app/test/unit/web-child-process-test.ts`, `app/test/unit/copilot-app-test.ts` |
 | lanzamiento de integraciones personalizadas importando directamente `child_process` | spawn host-backed `web/child_process` con stdio ignorado; el host preserva procesos detached en sesión propia y fuera del apagado del renderer, y la interfaz de shells consume la abstracción estructural `IChildProcess` | `app/test/unit/native-custom-integration-test.ts`, `cargo test -p desktop-shell-core-legacy io::process::tests` |
 | creación y limpieza de archivos de progreso LFS mediante imports directos `fs` | operaciones host-backed `web/fs`/`web/fs-promises`; la creación conserva exclusividad `wx` | `app/test/unit/web-fs-lfs-progress-test.ts` |
+| imports dispersos del enum `GitError` de dugite en consumidores renderer | vocabulario centralizado en `app/src/lib/git/error-kind.ts`; quedan imports directos solo en la frontera del vocabulario, legacy runner, hooks y credenciales | `pnpm check:types`, `app/test/unit/rust-fetch-error-test.ts`, routing fetch/pull/push |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -120,7 +121,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 16 imports `dugite`, 13 imports `fs`, 5 imports `child_process`,
+`transportKind`, 18 llamadas legacy Git, 5 imports `dugite`, 13 imports `fs`, 5 imports `child_process`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

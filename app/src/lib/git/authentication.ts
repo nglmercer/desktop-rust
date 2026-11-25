@@ -1,4 +1,4 @@
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from './error-kind'
 
 /** Get the environment for authenticating remote operations. */
 export function envForAuthentication(): Record<string, string | undefined> {
@@ -11,9 +11,9 @@ export function envForAuthentication(): Record<string, string | undefined> {
 }
 
 /** The set of errors which fit under the "authentication failed" umbrella. */
-export const AuthenticationErrors: ReadonlySet<DugiteError> = new Set([
-  DugiteError.HTTPSAuthenticationFailed,
-  DugiteError.SSHAuthenticationFailed,
-  DugiteError.HTTPSRepositoryNotFound,
-  DugiteError.SSHRepositoryNotFound,
+export const AuthenticationErrors: ReadonlySet<GitErrorKind> = new Set([
+  GitErrorKind.HTTPSAuthenticationFailed,
+  GitErrorKind.SSHAuthenticationFailed,
+  GitErrorKind.HTTPSRepositoryNotFound,
+  GitErrorKind.SSHRepositoryNotFound,
 ])

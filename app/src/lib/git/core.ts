@@ -1,6 +1,5 @@
 import {
   exec,
-  GitError as DugiteError,
   parseError,
   IGitResult as DugiteResult,
   IGitExecutionOptions as DugiteExecutionOptions,
@@ -15,6 +14,7 @@ import { withTrampolineEnv } from '../trampoline/trampoline-environment'
 import { kStringMaxLength } from 'buffer'
 import { withHooksEnv } from '../hooks/with-hooks-env'
 import { coerceToString } from './coerce-to-string'
+import { GitErrorKind as DugiteError } from './error-kind'
 import { pushTerminalChunk } from './push-terminal-chunk'
 import { IAccountIdentity } from '../../models/account'
 import {

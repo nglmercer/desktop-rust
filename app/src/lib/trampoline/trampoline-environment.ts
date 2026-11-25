@@ -9,7 +9,7 @@ import {
   deleteMostRecentSSHCredential,
   removeMostRecentSSHCredential,
 } from '../ssh/ssh-credential-storage'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from '../git/error-kind'
 import memoizeOne from 'memoize-one'
 import { GitError, getDescriptionForError } from '../git/core'
 import { getDesktopAskpassTrampolineFilename } from 'desktop-trampoline'
@@ -224,7 +224,7 @@ export async function withTrampolineEnv<T>(
       ) {
         const msg = 'Authentication failed: user cancelled authentication'
         const gitErrorDescription =
-          getDescriptionForError(DugiteError.HTTPSAuthenticationFailed, '') ??
+          getDescriptionForError(GitErrorKind.HTTPSAuthenticationFailed, '') ??
           msg
 
         const fakeAuthError = new GitError(
@@ -254,8 +254,8 @@ export async function withTrampolineEnv<T>(
 
 const isSSHAuthFailure = (e: unknown): e is GitError =>
   e instanceof GitError &&
-  (e.result.gitError === DugiteError.SSHAuthenticationFailed ||
-    e.result.gitError === DugiteError.SSHPermissionDenied)
+  (e.result.gitError === GitErrorKind.SSHAuthenticationFailed ||
+    e.result.gitError === GitErrorKind.SSHPermissionDenied)
 
 /** Returns the path of the desktop-askpass-trampoline binary. */
 export function getDesktopAskpassTrampolinePath(): string {

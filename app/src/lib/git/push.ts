@@ -30,7 +30,7 @@ import {
 import { FetchStreamProgressParser } from '../progress/fetch-stream'
 import { fetchFailureToGitError } from './fetch-error'
 import { pushTerminalChunk } from './push-terminal-chunk'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from './error-kind'
 
 const uncertainPushes = new WeakSet<Error>()
 
@@ -56,15 +56,15 @@ export function suppressUnsafePushRetry(
 
 const pushErrors: Record<
   Exclude<PushErrorKind, 'push_protection'>,
-  DugiteError
+  GitErrorKind
 > = {
-  push_non_fast_forward: DugiteError.PushNotFastForward,
-  push_file_too_large: DugiteError.PushWithFileSizeExceedingLimit,
-  push_private_email: DugiteError.PushWithPrivateEmail,
-  push_review_required: DugiteError.ProtectedBranchRequiresReview,
-  push_protected_force: DugiteError.ProtectedBranchForcePush,
-  push_required_status: DugiteError.ProtectedBranchRequiredStatus,
-  push_force_rejected: DugiteError.ForcePushRejected,
+  push_non_fast_forward: GitErrorKind.PushNotFastForward,
+  push_file_too_large: GitErrorKind.PushWithFileSizeExceedingLimit,
+  push_private_email: GitErrorKind.PushWithPrivateEmail,
+  push_review_required: GitErrorKind.ProtectedBranchRequiresReview,
+  push_protected_force: GitErrorKind.ProtectedBranchForcePush,
+  push_required_status: GitErrorKind.ProtectedBranchRequiredStatus,
+  push_force_rejected: GitErrorKind.ForcePushRejected,
 }
 
 /** Preserve native pushInsteadOf behavior when push falls back to the fetch URL. */

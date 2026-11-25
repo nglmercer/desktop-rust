@@ -1,5 +1,5 @@
 import type { IChildProcess } from '../process/child-process'
-import { GitError } from 'dugite'
+import { GitErrorKind } from './error-kind'
 import byline from 'byline'
 
 import { Repository } from '../../models/repository'
@@ -355,11 +355,11 @@ function parseRebaseResult(result: IGitStringResult): RebaseResult {
     return RebaseResult.CompletedWithoutError
   }
 
-  if (result.gitError === GitError.RebaseConflicts) {
+  if (result.gitError === GitErrorKind.RebaseConflicts) {
     return RebaseResult.ConflictsEncountered
   }
 
-  if (result.gitError === GitError.UnresolvedConflicts) {
+  if (result.gitError === GitErrorKind.UnresolvedConflicts) {
     return RebaseResult.OutstandingFilesNotStaged
   }
 
@@ -526,7 +526,7 @@ export async function rebaseInteractive(
   opts?: RebaseInteractiveOptions
 ): Promise<RebaseResult> {
   const baseOptions: IGitStringExecutionOptions = {
-    expectedErrors: new Set([GitError.RebaseConflicts]),
+    expectedErrors: new Set([GitErrorKind.RebaseConflicts]),
     env: {
       GIT_SEQUENCE_EDITOR: undefined,
       GIT_EDITOR: opts?.gitEditor ?? ':',
