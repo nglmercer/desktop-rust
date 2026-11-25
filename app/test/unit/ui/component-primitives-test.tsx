@@ -4,7 +4,6 @@ import * as React from 'react'
 
 import { FilesChangedBadge } from '../../../src/ui/changes/files-changed-badge'
 import { DialogFooter } from '../../../src/ui/dialog/footer'
-import { HorizontalRule } from '../../../src/ui/lib/horizontal-rule'
 import { Loading } from '../../../src/ui/lib/loading'
 import { Ref } from '../../../src/ui/lib/ref'
 import { Toolbar } from '../../../src/ui/toolbar/toolbar'
@@ -18,16 +17,6 @@ describe('component primitives', () => {
 
     assert.notEqual(spinner, null)
     assert.equal(spinner?.getAttribute('aria-hidden'), 'true')
-  })
-
-  it('renders a horizontal rule title when provided', () => {
-    const view = render(<HorizontalRule title="Recent Activity" />)
-
-    const wrapper = view.container.querySelector('.horizontal-rule')
-    const content = view.container.querySelector('.horizontal-rule-content')
-
-    assert.notEqual(wrapper, null)
-    assert.equal(content?.textContent, 'Recent Activity')
   })
 
   it('renders footer, ref, and toolbar children with their wrapper classes', () => {

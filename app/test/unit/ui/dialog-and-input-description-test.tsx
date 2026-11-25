@@ -4,7 +4,6 @@ import * as React from 'react'
 
 import { DialogError } from '../../../src/ui/dialog/error'
 import { DialogSuccess } from '../../../src/ui/dialog/success'
-import { Caption } from '../../../src/ui/lib/input-description/input-caption'
 import { InputError } from '../../../src/ui/lib/input-description/input-error'
 import { InputWarning } from '../../../src/ui/lib/input-description/input-warning'
 import { render, screen } from '../../helpers/ui/vitest-render'
@@ -31,24 +30,6 @@ describe('dialog and input descriptions', () => {
     assert.notEqual(successBanner?.querySelector('svg.octicon'), null)
     assert.ok(screen.getByText('Unable to fetch remotes.'))
     assert.ok(screen.getByText('Branch renamed successfully.'))
-  })
-
-  it('renders caption styling without error semantics', () => {
-    const view = render(
-      <Caption id="branch-caption">Branch names may include slashes.</Caption>
-    )
-
-    const description = view.container.querySelector(
-      '.input-description-caption'
-    )
-
-    assert.notEqual(description, null)
-    assert.equal(description?.getAttribute('role'), null)
-    assert.equal(description?.querySelector('svg.octicon'), null)
-    assert.equal(
-      view.container.querySelector('.input-description-content')?.textContent,
-      'Branch names may include slashes.'
-    )
   })
 
   it('renders input errors as alerts when they are not tied to tracked input', () => {

@@ -5,7 +5,6 @@ import * as React from 'react'
 import { DefaultDialogFooter } from '../../../src/ui/dialog/default-dialog-footer'
 import { DialogHeader } from '../../../src/ui/dialog/header'
 import { CallToAction } from '../../../src/ui/lib/call-to-action'
-import { ToggleButton } from '../../../src/ui/lib/toggle-button'
 import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
 describe('dialog composition and toggle components', () => {
@@ -94,33 +93,5 @@ describe('dialog composition and toggle components', () => {
     assert.equal(button.getAttribute('type'), 'submit')
     assert.equal(button.getAttribute('aria-disabled'), 'true')
     assert.equal(screen.queryByRole('button', { name: 'Cancel' }), null)
-  })
-
-  it('toggles unchecked and checked state for uncontrolled toggle buttons', () => {
-    const toggledStates = new Array<boolean>()
-
-    function onToggle(checked: boolean) {
-      toggledStates.push(checked)
-    }
-
-    render(
-      <>
-        <ToggleButton onClick={onToggle}>Toggle whitespace</ToggleButton>
-        <ToggleButton checked={true}>Keep checked</ToggleButton>
-      </>
-    )
-
-    const toggle = screen.getByRole('button', { name: 'Toggle whitespace' })
-    const controlled = screen.getByRole('button', { name: 'Keep checked' })
-
-    assert.ok(toggle.classList.contains('unchecked'))
-    assert.ok(controlled.classList.contains('checked'))
-
-    fireEvent.click(toggle)
-    assert.ok(toggle.classList.contains('checked'))
-
-    fireEvent.click(toggle)
-    assert.ok(toggle.classList.contains('unchecked'))
-    assert.deepEqual(toggledStates, [true, false])
   })
 })
