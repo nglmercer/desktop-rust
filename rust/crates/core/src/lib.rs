@@ -591,6 +591,9 @@ impl Repository {
             Operation::AssistedCommitSafety => {
                 return self.assisted_commit_safety().await;
             }
+            Operation::AssistedCommitGitPath { git_path } => {
+                return self.assisted_commit_git_path(&git_path).await;
+            }
             Operation::RendererCommitDiff {
                 revision,
                 path,
@@ -1407,6 +1410,7 @@ impl Repository {
             | RefLockContext { .. }
             | AssistedCommitHead
             | AssistedCommitSafety
+            | AssistedCommitGitPath { .. }
             | MergeBase { .. }
             | MergeTreePreview { .. }
             | InterpretTrailers { .. }

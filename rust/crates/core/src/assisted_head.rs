@@ -20,6 +20,34 @@ fn invalid(message: impl Into<String>) -> Value {
 }
 
 impl Repository {
+    pub(crate) async fn assisted_commit_git_path(&self, git_path: &str) -> Result<Value> {
+        anyhow::ensure!(
+            !git_path.is_empty()
+                && git_path.len() <= 4096
+                && !git_path.bytes().any(|byte| byte < 0x20 || byte == 0x7f)
+                && !std::path::Path::new(git_path).is_absolute()
+                && !git_path
+                    .split('/')
+                    .any(|part| part.is_empty() || part == "." || part == ".."),
+            "invalid assisted-commit Git path"
+        );
+        let output = self
+            .run(&args(&[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                git_path,
+            ]))
+            .await?;
+        anyhow::ensure!(output.code == 0, "Cannot resolve the Git path");
+        let path = output_line(&output.stdout, "Git path", true)?;
+        anyhow::ensure!(
+            std::path::Path::new(&path).is_absolute(),
+            "Git path must be absolute"
+        );
+        Ok(json!({"path":path}))
+    }
+
     pub(crate) async fn assisted_commit_safety(&self) -> Result<Value> {
         let replacements = self.run(&args(&["replace", "--list"])).await?;
         anyhow::ensure!(replacements.code == 0, "Cannot inspect replacement refs");
@@ -228,6 +256,14 @@ mod tests {
         assert_eq!(
             repository.assisted_commit_safety().await.unwrap()["kind"],
             "ok"
+        );
+        let index = repository.assisted_commit_git_path("index").await.unwrap();
+        assert!(index["path"].as_str().unwrap().ends_with(".git/index"));
+        assert!(
+            repository
+                .assisted_commit_git_path("../outside")
+                .await
+                .is_err()
         );
         let grafts = fixture.0.join(".git/info/grafts");
         fs::write(&grafts, "0000000000000000000000000000000000000000\n").unwrap();

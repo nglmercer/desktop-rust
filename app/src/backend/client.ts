@@ -2991,6 +2991,30 @@ export class BackendClient {
     return value.kind
   }
 
+  async repositoryAssistedCommitGitPath(
+    repositoryPath: string,
+    gitPath: string
+  ): Promise<string> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_git_path',
+      { git_path: gitPath }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.path === 'string' &&
+      value.path.length > 0 &&
+      value.path.length <= 65536
+    ) {
+      return value.path
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted-commit Git path response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitSafety(
     repositoryPath: string
   ): Promise<

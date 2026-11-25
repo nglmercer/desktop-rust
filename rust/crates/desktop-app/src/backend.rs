@@ -50,6 +50,8 @@ struct ReadRequest {
     #[serde(default)]
     canonical_bool: Option<bool>,
     #[serde(default)]
+    git_path: Option<String>,
+    #[serde(default)]
     paths: Option<Vec<desktop_backend::GitPath>>,
     #[serde(default)]
     submodule_path: Option<desktop_backend::GitPath>,
@@ -380,6 +382,7 @@ enum ReadMethod {
     RefLockContext,
     AssistedCommitHead,
     AssistedCommitSafety,
+    AssistedCommitGitPath,
     Worktrees,
     WorktreesFromGitDir,
     ProtectedResources,
@@ -1265,6 +1268,13 @@ impl Backend {
                 "boolean parsing only applies to Git setting reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::AssistedCommitGitPath)
+            && request.git_path.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "git_path only applies to assisted-commit Git path reads".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
             return Err(AppError::BadArgs(
                 "paths only apply to file-tracking reads".into(),
@@ -1522,6 +1532,21 @@ impl Backend {
                         expected_value: request.expected_value.ok_or_else(|| {
                             AppError::BadArgs("expected value is required".into())
                         })?,
+                    }
+                }
+                ReadMethod::AssistedCommitGitPath
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.paths.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitGitPath {
+                        git_path: request
+                            .git_path
+                            .ok_or_else(|| AppError::BadArgs("git_path is required".into()))?,
                     }
                 }
                 ReadMethod::AssistedCommitSafety
@@ -2521,6 +2546,12 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(safety["kind"], "ok");
+                let index = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_git_path","git_path":"index"}),
+                    ])
+                    .unwrap();
+                assert!(index["path"].as_str().unwrap().ends_with(".git/index"));
                 assert!(
                     backend
                         .admit(vec![

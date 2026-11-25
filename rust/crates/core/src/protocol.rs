@@ -443,6 +443,9 @@ pub enum Operation {
     },
     AssistedCommitHead,
     AssistedCommitSafety,
+    AssistedCommitGitPath {
+        git_path: String,
+    },
     MergeBase {
         first: String,
         second: String,

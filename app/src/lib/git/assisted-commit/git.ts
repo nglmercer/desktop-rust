@@ -812,12 +812,7 @@ export async function gitPath(
   repository: Repository,
   path: string
 ): Promise<string> {
-  const result = await git(
-    ['rev-parse', '--path-format=absolute', '--git-path', path],
-    repository.path,
-    'assistedCommitGitPath'
-  )
-  return resolve(repository.path, removeGitLineEnding(result.stdout))
+  return backend().repositoryAssistedCommitGitPath(repository.path, path)
 }
 
 export async function ensureNoRepositoryOperation(
