@@ -16,7 +16,7 @@ import type { IChildProcess } from '../process/child-process'
 import {
   expandTargetPathArgument,
   type ICustomIntegration,
-  parseCustomIntegrationArguments,
+  parseCustomIntegrationArgumentsForRuntime,
   spawnCustomIntegration,
 } from '../custom-integration'
 
@@ -588,12 +588,14 @@ export function launch(
   }
 }
 
-export function launchCustomShell(
+export async function launchCustomShell(
   customShell: ICustomIntegration,
   path: string
-): IChildProcess {
+): Promise<IChildProcess> {
   log.info(`launching custom shell at path: ${customShell.path}`)
-  const argv = parseCustomIntegrationArguments(customShell.arguments)
+  const argv = await parseCustomIntegrationArgumentsForRuntime(
+    customShell.arguments
+  )
   const args = expandTargetPathArgument(argv, path)
   return spawnCustomIntegration(customShell.path, args, {
     cwd: path,

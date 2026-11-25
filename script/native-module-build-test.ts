@@ -5,7 +5,6 @@ import { resolve } from 'path'
 import ts from 'typescript'
 import notificationsPackage from '../vendor/desktop-notifications/package.json'
 import trampolinePackage from '../vendor/desktop-trampoline/package.json'
-import argvParserPackage from '../vendor/windows-argv-parser/package.json'
 
 describe('native module TypeScript output', () => {
   for (const { name, main, additionalFiles } of [
@@ -14,7 +13,6 @@ describe('native module TypeScript output', () => {
       additionalFiles: ['dist/notification-callback.d.ts'],
     },
     { ...trampolinePackage, additionalFiles: [] },
-    { ...argvParserPackage, additionalFiles: [] },
   ]) {
     it(`emits the published entry points for ${name}`, async () => {
       const packageRoot = resolve(__dirname, '../vendor', name)

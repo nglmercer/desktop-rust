@@ -7,6 +7,7 @@ const client = vi.hoisted(() => ({
 }))
 vi.mock('../../src/backend/client', () => ({ backend: () => client }))
 
+import { launchCustomShell } from '../../src/lib/shells/win32'
 import {
   parseCustomIntegrationArgumentsForInput,
   parseCustomIntegrationArgumentsForRuntime,
@@ -54,6 +55,44 @@ describe('native custom integration settings', () => {
     expect(client.validateCustomIntegrationPath).toHaveBeenCalledWith(
       '/path/app'
     )
+  })
+
+  it('parses Windows custom shell arguments on the host before launch', async () => {
+    vi.stubGlobal('__WIN32__', true)
+    client.parseWindowsIntegrationArguments.mockResolvedValueOnce([
+      '--open',
+      '%TARGET_PATH%',
+    ])
+    const calls: Array<{ channel: string; options: any }> = []
+    vi.stubGlobal('__desktop', {
+      invoke: vi.fn((channel: string, options: any) => {
+        calls.push({ channel, options })
+        return Promise.resolve({ id: 1, pid: 1001 })
+      }),
+      send: vi.fn(),
+      on: vi.fn(),
+      encodeBase64: (bytes: Uint8Array) =>
+        Buffer.from(bytes).toString('base64'),
+      decodeBase64: (text: string) =>
+        new Uint8Array(Buffer.from(text, 'base64')),
+    })
+
+    await launchCustomShell(
+      { path: 'C:\\tools\\shell.exe', arguments: '--open %TARGET_PATH%' },
+      'C:\\work\\repo'
+    )
+
+    expect(client.parseWindowsIntegrationArguments).toHaveBeenCalledWith(
+      '--open %TARGET_PATH%'
+    )
+    expect(calls[0]).toMatchObject({
+      channel: 'desktop.io.process-spawn',
+      options: {
+        command: 'C:\\tools\\shell.exe',
+        args: ['--open', 'C:\\work\\repo'],
+        cwd: 'C:\\work\\repo',
+      },
+    })
   })
 
   it('launches custom integrations through the host process bridge', () => {

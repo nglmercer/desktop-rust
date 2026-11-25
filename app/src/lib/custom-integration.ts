@@ -1,4 +1,3 @@
-import { parseCommandLineArgv } from 'windows-argv-parser'
 import stringArgv from 'string-argv'
 import { spawn, type ISpawnOptions } from '../web/child_process'
 import { backend } from '../backend/client'
@@ -32,7 +31,12 @@ export interface ICustomIntegration {
 export function parseCustomIntegrationArguments(
   args: string
 ): ReadonlyArray<string> {
-  return __WIN32__ ? parseCommandLineArgv(args) : stringArgv(args)
+  if (__WIN32__) {
+    throw new Error(
+      'Windows custom integration arguments must be parsed by the native host'
+    )
+  }
+  return stringArgv(args)
 }
 
 /** Parse Windows integration arguments on the native host. */

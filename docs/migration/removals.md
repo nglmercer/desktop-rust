@@ -100,6 +100,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | streams de archivo escritos como builtin `fs` en el proxy de hooks | frontera explícita `web/fs`; stdin buffered usa WriteStream host-backed y lectura por rangos | `app/test/unit/traditional-hook-test.ts` |
 | escritura/borrado temporal de reorder/squash como builtin `fs/promises` | frontera explícita `web/fs-promises`; las pruebas comparten un bridge Node mínimo de filesystem | `app/test/unit/git/reorder-test.ts`, `app/test/unit/git/squash-test.ts` |
 | ejecución directa del proxy de hooks y hooks tradicionales mediante `child_process` | frontera host-backed `web/child_process`; AbortSignal produce AbortError y kill host, pipe conserva `end: false`, y la lectura de stdin buffered respeta backpressure | `app/test/unit/traditional-hook-test.ts`, `app/test/unit/web-child-process-test.ts` |
+| addon/vendor `windows-argv-parser` y shim web vacío | parsing Windows asíncrono en el host Rust mediante `CommandLineToArgvW`; el lanzamiento de shells personalizados espera ese parseo antes de spawn | `app/test/unit/native-custom-integration-test.ts`, `app/test/unit/backend-client-session-test.ts` |
 | `stream/promises.pipeline` como rechazo permanente en el shim web | promesas sobre el pipeline/finished Node-compatible usado por el bundle; necesario para stdin de hooks | `app/test/unit/web-stream-promises-test.ts` |
 | constructores vacíos `ReadStream`/`WriteStream` en el shim `stream` | eliminados por no tener consumidores; los streams de archivo viven en `web/fs` | `pnpm check:types`, `pnpm vite:build` |
 | shim `app/src/web/web-utils.ts` sin consumidores | eliminado junto a su alias Vite; archivos soltados usan `hostFiles.getPathForFile` del host bridge | `pnpm check:types`, `pnpm vite:build` |
@@ -113,7 +114,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | Pieza | Estado actual | Condición de borrado final |
 |---|---|---|
 | `keytar`, `registry-js`, `fs-admin` | imports dirigidos a shims web o Rust | ningún consumidor ni test dependa del shim |
-| `desktop-notifications`, `windows-argv-parser` | fuentes vendorizadas/resolución de tipos para consumidores existentes | reemplazo Rust/tipado completo en notificaciones e integración de comandos |
+| `desktop-notifications` | fuentes vendorizadas/resolución de tipos para consumidores existentes | reemplazo Rust/tipado completo en notificaciones |
 | `desktop-trampoline` | dependencia real en `app/package.json` | entorno Git/SSH/askpass servido completamente por Rust |
 | `printenvz` | helper Rust vendorizado usado por scripts de entorno de hooks | integración de hooks migrada o eliminada |
 | `dugite` | dependencia real mientras existen fallbacks Git Node | 0 imports del renderer y tests usando Rust |

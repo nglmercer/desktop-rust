@@ -607,13 +607,6 @@ export default defineConfig({
         ),
       },
       {
-        find: /^windows-argv-parser$/,
-        replacement: path.resolve(
-          __dirname,
-          'app/src/web/windows-argv-parser.ts'
-        ),
-      },
-      {
         find: /^app-path$/,
         replacement: path.resolve(__dirname, 'app/src/web/app-path.ts'),
       },

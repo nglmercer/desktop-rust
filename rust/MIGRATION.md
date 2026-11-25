@@ -78,7 +78,7 @@ worklist for retiring them module by module.
   old custom rule implementations and suite-routing file `vitest-suites.json`.
 - Native addon dependencies whose responsibilities are represented by web shims
   or Rust code (`keytar`, `registry-js`, `desktop-notifications`,
-  `windows-argv-parser`, `fs-admin`). `desktop-trampoline` and `dugite` remain
+  `fs-admin`). `desktop-trampoline` and `dugite` remain
   real dependencies until their callers are retired.
 - Python smoke/integration paths that have Rust or Vitest replacements.
 

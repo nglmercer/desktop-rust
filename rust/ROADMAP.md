@@ -117,7 +117,7 @@ Follows R2. Each grep must reach zero or be explicitly host-only:
 ### R6 — Delete legacy code and packages (M)
 
 - [ ] Remove `dugite`, `desktop-trampoline` as a Node module,
-      `windows-argv-parser`, `desktop-notifications` vendor TypeScript and the
+      `desktop-notifications` vendor TypeScript and the
       `printenvz` helper when Rust replacements are the only path.
 - [ ] Collapse `rust/crates/desktop-core` (`desktop-shell-core-legacy`) into
       `rust/crates/core` and retire `rust/crates/native` as a host.

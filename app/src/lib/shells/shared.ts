@@ -154,7 +154,7 @@ export async function launchCustomShell(
   if (__DARWIN__) {
     cp = Darwin.launchCustomShell(customShell, path)
   } else if (__WIN32__) {
-    cp = Win32.launchCustomShell(customShell, path)
+    cp = await Win32.launchCustomShell(customShell, path)
   }
 
   if (cp != null) {
