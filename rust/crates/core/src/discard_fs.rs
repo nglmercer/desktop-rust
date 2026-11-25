@@ -72,6 +72,52 @@ pub(crate) fn checked_path(path: GitPath) -> Result<OsString> {
     Ok(path)
 }
 
+#[cfg(unix)]
+fn metadata_version_string(metadata: &cap_std::fs::Metadata) -> String {
+    use cap_std::fs::MetadataExt;
+    let nanoseconds =
+        |seconds: i64, nanos: i64| i128::from(seconds) * 1_000_000_000 + i128::from(nanos);
+    format!(
+        "{}:{}:{}:{}:{}:{}",
+        metadata.dev(),
+        metadata.ino(),
+        metadata.mode(),
+        metadata.size(),
+        nanoseconds(metadata.mtime(), metadata.mtime_nsec()),
+        nanoseconds(metadata.ctime(), metadata.ctime_nsec())
+    )
+}
+
+#[cfg(windows)]
+fn metadata_version_string(metadata: &cap_std::fs::Metadata) -> String {
+    use cap_std::fs::MetadataExt;
+    format!(
+        "0:{}:{}:{}:{}:{}",
+        metadata.creation_time(),
+        metadata.file_attributes(),
+        metadata.file_size(),
+        metadata.last_write_time(),
+        metadata.creation_time()
+    )
+}
+
+#[cfg(not(any(unix, windows)))]
+fn metadata_version_string(metadata: &cap_std::fs::Metadata) -> String {
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "0:{}:{}:{}:{}:0",
+        metadata.is_file() as u32,
+        metadata.permissions().readonly() as u32,
+        metadata.len(),
+        modified
+    )
+}
+
 pub(crate) struct WorkingFile {
     parent: Dir,
     name: OsString,
@@ -104,6 +150,15 @@ impl WorkingFile {
             };
         }
         bail!("working file needs a filename")
+    }
+
+    pub fn metadata_version(&self) -> Result<Option<String>> {
+        let metadata = match self.parent.symlink_metadata(&self.name) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Some(metadata_version_string(&metadata)))
     }
 
     pub fn capture(&self, backup: Option<&Path>) -> Result<FileState> {

@@ -525,6 +525,9 @@ pub enum Operation {
         #[serde(default)]
         prefix: bool,
     },
+    RendererWorkingFileMetadata {
+        paths: Vec<GitPath>,
+    },
     RendererBlobPrefix {
         revision: String,
         path: GitPath,

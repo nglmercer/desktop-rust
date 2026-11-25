@@ -39,6 +39,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | lectura directa de archivos de trabajo para syntax highlighting | snapshot acotado `renderer_working_file` Rust obligatorio | `app/test/unit/rust-syntax-highlighting-test.ts` |
 | lectura directa de `FETCH_HEAD` para fecha de fetch | lectura Rust `repositoryLastFetch` obligatoria | `app/test/unit/stores/last-fetch-test.ts` |
 | `readPartialFile` sin consumidores de producción | lecturas acotadas Rust del archivo de trabajo | `app/test/unit/file-system-test.ts` |
+| lectura directa `lstat` de entradas assisted-commit para freshness preflight | operación tipada Rust `renderer_working_file_metadata` con rutas confinadas y versión opaca validada | `app/test/unit/assisted-commit-selection-test.ts`, `app/test/unit/backend-client-session-test.ts`, `cargo test -p desktop-core renderer_working_file::tests::metadata_versions_are_bounded_literal_and_missing_aware` |
 | ejecución directa de `git reset` hard/soft en renderer | reset revisado Rust por WebSocket y Tao/Wry | `app/test/unit/git/reset-test.ts`, `cargo test -p desktop-core renderer_reset`, `cargo test -p desktop-app wry_resets_a_reviewed_commit` |
 | lanzamiento backend-less de editores externos y edición de configuración global | apertura de editores validada por el host Rust | `pnpm check:types`, integración backend `open_editor` |
 | fallback backend-less de descarte de cambios y borrado directo de archivos en `GitStore` | descarte revisado/recuperable del backend Rust obligatorio | `app/test/unit/rust-reviewed-discard-test.ts`, `app/test/unit/rust-batch-discard-dialog-test.tsx`, `app/test/unit/rust-discard-recovery-test.tsx` |
@@ -115,7 +116,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 28 llamadas legacy Git, 17 imports `dugite`, 17 imports `fs`,
+`transportKind`, 28 llamadas legacy Git, 17 imports `dugite`, 16 imports `fs`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

@@ -698,6 +698,9 @@ impl Repository {
                     .renderer_working_file_with_digest(path, max_bytes, sha256, prefix)
                     .await;
             }
+            Operation::RendererWorkingFileMetadata { paths } => {
+                return self.renderer_working_file_metadata(paths).await;
+            }
             Operation::RendererWorkingDiff {
                 path,
                 base,
@@ -1410,6 +1413,7 @@ impl Repository {
             | RendererStagedDiff { .. }
             | RendererWorkingDiff { .. }
             | RendererWorkingFile { .. }
+            | RendererWorkingFileMetadata { .. }
             | RendererBlobPrefix { .. }
             | RendererBlobSnapshot { .. }
             | RendererBlobChunk { .. }

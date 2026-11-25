@@ -704,6 +704,7 @@ impl Backend {
                     | Operation::RendererStagedDiff { .. }
                     | Operation::RendererWorkingDiff { .. }
                     | Operation::RendererWorkingFile { .. }
+                    | Operation::RendererWorkingFileMetadata { .. }
                     | Operation::RendererBlobPrefix { .. }
                     | Operation::RendererBlobSnapshot { .. }
                     | Operation::RendererBlobChunk { .. }
@@ -2738,6 +2739,10 @@ mod tests {
             fs::write(root.join("[a].png"), [0, 255, 0, 128, 42, 10]).unwrap();
             let backend = Backend::new(16).unwrap();
             let route = |operation: Value| backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":operation}})]).unwrap();
+            let metadata = backend.read(route(json!({"method":"renderer_working_file_metadata","paths":["[a].png"]}))).unwrap();
+            assert_eq!(metadata["versions"][0].as_str().unwrap().split(':').count(), 6);
+            assert!(backend.read(route(json!({"method":"renderer_working_file_metadata","paths":["missing.png"]}))).unwrap()["versions"][0].is_null());
+            assert!(backend.read(route(json!({"method":"renderer_working_file_metadata","paths":["../outside.png"]}))).is_err());
             let preview = backend.read(route(json!({"method":"renderer_working_file","path":"[a].png"}))).unwrap();
             let id = preview["id"].as_str().unwrap();
             let chunk = backend.read(route(json!({"method":"renderer_compare_diff_chunk","snapshot_id":id,"offset":0,"length":64}))).unwrap();

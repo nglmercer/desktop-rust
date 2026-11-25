@@ -3944,6 +3944,7 @@ export class BackendClient {
       | 'renderer_blob_chunk'
       | 'renderer_working_diff'
       | 'renderer_working_file'
+      | 'renderer_working_file_metadata'
       | 'diff_detail'
       | 'select_diff'
       | 'select_renamed_diff'
@@ -3969,6 +3970,37 @@ export class BackendClient {
       })
     }
     return this.repositoryRead(repositoryPath, method, params)
+  }
+
+  async repositoryWorkingFileMetadataVersions(
+    repositoryPath: string,
+    paths: ReadonlyArray<string>
+  ): Promise<ReadonlyArray<string | null>> {
+    const value = await this.repositoryRendererRequest(
+      repositoryPath,
+      'renderer_working_file_metadata',
+      { paths }
+    )
+    if (
+      !isRecord(value) ||
+      !Array.isArray(value.versions) ||
+      value.versions.length !== paths.length ||
+      value.versions.some(
+        version =>
+          version !== null &&
+          (typeof version !== 'string' ||
+            version.length === 0 ||
+            version.length > 512 ||
+            [...version].some(character => character.charCodeAt(0) < 0x20))
+      )
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid working file metadata response',
+        retryable: false,
+      })
+    }
+    return value.versions as ReadonlyArray<string | null>
   }
 
   /**

@@ -1,9 +1,7 @@
 import { ICopilotAssistedCommitRequest } from '../models/copilot-assisted-commit'
 import { WorkingDirectoryFileChange } from '../models/status'
-import { lstat } from 'fs/promises'
-import { join } from 'path'
 import { Repository } from '../models/repository'
-import { isErrnoException } from './errno-exception'
+import { backend } from '../backend/client'
 
 /** Freeze UI inputs before consent or other awaited preflight work. Not a Git snapshot. */
 export function freezeAssistedCommitRequest(
@@ -61,28 +59,14 @@ export async function getAssistedCommitInputVersions(
   repository: Repository,
   files: ReadonlyArray<WorkingDirectoryFileChange>
 ): Promise<ReadonlyArray<string>> {
-  return Promise.all(
-    files.map(async file => {
-      try {
-        const stat = await lstat(join(repository.path, file.path), {
-          bigint: true,
-        })
-        return [
-          stat.dev,
-          stat.ino,
-          stat.mode,
-          stat.size,
-          stat.mtimeNs,
-          stat.ctimeNs,
-        ].join(':')
-      } catch (error) {
-        if (isErrnoException(error) && error.code === 'ENOENT') {
-          return 'missing'
-        }
-        throw error
-      }
-    })
+  if (files.length === 0) {
+    return []
+  }
+  const versions = await backend().repositoryWorkingFileMetadataVersions(
+    repository.path,
+    files.map(file => file.path)
   )
+  return versions.map(version => version ?? 'missing')
 }
 
 /** Text anchors are unsafe after inode, file type, or executable-mode changes. */

@@ -632,6 +632,38 @@ describe('backend Copilot session cleanup', () => {
     }
   })
 
+  it('validates host-owned working-file metadata versions', async () => {
+    const client = new BackendClient()
+    const request = vi
+      .spyOn(snapshotTransport(client), 'repositoryRendererRequest')
+      .mockResolvedValueOnce({ versions: ['1:2:3:4:5:6', null] })
+    await expect(
+      client.repositoryWorkingFileMetadataVersions('/repo', [
+        'file.txt',
+        'missing.txt',
+      ])
+    ).resolves.toEqual(['1:2:3:4:5:6', null])
+    expect(request).toHaveBeenCalledWith(
+      '/repo',
+      'renderer_working_file_metadata',
+      { paths: ['file.txt', 'missing.txt'] }
+    )
+    for (const response of [
+      { versions: ['1:2:3:4:5:6'] },
+      { versions: [''] },
+      { versions: ['bad\nversion', null] },
+      {},
+    ]) {
+      request.mockResolvedValueOnce(response)
+      await expect(
+        client.repositoryWorkingFileMetadataVersions('/repo', [
+          'file.txt',
+          'missing.txt',
+        ])
+      ).rejects.toMatchObject({ code: 'invalid_response', retryable: false })
+    }
+  })
+
   it('rejects oversized working-file snapshots before requesting chunks', async () => {
     const client = new BackendClient()
     const id = '12345678-1234-4234-8234-123456789abc'

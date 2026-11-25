@@ -5,6 +5,34 @@ use cap_std::{ambient_authority, fs::Dir};
 use std::path::Path;
 
 impl Repository {
+    pub(crate) async fn renderer_working_file_metadata(
+        &self,
+        paths: Vec<GitPath>,
+    ) -> Result<serde_json::Value> {
+        let paths = paths
+            .into_iter()
+            .map(crate::discard_fs::checked_path)
+            .collect::<Result<Vec<_>>>()?;
+        let root = self.path.clone();
+        let versions = crate::cancellation::blocking(move || {
+            let root = Dir::open_ambient_dir(&root, ambient_authority())?;
+            paths
+                .iter()
+                .map(|path| {
+                    let Some(file) =
+                        crate::discard_fs::WorkingFile::open(&root, Path::new(path), false)?
+                    else {
+                        return Ok(None);
+                    };
+                    file.metadata_version()
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .await?;
+        crate::cancellation::Cancellation::current().check()?;
+        Ok(serde_json::json!({ "versions": versions }))
+    }
+
     #[cfg(test)]
     pub(crate) async fn renderer_working_file(
         &self,
@@ -107,6 +135,60 @@ mod tests {
     use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use std::{fs, process::Command};
+
+    #[tokio::test]
+    async fn metadata_versions_are_bounded_literal_and_missing_aware() {
+        let root = std::env::temp_dir().join(format!("desktop-metadata-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .current_dir(&root)
+                .args(["init", "-q"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(root.join("file.txt"), b"one").unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let first = repo
+            .renderer_working_file_metadata(vec![GitPath::Text("file.txt".into())])
+            .await
+            .unwrap();
+        let first_version = first["versions"][0].as_str().unwrap();
+        assert_eq!(first_version.split(':').count(), 6);
+        fs::write(root.join("file.txt"), b"one two").unwrap();
+        let second = repo
+            .renderer_working_file_metadata(vec![GitPath::Text("file.txt".into())])
+            .await
+            .unwrap();
+        let second_version = second["versions"][0].as_str().unwrap();
+        assert_ne!(first_version, second_version);
+        assert_eq!(
+            second_version.split(':').nth(3),
+            Some("7"),
+            "metadata size must reflect the replacement bytes"
+        );
+        let batch = repo
+            .renderer_working_file_metadata(vec![
+                GitPath::Text("file.txt".into()),
+                GitPath::Text("missing.txt".into()),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(batch["versions"][0].as_str(), Some(second_version));
+        assert!(batch["versions"][1].is_null());
+        assert!(
+            repo.renderer_working_file_metadata(vec![GitPath::Text("../file.txt".into())])
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.renderer_working_file_metadata(vec![GitPath::Text(".git/config".into())])
+                .await
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn image_snapshot_preserves_bytes_and_releases_failed_reads() {
