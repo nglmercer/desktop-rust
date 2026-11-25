@@ -1,4 +1,4 @@
-import * as OS from 'os'
+import * as OS from '../web/os'
 import compareVersions from 'compare-versions'
 import memoizeOne from 'memoize-one'
 

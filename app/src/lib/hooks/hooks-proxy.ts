@@ -12,7 +12,7 @@ import memoizeOne from 'memoize-one'
 import which from 'which'
 import { createReadStream, createWriteStream } from 'fs'
 import { spawnTraditionalHook } from './traditional-hook'
-import { constants as osConstants } from 'os'
+import { constants as osConstants } from '../../web/os'
 
 const execFileAsync = promisify(execFile)
 

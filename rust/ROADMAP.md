@@ -14,7 +14,7 @@ if it regresses.
 | Renderer files importing `dugite` | 17 | 0 |
 | Renderer files importing `fs` | 17 | 0 (host operations only) |
 | Renderer files importing `child_process` | 7 | 0 |
-| Renderer files importing `os` / `crypto` / `keytar` | 8 / 0 / 0 | 0 |
+| Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 406 | 0 |
 | Rust code (crates, non-test) | 90,267 lines | — |
 
@@ -111,7 +111,7 @@ Follows R2. Each grep must reach zero or be explicitly host-only:
 
 - [ ] `dugite` (currently 17 files)
 - [ ] `fs` (currently 17 files)
-- [ ] `child_process` (8), `os` (8), `crypto` (0), `keytar` (0)
+- [ ] `child_process` (7), `os` (0), `crypto` (0), `keytar` (0)
 - [ ] Delete the matching `app/src/web/*` shims only after their imports are gone.
 - [ ] Remove `app/test/globals.cjs` once the import-cycle test no longer needs
       a Node subprocess with the old module-loader environment.

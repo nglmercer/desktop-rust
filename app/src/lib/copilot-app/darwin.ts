@@ -1,5 +1,5 @@
 import appPath from 'app-path'
-import { homedir } from 'os'
+import { homedir } from '../../web/os'
 import { isAbsolute, join, normalize } from 'path'
 
 const bundleIdentifier = 'com.github.githubapp'

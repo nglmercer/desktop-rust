@@ -1,5 +1,5 @@
 import { lstat, open, realpath, rename, stat } from 'fs/promises'
-import { homedir } from 'os'
+import { homedir } from '../../web/os'
 import {
   constants,
   closeSync,

@@ -1,6 +1,6 @@
 import { cp, mkdtemp, rm } from 'fs/promises'
 import type { AddressInfo } from 'net'
-import { tmpdir } from 'os'
+import { tmpdir } from '../../web/os'
 import { join } from 'path'
 import { createProxyProcessServer } from 'process-proxy'
 import type { IGitExecutionOptions } from '../git/core'

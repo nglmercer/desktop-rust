@@ -3,7 +3,7 @@ import { Tailer } from './tailer'
 import byline from 'byline'
 import { randomUUID } from '../web/random-uuid'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { tmpdir } from '../web/os'
 
 /**
  * Get a path to a temp file using the given name. Note that the file itself

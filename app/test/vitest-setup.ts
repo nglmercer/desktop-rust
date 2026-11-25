@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { expect, vi } from 'vitest'
 import { JSDOM } from 'jsdom'
 import packageInfo from '../package.json'
+import { arch, homedir, hostname, release, tmpdir } from 'node:os'
 
 vi.mock('../src/web/host-bridge', () => ({
   hostShell: { readShortcutLink: vi.fn(() => ({})) },
@@ -9,6 +10,14 @@ vi.mock('../src/web/host-bridge', () => ({
 }))
 
 Object.assign(globalThis, {
+  __desktopEnv: {
+    platform: process.platform,
+    arch: arch(),
+    homedir: homedir(),
+    tmpdir: tmpdir(),
+    release: release(),
+    hostname: hostname(),
+  },
   __DEV__: false,
   __TEST__: true,
   __DEV_SECRETS__: false,
