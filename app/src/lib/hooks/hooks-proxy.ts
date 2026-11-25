@@ -9,7 +9,7 @@ import { pipeline } from 'stream/promises'
 import { promisify } from 'util'
 import memoizeOne from 'memoize-one'
 import which from 'which'
-import { createReadStream, createWriteStream } from 'fs'
+import { createReadStream, createWriteStream } from '../../web/fs'
 import { spawnTraditionalHook } from './traditional-hook'
 import { constants as osConstants } from '../../web/os'
 

@@ -3,10 +3,12 @@ import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import {
+  appendFileSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -14,16 +16,72 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spawnTraditionalHook } from '../../src/lib/hooks/traditional-hook'
 import { createHooksProxy } from '../../src/lib/hooks/hooks-proxy'
 import type { TerminalOutput } from '../../src/lib/git/core'
+
+function installFileBridge() {
+  vi.stubGlobal('__desktop', {
+    invoke: (channel: string, options: any): Promise<unknown> => {
+      if (channel === 'desktop.io.fs-write-file') {
+        const bytes = Buffer.from(options.data, 'base64')
+        try {
+          if (options.append === true) {
+            appendFileSync(options.path, bytes)
+          } else {
+            writeFileSync(options.path, bytes, {
+              flag: options.exclusive === true ? 'wx' : 'w',
+              mode: options.mode,
+            })
+          }
+          return Promise.resolve(null)
+        } catch (error) {
+          return Promise.reject(error)
+        }
+      }
+      if (channel === 'desktop.io.fs-read-range') {
+        try {
+          const bytes = readFileSync(options.path)
+          const stat = statSync(options.path)
+          const part = bytes.subarray(
+            options.offset,
+            options.offset + options.length
+          )
+          return Promise.resolve({
+            data: part.toString('base64'),
+            bytesRead: part.byteLength,
+            eof: options.offset + part.byteLength >= bytes.byteLength,
+            identity: {
+              dev: stat.dev,
+              ino: String(stat.ino),
+              size: stat.size,
+              mtimeMs: stat.mtimeMs,
+            },
+          })
+        } catch (error) {
+          return Promise.reject(error)
+        }
+      }
+      return Promise.reject(new Error(`unexpected ${channel}`))
+    },
+    invokeSync: () => {
+      throw new Error('unexpected synchronous call')
+    },
+    encodeBase64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
+    decodeBase64: (text: string) => new Uint8Array(Buffer.from(text, 'base64')),
+  })
+}
 
 describe.skipIf(process.platform === 'win32')(
   'traditional Git hook execution',
   () => {
     let root = ''
+    beforeEach(() => {
+      installFileBridge()
+    })
     afterEach(() => {
+      vi.unstubAllGlobals()
       if (root) rmSync(root, { recursive: true, force: true })
       root = ''
     })
