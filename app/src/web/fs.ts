@@ -6,6 +6,8 @@
 // them, so a handle does not pin an inode the way Node's does: code that
 // relies on that for locking gets best-effort behaviour here.
 
+import { Writable } from 'stream'
+
 import { bundleUrl, bundleEntry, bundleEntrySync, IBundleEntry } from './bundle'
 
 type Encoding = BufferEncoding | null | undefined
@@ -1119,13 +1121,63 @@ export class ReadStream {
 export const createReadStream = (path: PathLike, options?: any) =>
   new ReadStream(path, options)
 
-export class WriteStream {
-  public constructor() {
-    throw new Error('fs.createWriteStream is not available in the webview')
+export class WriteStream extends Writable {
+  private pending: Promise<unknown>
+  private bytesWritten = 0
+
+  public constructor(
+    public readonly path: string,
+    options?: any
+  ) {
+    super()
+    const flags = typeof options === 'string' ? undefined : options?.flags
+    const append = flags?.includes('a') === true
+    const exclusive = flags?.includes('x') === true
+    const mode = typeof options === 'object' ? options?.mode : undefined
+    // Even an empty stream creates its destination in Node. Subsequent writes
+    // always append because the initial call has already applied truncation.
+    this.pending = call('write-file', {
+      path: this.path,
+      data: '',
+      append,
+      exclusive,
+      mode,
+    })
+  }
+
+  public _write(
+    chunk: unknown,
+    encoding: BufferEncoding,
+    callback: (error?: Error | null) => void
+  ) {
+    const bytes =
+      chunk instanceof Uint8Array ? chunk : Buffer.from(String(chunk), encoding)
+    const data = bridge().encodeBase64(bytes)
+    this.pending = this.pending.then(() =>
+      call('write-file', {
+        path: this.path,
+        data,
+        append: true,
+      })
+    )
+    this.pending.then(
+      () => {
+        this.bytesWritten += bytes.byteLength
+        callback()
+      },
+      error => callback(error)
+    )
+  }
+
+  public _final(callback: (error?: Error | null) => void) {
+    this.pending.then(
+      () => callback(),
+      error => callback(error)
+    )
   }
 }
-export function createWriteStream(): WriteStream {
-  return new WriteStream()
+export function createWriteStream(path: PathLike, options?: any): WriteStream {
+  return new WriteStream(toPath(path), options)
 }
 
 export default {

@@ -95,6 +95,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | imports dispersos del enum `GitError` de dugite en consumidores renderer | vocabulario centralizado en `app/src/lib/git/error-kind.ts`; quedan imports directos solo en la frontera del vocabulario y el legacy runner | `pnpm check:types`, `app/test/unit/rust-fetch-error-test.ts`, routing fetch/pull/push |
 | resolución dugite del binario Git para hooks y tabla vacía de señales del shim `os` | ejecución mediante `git` resuelto por el host/PATH, como ya ocurría en el bundle web; códigos de salida por señal POSIX conservados | `app/test/unit/traditional-hook-test.ts` |
 | imports directos `dugite` en hooks/credenciales | frontera explícita host-backed `app/src/web/dugite.ts`; los tests inyectan un bridge Node solo para ejercitar la superficie web | `app/test/unit/hooks-discovery-test.ts`, `app/test/unit/git/credential-test.ts` |
+| `fs.createWriteStream` ausente en el shim host usado para stdin de hooks | stream Writable real con creación/truncado inicial y appends chunked por el host; conserva destinos vacíos | `app/test/unit/web-fs-write-stream-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
