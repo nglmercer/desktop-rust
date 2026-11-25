@@ -58,6 +58,13 @@ export type AssistedCommitHeadResult =
     }
   | { readonly kind: 'invalid'; readonly message: string }
 
+/** A validated reference captured for an assisted-commit private view. */
+export type AssistedCommitRef = {
+  readonly objectId: string
+  readonly name: string
+  readonly target: string | null
+}
+
 /** Proxy settings explicitly resolved for one remote operation. */
 export type RemoteProxy = {
   readonly http?: string
@@ -2989,6 +2996,44 @@ export class BackendClient {
       })
     }
     return value.kind
+  }
+
+  async repositoryAssistedCommitRefs(
+    repositoryPath: string
+  ): Promise<ReadonlyArray<AssistedCommitRef>> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_refs',
+      {}
+    )
+    if (
+      isRecord(value) &&
+      Array.isArray(value.refs) &&
+      value.refs.every(
+        reference =>
+          isRecord(reference) &&
+          typeof reference.object_id === 'string' &&
+          [40, 64].includes(reference.object_id.length) &&
+          typeof reference.name === 'string' &&
+          reference.name.startsWith('refs/') &&
+          reference.name.length <= 4096 &&
+          (reference.target === null ||
+            (typeof reference.target === 'string' &&
+              reference.target.startsWith('refs/') &&
+              reference.target.length <= 4096))
+      )
+    ) {
+      return value.refs.map(reference => ({
+        objectId: reference.object_id as string,
+        name: reference.name as string,
+        target: reference.target as string | null,
+      }))
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted-commit refs response',
+      retryable: false,
+    })
   }
 
   async repositoryAssistedCommitIndexEntries(

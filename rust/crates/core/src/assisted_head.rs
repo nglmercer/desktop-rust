@@ -20,6 +20,53 @@ fn invalid(message: impl Into<String>) -> Value {
     json!({"kind":"invalid", "message":message.into()})
 }
 
+fn snapshot_reference_name(value: &str) -> bool {
+    value.len() <= 4096
+        && value.starts_with("refs/")
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+        && !value.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || character == '\\'
+        })
+}
+
+fn validate_snapshot_refs(output: &[u8]) -> Result<Vec<Value>> {
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    anyhow::ensure!(
+        output.ends_with(b"\n"),
+        "reference snapshot is not terminated"
+    );
+    let text = std::str::from_utf8(&output[..output.len() - 1])?;
+    let mut references = Vec::new();
+    for row in text.split('\n') {
+        let fields = row.split('\0').collect::<Vec<_>>();
+        anyhow::ensure!(fields.len() == 3, "reference snapshot row is malformed");
+        let [object_id, name, target] = fields.try_into().unwrap();
+        anyhow::ensure!(
+            matches!(object_id.len(), 40 | 64)
+                && object_id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "reference snapshot object ID is invalid"
+        );
+        anyhow::ensure!(
+            snapshot_reference_name(name),
+            "reference snapshot name is unsafe"
+        );
+        anyhow::ensure!(
+            target.is_empty() || snapshot_reference_name(target),
+            "reference snapshot target is unsafe"
+        );
+        references.push(json!({
+            "object_id": object_id,
+            "name": name,
+            "target": if target.is_empty() { Value::Null } else { json!(target) },
+        }));
+    }
+    Ok(references)
+}
+
 fn validate_index_entries(entries: &[u8]) -> Result<()> {
     if entries.is_empty() {
         return Ok(());
@@ -52,6 +99,18 @@ fn validate_index_entries(entries: &[u8]) -> Result<()> {
 }
 
 impl Repository {
+    /// Capture validated refs for assisted-commit's private reference view.
+    pub(crate) async fn assisted_commit_refs(&self) -> Result<Value> {
+        let output = self
+            .run(&args(&[
+                "for-each-ref",
+                "--format=%(objectname)%00%(refname)%00%(symref)",
+            ]))
+            .await?;
+        anyhow::ensure!(output.code == 0, "Cannot capture repository references");
+        Ok(json!({"refs":validate_snapshot_refs(&output.stdout)?}))
+    }
+
     /// Capture the exact stage entries needed to reproduce the real index in
     /// assisted-commit's temporary attributes index.
     pub(crate) async fn assisted_commit_index_entries(&self) -> Result<Value> {
@@ -293,7 +352,7 @@ mod tests {
     #[tokio::test]
     async fn safety_detects_grafts_operations_and_conflicts() {
         let fixture = Fixture::new();
-        fixture.commit();
+        let head = fixture.commit();
         let repository = Repository::open(&fixture.0).await.unwrap();
         assert_eq!(
             repository.assisted_commit_safety().await.unwrap()["kind"],
@@ -305,6 +364,12 @@ mod tests {
             .unwrap();
         assert!(entries.ends_with(b"\tfile\0"));
         assert!(entries.starts_with(b"100644 "));
+        let refs = repository.assisted_commit_refs().await.unwrap();
+        assert!(refs["refs"].as_array().unwrap().iter().any(|reference| {
+            reference["object_id"] == head
+                && reference["name"] == "refs/heads/main"
+                && reference["target"].is_null()
+        }));
         let index = repository.assisted_commit_git_path("index").await.unwrap();
         assert!(index["path"].as_str().unwrap().ends_with(".git/index"));
         assert!(

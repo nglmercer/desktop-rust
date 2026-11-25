@@ -433,11 +433,7 @@ export async function initializePrivateRepository(
   text +=
     '[gc]\n\tauto = 0\n\tautoDetach = false\n[maintenance]\n\tauto = false\n'
 
-  const refs = await git(
-    ['for-each-ref', '--format=%(objectname)%00%(refname)%00%(symref)'],
-    repository.path,
-    'assistedCommitCaptureRefs'
-  )
+  const refs = await backend().repositoryAssistedCommitRefs(repository.path)
   const objects = await gitPath(repository, 'objects')
   const attributesPath = await gitPath(repository, 'info/attributes')
   const hooksPath = await gitPath(repository, 'hooks')
@@ -451,29 +447,20 @@ export async function initializePrivateRepository(
   await writeFile(join(directory, 'config'), text, { mode: 0o600 })
   await writeFile(join(directory, 'HEAD'), headBytes, { mode: 0o600 })
   let packedRefs = ''
-  for (const row of refs.stdout
-    .split(/\r?\n/)
-    .filter(line => line.length > 0)) {
-    const [sha, ref, target] = row.split('\0')
-    if (target === undefined || !ref.startsWith('refs/')) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        'Cannot snapshot malformed Git references'
-      )
-    }
+  for (const { objectId: sha, name: ref, target } of refs) {
     const perWorktree = [
       'refs/bisect/',
       'refs/worktree/',
       'refs/rewritten/',
     ].some(prefix => ref.startsWith(prefix))
-    if (target.length === 0 && !perWorktree) {
+    if (target === null && !perWorktree) {
       packedRefs += `${sha} ${ref}\n`
     } else {
       const refPath = join(directory, ref)
       await mkdir(dirname(refPath), { recursive: true })
       await writeFile(
         refPath,
-        target.length === 0 ? `${sha}\n` : `ref: ${target}\n`,
+        target === null ? `${sha}\n` : `ref: ${target}\n`,
         { mode: 0o600 }
       )
     }
