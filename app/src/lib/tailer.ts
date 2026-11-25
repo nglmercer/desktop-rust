@@ -1,4 +1,4 @@
-import * as Fs from 'node:fs'
+import * as Fs from '../web/fs'
 import { Emitter, type Disposable } from 'event-kit'
 
 interface ICurrentFileTailState {
@@ -62,7 +62,7 @@ export class Tailer {
     }
 
     try {
-      const watcher = Fs.watch(this.path, event => {
+      const watcher = Fs.watch(this.path, (event: string) => {
         const state = this.state
         if (state?.watcher === watcher && event === 'change') {
           this.state = { ...state, readPending: true }
@@ -94,7 +94,7 @@ export class Tailer {
 
     this.state = { ...state, reading: true, readPending: false }
 
-    Fs.stat(this.path, (err, stats) => {
+    Fs.stat(this.path, (err: Error | null, stats: { size: number }) => {
       const currentState = this.state
       if (currentState?.watcher !== watcher) {
         return

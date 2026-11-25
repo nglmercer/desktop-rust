@@ -1116,6 +1116,10 @@ export class ReadStream {
     }
     return true
   }
+  public get readable() {
+    return !this.destroyed
+  }
+
   public pipe<T extends { write(chunk: any): any; end(): any }>(
     destination: T
   ): T {

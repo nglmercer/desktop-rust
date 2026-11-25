@@ -10,14 +10,37 @@ import { tailByLine } from '../../src/lib/file-system'
 import { Tailer } from '../../src/lib/tailer'
 import { createTempDirectory } from '../helpers/temp'
 
-// The tailer calls `watch` through the `node:fs` namespace, which cannot be
-// patched in place under Vitest. Route it through a spy that calls the real
-// watcher, and reset it per test.
-const realWatch = Fs.watch
-const watchSpy = mock.fn(
-  (...args: Parameters<typeof Fs.watch>): Fs.FSWatcher =>
-    (realWatch as unknown as (...a: Array<unknown>) => Fs.FSWatcher)(...args)
-)
+// The production tailer uses the host-backed web filesystem. These tests
+// replace that boundary with controlled Node implementations so watcher and
+// stream races remain deterministic.
+class FakeWatcher {
+  private readonly handlers = new Map<string, Set<(...args: any[]) => void>>()
+
+  public on(event: string, listener: (...args: any[]) => void) {
+    const listeners = this.handlers.get(event) ?? new Set()
+    listeners.add(listener)
+    this.handlers.set(event, listeners)
+    return this
+  }
+
+  public emit(event: string, ...args: any[]) {
+    for (const listener of this.handlers.get(event) ?? []) {
+      listener(...args)
+    }
+    return true
+  }
+
+  public close() {}
+}
+
+const watchSpy = mock.fn((...args: Array<unknown>) => {
+  const watcher = new FakeWatcher()
+  const listener = args.find(arg => typeof arg === 'function')
+  if (typeof listener === 'function') {
+    watcher.on('change', listener as (...args: any[]) => void)
+  }
+  return watcher
+})
 const statSpy = mock.fn(
   (
     path: Fs.PathLike,
@@ -36,9 +59,9 @@ const createReadStreamSpy = mock.fn(
       options
     )
 )
-vi.mock('node:fs', async importOriginal => ({
-  ...(await importOriginal<typeof import('node:fs')>()),
-  watch: (...args: Parameters<typeof Fs.watch>) => watchSpy(...args),
+vi.mock('../../src/web/fs', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/web/fs')>()),
+  watch: (...args: Array<unknown>) => watchSpy(...args),
   stat: (...args: Array<unknown>) => (statSpy as any)(...args),
   createReadStream: (...args: Array<unknown>) =>
     (createReadStreamSpy as any)(...args),
@@ -82,7 +105,7 @@ async function setupTailer(t: TestContext) {
   }
 
   const nextStream = () =>
-    new Promise<Fs.ReadStream>(resolve => {
+    new Promise<any>(resolve => {
       const subscription = tailer.onDataAvailable(stream => {
         subscription.dispose()
         t.after(() => stream.destroy())
@@ -104,7 +127,7 @@ async function setupTailer(t: TestContext) {
   }
 }
 
-async function consume(stream: Fs.ReadStream) {
+async function consume(stream: any) {
   const closed = once(stream, 'close')
   const chunks: Buffer[] = []
   stream.on('data', (chunk: Buffer) => chunks.push(chunk))
@@ -382,17 +405,23 @@ describe('tailByLine', { timeout: 5000 }, () => {
       new Promise<string>(resolve => {
         onLine = resolve
       })
+    const watch = (watchSpy.mock.resetCalls(), watchSpy)
     const disposable = tailByLine(path, line => {
       lines.push(line)
       onLine(line)
     })
     t.after(() => disposable.dispose())
+    const watcher = watch.mock.calls[0].result
+    assert.ok(watcher)
+    watcher.close()
 
     const first = nextLine()
     await appendFile(path, 'first\n')
+    watcher.emit('change', 'change')
     assert.strictEqual(await first, 'first')
     const second = nextLine()
     await appendFile(path, 'second\n')
+    watcher.emit('change', 'change')
     assert.strictEqual(await second, 'second')
     assert.deepStrictEqual(lines, ['first', 'second'])
   })

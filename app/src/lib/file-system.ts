@@ -29,14 +29,17 @@ export function tailByLine(
   })
 
   const onDataDisposable = tailer.onDataAvailable(stream => {
-    byline(stream).on('data', (buffer: Buffer) => {
-      if (onDataDisposable.disposed) {
-        return
-      }
+    byline(stream as unknown as NodeJS.ReadableStream).on(
+      'data',
+      (buffer: Buffer) => {
+        if (onDataDisposable.disposed) {
+          return
+        }
 
-      const line = buffer.toString()
-      cb(line)
-    })
+        const line = buffer.toString()
+        cb(line)
+      }
+    )
   })
 
   tailer.start()
