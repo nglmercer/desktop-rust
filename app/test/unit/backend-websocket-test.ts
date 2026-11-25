@@ -152,6 +152,21 @@ describe('WebSocket backend transport', () => {
     await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('sends typed assisted-commit safety reads and validates their response', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.repositoryAssistedCommitSafety('/repo')
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'assisted_commit_safety',
+      repository_path: '/repo',
+    })
+    socket.message({ id: 1, result: { kind: 'ok' } })
+    await expect(pending).resolves.toEqual({ kind: 'ok' })
+    const invalid = value.repositoryAssistedCommitSafety('/repo')
+    socket.message({ id: 2, result: { kind: 'invalid' } })
+    await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('sends typed assisted-commit HEAD reads and validates their response', async () => {
     const { client: value, socket } = await connected()
     const pending = value.repositoryAssistedCommitHead('/repo')

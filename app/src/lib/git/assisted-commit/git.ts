@@ -823,47 +823,8 @@ export async function gitPath(
 export async function ensureNoRepositoryOperation(
   repository: Repository
 ): Promise<void> {
-  const replacements = await git(
-    ['replace', '--list'],
-    repository.path,
-    'assistedCommitCheckReplacementHistory'
-  )
-  if (
-    replacements.stdout.length > 0 ||
-    (await optionalStat(
-      process.env.GIT_GRAFT_FILE ?? (await gitPath(repository, 'info/grafts'))
-    )) !== null
-  ) {
-    throw new AssistedCommitError(
-      'unsafe-selection',
-      'Assisted commits do not support replacement refs or grafted history'
-    )
-  }
-  for (const name of [
-    'MERGE_HEAD',
-    'CHERRY_PICK_HEAD',
-    'REVERT_HEAD',
-    'rebase-merge',
-    'rebase-apply',
-    'sequencer',
-    'BISECT_LOG',
-  ]) {
-    if ((await optionalStat(await gitPath(repository, name))) !== null) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        `Cannot create assisted commits during a Git operation (${name})`
-      )
-    }
-  }
-  const conflicts = await git(
-    ['ls-files', '--unmerged', '-z'],
-    repository.path,
-    'assistedCommitCheckConflicts'
-  )
-  if (conflicts.stdout.length > 0) {
-    throw new AssistedCommitError(
-      'unsafe-selection',
-      'The real index contains unresolved conflicts'
-    )
+  const safety = await backend().repositoryAssistedCommitSafety(repository.path)
+  if (safety.kind === 'invalid') {
+    throw new AssistedCommitError('unsafe-selection', safety.message)
   }
 }

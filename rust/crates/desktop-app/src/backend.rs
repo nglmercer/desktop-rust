@@ -379,6 +379,7 @@ enum ReadMethod {
     RendererCommitChanges,
     RefLockContext,
     AssistedCommitHead,
+    AssistedCommitSafety,
     Worktrees,
     WorktreesFromGitDir,
     ProtectedResources,
@@ -1523,6 +1524,17 @@ impl Backend {
                         })?,
                     }
                 }
+                ReadMethod::AssistedCommitSafety
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.paths.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitSafety
+                }
                 ReadMethod::AssistedCommitHead
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()
@@ -2503,6 +2515,12 @@ mod tests {
                 assert!(value["git_dir"].as_str().unwrap().ends_with(".git"));
                 assert_eq!(value["worktree_root"], root.to_string_lossy().as_ref());
                 assert_eq!(value["ref_format"], "files");
+                let safety = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_safety"}),
+                    ])
+                    .unwrap();
+                assert_eq!(safety["kind"], "ok");
                 assert!(
                     backend
                         .admit(vec![

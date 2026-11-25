@@ -442,6 +442,7 @@ pub enum Operation {
         expected_value: String,
     },
     AssistedCommitHead,
+    AssistedCommitSafety,
     MergeBase {
         first: String,
         second: String,

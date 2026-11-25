@@ -15,11 +15,62 @@ fn output_line(output: &[u8], what: &str, path: bool) -> Result<String> {
     Ok(text.to_owned())
 }
 
-fn invalid(message: &'static str) -> Value {
-    json!({"kind":"invalid", "message":message})
+fn invalid(message: impl Into<String>) -> Value {
+    json!({"kind":"invalid", "message":message.into()})
 }
 
 impl Repository {
+    pub(crate) async fn assisted_commit_safety(&self) -> Result<Value> {
+        let replacements = self.run(&args(&["replace", "--list"])).await?;
+        anyhow::ensure!(replacements.code == 0, "Cannot inspect replacement refs");
+        if !replacements.stdout.is_empty() {
+            return Ok(invalid(
+                "Assisted commits do not support replacement refs or grafted history",
+            ));
+        }
+        let directory = self.git_directory().await?;
+        let grafts = std::env::var_os("GIT_GRAFT_FILE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| directory.join("info/grafts"));
+        match std::fs::symlink_metadata(&grafts) {
+            Ok(_) => {
+                return Ok(invalid(
+                    "Assisted commits do not support replacement refs or grafted history",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        for name in [
+            "MERGE_HEAD",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "rebase-merge",
+            "rebase-apply",
+            "sequencer",
+            "BISECT_LOG",
+        ] {
+            match std::fs::symlink_metadata(directory.join(name)) {
+                Ok(_) => {
+                    return Ok(invalid(format!(
+                        "Cannot create assisted commits during a Git operation ({name})"
+                    )));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let conflicts = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
+        anyhow::ensure!(
+            conflicts.code == 0,
+            "Cannot inspect unresolved index entries"
+        );
+        if !conflicts.stdout.is_empty() {
+            return Ok(invalid("The real index contains unresolved conflicts"));
+        }
+        Ok(json!({"kind":"ok"}))
+    }
+
     /// Read HEAD, its optional branch, tip, and absolute Git directory in one
     /// repository operation. Expected unsafe states are data, not transport errors.
     pub(crate) async fn assisted_commit_head(&self) -> Result<Value> {
@@ -167,6 +218,57 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn safety_detects_grafts_operations_and_conflicts() {
+        let fixture = Fixture::new();
+        fixture.commit();
+        let repository = Repository::open(&fixture.0).await.unwrap();
+        assert_eq!(
+            repository.assisted_commit_safety().await.unwrap()["kind"],
+            "ok"
+        );
+        let grafts = fixture.0.join(".git/info/grafts");
+        fs::write(&grafts, "0000000000000000000000000000000000000000\n").unwrap();
+        let grafted = repository.assisted_commit_safety().await.unwrap();
+        assert_eq!(grafted["kind"], "invalid");
+        assert!(
+            grafted["message"]
+                .as_str()
+                .unwrap()
+                .contains("grafted history")
+        );
+        fs::remove_file(&grafts).unwrap();
+        let merge_head = fixture.0.join(".git/MERGE_HEAD");
+        fs::write(&merge_head, "0000000000000000000000000000000000000000\n").unwrap();
+        let merging = repository.assisted_commit_safety().await.unwrap();
+        assert_eq!(merging["kind"], "invalid");
+        assert!(merging["message"].as_str().unwrap().contains("MERGE_HEAD"));
+        fs::remove_file(&merge_head).unwrap();
+        let blob = fixture.git(&["hash-object", "-w", "file"]);
+        let mut child = Command::new("git")
+            .arg("-C")
+            .arg(&fixture.0)
+            .args(["update-index", "--index-info"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        write!(
+            child.stdin.as_mut().unwrap(),
+            "100644 {blob} 1\tfile\n100644 {blob} 2\tfile\n"
+        )
+        .unwrap();
+        assert!(child.wait().unwrap().success());
+        let conflicted = repository.assisted_commit_safety().await.unwrap();
+        assert_eq!(conflicted["kind"], "invalid");
+        assert!(
+            conflicted["message"]
+                .as_str()
+                .unwrap()
+                .contains("unresolved conflicts")
+        );
     }
 
     #[tokio::test]

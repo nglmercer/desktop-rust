@@ -2991,6 +2991,33 @@ export class BackendClient {
     return value.kind
   }
 
+  async repositoryAssistedCommitSafety(
+    repositoryPath: string
+  ): Promise<
+    | { readonly kind: 'ok' }
+    | { readonly kind: 'invalid'; readonly message: string }
+  > {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_safety',
+      {}
+    )
+    if (
+      isRecord(value) &&
+      ((value.kind === 'ok' && Object.keys(value).length === 1) ||
+        (value.kind === 'invalid' &&
+          typeof value.message === 'string' &&
+          value.message.length <= 4096))
+    ) {
+      return value as { kind: 'ok' } | { kind: 'invalid'; message: string }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted-commit safety response',
+      retryable: false,
+    })
+  }
+
   /** Read the assisted-commit HEAD identity and Git directory through Rust. */
   async repositoryAssistedCommitHead(
     repositoryPath: string
