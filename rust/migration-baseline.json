@@ -4,7 +4,7 @@
   "nodeTestFiles": 0,
   "imports.dugite": 17,
   "imports.fs": 17,
-  "imports.child_process": 8,
+  "imports.child_process": 7,
   "imports.os": 8,
   "imports.crypto": 0,
   "imports.keytar": 0

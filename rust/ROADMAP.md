@@ -13,7 +13,7 @@ if it regresses.
 | Legacy Git runner calls (`await git(`) in `lib/git` | 28 in 10 files | 0 |
 | Renderer files importing `dugite` | 17 | 0 |
 | Renderer files importing `fs` | 17 | 0 (host operations only) |
-| Renderer files importing `child_process` | 8 | 0 |
+| Renderer files importing `child_process` | 7 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 8 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 409 | 0 |
 | Rust code (crates, non-test) | 90,332 lines | — |
