@@ -1,4 +1,4 @@
-import { ChildProcess } from 'child_process'
+import type { IChildProcess } from '../process/child-process'
 import { GitError } from 'dugite'
 import byline from 'byline'
 
@@ -249,7 +249,7 @@ function configureOptionsForRebase<T extends IGitExecutionOptions>(
   const { commits, progressCallback } = progress
 
   return merge(options, {
-    processCallback: (process: ChildProcess) => {
+    processCallback: (process: IChildProcess) => {
       // If Node.js encounters a synchronous runtime error while spawning
       // `stderr` will be undefined and the error will be emitted asynchronously
       if (process.stderr === null) {

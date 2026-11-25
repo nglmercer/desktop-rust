@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'child_process'
+import type { IChildProcess } from '../process/child-process'
 
 import * as Darwin from './darwin'
 import * as Win32 from './win32'
@@ -114,7 +114,7 @@ export async function launchShell(
     )
   }
 
-  let cp: ChildProcess | null = null
+  let cp: IChildProcess | null = null
 
   if (__DARWIN__) {
     cp = Darwin.launch(shell as FoundShell<Darwin.Shell>, path)
@@ -149,7 +149,7 @@ export async function launchCustomShell(
     )
   }
 
-  let cp: ChildProcess | null = null
+  let cp: IChildProcess | null = null
 
   if (__DARWIN__) {
     cp = Darwin.launchCustomShell(customShell, path)
@@ -169,7 +169,7 @@ export async function launchCustomShell(
 
 function addErrorTracing(
   shell: Shell | 'Custom Shell',
-  cp: ChildProcess,
+  cp: IChildProcess,
   onError: (error: Error) => void
 ) {
   if (cp.stderr !== null) {

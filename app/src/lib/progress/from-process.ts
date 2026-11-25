@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'child_process'
+import type { IChildProcess } from '../process/child-process'
 import * as Fs from 'fs'
 import * as Path from 'path'
 import byline from 'byline'
@@ -54,7 +54,7 @@ function createProgressProcessCallback(
   parser: IGitProgressParser,
   lfsProgressPath: string | null,
   progressCallback: (progress: IGitProgress | IGitOutput) => void
-): (process: ChildProcess) => void {
+): (process: IChildProcess) => void {
   return process => {
     let lfsProgressActive = false
 

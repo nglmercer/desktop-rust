@@ -1,6 +1,6 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
-import { ChildProcess } from 'child_process'
+import type { IChildProcess } from '../process/child-process'
 import { mkdir } from 'fs/promises'
 import { dirname } from 'path'
 import { backend } from '../../backend/client'
@@ -139,7 +139,7 @@ async function preparedRefTransaction(
   let verificationFailed = false
   let prepared = false
   let protocol = ''
-  let child: ChildProcess | undefined
+  let child: IChildProcess | undefined
   let completionRequested = false
   const controller = new AbortController()
   const lock: IRefLock = {
