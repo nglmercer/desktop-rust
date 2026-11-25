@@ -178,7 +178,7 @@ describe('AppStore assisted push with real local remotes', () => {
       const captureError = new Error('Synthetic opted-in capture EIO')
       const cleanupError = new Error('Synthetic opted-in cleanup EIO')
       fsSpies.mkdtemp.mockImplementation(
-      async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
+        async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
           const result = await makeDirectory(...args)
           if (basename(result).startsWith('desktop-assisted-commit-')) {
             directory = result
@@ -187,7 +187,7 @@ describe('AppStore assisted push with real local remotes', () => {
         }
       )
       fsSpies.writeFile.mockImplementation(
-      async (...args: Parameters<typeof FileSystem.writeFile>) => {
+        async (...args: Parameters<typeof FileSystem.writeFile>) => {
           if (directory !== '' && args[0] === join(directory, 'config')) {
             throw captureError
           }
@@ -195,7 +195,7 @@ describe('AppStore assisted push with real local remotes', () => {
         }
       )
       fsSpies.rm.mockImplementation(
-      async (...args: Parameters<typeof FileSystem.rm>) => {
+        async (...args: Parameters<typeof FileSystem.rm>) => {
           if (args[0] === directory && cleanupFails) {
             throw cleanupError
           }
@@ -363,10 +363,10 @@ describe('AppStore assisted push with real local remotes', () => {
         route === 'native' || route === 'environment'
           ? `a missing ${route} graft parent`
           : route === 'shallow-parent'
-          ? 'a missing optional shallow parent'
-          : route === 'shallow-alias'
-          ? 'an existing symbolic shallow route'
-          : `an unsupported ${route} history namespace`
+            ? 'a missing optional shallow parent'
+            : route === 'shallow-alias'
+              ? 'an existing symbolic shallow route'
+              : `an unsupported ${route} history namespace`
       it(`keeps valid local commits with ${setup}, empty ${empty}`, async t => {
         const source = await seed(t, { file: 'before\n' })
         const remote = await addBareRemote(t, source)
@@ -374,10 +374,10 @@ describe('AppStore assisted push with real local remotes', () => {
           route === 'replace-base'
             ? 'GIT_REPLACE_REF_BASE'
             : route === 'namespace'
-            ? 'GIT_NAMESPACE'
-            : route === 'shallow-parent'
-            ? 'GIT_SHALLOW_FILE'
-            : 'GIT_GRAFT_FILE'
+              ? 'GIT_NAMESPACE'
+              : route === 'shallow-parent'
+                ? 'GIT_SHALLOW_FILE'
+                : 'GIT_GRAFT_FILE'
         const previous = process.env[environmentName]
         if (route === 'native') {
           const info = join(source.path, '.git', 'info')

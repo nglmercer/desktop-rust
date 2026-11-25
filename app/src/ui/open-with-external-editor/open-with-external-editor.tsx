@@ -109,7 +109,7 @@ export class OpenWithExternalEditor extends React.Component<
         value={
           this.state.useCustomEditor
             ? CustomIntegrationValue
-            : this.state.selectedEditor ?? undefined
+            : (this.state.selectedEditor ?? undefined)
         }
         onChange={this.onSelectedEditorChanged}
       >

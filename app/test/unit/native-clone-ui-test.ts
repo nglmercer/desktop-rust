@@ -8,7 +8,10 @@ vi.mock('../../src/backend/client', () => ({
   backend: () => ({ request, transportKind: route.kind }),
   BackendError: class BackendError extends Error {
     readonly code: string
-    constructor(error: { code: string; message: string }) { super(error.message); this.code = error.code }
+    constructor(error: { code: string; message: string }) {
+      super(error.message)
+      this.code = error.code
+    }
   },
 }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
@@ -81,18 +84,43 @@ describe('native clone UI requests', () => {
     const id = '11111111-1111-1111-1111-111111111111'
     const account = { host: 'github.com', login: 'alice', id: 12 }
     request
-      .mockResolvedValueOnce({ kind: 'clone_completed_unselected', record: { path: '/repo' }, retained_staging: '/stage' })
-      .mockResolvedValueOnce([{ id, destination: '/repo', stage: '/stage', recoverable: true }])
+      .mockResolvedValueOnce({
+        kind: 'clone_completed_unselected',
+        record: { path: '/repo' },
+        retained_staging: '/stage',
+      })
+      .mockResolvedValueOnce([
+        { id, destination: '/repo', stage: '/stage', recoverable: true },
+      ])
       .mockResolvedValueOnce({ path: '/repo', retained_staging: '/stage' })
-    await nativeClone('https://github.com/a/b', '/repo', account, 'main', () => {})
+    await nativeClone(
+      'https://github.com/a/b',
+      '/repo',
+      account,
+      'main',
+      () => {}
+    )
     expect(request.mock.calls[0][0]).toBe('git_info')
-    expect(request.mock.calls[0][1]).toEqual({ operation: { type: 'clone_selected', url: 'https://github.com/a/b', path: '/repo', account, default_branch: 'main' } })
+    expect(request.mock.calls[0][1]).toEqual({
+      operation: {
+        type: 'clone_selected',
+        url: 'https://github.com/a/b',
+        path: '/repo',
+        account,
+        default_branch: 'main',
+      },
+    })
     expect(request.mock.calls[0][2].deadlineMs).toBe(3_600_000)
     expect(await listNativeCloneRecoveries()).toHaveLength(1)
-    expect(request.mock.calls[1]).toEqual(['git_info', { operation: { type: 'list_clone_recoveries' } }])
+    expect(request.mock.calls[1]).toEqual([
+      'git_info',
+      { operation: { type: 'list_clone_recoveries' } },
+    ])
     await recoverNativeClone(id, '/repo', '/stage')
     expect(request.mock.calls[2][0]).toBe('git_info')
-    expect(request.mock.calls[2][1]).toEqual({ operation: { type: 'recover_clone', recovery_id: id } })
+    expect(request.mock.calls[2][1]).toEqual({
+      operation: { type: 'recover_clone', recovery_id: id },
+    })
   })
 
   it('shows only fixed progress categories', () => {
@@ -201,22 +229,72 @@ describe('native clone UI requests', () => {
   })
 
   it('protects both destination aliases if the bridge disconnects', async () => {
-    request.mockRejectedValue(new BackendError({ code: 'disconnected', message: 'lost', retryable: false }))
-    await expect(nativeClone('https://github.com/a/b', '/repo', { host: 'github.com', login: 'alice', id: 12 }, undefined, () => {})).rejects.toThrow()
-    expect(protections).toHaveBeenCalledWith('/repo', ['/repo', '/canonical/repo'])
+    request.mockRejectedValue(
+      new BackendError({
+        code: 'disconnected',
+        message: 'lost',
+        retryable: false,
+      })
+    )
+    await expect(
+      nativeClone(
+        'https://github.com/a/b',
+        '/repo',
+        { host: 'github.com', login: 'alice', id: 12 },
+        undefined,
+        () => {}
+      )
+    ).rejects.toThrow()
+    expect(protections).toHaveBeenCalledWith('/repo', [
+      '/repo',
+      '/canonical/repo',
+    ])
     expect(reservations.active).toEqual([])
   })
 
   it('protects the destination when the native IPC shim expires', async () => {
     route.kind = 'wry'
-    request.mockRejectedValue(new BackendError({ code: 'internal', message: 'IPC timeout: desktop.backend.git_info', retryable: false }))
-    await expect(nativeClone('https://github.com/a/b', '/repo', { host: 'github.com', login: 'alice', id: 12 }, undefined, () => {})).rejects.toThrow('protected only in this session')
-    expect(protections).toHaveBeenCalledWith('/repo', ['/repo', '/canonical/repo'])
+    request.mockRejectedValue(
+      new BackendError({
+        code: 'internal',
+        message: 'IPC timeout: desktop.backend.git_info',
+        retryable: false,
+      })
+    )
+    await expect(
+      nativeClone(
+        'https://github.com/a/b',
+        '/repo',
+        { host: 'github.com', login: 'alice', id: 12 },
+        undefined,
+        () => {}
+      )
+    ).rejects.toThrow('protected only in this session')
+    expect(protections).toHaveBeenCalledWith('/repo', [
+      '/repo',
+      '/canonical/repo',
+    ])
   })
 
-  it.each(['cancelled', 'ETIMEDOUT', 'timeout'])('keeps destinations protected after %s without assuming the host platform', async code => {
-    request.mockRejectedValue(new BackendError({ code, message: 'interrupted', retryable: false }))
-    await expect(nativeClone('https://github.com/a/b', '/repo', { host: 'github.com', login: 'alice', id: 12 }, undefined, () => {})).rejects.toThrow('protected only in this session')
-    expect(protections).toHaveBeenCalledWith('/repo', ['/repo', '/canonical/repo'])
-  })
+  it.each(['cancelled', 'ETIMEDOUT', 'timeout'])(
+    'keeps destinations protected after %s without assuming the host platform',
+    async code => {
+      request.mockRejectedValue(
+        new BackendError({ code, message: 'interrupted', retryable: false })
+      )
+      await expect(
+        nativeClone(
+          'https://github.com/a/b',
+          '/repo',
+          { host: 'github.com', login: 'alice', id: 12 },
+          undefined,
+          () => {}
+        )
+      ).rejects.toThrow('protected only in this session')
+      expect(protections).toHaveBeenCalledWith('/repo', [
+        '/repo',
+        '/canonical/repo',
+      ])
+    }
+  )
 })

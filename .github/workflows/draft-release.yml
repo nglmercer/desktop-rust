@@ -52,17 +52,14 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            app/package-lock.json
-            vendor/*/package-lock.json
 
       - name: Prepare Rust compiler
         run: rustup default stable
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm install --global pnpm@11.17.0
+          pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Determine previous and next versions
         id: version
@@ -177,7 +174,7 @@ jobs:
             git checkout -b "$BRANCH"
           fi
 
-          # Bump app/package.json and its lockfile, and update changelog.json
+          # Bump app/package.json and update changelog.json
           node --require ./script/ts-register.cjs \
             script/draft-release/ci.ts prepare "$NEXT_VERSION" "$ENTRIES"
 
@@ -186,10 +183,6 @@ jobs:
             script/draft-release/format-json-cli.ts changelog.json
 
           git add app/package.json changelog.json
-          # Release refs from before the npm migration have no npm lockfile.
-          if [ -f app/package-lock.json ]; then
-            git add app/package-lock.json
-          fi
           git commit -m "Draft release $NEXT_VERSION"
           git push origin "$BRANCH"
           echo "✅ Pushed $BRANCH — release-pr.yml will create the draft PR"

@@ -70,8 +70,8 @@ class ModelRow extends React.Component<IModelRowProps> {
       model.name.trim() !== ''
         ? model.name
         : model.id !== ''
-        ? model.id
-        : 'Untitled model'
+          ? model.id
+          : 'Untitled model'
     const reasoningLabel =
       model.reasoningEffort !== undefined
         ? `Reasoning: ${formatReasoningEffort(model.reasoningEffort)}`
@@ -150,8 +150,8 @@ export class EditCopilotBYOKProviderDialog extends React.Component<
         ? 'Edit Custom Provider'
         : 'Edit custom provider'
       : __DARWIN__
-      ? 'Add Custom Provider'
-      : 'Add custom provider'
+        ? 'Add Custom Provider'
+        : 'Add custom provider'
 
     return (
       <Dialog
@@ -422,10 +422,10 @@ export class EditCopilotBYOKProviderDialog extends React.Component<
       this.state.authKind === 'none'
         ? null
         : this.state.secret.length > 0
-        ? this.state.secret
-        : existing === null
-        ? null
-        : undefined
+          ? this.state.secret
+          : existing === null
+            ? null
+            : undefined
 
     this.props.onSave(provider, secret)
     this.props.onDismissed()

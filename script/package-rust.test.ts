@@ -32,8 +32,8 @@ const host =
   process.platform === 'darwin'
     ? 'macos'
     : process.platform === 'win32'
-    ? 'windows'
-    : 'linux'
+      ? 'windows'
+      : 'linux'
 const suffix = process.platform === 'win32' ? '.exe' : ''
 const report = process.report?.getReport() as
   | { header?: { glibcVersionRuntime?: string } }
@@ -105,7 +105,7 @@ beforeEach(() => {
     const [command, values, options] = args as [
       string,
       string[],
-      { cwd: string; env?: NodeJS.ProcessEnv }
+      { cwd: string; env?: NodeJS.ProcessEnv },
     ]
     if (command === 'rustc') {
       const rustArch = process.arch === 'x64' ? 'x86_64' : 'aarch64'
@@ -113,10 +113,10 @@ beforeEach(() => {
         host === 'macos'
           ? 'apple-darwin'
           : host === 'windows'
-          ? 'pc-windows-msvc'
-          : linuxMusl
-          ? 'unknown-linux-musl'
-          : 'unknown-linux-gnu'
+            ? 'pc-windows-msvc'
+            : linuxMusl
+              ? 'unknown-linux-musl'
+              : 'unknown-linux-gnu'
       return { status: 0, stdout: `host: ${rustArch}-${rustOs}\n`, stderr: '' }
     }
     if (command === 'cargo') {

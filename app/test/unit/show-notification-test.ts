@@ -176,10 +176,7 @@ describe('showNotification', () => {
       }
       vi.stubGlobal('Notification', Notification)
       const ipc = new MockIPC()
-      const sendDescriptor = Object.getOwnPropertyDescriptor(
-        hostIpc,
-        'send'
-      )
+      const sendDescriptor = Object.getOwnPropertyDescriptor(hostIpc, 'send')
       Object.defineProperty(hostIpc, 'send', {
         configurable: true,
         value: ipc.send.bind(ipc),

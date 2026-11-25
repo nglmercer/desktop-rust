@@ -24,7 +24,8 @@ export async function applyPatchToIndex(
   certifiedDiff?: ITextDiff | ILargeTextDiff,
   preserveRenameSource = false
 ): Promise<void> {
-  const useRust = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  const useRust =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
   // If the file was a rename we have to recreate that rename since we've
   // just blown away the index. Think of this block of weird looking commands
   // as running `git mv`.
@@ -91,18 +92,50 @@ export async function applyPatchToIndex(
   }
 
   if (useRust) {
-    await withRepositoryGitOperation(repository.path, 'mutation', async () => {
-      const originalPath = file.status.kind === AppFileStatusKind.Renamed ? file.status.oldPath : undefined
-      const preview = originalPath === undefined
-        ? await backend().repositoryWorkingDiff(repository.path, file.path)
-        : await backend().copilotCommitDiffForRepository(repository.path, file.path, {}, originalPath)
-      const lines = getReviewedDiffLines(file.path, file.selection, diff, preview, 'The selected diff changed. Review and reselect its lines before committing.')
-      if (originalPath === undefined) {
-        await backend().repositoryStageSelectedLines(repository.path, file.path, preview.basis, lines)
-      } else {
-        await backend().repositoryStageRenamedLines(repository.path, file.path, originalPath, preview.basis, lines, preserveRenameSource)
-      }
-    }, true)
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      async () => {
+        const originalPath =
+          file.status.kind === AppFileStatusKind.Renamed
+            ? file.status.oldPath
+            : undefined
+        const preview =
+          originalPath === undefined
+            ? await backend().repositoryWorkingDiff(repository.path, file.path)
+            : await backend().copilotCommitDiffForRepository(
+                repository.path,
+                file.path,
+                {},
+                originalPath
+              )
+        const lines = getReviewedDiffLines(
+          file.path,
+          file.selection,
+          diff,
+          preview,
+          'The selected diff changed. Review and reselect its lines before committing.'
+        )
+        if (originalPath === undefined) {
+          await backend().repositoryStageSelectedLines(
+            repository.path,
+            file.path,
+            preview.basis,
+            lines
+          )
+        } else {
+          await backend().repositoryStageRenamedLines(
+            repository.path,
+            file.path,
+            originalPath,
+            preview.basis,
+            lines,
+            preserveRenameSource
+          )
+        }
+      },
+      true
+    )
     return
   }
 

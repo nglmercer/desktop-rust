@@ -4,21 +4,20 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-/** Run the real pinned Biome plugin using the repository's security scope. */
+/** Run the real pinned Oxlint plugin using the repository's security scope. */
 function lint(source: string): { status: number | null; lines: number[] } {
   const root = resolve('.')
-  const dir = mkdtempSync(join(root, 'app/test/biome-rule-'))
+  const dir = mkdtempSync(join(root, 'app/test/oxlint-rule-'))
   try {
     const fixture = join(dir, 'input.ts')
     writeFileSync(fixture, source)
     const result = spawnSync(
       process.execPath,
       [
-        resolve('node_modules/@biomejs/biome/bin/biome'),
-        'lint',
-        '--config-path=biome.security.json',
+        resolve('node_modules/oxlint/bin/oxlint'),
+        '--config=.oxlint.security.json',
         fixture,
-        '--reporter=json',
+        '--format=json',
       ],
       { cwd: root, encoding: 'utf8' }
     )
@@ -28,21 +27,21 @@ function lint(source: string): { status: number | null; lines: number[] } {
     const report = JSON.parse(result.stdout) as {
       diagnostics: Array<{
         severity: string
-        location: { start: { line: number } }
+        labels: Array<{ span: { line: number } }>
       }>
     }
     return {
       status: result.status,
       lines: report.diagnostics
         .filter(item => item.severity === 'error')
-        .map(item => item.location.start.line),
+        .map(item => item.labels[0]?.span.line ?? 0),
     }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
-describe('Biome no-loosely-typed-webcontents-ipc rule', () => {
+describe('Oxlint no-loosely-typed-webcontents-ipc rule', () => {
   it('retains the legacy direct, optional, computed, escaped and parenthesized calls', () => {
     const source = String.raw`wc.send('channel');
 wc?.send('channel');
@@ -100,14 +99,14 @@ new wc.send('channel');
   })
 
   it('suppresses only the named rule, leaving other security diagnostics active', () => {
-    const source = `// biome-ignore lint/plugin/noLooselyTypedWebContentsIpc: Typed helper implementation.
+    const source = `// oxlint-disable-next-line desktop/no-loosely-typed-webcontents-ipc
 webContents.send(Math.random())
 `
     expect(lint(source)).toEqual({ status: 1, lines: [2] })
   })
 
   it('does not hide IPC diagnostics when randomness is suppressed', () => {
-    const source = `// biome-ignore lint/plugin/insecureRandom: Non-security visual jitter.
+    const source = `// oxlint-disable-next-line desktop/insecure-random
 webContents.send(Math.random())
 `
     expect(lint(source)).toEqual({ status: 1, lines: [2] })

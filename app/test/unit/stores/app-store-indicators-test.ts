@@ -27,9 +27,9 @@ describe('AppStore repository indicators', () => {
 
   before(async () => {
     vi.doMock('../../../src/ui/main-process-proxy', async () => ({
-        ...(await vi.importActual('../../../src/ui/main-process-proxy')),
-        getAppMenu: () => {},
-      }))
+      ...(await vi.importActual('../../../src/ui/main-process-proxy')),
+      getAppMenu: () => {},
+    }))
     const { AppStore } = await import('../../../src/lib/stores/app-store')
     const { AliveStore } = await import('../../../src/lib/stores/alive-store')
     const { CopilotStore } = await import(

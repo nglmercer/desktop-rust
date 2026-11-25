@@ -20,7 +20,10 @@ import {
   IAutocompletionProvider,
 } from '../autocompletion'
 import { ClickSource } from '../lib/list'
-import { AppFileStatusKind, WorkingDirectoryFileChange } from '../../models/status'
+import {
+  AppFileStatusKind,
+  WorkingDirectoryFileChange,
+} from '../../models/status'
 import { TransitionGroup, CSSTransition } from 'react-transition-group'
 import { openFile } from '../lib/open-file'
 import { Account } from '../../models/account'
@@ -271,7 +274,14 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
   }
 
   private onDiscardChanges = (file: WorkingDirectoryFileChange) => {
-    if (!this.props.askForConfirmationOnDiscardChanges && !(typeof window !== 'undefined' && backend().transportKind !== 'none' && file.status.kind === AppFileStatusKind.Renamed)) {
+    if (
+      !this.props.askForConfirmationOnDiscardChanges &&
+      !(
+        typeof window !== 'undefined' &&
+        backend().transportKind !== 'none' &&
+        file.status.kind === AppFileStatusKind.Renamed
+      )
+    ) {
       this.props.dispatcher.discardChanges(this.props.repository, [file])
     } else {
       this.props.dispatcher.showPopup({
@@ -548,9 +558,15 @@ export class ChangesSidebar extends React.Component<IChangesSidebarProps, {}> {
           onUpdateCommitOptions={this.props.onUpdateCommitOptions}
         />
         {this.renderUndoCommit(rebaseConflictState)}
-        {typeof window !== 'undefined' && backend().transportKind !== 'none' && (
-          <DiscardRecovery key={this.props.repository.path} repository={this.props.repository} dispatcher={this.props.dispatcher} disabled={this.props.isShowingModal || this.props.isCommitting} />
-        )}
+        {typeof window !== 'undefined' &&
+          backend().transportKind !== 'none' && (
+            <DiscardRecovery
+              key={this.props.repository.path}
+              repository={this.props.repository}
+              dispatcher={this.props.dispatcher}
+              disabled={this.props.isShowingModal || this.props.isCommitting}
+            />
+          )}
       </div>
     )
   }

@@ -58,8 +58,8 @@ export class EditCopilotBYOKModelDialog extends React.Component<
         ? 'Edit Model'
         : 'Edit model'
       : __DARWIN__
-      ? 'Add Model'
-      : 'Add model'
+        ? 'Add Model'
+        : 'Add model'
 
     return (
       <Dialog

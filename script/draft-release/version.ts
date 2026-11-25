@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { inc, parse, SemVer } from 'semver'
 
 import { Channel } from './channel'
@@ -98,4 +100,14 @@ export function getNextVersionNumber(
         `Resolving the next version is not implemented for channel ${channel}`
       )
   }
+}
+
+/** Set the application version without invoking npm or updating an npm lockfile. */
+export function setAppPackageVersion(nextVersion: string): void {
+  const packagePath = join(__dirname, '..', '..', 'app', 'package.json')
+  const packageInfo = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    version?: string
+  }
+  packageInfo.version = nextVersion
+  writeFileSync(packagePath, `${JSON.stringify(packageInfo, null, 2)}\n`)
 }

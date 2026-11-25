@@ -508,7 +508,11 @@ mod tests {
             available.runtime_path.as_deref(),
             Some("/runtime/prebuilds/linux-x64/copilot-runtime")
         );
-        assert!(CopilotCapability::unavailable("missing").runtime_path.is_none());
+        assert!(
+            CopilotCapability::unavailable("missing")
+                .runtime_path
+                .is_none()
+        );
     }
 
     #[test]

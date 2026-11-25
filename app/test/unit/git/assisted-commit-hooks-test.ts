@@ -486,110 +486,106 @@ describe('git/assisted-commit real hook interception', () => {
     assert.strictEqual(await fixtures.count(repository), 1)
   })
 
-  it(
-    'retains attempted publication ownership when its first HEAD observation also fails',
-    { skip: process.platform === 'win32' },
-    async t => {
-      config.setHooksEnvEnabled(false)
-      const repository = await fixtures.seed(t, { file: 'old\n' })
-      const original = await fixtures.tip(repository)
-      await FileSystem.writeFile(join(repository.path, 'file'), 'selected\n')
-      const input = await fixtures.request(repository)
-      await fixtures.writeHook(
-        repository,
-        'reference-transaction',
-        [
-          'if test "$1" != committed || test -f publish-observation-fault; then exit 0; fi',
-          'case "${GIT_DIR-}" in *desktop-assisted-commit-*) exit 0 ;; esac',
-          'printf ready > publish-observation-fault',
-          'kill -TERM "$PPID"',
-        ].join('\n')
-      )
-      let injected = false
-      nativeExecFault = (args, cwd, options) => {
-        if (
-          !injected &&
-          cwd === repository.path &&
-          options?.env?.GIT_DIR === undefined &&
-          args[0] === 'symbolic-ref' &&
-          args.at(-1) === 'HEAD'
-        ) {
-          return FileSystem.access(
-            join(repository.path, 'publish-observation-fault')
-          ).then(
-            () => {
-              injected = true
-              throw new Error('Injected one-shot HEAD observation failure')
-            },
-            () => nativeExec(args, cwd, options)
-          )
-        }
+  it('retains attempted publication ownership when its first HEAD observation also fails', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    config.setHooksEnvEnabled(false)
+    const repository = await fixtures.seed(t, { file: 'old\n' })
+    const original = await fixtures.tip(repository)
+    await FileSystem.writeFile(join(repository.path, 'file'), 'selected\n')
+    const input = await fixtures.request(repository)
+    await fixtures.writeHook(
+      repository,
+      'reference-transaction',
+      [
+        'if test "$1" != committed || test -f publish-observation-fault; then exit 0; fi',
+        'case "${GIT_DIR-}" in *desktop-assisted-commit-*) exit 0 ;; esac',
+        'printf ready > publish-observation-fault',
+        'kill -TERM "$PPID"',
+      ].join('\n')
+    )
+    let injected = false
+    nativeExecFault = (args, cwd, options) => {
+      if (
+        !injected &&
+        cwd === repository.path &&
+        options?.env?.GIT_DIR === undefined &&
+        args[0] === 'symbolic-ref' &&
+        args.at(-1) === 'HEAD'
+      ) {
+        return FileSystem.access(
+          join(repository.path, 'publish-observation-fault')
+        ).then(
+          () => {
+            injected = true
+            throw new Error('Injected one-shot HEAD observation failure')
+          },
+          () => nativeExec(args, cwd, options)
+        )
+      }
+      return undefined
+    }
+    await assert.rejects(
+      fixtures.single(repository, input),
+      error =>
+        error instanceof engine.AssistedCommitError &&
+        error.recovery?.history === 'restored'
+    )
+    assert.ok(injected)
+    assert.strictEqual(await fixtures.tip(repository), original)
+    assert.strictEqual(await fixtures.count(repository), 1)
+  })
+
+  it('does not launch another native formatter after a failed formatter settles', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    config.setHooksEnvEnabled(false)
+    const repository = await fixtures.seed(t, { a: 'a\n', b: 'b\n' })
+    const original = await fixtures.tip(repository)
+    await FileSystem.writeFile(join(repository.path, 'a'), 'A\n')
+    await FileSystem.writeFile(join(repository.path, 'b'), 'B\n')
+    await fixtures.rawGit(repository, ['config', 'trailer.peer.key', 'Peer'])
+    await fixtures.rawGit(repository, [
+      'config',
+      'trailer.peer.cmd',
+      'sleep 0.5; printf peer',
+    ])
+    const input = await fixtures.request(repository, ['a', 'b'], {
+      trailers: [{ token: 'Peer', value: 'peer' }],
+    })
+    let launched = 0
+    nativeExecFault = (args, cwd, options) => {
+      if (cwd !== repository.path || args[0] !== 'interpret-trailers') {
         return undefined
       }
-      await assert.rejects(
-        fixtures.single(repository, input),
-        error =>
-          error instanceof engine.AssistedCommitError &&
-          error.recovery?.history === 'restored'
-      )
-      assert.ok(injected)
-      assert.strictEqual(await fixtures.tip(repository), original)
-      assert.strictEqual(await fixtures.count(repository), 1)
-    }
-  )
-
-  it(
-    'does not launch another native formatter after a failed formatter settles',
-    { skip: process.platform === 'win32' },
-    async t => {
-      config.setHooksEnvEnabled(false)
-      const repository = await fixtures.seed(t, { a: 'a\n', b: 'b\n' })
-      const original = await fixtures.tip(repository)
-      await FileSystem.writeFile(join(repository.path, 'a'), 'A\n')
-      await FileSystem.writeFile(join(repository.path, 'b'), 'B\n')
-      await fixtures.rawGit(repository, ['config', 'trailer.peer.key', 'Peer'])
-      await fixtures.rawGit(repository, [
-        'config',
-        'trailer.peer.cmd',
-        'sleep 0.5; printf peer',
-      ])
-      const input = await fixtures.request(repository, ['a', 'b'], {
-        trailers: [{ token: 'Peer', value: 'peer' }],
+      const index = ++launched
+      return nativeExec(args, cwd, {
+        ...options,
+        processCallback: child => {
+          options?.processCallback?.(child)
+          if (index === 1) {
+            setTimeout(() => {
+              if (child.pid !== undefined && child.exitCode === null) {
+                process.kill(child.pid, 'SIGTERM')
+              }
+            }, 50)
+          }
+        },
       })
-      let launched = 0
-      nativeExecFault = (args, cwd, options) => {
-        if (cwd !== repository.path || args[0] !== 'interpret-trailers') {
-          return undefined
-        }
-        const index = ++launched
-        return nativeExec(args, cwd, {
-          ...options,
-          processCallback: child => {
-            options?.processCallback?.(child)
-            if (index === 1) {
-              setTimeout(() => {
-                if (child.pid !== undefined && child.exitCode === null) {
-                  process.kill(child.pid, 'SIGTERM')
-                }
-              }, 50)
-            }
-          },
-        })
-      }
-      await assert.rejects(
-        engine.withAssistedCommitSnapshot(repository, input, async snapshot => {
-          const checked = await engine.validateAssistedCommitPlan(
-            snapshot,
-            fixtures.splitPlan(snapshot)
-          )
-          return engine.executeAssistedCommitPlan(snapshot, checked)
-        }),
-        error => error instanceof engine.AssistedCommitError
-      )
-      assert.strictEqual(launched, 1)
-      assert.strictEqual(await fixtures.tip(repository), original)
     }
-  )
+    await assert.rejects(
+      engine.withAssistedCommitSnapshot(repository, input, async snapshot => {
+        const checked = await engine.validateAssistedCommitPlan(
+          snapshot,
+          fixtures.splitPlan(snapshot)
+        )
+        return engine.executeAssistedCommitPlan(snapshot, checked)
+      }),
+      error => error instanceof engine.AssistedCommitError
+    )
+    assert.strictEqual(launched, 1)
+    assert.strictEqual(await fixtures.tip(repository), original)
+  })
 
   it('recovers the confirmed prefix when the next publication and its observation both fail', async t => {
     config.setHooksEnvEnabled(false)

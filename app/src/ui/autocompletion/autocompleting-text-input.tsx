@@ -170,7 +170,7 @@ interface IAutocompletingTextInputState<T> {
 /** A text area which provides autocompletions as the user types. */
 export abstract class AutocompletingTextInput<
   ElementType extends HTMLInputElement | HTMLTextAreaElement,
-  AutocompleteItemType extends object
+  AutocompleteItemType extends object,
 > extends React.Component<
   IAutocompletingTextInputProps<ElementType, AutocompleteItemType>,
   IAutocompletingTextInputState<AutocompleteItemType>
@@ -583,7 +583,7 @@ export abstract class AutocompletingTextInput<
     const autoCompleteItems =
       this.props.readOnly === true
         ? []
-        : this.state.autocompletionState?.items ?? []
+        : (this.state.autocompletionState?.items ?? [])
 
     const suggestionsMessage =
       autoCompleteItems.length === 1

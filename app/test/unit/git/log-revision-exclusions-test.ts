@@ -63,7 +63,9 @@ it('getCommits preserves revision inclusion when additional arguments exclude re
       revision,
       1,
       1,
-      rust ? ['--not', '--remotes'] : ['--grep=local', '--not', '--remotes=origin']
+      rust
+        ? ['--not', '--remotes']
+        : ['--grep=local', '--not', '--remotes=origin']
     )
     assert.deepStrictEqual(
       paginated.map(c => c.sha),

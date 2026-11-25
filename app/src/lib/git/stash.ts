@@ -43,7 +43,8 @@ type StashResult = {
  * as well as the total amount of stash entries.
  */
 export async function getStashes(repository: Repository): Promise<StashResult> {
-  const read = () => backend().repositoryRendererReflog(repository.path, 'stash')
+  const read = () =>
+    backend().repositoryRendererReflog(repository.path, 'stash')
   const result =
     backend().transportKind === 'wry'
       ? await withRepositoryGitOperation(repository.path, 'read', read, true)
@@ -55,7 +56,11 @@ export async function getStashes(repository: Repository): Promise<StashResult> {
   const files: StashedFileChanges = { kind: StashedChangesLoadStates.NotLoaded }
 
   const { parse } = createLogParser({
-    name: '%gD', stashSha: '%H', message: '%gs', tree: '%T', parents: '%P',
+    name: '%gD',
+    stashSha: '%H',
+    message: '%gs',
+    tree: '%T',
+    parents: '%P',
   })
   const entries = parse(stdout)
 
@@ -145,7 +150,12 @@ export async function createDesktopStashEntry(
   await stageFiles(repository, fullySelectedUntrackedFiles)
 
   const branchName = typeof branch === 'string' ? branch : branch.name
-  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().saveDesktopStash(repository.path, branchName), true)
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().saveDesktopStash(repository.path, branchName),
+    true
+  )
 }
 
 /**
@@ -157,8 +167,12 @@ export async function dropDesktopStashEntry(
   repository: Repository,
   stashSha: string
 ) {
-  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'drop'), true)
-
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().mutateDesktopStash(repository.path, stashSha, 'drop'),
+    true
+  )
 }
 
 /**
@@ -172,8 +186,12 @@ export async function popStashEntry(
   repository: Repository,
   stashSha: string
 ): Promise<void> {
-  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateDesktopStash(repository.path, stashSha, 'pop'), true)
-
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().mutateDesktopStash(repository.path, stashSha, 'pop'),
+    true
+  )
 }
 
 function extractBranchFromMessage(message: string): string | null {
@@ -187,9 +205,9 @@ export async function getStashedFiles(
   stashSha: string
 ): Promise<ReadonlyArray<CommittedFileChange>> {
   const read = () => backend().repositoryStashChanges(repository.path, stashSha)
-  const stdout = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-    : await read()
+  const stdout =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
   return parseRawLogWithNumstat(stdout, stashSha, `${stashSha}^`).files
-
 }

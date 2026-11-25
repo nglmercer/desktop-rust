@@ -7,7 +7,10 @@ import { ManualConflictResolution } from '../../models/manual-conflict-resolutio
 import { stageManualConflictResolution } from './stage'
 import { ITextDiff, ILargeTextDiff } from '../../models/diff'
 import { backend } from '../../backend/client'
-import { withRepositoryGitOperation, withoutRepositoryGitAccess } from './repository-operation'
+import {
+  withRepositoryGitOperation,
+  withoutRepositoryGitAccess,
+} from './repository-operation'
 import type { ISelectedCommitReviewWithSelection } from './selected-commit-review'
 
 /**
@@ -37,10 +40,17 @@ export async function createCommit(
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     const review = options?.selectedReview
     if (review === undefined) {
-      throw new Error('The selected changes must be reviewed before committing.')
+      throw new Error(
+        'The selected changes must be reviewed before committing.'
+      )
     }
-    if (backend().transportKind === 'wry' && (window as any).__desktop?.supportsCommitRequestProgress !== true) {
-      throw new Error('Request-owned commit progress requires a matching desktop backend')
+    if (
+      backend().transportKind === 'wry' &&
+      (window as any).__desktop?.supportsCommitRequestProgress !== true
+    ) {
+      throw new Error(
+        'Request-owned commit progress requires a matching desktop backend'
+      )
     }
     const controller = new AbortController()
     const listeners = new Set<(chunk: string | Buffer | Buffer[]) => void>()
@@ -54,11 +64,13 @@ export async function createCommit(
         log.error('Commit observer failed', error)
       }
     }
-    notify(() => options?.onTerminalOutputAvailable?.(callback => {
-      for (const chunk of buffered) notify(() => callback(chunk))
-      listeners.add(callback)
-      return { unsubscribe: () => listeners.delete(callback) }
-    }))
+    notify(() =>
+      options?.onTerminalOutputAvailable?.(callback => {
+        for (const chunk of buffered) notify(() => callback(chunk))
+        listeners.add(callback)
+        return { unsubscribe: () => listeners.delete(callback) }
+      })
+    )
     const checkpoint = await backend().prepareSelectedCommit(
       repository.path,
       review.selection,
@@ -77,11 +89,20 @@ export async function createCommit(
           signal: controller.signal,
           onHookProgress: progress => {
             if (progress.status === 'failed') failedHook = progress.hookName
-            notify(() => options?.onHookProgress?.(
-              progress.status === 'started'
-                ? { hookName: progress.hookName, status: 'started', abort: () => controller.abort() }
-                : { hookName: progress.hookName, status: progress.status as 'finished' | 'failed' }
-            ))
+            notify(() =>
+              options?.onHookProgress?.(
+                progress.status === 'started'
+                  ? {
+                      hookName: progress.hookName,
+                      status: 'started',
+                      abort: () => controller.abort(),
+                    }
+                  : {
+                      hookName: progress.hookName,
+                      status: progress.status as 'finished' | 'failed',
+                    }
+              )
+            )
           },
           onOutput: output => {
             const chunk = Buffer.from(output.bytes)
@@ -101,19 +122,34 @@ export async function createCommit(
           { cause: error }
         )
       }
-      throw new Error(`Commit outcome may be uncertain. Inspect commit checkpoint ${checkpoint} before retrying.`, { cause: error })
+      throw new Error(
+        `Commit outcome may be uncertain. Inspect commit checkpoint ${checkpoint} before retrying.`,
+        { cause: error }
+      )
     }
   }
   // Clear the staging area, our diffs reflect the difference between the
   // working directory and the last commit (if any) so our commits should
   // do the same thing.
-  const partialDiffs = await preparePartialStagingDiffs(repository, files, options?.certifiedPartialDiffs)
+  const partialDiffs = await preparePartialStagingDiffs(
+    repository,
+    files,
+    options?.certifiedPartialDiffs
+  )
   await unstageAll(repository)
 
   await stageFiles(repository, files, partialDiffs)
 
-  if (options?.selectedReview !== undefined && !(await backend().verifySelectedIndex(repository.path, options.selectedReview))) {
-    throw new Error('Selected changes or HEAD changed since review. Inspect the index, then review and try again.')
+  if (
+    options?.selectedReview !== undefined &&
+    !(await backend().verifySelectedIndex(
+      repository.path,
+      options.selectedReview
+    ))
+  ) {
+    throw new Error(
+      'Selected changes or HEAD changed since review. Inspect the index, then review and try again.'
+    )
   }
 
   const args = ['-F', '-']
@@ -186,8 +222,12 @@ export async function createMergeCommit(
 
   await stageFiles(repository, otherFiles)
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const stdout = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().finishRepositoryMergeCommit(repository.path), true)
+    const stdout = await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().finishRepositoryMergeCommit(repository.path),
+      true
+    )
     return stdout.split(']')[0].split(' ')[1]
   }
   const result = await git(

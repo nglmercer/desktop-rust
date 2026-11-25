@@ -99,7 +99,7 @@ const ThemeLabels: Record<LoadingTheme, string> = {
 function randomDwell(): number {
   return (
     MinDwellSeconds +
-    // biome-ignore lint/plugin/insecureRandom: Display timing does not need cryptographic randomness.
+    // oxlint-disable-next-line desktop/insecure-random -- Display timing does not need cryptographic randomness.
     Math.floor(Math.random() * (MaxDwellSeconds - MinDwellSeconds + 1))
   )
 }

@@ -1,36 +1,72 @@
-# Linting
+# Linting and formatting
 
-[What is linting, anyways?](https://en.wikipedia.org/wiki/Lint_%28software%29)
+The fast JavaScript/TypeScript gate uses:
 
-## Tooling
+- [oxlint](https://oxc.rs/docs/guide/usage/linter.html) for static analysis,
+  including the project rules in `oxlint-rules/`.
+- [Biome](https://biomejs.dev/) for formatting. Biome's linter is disabled in
+  the root configuration; oxlint is the only JavaScript linter.
+- [markdownlint](https://github.com/DavidAnson/markdownlint) for Markdown when
+  documentation is changed.
 
-Our linting tooling uses a combination of
+The editor integrations recommended by the repository are the Biome and oxlint
+VS Code extensions. See [tooling](./tooling.md).
 
-* [Prettier](https://github.com/prettier/prettier)
-* [ESLint](https://github.com/eslint/eslint)
+## Running checks
 
-Most (if not all) editors have integrations for these tools so that they will report errors and fix formatting in realtime. See [tooling](./tooling.md) for how to set these integrations up while developing for desktop.
-
-## Running Checks
-
-Use
-
-```shellsession
-$ npm run lint
+```sh
+pnpm lint
 ```
 
-in your local repository to run all linting checks. Each tool will report their errors on the command line.
+This runs oxlint and then checks formatting with Biome. On a warm checkout the
+command should complete in a few seconds.
 
-## Fixing Issues
+Useful focused commands:
 
-Some issues found by linters can be automatically fixed. Use
-
-```shellsession
-$ npm run lint:fix
+```sh
+pnpm lint:oxlint      # oxlint only
+pnpm lint:security    # only the project security rules
+pnpm format:check     # Biome formatting only
+pnpm markdownlint     # Markdown documentation only
 ```
 
-to automatically fix them. If any issues remain, you'll have to fix them manually (and the output will tell you that).
+## Fixing issues
 
-## Continuous Integration (CI)
+```sh
+pnpm lint:fix
+```
 
-Each of our CI services also runs linting checks on [open pull requests](https://github.com/desktop/desktop/pulls) in the GitHub Desktop repository. Pull requests must pass CI to before we accept them, so don't forget to lint locally.
+This applies oxlint's safe fixes and formats the repository with Biome. Review
+the resulting diff before committing; format migration is intentionally
+repo-wide so generated or vendored exclusions live in `biome.json`.
+
+## Project rules
+
+`oxlint-rules/desktop.mjs` implements the project-specific checks formerly
+implemented as ESLint/Biome plugins:
+
+- `desktop/insecure-random`
+- `desktop/no-loosely-typed-webcontents-ipc`
+- `desktop/react-no-unbound-dispatcher-props`
+- `desktop/react-readonly-props-and-state`
+- `desktop/react-proper-lifecycle-methods`
+
+Their regression tests live in `oxlint-rules/tests/` and run with:
+
+```sh
+pnpm test:oxlint
+```
+
+The oxlint JavaScript plugin API is still marked upstream as experimental, so
+keep the rules syntax-only and covered by fixtures. Type-aware checking belongs
+in TypeScript, not in these plugins.
+
+## Intentional migration gaps
+
+Oxlint does not yet implement every legacy ESLint rule. In particular, the old
+member-ordering, naming-convention, `react/jsx-no-bind`, prop-types, and some
+JSDoc rules have no direct oxlint equivalent. The legacy `curly`,
+`no-sync`, and explicit-member-accessibility gates currently have a large
+inherited violation backlog and are disabled in `.oxlintrc.json` rather than
+being silently reported forever. They remain style expectations in
+`styleguide.md`; do not use that backlog as a reason to add new violations.

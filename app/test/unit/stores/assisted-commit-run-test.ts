@@ -492,8 +492,8 @@ describe('AppStore assisted commit runs', () => {
         action === 'decline'
           ? 'declined'
           : action === 'cancel'
-          ? 'cancelled'
-          : 'error'
+            ? 'cancelled'
+            : 'error'
       )
       assert.strictEqual(h.propose.mock.callCount(), 0)
       assert.strictEqual(await count(repository), 1)

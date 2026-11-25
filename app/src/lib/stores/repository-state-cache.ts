@@ -222,7 +222,7 @@ export class RepositoryStateCache {
   }
 
   public updateMultiCommitOperationUndoState<
-    K extends keyof IMultiCommitOperationUndoState
+    K extends keyof IMultiCommitOperationUndoState,
   >(
     repository: Repository,
     fn: (
@@ -241,7 +241,7 @@ export class RepositoryStateCache {
   }
 
   public updateMultiCommitOperationState<
-    K extends keyof IMultiCommitOperationState
+    K extends keyof IMultiCommitOperationState,
   >(
     repository: Repository,
     fn: (

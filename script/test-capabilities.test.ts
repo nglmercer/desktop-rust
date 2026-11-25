@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { resolve } from 'node:path'
+import { existsSync, rmSync } from 'node:fs'
 import {
+  createCapableGitDirectory,
   filterByGitCapabilities,
   gitHasCapability,
   testGitExecutable,
@@ -16,6 +18,16 @@ describe('test Git capabilities', () => {
     expect(testGitExecutable(missingGit)).toBe(
       '/nonexistent/git-directory/bin/git'
     )
+  })
+
+  it('provides a dugite-shaped layout for the system Git on POSIX', () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    const layout = createCapableGitDirectory({})
+    expect(layout).toBeDefined()
+    expect(existsSync(`${layout?.directory}/bin/git`)).toBe(true)
+    rmSync(layout!.directory, { recursive: true, force: true })
   })
 
   it('reports no capability for an unusable Git', () => {

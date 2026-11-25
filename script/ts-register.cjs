@@ -1,8 +1,9 @@
-// A minimal CommonJS loader for TypeScript sources, used by the Node test
-// runner (`node --require ./script/ts-register.cjs`). It compiles each file
-// with the TypeScript compiler itself, without type-checking, so that
-// namespace and default imports keep TypeScript's live bindings: the legacy
-// suites patch built-in modules (for example `Fs.watch`) after importing them.
+// A minimal CommonJS loader for TypeScript sources, used by development and release scripts
+// (`node --require ./script/ts-register.cjs`). It compiles each file
+// with the TypeScript 6 compiler API, without type-checking. TypeScript 7 is
+// the type checker, but does not expose the compiler API needed by this
+// CommonJS loader. Scripts are still CommonJS-oriented; new test files run
+// through Vitest and never use this hook.
 'use strict'
 
 const fs = require('node:fs')
@@ -10,10 +11,12 @@ const Module = require('node:module')
 const path = require('node:path')
 const ts = require('typescript')
 
-const configPath = path.join(__dirname, '..', 'tsconfig.node-test.json')
+const configPath = path.join(__dirname, '..', 'tsconfig.runner.json')
 const config = ts.readConfigFile(configPath, ts.sys.readFile)
 if (config.error) {
-  throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'))
+  throw new Error(
+    ts.flattenDiagnosticMessageText(config.error.messageText, '\n')
+  )
 }
 const { options } = ts.parseJsonConfigFileContent(
   config.config,

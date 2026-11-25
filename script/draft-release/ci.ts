@@ -1,7 +1,7 @@
 /**
  * CI helper for the Draft Release workflow (.github/workflows/draft-release.yml).
  *
- * Reuses the same functions as `npm run draft-release` so there is a single source
+ * Reuses the same functions as `pnpm draft-release` so there is a single source
  * of truth for version computation, tag discovery, and changelog aggregation.
  *
  * Usage (from repo root):
@@ -20,7 +20,7 @@
  *     Outputs a JSON array of entry strings.
  *
  *   prepare <next-version> <entries-json>
- *     Bumps app/package.json and its lockfile to <next-version> and prepends entries to
+ *     Bumps app/package.json to <next-version> and prepends entries to
  *     changelog.json. Used in the commit step.
  */
 
@@ -28,11 +28,9 @@ import { appendFileSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 import { getLatestRelease } from './tags'
-import { getNextVersionNumber } from './version'
+import { getNextVersionNumber, setAppPackageVersion } from './version'
 import { getChangelogEntriesSince } from '../changelog/parser'
 import { Channel } from './channel'
-import { execFileSync } from 'child_process'
-import { getNpmCommand } from '../npm'
 
 const repoRoot = join(__dirname, '..', '..')
 
@@ -134,18 +132,8 @@ function commandChangelogEntries(previousVersion: string): void {
 }
 
 function commandPrepare(nextVersion: string, entriesJson: string): void {
-  const npm = getNpmCommand([
-    'version',
-    nextVersion,
-    '--allow-same-version',
-    '--no-git-tag-version',
-    '--ignore-scripts',
-  ])
-  execFileSync(npm.executable, npm.args, {
-    cwd: join(repoRoot, 'app'),
-    stdio: 'inherit',
-  })
-  console.log(`✅ Set app/package.json and lockfile version to ${nextVersion}`)
+  setAppPackageVersion(nextVersion)
+  console.log(`✅ Set app/package.json version to ${nextVersion}`)
 
   // Prepend to changelog.json
   const changelogPath = join(repoRoot, 'changelog.json')

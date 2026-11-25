@@ -563,8 +563,8 @@ export class CopilotConflictsDialog extends React.Component<
       choice === 'ours'
         ? oursLabel
         : choice === 'theirs'
-        ? theirsLabel
-        : 'Choose a resolution'
+          ? theirsLabel
+          : 'Choose a resolution'
 
     const onDropdownClick = this.getSkippedDropdownClickHandler(skipped.path)
     const onOverflowClick = this.getOverflowMenuClickHandler(skipped.path)
@@ -746,8 +746,8 @@ export class CopilotConflictsDialog extends React.Component<
                 resolutionError !== null || resolutionUnavailable
                   ? 'Refresh the repository and generate suggestions again.'
                   : hasUnresolvedSkippedFiles
-                  ? 'Some files were skipped by Copilot. Those need to be resolved manually.'
-                  : undefined
+                    ? 'Some files were skipped by Copilot. Those need to be resolved manually.'
+                    : undefined
               }
               cancelButtonText={`Abort ${operation}`}
               onCancelButtonClick={this.onAbort}

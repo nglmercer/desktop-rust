@@ -84,9 +84,10 @@ export async function showContextualMenu(
   items: ReadonlyArray<IMenuItem>,
   addSpellCheckMenu = false
 ) {
-  const indices = typeof window !== 'undefined' && backend().transportKind !== 'none'
-    ? await showBrowserContextMenu(items)
-    : await invokeContextualMenu(serializeMenuItems(items), addSpellCheckMenu)
+  const indices =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
+      ? await showBrowserContextMenu(items)
+      : await invokeContextualMenu(serializeMenuItems(items), addSpellCheckMenu)
 
   if (indices !== null) {
     const menuItem = findSubmenuItem(items, indices)

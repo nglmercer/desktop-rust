@@ -57,26 +57,27 @@ export function parseWorktreePorcelainOutput(
 export async function listWorktrees(
   repositoryOrPath: Repository | string
 ): Promise<ReadonlyArray<WorktreeEntry>> {
-  const repositoryPath = typeof repositoryOrPath === 'string'
-    ? repositoryOrPath
-    : repositoryOrPath.path
+  const repositoryPath =
+    typeof repositoryOrPath === 'string'
+      ? repositoryOrPath
+      : repositoryOrPath.path
   const read = () => backend().repositoryWorktrees(repositoryPath)
-  const entries = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(repositoryPath, 'read', read, true)
-    : await read()
+  const entries =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repositoryPath, 'read', read, true)
+      : await read()
   return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
-
 }
 
 export async function listWorktreesFromGitDir(
   gitDir: string
 ): Promise<ReadonlyArray<WorktreeEntry>> {
   const read = () => backend().repositoryWorktrees(gitDir, true)
-  const entries = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(gitDir, 'read', read, true)
-    : await read()
+  const entries =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(gitDir, 'read', read, true)
+      : await read()
   return entries.map(entry => ({ ...entry, path: Path.normalize(entry.path) }))
-
 }
 
 /**
@@ -130,8 +131,18 @@ export async function addWorktree(
   path: string,
   options: IAddWorktreeOptions = {}
 ): Promise<void> {
-  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'add', path, create_branch: options.createBranch || null, commitish: options.commitish || null }), true)
-
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () =>
+      backend().mutateRepositoryWorktree(repository.path, {
+        kind: 'add',
+        path,
+        create_branch: options.createBranch || null,
+        commitish: options.commitish || null,
+      }),
+    true
+  )
 }
 
 export async function removeWorktree(
@@ -139,8 +150,17 @@ export async function removeWorktree(
   worktreePath: string,
   force: boolean = false
 ): Promise<void> {
-  return withRepositoryGitOperation(repositoryPath, 'mutation', () => backend().mutateRepositoryWorktree(repositoryPath, { kind: 'remove', path: worktreePath, force }), true)
-
+  return withRepositoryGitOperation(
+    repositoryPath,
+    'mutation',
+    () =>
+      backend().mutateRepositoryWorktree(repositoryPath, {
+        kind: 'remove',
+        path: worktreePath,
+        force,
+      }),
+    true
+  )
 }
 
 /**
@@ -155,6 +175,15 @@ export async function moveWorktree(
   oldPath: string,
   newPath: string
 ): Promise<void> {
-  return withRepositoryGitOperation(repository.path, 'mutation', () => backend().mutateRepositoryWorktree(repository.path, { kind: 'move', from: oldPath, to: newPath }), true)
-
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () =>
+      backend().mutateRepositoryWorktree(repository.path, {
+        kind: 'move',
+        from: oldPath,
+        to: newPath,
+      }),
+    true
+  )
 }

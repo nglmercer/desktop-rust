@@ -9,7 +9,7 @@
     "**/*.mts",
     "../app/src/lib/globals.d.ts",
     "../app/src/styles.d.ts",
-    
+
     "../app/src/web/path-browserify.d.ts"
   ]
 }

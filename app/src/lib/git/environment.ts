@@ -93,7 +93,9 @@ export async function envForRemoteOperation(remoteUrl: string) {
 export async function envForProxy(
   remoteUrl: string,
   env: NodeJS.ProcessEnv = process.env,
-  resolve: (url: string) => Promise<string | typeof inheritHostProxy | undefined> = resolveGitProxy
+  resolve: (
+    url: string
+  ) => Promise<string | typeof inheritHostProxy | undefined> = resolveGitProxy
 ): Promise<Record<string, string | undefined> | undefined> {
   const protocolMatch = /^(https?):\/\//i.exec(remoteUrl)
 

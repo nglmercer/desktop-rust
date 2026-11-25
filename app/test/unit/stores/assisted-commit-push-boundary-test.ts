@@ -3,7 +3,10 @@ import assert from 'node:assert'
 import { before, describe, it, type TestContext } from 'node:test'
 import { vi } from 'vitest'
 import { backend, overrideBackendForTests } from '../../../src/backend/client'
-import { createForEachRefParser, createLogParser } from '../../../src/lib/git/git-delimiter-parser'
+import {
+  createForEachRefParser,
+  createLogParser,
+} from '../../../src/lib/git/git-delimiter-parser'
 import * as Dugite from 'dugite'
 import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
@@ -117,243 +120,239 @@ before(async () => {
     ...syncExports,
   }))
   vi.doMock('dugite', async () => ({
-
-      ...Dugite,
-      exec: async (
-        args: string[],
-        path: string,
-        options?: Dugite.IGitExecutionOptions
-      ) => {
-        if (
-          historyFailure !== undefined &&
-          pushArguments.length > 0 &&
-          args.includes('log')
-        ) {
-          const failure = historyFailure
-          historyFailure = undefined
-          throw failure
-        }
-        if (
-          statusFailure !== undefined &&
-          pushArguments.length > 0 &&
-          args.includes('status')
-        ) {
-          const failure = statusFailure
-          statusFailure = undefined
-          historyFailure = undefined
-          throw failure
-        }
-        if (
-          beforePublicationConfig !== undefined &&
-          pushArguments.length > 0 &&
-          args[0] === 'rev-parse' &&
-          args.includes('--git-path') &&
-          args.at(-1) === 'config'
-        ) {
-          await beforePublicationConfig(path)
-        }
-        if (
-          duringConfigWrite !== undefined &&
-          args[0] === 'config' &&
-          (args.includes('--file') || args.includes('--local')) &&
-          args.includes('--') &&
-          (args.length > args.indexOf('--') + 2 ||
-            (args.includes('--get-all') &&
-              args[args.indexOf('--file') + 1] === '-'))
-        ) {
-          await duringConfigWrite(args, path)
-        }
-        if (capturePushes) {
-          allArguments.push([...args])
-          allExecutions.push({ path, args: [...args] })
-        }
-        if (
-          denyConfigKey !== undefined &&
-          args[0] === 'config' &&
-          args.includes('--file') &&
-          args[args.indexOf('--') + 1] === denyConfigKey
-        ) {
-          throw new Error('Synthetic publication metadata write failure')
-        }
-        if (capturePushes && args[0] === 'push') {
-          pushArguments.push([...args])
-          await beforePush?.(path)
-          const result = await actualExec(args, path, options)
-          await afterPush?.(path)
-          if (reportPushFailure !== undefined) {
-            const failure = reportPushFailure
-            reportPushFailure = undefined
-            throw failure
-          }
-          return result
-        }
+    ...Dugite,
+    exec: async (
+      args: string[],
+      path: string,
+      options?: Dugite.IGitExecutionOptions
+    ) => {
+      if (
+        historyFailure !== undefined &&
+        pushArguments.length > 0 &&
+        args.includes('log')
+      ) {
+        const failure = historyFailure
+        historyFailure = undefined
+        throw failure
+      }
+      if (
+        statusFailure !== undefined &&
+        pushArguments.length > 0 &&
+        args.includes('status')
+      ) {
+        const failure = statusFailure
+        statusFailure = undefined
+        historyFailure = undefined
+        throw failure
+      }
+      if (
+        beforePublicationConfig !== undefined &&
+        pushArguments.length > 0 &&
+        args[0] === 'rev-parse' &&
+        args.includes('--git-path') &&
+        args.at(-1) === 'config'
+      ) {
+        await beforePublicationConfig(path)
+      }
+      if (
+        duringConfigWrite !== undefined &&
+        args[0] === 'config' &&
+        (args.includes('--file') || args.includes('--local')) &&
+        args.includes('--') &&
+        (args.length > args.indexOf('--') + 2 ||
+          (args.includes('--get-all') &&
+            args[args.indexOf('--file') + 1] === '-'))
+      ) {
+        await duringConfigWrite(args, path)
+      }
+      if (capturePushes) {
+        allArguments.push([...args])
+        allExecutions.push({ path, args: [...args] })
+      }
+      if (
+        denyConfigKey !== undefined &&
+        args[0] === 'config' &&
+        args.includes('--file') &&
+        args[args.indexOf('--') + 1] === denyConfigKey
+      ) {
+        throw new Error('Synthetic publication metadata write failure')
+      }
+      if (capturePushes && args[0] === 'push') {
+        pushArguments.push([...args])
+        await beforePush?.(path)
         const result = await actualExec(args, path, options)
-        if (
-          afterPublicationTrackingProbe !== undefined &&
-          pushArguments.length > 0 &&
-          args[0] === 'config' &&
-          args.includes('--get-all') &&
-          args.at(-1)?.endsWith('.merge')
-        ) {
-          const mutate = afterPublicationTrackingProbe
-          afterPublicationTrackingProbe = undefined
-          await mutate(path)
-        }
-        if (
-          afterHistoryRead !== undefined &&
-          pushArguments.length > 0 &&
-          args.includes('log') &&
-          args.includes('--numstat')
-        ) {
-          await afterHistoryRead()
-        }
-        if (
-          afterFollowUpFetch !== undefined &&
-          pushArguments.length > 0 &&
-          args[0] === 'fetch' &&
-          args.includes('--') &&
-          args.at(-1) === 'origin'
-        ) {
-          await afterFollowUpFetch()
-        }
-        if (
-          afterConfigurationRead !== undefined &&
-          args[0] === 'config' &&
-          args.includes('--list') &&
-          args.includes('--show-origin')
-        ) {
-          await afterConfigurationRead(path)
-        }
-        if (
-          afterPinnedLookup !== undefined &&
-          args[0] === 'remote' &&
-          args[1] === 'get-url' &&
-          args.includes('--push') &&
-          args.includes('--all') &&
-          options?.env?.GIT_CONFIG_PARAMETERS?.includes('remote.origin.url=')
-        ) {
-          await afterPinnedLookup(path)
+        await afterPush?.(path)
+        if (reportPushFailure !== undefined) {
+          const failure = reportPushFailure
+          reportPushFailure = undefined
+          throw failure
         }
         return result
-      },
-
+      }
+      const result = await actualExec(args, path, options)
+      if (
+        afterPublicationTrackingProbe !== undefined &&
+        pushArguments.length > 0 &&
+        args[0] === 'config' &&
+        args.includes('--get-all') &&
+        args.at(-1)?.endsWith('.merge')
+      ) {
+        const mutate = afterPublicationTrackingProbe
+        afterPublicationTrackingProbe = undefined
+        await mutate(path)
+      }
+      if (
+        afterHistoryRead !== undefined &&
+        pushArguments.length > 0 &&
+        args.includes('log') &&
+        args.includes('--numstat')
+      ) {
+        await afterHistoryRead()
+      }
+      if (
+        afterFollowUpFetch !== undefined &&
+        pushArguments.length > 0 &&
+        args[0] === 'fetch' &&
+        args.includes('--') &&
+        args.at(-1) === 'origin'
+      ) {
+        await afterFollowUpFetch()
+      }
+      if (
+        afterConfigurationRead !== undefined &&
+        args[0] === 'config' &&
+        args.includes('--list') &&
+        args.includes('--show-origin')
+      ) {
+        await afterConfigurationRead(path)
+      }
+      if (
+        afterPinnedLookup !== undefined &&
+        args[0] === 'remote' &&
+        args[1] === 'get-url' &&
+        args.includes('--push') &&
+        args.includes('--all') &&
+        options?.env?.GIT_CONFIG_PARAMETERS?.includes('remote.origin.url=')
+      ) {
+        await afterPinnedLookup(path)
+      }
+      return result
+    },
   }))
   vi.doMock('fs/promises', async () => ({
-
-      ...FileSystem,
-      realpath: async (...args: Parameters<typeof FileSystem.realpath>) => {
-        const result = await resolvePath(...args)
-        if (args[0] === aliasResolutionPath) {
-          await beforeAliasFenceCapture?.()
+    ...FileSystem,
+    realpath: async (...args: Parameters<typeof FileSystem.realpath>) => {
+      const result = await resolvePath(...args)
+      if (args[0] === aliasResolutionPath) {
+        await beforeAliasFenceCapture?.()
+      }
+      return result
+    },
+    readFile: async (...args: Parameters<typeof FileSystem.readFile>) => {
+      if (typeof args[0] === 'string' && basename(args[0]) === 'image.png') {
+        await beforeImageRead?.()
+      }
+      return readFile(...args)
+    },
+    open: async (...args: Parameters<typeof FileSystem.open>) => {
+      if (
+        markerOpenFailure !== undefined &&
+        typeof args[0] === 'string' &&
+        basename(args[0]) === '.desktop-publication-owner'
+      ) {
+        const error = markerOpenFailure
+        markerOpenFailure = undefined
+        throw error
+      }
+      const handle = await open(...args)
+      if (
+        afterAlternateRoutingRead !== undefined &&
+        typeof args[0] === 'string' &&
+        basename(args[0]) === 'alternates'
+      ) {
+        const path = args[0]
+        const close = handle.close.bind(handle)
+        handle.close = async () => {
+          await close()
+          await afterAlternateRoutingRead?.(path)
         }
-        return result
-      },
-      readFile: async (...args: Parameters<typeof FileSystem.readFile>) => {
-        if (typeof args[0] === 'string' && basename(args[0]) === 'image.png') {
-          await beforeImageRead?.()
+      }
+      if (
+        afterPublicationLockClose !== undefined &&
+        typeof args[0] === 'string' &&
+        basename(args[0]) === 'config.lock' &&
+        pushArguments.length > 0
+      ) {
+        const path = args[0]
+        const close = handle.close.bind(handle)
+        handle.close = async () => {
+          await close()
+          await afterPublicationLockClose?.(path)
         }
-        return readFile(...args)
-      },
-      open: async (...args: Parameters<typeof FileSystem.open>) => {
-        if (
-          markerOpenFailure !== undefined &&
-          typeof args[0] === 'string' &&
-          basename(args[0]) === '.desktop-publication-owner'
-        ) {
-          const error = markerOpenFailure
-          markerOpenFailure = undefined
-          throw error
-        }
-        const handle = await open(...args)
-        if (
-          afterAlternateRoutingRead !== undefined &&
-          typeof args[0] === 'string' &&
-          basename(args[0]) === 'alternates'
-        ) {
-          const path = args[0]
-          const close = handle.close.bind(handle)
-          handle.close = async () => {
-            await close()
-            await afterAlternateRoutingRead?.(path)
+      }
+      return handle
+    },
+    mkdtemp: async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
+      const directory = await mkdtemp(...args)
+      if (
+        typeof directory === 'string' &&
+        basename(directory).startsWith('desktop-publication-')
+      ) {
+        stagingDirectoryCreations++
+        await afterStagingDirectoryCreation?.(directory)
+      }
+      return directory
+    },
+    unlink: async (path: PathLike) => {
+      if (await denyUnlink?.(path)) {
+        throw Object.assign(
+          new Error('Synthetic owned HEAD lock unlink failure'),
+          {
+            code: 'EACCES',
+            errno: -13,
+            syscall: 'unlink',
           }
+        )
+      }
+      await unlink(path)
+      if (
+        typeof path === 'string' &&
+        basename(path) === '.desktop-publication-owner'
+      ) {
+        await afterMarkerUnlink?.(path)
+      }
+    },
+    rm: async (...args: Parameters<typeof FileSystem.rm>) => {
+      if (await denyRemove?.(args[0])) {
+        throw Object.assign(
+          new Error('Synthetic publication directory cleanup EIO'),
+          { code: 'EIO' }
+        )
+      }
+      return remove(...args)
+    },
+    lstat: async (...args: Parameters<typeof FileSystem.lstat>) => {
+      if (args[0] === configurationReadFailure?.path) {
+        throw configurationReadFailure.error
+      }
+      if (
+        directoryStatFailure !== undefined &&
+        typeof args[0] === 'string' &&
+        basename(args[0]).startsWith('desktop-publication-')
+      ) {
+        failedDirectory = args[0]
+        const failure = directoryStatFailure
+        if (!retainDirectoryStatFailure) {
+          directoryStatFailure = undefined
         }
-        if (
-          afterPublicationLockClose !== undefined &&
-          typeof args[0] === 'string' &&
-          basename(args[0]) === 'config.lock' &&
-          pushArguments.length > 0
-        ) {
-          const path = args[0]
-          const close = handle.close.bind(handle)
-          handle.close = async () => {
-            await close()
-            await afterPublicationLockClose?.(path)
-          }
-        }
-        return handle
-      },
-      mkdtemp: async (...args: Parameters<typeof FileSystem.mkdtemp>) => {
-        const directory = await mkdtemp(...args)
-        if (
-          typeof directory === 'string' &&
-          basename(directory).startsWith('desktop-publication-')
-        ) {
-          stagingDirectoryCreations++
-          await afterStagingDirectoryCreation?.(directory)
-        }
-        return directory
-      },
-      unlink: async (path: PathLike) => {
-        if (await denyUnlink?.(path)) {
-          throw Object.assign(
-            new Error('Synthetic owned HEAD lock unlink failure'),
-            {
-              code: 'EACCES',
-              errno: -13,
-              syscall: 'unlink',
-            }
-          )
-        }
-        await unlink(path)
-        if (
-          typeof path === 'string' &&
-          basename(path) === '.desktop-publication-owner'
-        ) {
-          await afterMarkerUnlink?.(path)
-        }
-      },
-      rm: async (...args: Parameters<typeof FileSystem.rm>) => {
-        if (await denyRemove?.(args[0])) {
-          throw Object.assign(
-            new Error('Synthetic publication directory cleanup EIO'),
-            { code: 'EIO' }
-          )
-        }
-        return remove(...args)
-      },
-      lstat: async (...args: Parameters<typeof FileSystem.lstat>) => {
-        if (args[0] === configurationReadFailure?.path) {
-          throw configurationReadFailure.error
-        }
-        if (
-          directoryStatFailure !== undefined &&
-          typeof args[0] === 'string' &&
-          basename(args[0]).startsWith('desktop-publication-')
-        ) {
-          failedDirectory = args[0]
-          const failure = directoryStatFailure
-          if (!retainDirectoryStatFailure) {
-            directoryStatFailure = undefined
-          }
-          throw failure
-        }
-        const result = await stat(...args)
-        if (afterModeStat !== undefined && args[1] === undefined) {
-          await afterModeStat(args[0])
-        }
-        return result
-      },
-
+        throw failure
+      }
+      const result = await stat(...args)
+      if (afterModeStat !== undefined && args[1] === undefined) {
+        await afterModeStat(args[0])
+      }
+      return result
+    },
   }))
   ;[
     harness,
@@ -425,109 +424,172 @@ let rustClient: ReturnType<typeof backend>
  * path; the rest of the suite exercises the real Rust backend.
  */
 function nodeBackend(t: TestContext) {
-  overrideBackendForTests(new Proxy({
-    transportKind: 'none',
-    repositoryRendererCommit: async (path: string, ref: string) => {
-      await afterHistoryRead?.()
-      const { formatArgs } = createLogParser({
-        sha: '%H', shortSha: '%h', summary: '%s', body: '%b',
-        author: '%an <%ae> %ad', committer: '%cn <%ce> %cd',
-        parents: '%P', trailers: '%(trailers:unfold,only)', refs: '%D',
-      })
-      const result = await actualExec(
-        ['log', '--date=raw', ...formatArgs, '--no-show-signature', '--no-color', '--end-of-options', ref, '--'],
-        path,
-        { successExitCodes: new Set([0, 128]) } as any
-      )
-      return Buffer.from(result.stdout).toString('base64')
-    },
-    repositoryRendererCommitChanges: async (path: string, sha: string) => {
-      await afterHistoryRead?.()
-      const result = await actualExec(
-        ['log', sha, '-C', '-M', '-m', '-1', '--no-show-signature', '--first-parent', '--raw', '--format=format:', '--numstat', '-z', '--'],
-        path
-      )
-      return result.stdout
-    },
-    repositoryAuthors: async (path: string, revisions: ReadonlyArray<string>) => {
-      const result = await actualExec(
-        ['log', '--format=%H%x00%an <%ae> %ad', '--no-walk=unsorted', '--date=raw', '-z', '--stdin'],
-        path,
-        { stdin: revisions.join('\n') } as any
-      )
-      const parts = result.stdout.split('\0')
-      const entries = []
-      for (let i = 0; i + 1 < parts.length; i += 2) {
-        entries.push({ oid: parts[i], identity: parts[i + 1] })
+  overrideBackendForTests(
+    new Proxy(
+      {
+        transportKind: 'none',
+        repositoryRendererCommit: async (path: string, ref: string) => {
+          await afterHistoryRead?.()
+          const { formatArgs } = createLogParser({
+            sha: '%H',
+            shortSha: '%h',
+            summary: '%s',
+            body: '%b',
+            author: '%an <%ae> %ad',
+            committer: '%cn <%ce> %cd',
+            parents: '%P',
+            trailers: '%(trailers:unfold,only)',
+            refs: '%D',
+          })
+          const result = await actualExec(
+            [
+              'log',
+              '--date=raw',
+              ...formatArgs,
+              '--no-show-signature',
+              '--no-color',
+              '--end-of-options',
+              ref,
+              '--',
+            ],
+            path,
+            { successExitCodes: new Set([0, 128]) } as any
+          )
+          return Buffer.from(result.stdout).toString('base64')
+        },
+        repositoryRendererCommitChanges: async (path: string, sha: string) => {
+          await afterHistoryRead?.()
+          const result = await actualExec(
+            [
+              'log',
+              sha,
+              '-C',
+              '-M',
+              '-m',
+              '-1',
+              '--no-show-signature',
+              '--first-parent',
+              '--raw',
+              '--format=format:',
+              '--numstat',
+              '-z',
+              '--',
+            ],
+            path
+          )
+          return result.stdout
+        },
+        repositoryAuthors: async (
+          path: string,
+          revisions: ReadonlyArray<string>
+        ) => {
+          const result = await actualExec(
+            [
+              'log',
+              '--format=%H%x00%an <%ae> %ad',
+              '--no-walk=unsorted',
+              '--date=raw',
+              '-z',
+              '--stdin',
+            ],
+            path,
+            { stdin: revisions.join('\n') } as any
+          )
+          const parts = result.stdout.split('\0')
+          const entries = []
+          for (let i = 0; i + 1 < parts.length; i += 2) {
+            entries.push({ oid: parts[i], identity: parts[i + 1] })
+          }
+          return entries
+        },
+        repositoryBranches: async (
+          path: string,
+          prefixes: ReadonlyArray<string>
+        ) => {
+          const { formatArgs, parse } = createForEachRefParser({
+            fullName: '%(refname)',
+            shortName: '%(refname:short)',
+            upstreamShortName: '%(upstream:short)',
+            upstream: '%(upstream)',
+            sha: '%(objectname)',
+            symref: '%(symref)',
+            head: '%(HEAD)',
+          })
+          const result = await actualExec(
+            ['for-each-ref', ...formatArgs, ...prefixes],
+            path
+          )
+          return parse(result.stdout).map(ref => ({
+            ref: ref.fullName,
+            name: ref.shortName,
+            upstream:
+              ref.upstreamShortName.length > 0 ? ref.upstreamShortName : null,
+            upstream_ref: ref.upstream.length > 0 ? ref.upstream : null,
+            oid: ref.sha,
+            current: ref.head === '*',
+          }))
+        },
+        repositoryRendererTagRefs: async (path: string) => {
+          const result = await actualExec(['show-ref', '--tags', '-d'], path, {
+            successExitCodes: new Set([0, 1]),
+          } as any)
+          return result.stdout
+        },
+        repositorySymbolicRef: async (path: string, ref: string) => {
+          const result = await actualExec(['symbolic-ref', '-q', ref], path, {
+            successExitCodes: new Set([0, 1, 128]),
+          } as any)
+          return result.exitCode === 0 ? result.stdout.trim() : null
+        },
+        repositoryRendererReflog: async (path: string, kind: string) => {
+          if (kind !== 'branches') return null
+          const result = await actualExec(
+            [
+              'log',
+              '-g',
+              '--no-abbrev-commit',
+              '--pretty=oneline',
+              'HEAD',
+              '-n',
+              '2500',
+              '--',
+            ],
+            path,
+            { successExitCodes: new Set([0, 128]) } as any
+          )
+          return result.exitCode === 128 ? null : result.stdout
+        },
+        repositoryBranchCheckouts: async (path: string, afterDate: Date) => {
+          const result = await actualExec(
+            [
+              'reflog',
+              '--date=iso',
+              `--after="${afterDate.toISOString()}"`,
+              '--pretty=%H %gd %gs',
+              '--grep-reflog=checkout: moving from .* to .*$',
+              '--',
+            ],
+            path,
+            { successExitCodes: new Set([0, 128]) } as any
+          )
+          return result.exitCode === 128 ? null : result.stdout
+        },
+      },
+      {
+        get(target, prop) {
+          if (prop in target) return (target as any)[prop]
+          return (...args: unknown[]) => {
+            console.error(
+              'MISSING BACKEND METHOD',
+              String(prop),
+              JSON.stringify(args).slice(0, 200)
+            )
+            throw new Error(`missing backend method ${String(prop)}`)
+          }
+        },
       }
-      return entries
-    },
-    repositoryBranches: async (path: string, prefixes: ReadonlyArray<string>) => {
-      const { formatArgs, parse } = createForEachRefParser({
-        fullName: '%(refname)',
-        shortName: '%(refname:short)',
-        upstreamShortName: '%(upstream:short)',
-        upstream: '%(upstream)',
-        sha: '%(objectname)',
-        symref: '%(symref)',
-        head: '%(HEAD)',
-      })
-      const result = await actualExec(
-        ['for-each-ref', ...formatArgs, ...prefixes],
-        path
-      )
-      return parse(result.stdout).map(ref => ({
-        ref: ref.fullName,
-        name: ref.shortName,
-        upstream: ref.upstreamShortName.length > 0 ? ref.upstreamShortName : null,
-        upstream_ref: ref.upstream.length > 0 ? ref.upstream : null,
-        oid: ref.sha,
-        current: ref.head === '*',
-      }))
-    },
-    repositoryRendererTagRefs: async (path: string) => {
-      const result = await actualExec(
-        ['show-ref', '--tags', '-d'],
-        path,
-        { successExitCodes: new Set([0, 1]) } as any
-      )
-      return result.stdout
-    },
-    repositorySymbolicRef: async (path: string, ref: string) => {
-      const result = await actualExec(
-        ['symbolic-ref', '-q', ref],
-        path,
-        { successExitCodes: new Set([0, 1, 128]) } as any
-      )
-      return result.exitCode === 0 ? result.stdout.trim() : null
-    },
-    repositoryRendererReflog: async (path: string, kind: string) => {
-      if (kind !== 'branches') return null
-      const result = await actualExec(
-        ['log', '-g', '--no-abbrev-commit', '--pretty=oneline', 'HEAD', '-n', '2500', '--'],
-        path,
-        { successExitCodes: new Set([0, 128]) } as any
-      )
-      return result.exitCode === 128 ? null : result.stdout
-    },
-    repositoryBranchCheckouts: async (path: string, afterDate: Date) => {
-      const result = await actualExec(
-        ['reflog', '--date=iso', `--after="${afterDate.toISOString()}"`,
-          '--pretty=%H %gd %gs', '--grep-reflog=checkout: moving from .* to .*$', '--'],
-        path,
-        { successExitCodes: new Set([0, 128]) } as any
-      )
-      return result.exitCode === 128 ? null : result.stdout
-    },
-  }, {
-    get(target, prop) {
-      if (prop in target) return (target as any)[prop]
-      return (...args: unknown[]) => {
-        console.error('MISSING BACKEND METHOD', String(prop), JSON.stringify(args).slice(0, 200))
-        throw new Error(`missing backend method ${String(prop)}`)
-      }
-    },
-  }) as unknown as ReturnType<typeof backend>)
+    ) as unknown as ReturnType<typeof backend>
+  )
   t.after(() => overrideBackendForTests(rustClient))
 }
 
@@ -3651,7 +3713,9 @@ describe('assisted native push boundary', () => {
       errors
         .assistedCommitErrorCauses(refused.error)
         .map(cause =>
-          cause instanceof Error ? cause.stack ?? cause.message : String(cause)
+          cause instanceof Error
+            ? (cause.stack ?? cause.message)
+            : String(cause)
         )
         .join('\n')
     )

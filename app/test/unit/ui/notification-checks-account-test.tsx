@@ -51,12 +51,14 @@ const logs = mock.fn<
 >(async (_api, _owner, _name, original) => original)
 
 before(() => {
-  vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({ sendDialogDidOpen: () => {} }))
+  vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({
+    sendDialogDidOpen: () => {},
+  }))
   vi.doMock('../../../src/lib/ci-checks/ci-checks.ts', async () => ({
-      ...checksModule,
-      getCheckRunActionsWorkflowRuns: workflows,
-      getLatestPRWorkflowRunsLogsForCheckRun: logs,
-    }))
+    ...checksModule,
+    getCheckRunActionsWorkflowRuns: workflows,
+    getLatestPRWorkflowRunsLogsForCheckRun: logs,
+  }))
 })
 
 beforeEach(() => {

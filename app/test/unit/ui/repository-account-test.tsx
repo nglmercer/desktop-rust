@@ -112,11 +112,11 @@ async function renderAccountDialog(
   let callback: ((result: SignInResult) => void) | undefined
   const completed: Array<Account | undefined> = []
   const order: string[] = []
-  const showAccountSignInDialog = vi.fn<
-    Dispatcher['showAccountSignInDialog']
-  >(async (_endpoint, _login, resultCallback) => {
-    callback = resultCallback
-  })
+  const showAccountSignInDialog = vi.fn<Dispatcher['showAccountSignInDialog']>(
+    async (_endpoint, _login, resultCallback) => {
+      callback = resultCallback
+    }
+  )
   const showDotComSignInDialog = vi.fn<Dispatcher['showDotComSignInDialog']>(
     async resultCallback => {
       callback = resultCallback
@@ -221,9 +221,7 @@ describe('RepositoryAccountDialog', () => {
     view.updateAccounts([work, personal])
     view.finishSignIn({ kind: 'success', account: personal })
     assert.deepStrictEqual(view.completed, [personal])
-    assert.deepStrictEqual(view.closePopup.mock.calls[0], [
-      PopupType.SignIn,
-    ])
+    assert.deepStrictEqual(view.closePopup.mock.calls[0], [PopupType.SignIn])
     assert.deepStrictEqual(view.order, ['close-sign-in', 'complete', 'dismiss'])
   })
 

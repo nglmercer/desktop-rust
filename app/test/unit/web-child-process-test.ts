@@ -72,7 +72,9 @@ function installFakeRust(): IFakeRust {
           if (held !== null) {
             fake.refusals += 1
             wantsDrain = true
-            return Promise.reject(Object.assign(new Error('EBUSY: QUEUE_FULL'), { code: 'EBUSY' }))
+            return Promise.reject(
+              Object.assign(new Error('EBUSY: QUEUE_FULL'), { code: 'EBUSY' })
+            )
           }
           held = data
           accepted.push(data)
@@ -115,7 +117,11 @@ describe('child_process stdin flow control', () => {
 
     const payload = Uint8Array.from({ length: 30 }, (_, i) => i)
     const drained = once(child.stdin!, 'drain')
-    assert.strictEqual(child.stdin!.write(payload), false, 'a backlog reports false')
+    assert.strictEqual(
+      child.stdin!.write(payload),
+      false,
+      'a backlog reports false'
+    )
 
     // Release the child's reads one block at a time until the queue is empty.
     for (let step = 0; step < 50; step++) {
@@ -125,9 +131,19 @@ describe('child_process stdin flow control', () => {
     await drained
 
     const sent = fake.accepted.flatMap(block => [...block])
-    assert.deepStrictEqual(sent, [...payload], 'the bytes arrive intact and in order')
-    assert.ok(fake.accepted.every(block => block.length <= LIMITS.block), 'blocks respect the block size')
-    assert.ok(fake.refusals > 0, 'Rust refused a block while it was still held, and the writer waited')
+    assert.deepStrictEqual(
+      sent,
+      [...payload],
+      'the bytes arrive intact and in order'
+    )
+    assert.ok(
+      fake.accepted.every(block => block.length <= LIMITS.block),
+      'blocks respect the block size'
+    )
+    assert.ok(
+      fake.refusals > 0,
+      'Rust refused a block while it was still held, and the writer waited'
+    )
   })
 
   it('a write callback runs once per chunk, after its last block is accepted', async () => {
@@ -180,7 +196,10 @@ describe('child_process stdin flow control', () => {
     const lastWrite = channels.lastIndexOf('desktop.io.process-write')
     const end = channels.indexOf('desktop.io.process-end')
     assert.ok(end > lastWrite, 'end-of-input is sent after the last write')
-    assert.deepStrictEqual(fake.accepted.flatMap(block => [...block]), [1, 2, 3])
+    assert.deepStrictEqual(
+      fake.accepted.flatMap(block => [...block]),
+      [1, 2, 3]
+    )
   })
 })
 
@@ -199,11 +218,30 @@ describe('child_process output', () => {
       seen.push({ text, acksSoFar: fake.acks.length })
     })
 
-    fake.emit({ id: 1, event: 'data', stream: 'stdout', seq: 1, data: Buffer.from('ab').toString('base64') })
-    fake.emit({ id: 1, event: 'data', stream: 'stdout', seq: 2, data: Buffer.from('cd').toString('base64') })
+    fake.emit({
+      id: 1,
+      event: 'data',
+      stream: 'stdout',
+      seq: 1,
+      data: Buffer.from('ab').toString('base64'),
+    })
+    fake.emit({
+      id: 1,
+      event: 'data',
+      stream: 'stdout',
+      seq: 2,
+      data: Buffer.from('cd').toString('base64'),
+    })
 
-    assert.deepStrictEqual(seen.map(s => s.text), ['ab', 'cd'])
-    assert.deepStrictEqual(seen.map(s => s.acksSoFar), [0, 1], 'an ack follows the consumer')
+    assert.deepStrictEqual(
+      seen.map(s => s.text),
+      ['ab', 'cd']
+    )
+    assert.deepStrictEqual(
+      seen.map(s => s.acksSoFar),
+      [0, 1],
+      'an ack follows the consumer'
+    )
     assert.deepStrictEqual(fake.acks, [
       { stream: 'stdout', seq: 1 },
       { stream: 'stdout', seq: 2 },
@@ -219,8 +257,20 @@ describe('child_process output', () => {
     child.stdout!.on('data', (chunk: string) => text.push(chunk))
 
     // "é" is C3 A9 in UTF-8; the blocks split it.
-    fake.emit({ id: 1, event: 'data', stream: 'stdout', seq: 1, data: Buffer.from([0xc3]).toString('base64') })
-    fake.emit({ id: 1, event: 'data', stream: 'stdout', seq: 2, data: Buffer.from([0xa9]).toString('base64') })
+    fake.emit({
+      id: 1,
+      event: 'data',
+      stream: 'stdout',
+      seq: 1,
+      data: Buffer.from([0xc3]).toString('base64'),
+    })
+    fake.emit({
+      id: 1,
+      event: 'data',
+      stream: 'stdout',
+      seq: 2,
+      data: Buffer.from([0xa9]).toString('base64'),
+    })
 
     assert.strictEqual(text.join(''), 'é')
   })

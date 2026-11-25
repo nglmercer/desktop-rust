@@ -1,0 +1,129 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["./.oxlint.security.json"],
+  "plugins": [
+    "typescript",
+    "react",
+    "jsdoc",
+    "jsx-a11y",
+    "node",
+    "unicorn",
+    "oxc"
+  ],
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "node": true
+  },
+  "settings": {
+    "react": {
+      "version": "16.3"
+    }
+  },
+  "categories": {
+    "correctness": "off",
+    "suspicious": "off",
+    "pedantic": "off",
+    "style": "off",
+    "perf": "off",
+    "restriction": "off",
+    "nursery": "off"
+  },
+  "rules": {
+    "curly": "off",
+    "eqeqeq": ["error", "smart"],
+    "no-eval": "error",
+    "no-loss-of-precision": "error",
+    "no-new-wrappers": "error",
+    "no-redeclare": "error",
+    "no-unused-expressions": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "args": "none"
+      }
+    ],
+    "no-var": "error",
+    "prefer-const": "error",
+    "node/no-sync": "off",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["**/web/host-bridge"],
+            "importNames": ["hostIpc"],
+            "message": "Please use 'import * as ipcRenderer' from 'ipc-renderer' instead to get strongly typed IPC methods."
+          }
+        ]
+      }
+    ],
+    "no-restricted-exports": [
+      "error",
+      {
+        "restrictDefaultExports": {
+          "direct": true
+        }
+      }
+    ],
+    "typescript/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "as"
+      }
+    ],
+    "typescript/explicit-member-accessibility": "off",
+    "typescript/explicit-module-boundary-types": "off",
+    "typescript/no-empty-object-type": [
+      "error",
+      {
+        "allowInterfaces": "never",
+        "allowObjectTypes": "always"
+      }
+    ],
+    "typescript/no-explicit-any": "off",
+    "typescript/no-extra-non-null-assertion": "error",
+    "typescript/no-extraneous-class": "error",
+    "typescript/no-inferrable-types": "off",
+    "typescript/no-non-null-assertion": "off",
+    "typescript/no-require-imports": "off",
+    "typescript/triple-slash-reference": "off",
+    "react/jsx-boolean-value": ["error", "always"],
+    "react/jsx-key": "error",
+    "react/no-string-refs": "error",
+    "react/react-in-jsx-scope": "error",
+    "jsdoc/check-tag-names": "error",
+    "jsdoc/implements-on-classes": "error",
+    "jsx-a11y/no-autofocus": "off"
+  },
+  "overrides": [
+    {
+      "files": ["app/test/**/*", "script/**/*"],
+      "rules": {
+        "typescript/no-non-null-assertion": "off"
+      }
+    },
+    {
+      "files": ["app/test/**/*"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": ["app/src/ui/octicons/octicons.generated.ts"],
+      "rules": {}
+    },
+    {
+      "files": ["app/src/web/**/*", "oxlint-rules/**/*.mjs"],
+      "rules": {
+        "no-restricted-exports": "off"
+      }
+    },
+    {
+      "files": ["app/test/**/*", "app/src/web/**/*"],
+      "rules": {
+        "typescript/no-extraneous-class": "off"
+      }
+    }
+  ]
+}

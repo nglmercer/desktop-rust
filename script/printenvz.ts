@@ -13,7 +13,11 @@ export function getPrintenvzPath(directory = sourceDirectory): string {
     process.platform === 'win32' ? 'printenvz.exe' : 'printenvz'
   )
 }
-export function resolveRustTarget(host: string, platform: string, architecture: string): string {
+export function resolveRustTarget(
+  host: string,
+  platform: string,
+  architecture: string
+): string {
   if (!['x64', 'arm64', 'ia32', 'arm'].includes(architecture)) {
     throw new Error(
       `Unsupported printenvz cross target: ${host} to ${architecture}`
@@ -50,8 +54,8 @@ export function resolveRustTarget(host: string, platform: string, architecture: 
     const suffix = host.endsWith('-unknown-linux-gnu')
       ? '-unknown-linux-gnu'
       : host.endsWith('-unknown-linux-musl')
-      ? '-unknown-linux-musl'
-      : undefined
+        ? '-unknown-linux-musl'
+        : undefined
     const targets: Record<string, string> = { x64: 'x86_64', arm64: 'aarch64' }
     const target = targets[architecture]
     if (suffix && target) return target + suffix
@@ -81,12 +85,12 @@ export function buildPrintenvz(directory = sourceDirectory): void {
   const hostOs = host.includes('-apple-darwin')
     ? 'darwin'
     : host.includes('-windows-')
-    ? 'win32'
-    : host.endsWith('-android') || host.endsWith('-androideabi')
-    ? 'android'
-    : host.includes('-linux-')
-    ? 'linux'
-    : undefined
+      ? 'win32'
+      : host.endsWith('-android') || host.endsWith('-androideabi')
+        ? 'android'
+        : host.includes('-linux-')
+          ? 'linux'
+          : undefined
   if (hostOs !== process.platform) {
     throw new Error(`Unsupported Rust host target: ${host}`)
   }

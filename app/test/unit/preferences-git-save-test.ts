@@ -50,7 +50,11 @@ import { Preferences } from '../../src/ui/preferences/preferences'
 
 function createPreferences() {
   const dispatcher = new Proxy(
-    { refreshAuthor: vi.fn(), setCustomEditor: vi.fn(), setUseCustomEditor: vi.fn() },
+    {
+      refreshAuthor: vi.fn(),
+      setCustomEditor: vi.fn(),
+      setUseCustomEditor: vi.fn(),
+    },
     {
       get: (target, key) => Reflect.get(target, key) ?? vi.fn(),
     }
@@ -165,12 +169,18 @@ describe('preferences Git settings save', () => {
     Object.assign(instance.state, {
       useCustomEditor: true,
       customEditor: { path: '/invalid-visible', arguments: '%TARGET_PATH%' },
-      initialCommitterName: 'Before', committerName: 'After',
-      initialCommitterEmail: '', committerEmail: '',
-      initialDefaultBranch: 'main', defaultBranch: 'main',
+      initialCommitterName: 'Before',
+      committerName: 'After',
+      initialCommitterEmail: '',
+      committerEmail: '',
+      initialDefaultBranch: 'main',
+      defaultBranch: 'main',
     })
     await save()
-    expect(mocks.isValidCustomIntegration).toHaveBeenCalledWith({ path: '/invalid-visible', arguments: '%TARGET_PATH%' })
+    expect(mocks.isValidCustomIntegration).toHaveBeenCalledWith({
+      path: '/invalid-visible',
+      arguments: '%TARGET_PATH%',
+    })
     expect(instance.state.integrationSaveError).toContain('valid custom editor')
     expect(instance.state.selectedIndex).toBe(PreferencesTab.Integrations)
     expect(dispatcher.setCustomEditor).not.toHaveBeenCalled()
@@ -181,12 +191,23 @@ describe('preferences Git settings save', () => {
   it('does not save an editor changed while validation was pending', async () => {
     const { instance, dispatcher, onDismissed, save } = createPreferences()
     const previous = { path: '/old', arguments: '%TARGET_PATH%' }
-    Object.assign(instance.state, { useCustomEditor: true, customEditor: previous, useCustomShell: false })
+    Object.assign(instance.state, {
+      useCustomEditor: true,
+      customEditor: previous,
+      useCustomShell: false,
+    })
     let finish: (valid: boolean) => void = () => {}
-    mocks.isValidCustomIntegration.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    mocks.isValidCustomIntegration.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          finish = resolve
+        })
+    )
     mocks.validateCustomIntegrationPath.mockResolvedValueOnce({ isValid: true })
     const pending = save()
-    Object.assign(instance.state, { customEditor: { path: '/new', arguments: '%TARGET_PATH%' } })
+    Object.assign(instance.state, {
+      customEditor: { path: '/new', arguments: '%TARGET_PATH%' },
+    })
     finish(true)
     await pending
     expect(instance.state.integrationSaveError).toContain('changed while')
@@ -197,8 +218,14 @@ describe('preferences Git settings save', () => {
 
   it('keeps the dialog open when integration validation fails unexpectedly', async () => {
     const { instance, dispatcher, onDismissed, save } = createPreferences()
-    Object.assign(instance.state, { useCustomEditor: true, customEditor: { path: '/editor', arguments: '%TARGET_PATH%' }, useCustomShell: false })
-    mocks.isValidCustomIntegration.mockRejectedValueOnce(new Error('backend disconnected'))
+    Object.assign(instance.state, {
+      useCustomEditor: true,
+      customEditor: { path: '/editor', arguments: '%TARGET_PATH%' },
+      useCustomShell: false,
+    })
+    mocks.isValidCustomIntegration.mockRejectedValueOnce(
+      new Error('backend disconnected')
+    )
     await save()
     expect(instance.state.integrationSaveError).toContain('Could not validate')
     expect(dispatcher.setCustomEditor).not.toHaveBeenCalled()

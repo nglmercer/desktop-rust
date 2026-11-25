@@ -99,7 +99,11 @@ describe('path', () => {
       assert.equal(isPathWithin('C:\\Repo', 'C:\\Repo-other', win32), false)
       assert.equal(isPathWithin('C:\\Repo', 'D:\\Repo', win32), false)
       assert.equal(
-        isPathWithin('\\\\server\\share\\repo', '\\\\server\\share\\repo-other', win32),
+        isPathWithin(
+          '\\\\server\\share\\repo',
+          '\\\\server\\share\\repo-other',
+          win32
+        ),
         false
       )
     })

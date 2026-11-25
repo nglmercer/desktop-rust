@@ -232,7 +232,12 @@ export async function getStatus(
   if (backend().transportKind === 'ws') {
     parsed = statusItemsFromBackend(
       await (forCreation
-        ? backend().detailedRepositoryStatus(repository.path, includeUntracked, {}, true)
+        ? backend().detailedRepositoryStatus(
+            repository.path,
+            includeUntracked,
+            {},
+            true
+          )
         : backend().detailedRepositoryStatus(repository.path, includeUntracked))
     )
   }
@@ -614,8 +619,8 @@ async function getBridgeConflictDetails(
   const kind = mergeHeadFound
     ? 'merge'
     : rebaseInternalState !== null
-    ? 'rebase'
-    : 'working'
+      ? 'rebase'
+      : 'working'
   const details = forCreation
     ? await backend().repositoryConflictDetails(repository.path, kind, true)
     : await backend().repositoryConflictDetails(repository.path, kind)

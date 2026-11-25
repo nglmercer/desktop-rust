@@ -446,7 +446,10 @@ export class CloneRepository extends React.Component<
   }
 
   private onNativeModeChanged = (event: React.FormEvent<HTMLInputElement>) => {
-    this.setState({ nativeSelectedClone: event.currentTarget.checked }, this.validatePath)
+    this.setState(
+      { nativeSelectedClone: event.currentTarget.checked },
+      this.validatePath
+    )
   }
 
   private refreshNativeRecoveries = async () => {
@@ -763,7 +766,12 @@ export class CloneRepository extends React.Component<
       // We only care about the result if the path hasn't
       // changed since we went async
       const newTabState = this.getSelectedTabState()
-      if (generation === this.pathValidationGeneration && this.props.selectedTab === tab && newTabState.path === path && this.state.nativeSelectedClone === nativeSelectedClone) {
+      if (
+        generation === this.pathValidationGeneration &&
+        this.props.selectedTab === tab &&
+        newTabState.path === path &&
+        this.state.nativeSelectedClone === nativeSelectedClone
+      ) {
         this.setSelectedTabState({ error: pathValidation, path })
       }
     }
@@ -891,14 +899,18 @@ export class CloneRepository extends React.Component<
       if (backend().transportKind === 'ws') {
         // This is a UI hint only; Git still checks the destination when it
         // starts, as files or links can change after this request completes.
-        const status = await backend().cloneDestinationStatus(Path.resolve(path))
+        const status = await backend().cloneDestinationStatus(
+          Path.resolve(path)
+        )
         if (status === 'dangling_symlink') {
           return new Error(
             'A broken symbolic link already exists at this path. Choose a different folder.'
           )
         }
         if (requireAbsent && status !== 'missing' && status !== 'unreadable') {
-          return new Error('This mode requires a destination that does not yet exist.')
+          return new Error(
+            'This mode requires a destination that does not yet exist.'
+          )
         }
         if (status === 'not_directory') {
           return new Error(
@@ -917,7 +929,12 @@ export class CloneRepository extends React.Component<
         }
       }
       const canonical = await canonicalMutationPath(path)
-      if (generation === this.pathValidationGeneration && this.props.selectedTab === tab && this.state.nativeSelectedClone === nativeSelectedClone && this.getSelectedTabState().path === path) {
+      if (
+        generation === this.pathValidationGeneration &&
+        this.props.selectedTab === tab &&
+        this.state.nativeSelectedClone === nativeSelectedClone &&
+        this.getSelectedTabState().path === path
+      ) {
         this.validatedClonePath = { path, canonical }
       }
       if (isRepositoryAffectedByAssistedCommit(canonical)) {
@@ -928,8 +945,10 @@ export class CloneRepository extends React.Component<
       if (requireAbsent && backend().transportKind !== 'ws') {
         // This is only an early UI check. The native clone operation itself
         // validates and reserves the destination before contacting a remote.
-        return await backend().pathExists(Path.resolve(path))
-          ? new Error('This mode requires a destination that does not yet exist.')
+        return (await backend().pathExists(Path.resolve(path)))
+          ? new Error(
+              'This mode requires a destination that does not yet exist.'
+            )
           : null
       }
       if (backend().transportKind === 'ws') {
@@ -1013,8 +1032,10 @@ export class CloneRepository extends React.Component<
     // with another account.
     const request = this.getCloneRequest()
     const { path } = request
-    const nativeOperation = backend().transportKind !== 'none' &&
-      request.tab === CloneRepositoryTab.GitHub && this.state.nativeSelectedClone
+    const nativeOperation =
+      backend().transportKind !== 'none' &&
+      request.tab === CloneRepositoryTab.GitHub &&
+      this.state.nativeSelectedClone
     this.setState({ loading: true, nativeOperation })
 
     if (path == null) {
@@ -1084,7 +1105,11 @@ export class CloneRepository extends React.Component<
         }
       } catch (error) {
         if (this.mounted) {
-          this.setState({ loading: false, nativeProgress: null, nativeOperation: false })
+          this.setState({
+            loading: false,
+            nativeProgress: null,
+            nativeOperation: false,
+          })
           this.setSelectedTabState({
             error: new Error(
               `${error.message} Inspect the destination before retrying.`

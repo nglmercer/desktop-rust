@@ -22,7 +22,7 @@ versions look similar to the below output:
 
 ```shellsession
 $ node -v
-v24.19.0
+v24.x.y
 
 $ pnpm -v
 11.17.0
@@ -62,14 +62,14 @@ problems.
 
 ## Running tests
 
-- `npm test` - Alias for `npm run test:unit`
-- `npm run test:script` - Runs all script tests
-- `npm run test:eslint` - Runs all eslint tests
-- `npm run test:unit` - Runs all unit tests
+- `pnpm test` - Runs all TypeScript unit tests through Vitest
+- `pnpm test:script` - Runs all script tests
+- `pnpm test:oxlint` - Runs the project oxlint rule tests
+- `pnpm migration:check` - Checks migration metrics and unresolved compatibility markers
   - Add `-- <file>` to only run tests in the specified file
   - Add `-- <directory>` to search for tests matching our test pattern in the given directory
-  - Add `-- --test-name-pattern=<pattern>` to only match tests whose name matches the pattern
-  - For more information on these and other arguments, see [Node CLI options](https://nodejs.org/api/test.html)
+  - Add `-- -t <pattern>` to only match tests whose name contains the pattern
+  - Rust tests run separately with Cargo, for example `cargo test --workspace --exclude desktop-app --locked`
 
 ## Debugging
 

@@ -1062,50 +1062,66 @@ export class Preferences extends React.Component<
 
     // Validate exactly the visible integration drafts before changing any
     // settings. A backend response can arrive after the user edits again.
-    const { useCustomEditor, customEditor, useCustomShell, customShell } = this.state
+    const { useCustomEditor, customEditor, useCustomShell, customShell } =
+      this.state
     const integrationsChanged = () =>
       this.state.useCustomEditor !== useCustomEditor ||
       this.state.customEditor !== customEditor ||
       this.state.useCustomShell !== useCustomShell ||
       this.state.customShell !== customShell
-    const integrationError = (message: string) => this.setState({
-      selectedIndex: PreferencesTab.Integrations,
-      integrationSaveError: message,
-    })
+    const integrationError = (message: string) =>
+      this.setState({
+        selectedIndex: PreferencesTab.Integrations,
+        integrationSaveError: message,
+      })
     let editorToSave = customEditor
     let shellToSave = customShell
     try {
-    if (useCustomEditor) {
-      const valid = await isValidCustomIntegration(customEditor)
-      const pathResult: { isValid: boolean; bundleID?: string } = valid ? await validateCustomIntegrationPath(customEditor.path) : { isValid: false }
-      if (integrationsChanged()) {
-        integrationError('Integration settings changed while they were being checked. Review them and save again.')
-        return
+      if (useCustomEditor) {
+        const valid = await isValidCustomIntegration(customEditor)
+        const pathResult: { isValid: boolean; bundleID?: string } = valid
+          ? await validateCustomIntegrationPath(customEditor.path)
+          : { isValid: false }
+        if (integrationsChanged()) {
+          integrationError(
+            'Integration settings changed while they were being checked. Review them and save again.'
+          )
+          return
+        }
+        if (!valid || !pathResult.isValid) {
+          integrationError(
+            'Choose a valid custom editor and include the target path in its arguments.'
+          )
+          return
+        }
+        editorToSave = { ...customEditor, bundleID: pathResult.bundleID }
       }
-      if (!valid || !pathResult.isValid) {
-        integrationError('Choose a valid custom editor and include the target path in its arguments.')
-        return
+      if (useCustomShell) {
+        const valid = await isValidCustomIntegration(customShell)
+        const pathResult: { isValid: boolean; bundleID?: string } = valid
+          ? await validateCustomIntegrationPath(customShell.path)
+          : { isValid: false }
+        if (integrationsChanged()) {
+          integrationError(
+            'Integration settings changed while they were being checked. Review them and save again.'
+          )
+          return
+        }
+        if (!valid || !pathResult.isValid) {
+          integrationError(
+            'Choose a valid custom shell and include the target path in its arguments.'
+          )
+          return
+        }
+        shellToSave = { ...customShell, bundleID: pathResult.bundleID }
       }
-      editorToSave = { ...customEditor, bundleID: pathResult.bundleID }
-    }
-    if (useCustomShell) {
-      const valid = await isValidCustomIntegration(customShell)
-      const pathResult: { isValid: boolean; bundleID?: string } = valid ? await validateCustomIntegrationPath(customShell.path) : { isValid: false }
-      if (integrationsChanged()) {
-        integrationError('Integration settings changed while they were being checked. Review them and save again.')
-        return
-      }
-      if (!valid || !pathResult.isValid) {
-        integrationError('Choose a valid custom shell and include the target path in its arguments.')
-        return
-      }
-      shellToSave = { ...customShell, bundleID: pathResult.bundleID }
-    }
     } catch (error) {
       log.error('Could not validate custom integration settings', error)
-      integrationError(integrationsChanged()
-        ? 'Integration settings changed while they were being checked. Review them and save again.'
-        : 'Could not validate the custom integration. Check its path and arguments, then try again.')
+      integrationError(
+        integrationsChanged()
+          ? 'Integration settings changed while they were being checked. Review them and save again.'
+          : 'Could not validate the custom integration. Check its path and arguments, then try again.'
+      )
       return
     }
     this.setState({ integrationSaveError: undefined })
@@ -1115,7 +1131,6 @@ export class Preferences extends React.Component<
     let savingDefaultBranch = false
     let savingGitSettings = true
     try {
-
       if (this.state.committerName !== this.state.initialCommitterName) {
         await setGlobalConfigValue('user.name', this.state.committerName)
         shouldRefreshAuthor = true
@@ -1209,7 +1224,9 @@ export class Preferences extends React.Component<
     await dispatcher.setStatsOptOut(this.state.optOutOfUsageTracking, false)
 
     if (integrationsChanged()) {
-      integrationError('Integration settings changed while saving. Some other settings may already have been saved; review and save again.')
+      integrationError(
+        'Integration settings changed while saving. Some other settings may already have been saved; review and save again.'
+      )
       return
     }
     dispatcher.setUseCustomEditor(useCustomEditor)

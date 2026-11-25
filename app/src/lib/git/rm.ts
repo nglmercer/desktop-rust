@@ -8,5 +8,10 @@ import { withRepositoryGitOperation } from './repository-operation'
  * @param repository the repository to update
  */
 export async function unstageAllFiles(repository: Repository): Promise<void> {
-  await withRepositoryGitOperation(repository.path, 'mutation', () => backend().repositoryRemoveIndexAll(repository.path), true)
+  await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().repositoryRemoveIndexAll(repository.path),
+    true
+  )
 }

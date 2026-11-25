@@ -458,8 +458,8 @@ export async function push(
     assisted !== undefined
       ? `${assisted.expectedTip}:${assisted.remoteRef}`
       : remoteBranch
-      ? `${localBranch}:${remoteBranch}`
-      : localBranch
+        ? `${localBranch}:${remoteBranch}`
+        : localBranch
   )
 
   if (assisted === undefined && tagsToPush !== null) {

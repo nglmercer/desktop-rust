@@ -71,12 +71,9 @@ export function measure(): IMetrics {
   const tests = walk(path.join(root, 'app', 'test', 'unit'), file =>
     /(?:-test|\.test)\.(ts|tsx|js|jsx|mts|mjs)$/.test(file)
   )
-  const vitestSuites = new Set<string>(
-    JSON.parse(readFileSync(path.join(root, 'vitest-suites.json'), 'utf8')).map(
-      (file: string) => path.resolve(root, file)
-    )
-  )
-  const vitest = tests.filter(file => vitestSuites.has(path.resolve(file)))
+  // Vitest is the only JavaScript test runner. The compatibility counts remain
+  // in the metrics shape so the baseline can continue guarding the migration.
+  const vitest = tests
 
   const rustLines = walk(path.join(root, 'rust', 'crates'), file =>
     file.endsWith('.rs')

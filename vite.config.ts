@@ -126,8 +126,8 @@ const staticDirName =
   process.platform === 'darwin'
     ? 'darwin'
     : process.platform === 'win32'
-    ? 'win32'
-    : 'linux'
+      ? 'win32'
+      : 'linux'
 
 function isInside(root: string, target: string): boolean {
   const relative = path.relative(root, target)

@@ -437,7 +437,7 @@ export class CredentialSessions {
     return () =>
       session === undefined || session.retired
         ? null
-        : session.credential?.accessToken ?? null
+        : (session.credential?.accessToken ?? null)
   }
 
   /** Whether an account owns a rotating credential pair. */

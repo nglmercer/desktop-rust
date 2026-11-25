@@ -9,19 +9,24 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../src/lib/custom-integration', () => ({
-  checkTargetPathArgument: (args: ReadonlyArray<string>) => args.some(arg => arg.includes('%TARGET_PATH%')),
+  checkTargetPathArgument: (args: ReadonlyArray<string>) =>
+    args.some(arg => arg.includes('%TARGET_PATH%')),
   parseCustomIntegrationArgumentsForInput: mocks.parse,
   validateCustomIntegrationPath: mocks.validatePath,
   TargetPathArgument: '%TARGET_PATH%',
   WindowsExecutableExtensions: ['exe', 'com'],
 }))
-vi.mock('../../../src/ui/main-process-proxy', () => ({ showOpenDialog: vi.fn() }))
+vi.mock('../../../src/ui/main-process-proxy', () => ({
+  showOpenDialog: vi.fn(),
+}))
 
 import { CustomIntegrationForm } from '../../../src/ui/preferences/custom-integration-form'
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {}
-  const promise = new Promise<T>(done => { resolve = done })
+  const promise = new Promise<T>(done => {
+    resolve = done
+  })
   return { promise, resolve }
 }
 
@@ -32,9 +37,19 @@ describe('custom integration form', () => {
   })
 
   it('updates valid arguments synchronously and rejects missing placeholders', () => {
-    mocks.parse.mockReturnValueOnce(['older']).mockReturnValueOnce(['new', '%TARGET_PATH%'])
+    mocks.parse
+      .mockReturnValueOnce(['older'])
+      .mockReturnValueOnce(['new', '%TARGET_PATH%'])
     const onArgumentsChanged = vi.fn()
-    render(<CustomIntegrationForm id="editor" path="" arguments="" onPathChanged={vi.fn()} onArgumentsChanged={onArgumentsChanged} />)
+    render(
+      <CustomIntegrationForm
+        id="editor"
+        path=""
+        arguments=""
+        onPathChanged={vi.fn()}
+        onArgumentsChanged={onArgumentsChanged}
+      />
+    )
     const input = screen.getByLabelText('Arguments')
     fireEvent.change(input, { target: { value: 'older' } })
     fireEvent.change(input, { target: { value: 'new %TARGET_PATH%' } })
@@ -47,15 +62,31 @@ describe('custom integration form', () => {
   it('ignores path validation after a newer path or unmount', async () => {
     const first = deferred<{ isValid: boolean }>()
     const second = deferred<{ isValid: boolean }>()
-    mocks.validatePath.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    mocks.validatePath
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
     const onPathChanged = vi.fn()
-    const view = render(<CustomIntegrationForm id="editor" path="" arguments="" onPathChanged={onPathChanged} onArgumentsChanged={vi.fn()} />)
+    const view = render(
+      <CustomIntegrationForm
+        id="editor"
+        path=""
+        arguments=""
+        onPathChanged={onPathChanged}
+        onArgumentsChanged={vi.fn()}
+      />
+    )
     const input = screen.getByLabelText('Path')
     fireEvent.change(input, { target: { value: '/old' } })
     fireEvent.change(input, { target: { value: '/new' } })
-    await act(async () => { second.resolve({ isValid: true }); await second.promise })
+    await act(async () => {
+      second.resolve({ isValid: true })
+      await second.promise
+    })
     view.unmount()
-    await act(async () => { first.resolve({ isValid: true }); await first.promise })
+    await act(async () => {
+      first.resolve({ isValid: true })
+      await first.promise
+    })
     expect(onPathChanged).toHaveBeenCalledTimes(3)
     expect(onPathChanged).toHaveBeenNthCalledWith(1, '/old')
     expect(onPathChanged).toHaveBeenNthCalledWith(2, '/new')

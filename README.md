@@ -93,12 +93,12 @@ on it as a replacement for the existing desktop application.
 contains the headless CLI, bridge, native host, and desktop shell. Its default
 members build without GUI dependencies using `cargo build --locked`.
 
-Unit tests are moving from Node's test runner to Vitest. `npm test -- <path>`
-routes migrated suites through Vitest; `vitest-suites.json` lists those suites.
-Run them together with `node node_modules/vitest/vitest.mjs run --config vitest.config.ts`.
-Biome checks the test-runner tooling and project-specific rules via
-`npm run lint:biome` and `npm run lint:security`. Prettier and ESLint still
-cover other files while their migration is in progress.
+All TypeScript unit tests run through Vitest: `pnpm test -- <path>`. Older
+files may still import the `node:test` API surface, but Vitest aliases those
+imports to the compatibility layer and remains the only runner. TypeScript 7
+provides the fast `tsc` check, oxlint provides linting and the project security
+rules, and Biome formats the repository. Run `pnpm lint`, `pnpm check:types`,
+and `pnpm test` before handing off TypeScript changes.
 
 See [Rust development and commands](rust/README.md) and the
 [full migration ledger](rust/MIGRATION.md). Install scripts are never needed

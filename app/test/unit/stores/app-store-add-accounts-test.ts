@@ -46,11 +46,11 @@ describe('AppStore explicitly adding repositories', () => {
 
   before(async () => {
     vi.doMock('../../../src/ui/main-process-proxy', async () => ({
-        ...(await vi.importActual('../../../src/ui/main-process-proxy')),
-        getAppMenu: () => {},
-        updateAccounts: () => {},
-        updatePreferredAppMenuItemLabels: () => {},
-      }))
+      ...(await vi.importActual('../../../src/ui/main-process-proxy')),
+      getAppMenu: () => {},
+      updateAccounts: () => {},
+      updatePreferredAppMenuItemLabels: () => {},
+    }))
     const { AppStore } = await import('../../../src/lib/stores/app-store')
     const { createTestStores } = await import(
       '../../helpers/app-store-test-harness'
@@ -127,74 +127,64 @@ describe('AppStore explicitly adding repositories', () => {
     return repository
   }
 
-  it(
-    'stages only literal filenames when applying Copilot conflict resolutions',
-    { skip: process.platform === 'win32' },
-    async t => {
-      const {
-        setupConflictedRepoWithPathspecMagicFile,
-        PathspecMagicFileName,
-      } = await import('../../helpers/repositories')
-      const repository = await setupConflictedRepoWithPathspecMagicFile(t)
-      await writeFile(
-        Path.join(repository.path, 'unintended.txt'),
-        'untracked\n'
-      )
-      appStore._initializeMultiCommitOperation(
-        repository,
-        {
-          kind: MultiCommitOperationKind.Merge,
-          sourceBranch: null,
-          isSquash: false,
-        },
-        null,
-        [],
-        null,
-        false
-      )
-      const { backend } = await import('../../../src/backend/client')
-      const { basis } = await backend().repositoryCopilotConflictBasis(
-        repository.path,
-        PathspecMagicFileName,
-        10_485_760,
-        false
-      )
-      stores.repositoryStateCache.updateMultiCommitOperationState(
-        repository,
-        () => ({
-          copilotResolutions: [
-            {
-              path: PathspecMagicFileName,
-              resolvedContent: 'resolved\n',
-              reasoning: 'Combine both versions',
-              conflictBasis: basis,
-            },
-          ],
-        })
-      )
+  it('stages only literal filenames when applying Copilot conflict resolutions', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    const { setupConflictedRepoWithPathspecMagicFile, PathspecMagicFileName } =
+      await import('../../helpers/repositories')
+    const repository = await setupConflictedRepoWithPathspecMagicFile(t)
+    await writeFile(Path.join(repository.path, 'unintended.txt'), 'untracked\n')
+    appStore._initializeMultiCommitOperation(
+      repository,
+      {
+        kind: MultiCommitOperationKind.Merge,
+        sourceBranch: null,
+        isSquash: false,
+      },
+      null,
+      [],
+      null,
+      false
+    )
+    const { backend } = await import('../../../src/backend/client')
+    const { basis } = await backend().repositoryCopilotConflictBasis(
+      repository.path,
+      PathspecMagicFileName,
+      10_485_760,
+      false
+    )
+    stores.repositoryStateCache.updateMultiCommitOperationState(
+      repository,
+      () => ({
+        copilotResolutions: [
+          {
+            path: PathspecMagicFileName,
+            resolvedContent: 'resolved\n',
+            reasoning: 'Combine both versions',
+            conflictBasis: basis,
+          },
+        ],
+      })
+    )
 
-      await appStore._applyCopilotConflictResolutions(repository)
+    await appStore._applyCopilotConflictResolutions(repository)
 
-      const staged = await exec(
-        ['diff', '--cached', '--name-only', '-z'],
-        repository.path
-      )
-      assert.deepEqual(staged.stdout.split('\0').filter(Boolean), [
-        PathspecMagicFileName,
-      ])
-      assert.equal(
-        await readFile(
-          Path.join(repository.path, PathspecMagicFileName),
-          'utf8'
-        ),
-        'resolved\n'
-      )
-      assert.equal(
-        await readFile(Path.join(repository.path, 'unintended.txt'), 'utf8'),
-        'untracked\n'
-      )
-    }
-  )
+    const staged = await exec(
+      ['diff', '--cached', '--name-only', '-z'],
+      repository.path
+    )
+    assert.deepEqual(staged.stdout.split('\0').filter(Boolean), [
+      PathspecMagicFileName,
+    ])
+    assert.equal(
+      await readFile(Path.join(repository.path, PathspecMagicFileName), 'utf8'),
+      'resolved\n'
+    )
+    assert.equal(
+      await readFile(Path.join(repository.path, 'unintended.txt'), 'utf8'),
+      'untracked\n'
+    )
+  })
 
   describe('preserving repository state across account changes', () => {
     async function setupDraft(t: TestContext) {
@@ -261,9 +251,8 @@ describe('AppStore explicitly adding repositories', () => {
           fetchProtectedBranches: async () => [],
         })
       )
-      const refreshed = await appStore[
-        'repositoryWithRefreshedGitHubRepository'
-      ](repository)
+      const refreshed =
+        await appStore['repositoryWithRefreshedGitHubRepository'](repository)
       assert.notStrictEqual(refreshed.hash, repository.hash)
       assert.strictEqual(draftOf(refreshed), 'Draft')
     })
@@ -293,9 +282,8 @@ describe('AppStore explicitly adding repositories', () => {
           fetchProtectedBranches: async () => [],
         })
       )
-      const refreshed = await appStore[
-        'repositoryWithRefreshedGitHubRepository'
-      ](added)
+      const refreshed =
+        await appStore['repositoryWithRefreshedGitHubRepository'](added)
       assert.notStrictEqual(refreshed.gitHubRepository, null)
       assert.strictEqual(draftOf(refreshed), 'Draft')
     })
@@ -373,9 +361,8 @@ describe('AppStore explicitly adding repositories', () => {
         })
       )
       const finish = await startNetworkOperation(repository)
-      const refreshed = await appStore[
-        'repositoryWithRefreshedGitHubRepository'
-      ](repository)
+      const refreshed =
+        await appStore['repositoryWithRefreshedGitHubRepository'](repository)
       assert.notStrictEqual(refreshed.hash, repository.hash)
 
       await finish()
@@ -405,9 +392,8 @@ describe('AppStore explicitly adding repositories', () => {
         })
       )
       const finish = await startNetworkOperation(added)
-      const refreshed = await appStore[
-        'repositoryWithRefreshedGitHubRepository'
-      ](added)
+      const refreshed =
+        await appStore['repositoryWithRefreshedGitHubRepository'](added)
       assert.notStrictEqual(refreshed.gitHubRepository, null)
 
       await finish()

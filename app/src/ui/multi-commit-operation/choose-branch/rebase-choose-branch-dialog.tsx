@@ -97,8 +97,8 @@ export class RebaseChooseBranchDialog extends React.Component<
     return selectedBranchIsCurrentBranch
       ? 'You are not able to rebase this branch onto itself.'
       : !currentBranchIsBehindSelectedBranch
-      ? 'The current branch is already up to date with the selected branch.'
-      : undefined
+        ? 'The current branch is already up to date with the selected branch.'
+        : undefined
   }
 
   private getDialogTitle = () => {

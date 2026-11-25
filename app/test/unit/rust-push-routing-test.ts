@@ -29,7 +29,10 @@ const mocks = vi.hoisted(() => ({
   ),
   PreviewUnsupported: class extends Error {},
   BackendError: class extends Error {
-    constructor(public code: string, message: string) {
+    constructor(
+      public code: string,
+      message: string
+    ) {
       super(message)
     }
   },

@@ -83,17 +83,17 @@ describe('repository-aware credential trampoline', () => {
       '../../src/lib/trampoline/trampoline-environment'
     )
     vi.doMock('../../src/lib/trampoline/trampoline-environment', async () => ({
-        ...environment,
-        getTrampolineEnvironmentPath: () => path,
-        getIsBackgroundTaskEnvironment: () => background,
-        getTrampolineFallbackAccount: () => fallbackAccount,
-      }))
+      ...environment,
+      getTrampolineEnvironmentPath: () => path,
+      getIsBackgroundTaskEnvironment: () => background,
+      getTrampolineFallbackAccount: () => fallbackAccount,
+    }))
     vi.doMock('../../src/lib/trampoline/trampoline-ui-helper', async () => ({
-        trampolineUIHelper: {
-          promptForRepositoryAccount: prompt,
-          associateRepositoryWithEndpoint: associate,
-        },
-      }))
+      trampolineUIHelper: {
+        promptForRepositoryAccount: prompt,
+        associateRepositoryWithEndpoint: associate,
+      },
+    }))
     createHandler = (
       await import('../../src/lib/trampoline/trampoline-credential-helper')
     ).createCredentialHelperTrampolineHandler
@@ -140,11 +140,10 @@ describe('repository-aware credential trampoline', () => {
     let resolveAccounts: (accounts: ReadonlyArray<Account>) => void = () => {
       assert.fail('Initial account load has not started')
     }
-    let resolveRepositories: (
-      repositories: ReadonlyArray<Repository>
-    ) => void = () => {
-      assert.fail('Initial repository load has not started')
-    }
+    let resolveRepositories: (repositories: ReadonlyArray<Repository>) => void =
+      () => {
+        assert.fail('Initial repository load has not started')
+      }
     mock.method(
       accounts,
       'getAll',

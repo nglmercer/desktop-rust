@@ -6,12 +6,20 @@ import { backend } from '../../backend/client'
 import type { BackendReadableGitSetting } from '../../backend/client'
 import { isRecord } from '../is-record'
 
-function supportedGlobalSetting(name: string): 'user.name' | 'user.email' | 'init.defaultbranch' | null {
+function supportedGlobalSetting(
+  name: string
+): 'user.name' | 'user.email' | 'init.defaultbranch' | null {
   const key = name.toLowerCase()
-  return key === 'user.name' || key === 'user.email' || key === 'init.defaultbranch' ? key : null
+  return key === 'user.name' ||
+    key === 'user.email' ||
+    key === 'init.defaultbranch'
+    ? key
+    : null
 }
 
-function supportedRepositorySetting(name: string): BackendReadableGitSetting | null {
+function supportedRepositorySetting(
+  name: string
+): BackendReadableGitSetting | null {
   switch (name) {
     case 'core.autocrlf':
     case 'core.safecrlf':
@@ -43,11 +51,24 @@ export function getConfigValue(
     typeof window !== 'undefined' &&
     backend().transportKind !== 'none'
   ) {
-    return backend().repositoryGitIdentityValue(repository.path, name, onlyLocal)
+    return backend().repositoryGitIdentityValue(
+      repository.path,
+      name,
+      onlyLocal
+    )
   }
   const key = supportedRepositorySetting(name)
-  if (key !== null && typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return backend().repositoryGitReadSetting(repository.path, key, onlyLocal, false)
+  if (
+    key !== null &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    return backend().repositoryGitReadSetting(
+      repository.path,
+      key,
+      onlyLocal,
+      false
+    )
   }
   return getConfigValueInPath(name, repository.path, onlyLocal)
 }
@@ -67,19 +88,24 @@ export function getGlobalConfigValue(
     backend().transportKind !== 'none'
   ) {
     const client = backend()
-    return (client.transportKind === 'wry'
-      ? client.request('git_info', { operation: { type: 'read' } })
-      : client.request('git_settings', { scope: 'global' }))
-      .then(result => {
-        if (!isRecord(result) || result.scope !== 'global' || !isRecord(result.values)) {
-          throw new Error('Invalid global Git settings response')
-        }
-        const value = result.values[key]
-        if (value !== null && typeof value !== 'string') {
-          throw new Error('Invalid global Git setting value')
-        }
-        return value
-      })
+    return (
+      client.transportKind === 'wry'
+        ? client.request('git_info', { operation: { type: 'read' } })
+        : client.request('git_settings', { scope: 'global' })
+    ).then(result => {
+      if (
+        !isRecord(result) ||
+        result.scope !== 'global' ||
+        !isRecord(result.values)
+      ) {
+        throw new Error('Invalid global Git settings response')
+      }
+      const value = result.values[key]
+      if (value !== null && typeof value !== 'string') {
+        throw new Error('Invalid global Git setting value')
+      }
+      return value
+    })
   }
   return getConfigValueInPath(name, null, false, undefined, env)
 }
@@ -99,8 +125,18 @@ export async function getBooleanConfigValue(
     HOME: string
   }
 ): Promise<boolean | null> {
-  if (env === undefined && name === 'commit.gpgsign' && typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const value = await backend().repositoryGitReadSetting(repository.path, 'commit.gpgsign', onlyLocal, true)
+  if (
+    env === undefined &&
+    name === 'commit.gpgsign' &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    const value = await backend().repositoryGitReadSetting(
+      repository.path,
+      'commit.gpgsign',
+      onlyLocal,
+      true
+    )
     return value === null ? null : value === 'true'
   }
   const value = await getConfigValueInPath(
@@ -190,16 +226,25 @@ async function getConfigValueInPath(
  * is to support opening the global git config for editing.
  */
 export const getGlobalConfigPath = (env?: { HOME: string }) => {
-  if (env === undefined && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+  if (
+    env === undefined &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
     return backend().globalGitConfigPath().then(normalize)
   }
-  return git(['config', '--edit', '--global'], __dirname, 'getGlobalConfigPath', {
-    // We're using printf instead of echo because echo could attempt to decode
-    // escape sequences like \n which would be bad in a case like
-    // c:\Users\niik\.gitconfig
-    //         ^^
-    env: { ...env, GIT_EDITOR: 'printf %s' },
-  }).then(x => normalize(x.stdout))
+  return git(
+    ['config', '--edit', '--global'],
+    __dirname,
+    'getGlobalConfigPath',
+    {
+      // We're using printf instead of echo because echo could attempt to decode
+      // escape sequences like \n which would be bad in a case like
+      // c:\Users\niik\.gitconfig
+      //         ^^
+      env: { ...env, GIT_EDITOR: 'printf %s' },
+    }
+  ).then(x => normalize(x.stdout))
 }
 
 /** Set the local config value by name. */

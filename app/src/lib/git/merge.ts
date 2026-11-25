@@ -86,8 +86,12 @@ export async function getMergeBase(
 
 /** Abort a mid-flight (conflicted) merge. */
 export async function abortMerge(repository: Repository): Promise<void> {
-  await withRepositoryGitOperation(repository.path, 'mutation', () =>
-    backend().abortRepositoryGitOperation(repository.path, 'merge'), true)
+  await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () => backend().abortRepositoryGitOperation(repository.path, 'merge'),
+    true
+  )
 }
 
 /** Check the `.git/MERGE_HEAD` file exists in a repository. */

@@ -38,16 +38,27 @@ export async function updateSubmodulesAfterOperation<T extends Progress>(
   allowFileProtocol: boolean
 ): Promise<void> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const progress = (description: string, value: number) => progressCallback?.({
-      kind: progressKind,
-      title,
-      description,
-      value,
-      ...(progressKind === 'checkout' ? { target: targetOrRemote } : { remote: targetOrRemote }),
-    } as T)
+    const progress = (description: string, value: number) =>
+      progressCallback?.({
+        kind: progressKind,
+        title,
+        description,
+        value,
+        ...(progressKind === 'checkout'
+          ? { target: targetOrRemote }
+          : { remote: targetOrRemote }),
+      } as T)
     progress('Updating submodules', 0)
-    await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().repositoryUpdateSubmodules(repository.path, allowFileProtocol), true)
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().repositoryUpdateSubmodules(
+          repository.path,
+          allowFileProtocol
+        ),
+      true
+    )
     progress('Submodules updated', 1)
     return
   }
@@ -145,9 +156,10 @@ export async function listSubmodules(
 ): Promise<ReadonlyArray<SubmoduleEntry>> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     const read = () => backend().repositorySubmoduleStatus(repository.path)
-    const stdout = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+    const stdout =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     return parseSubmoduleStatus(stdout)
   }
   const [submodulesFile, submodulesDir] = await Promise.all([
@@ -232,8 +244,12 @@ export async function resetSubmodulePaths(
   }
 
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    return withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().repositoryResetSubmodules(repository.path, paths), true)
+    return withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().repositoryResetSubmodules(repository.path, paths),
+      true
+    )
   }
 
   await git(

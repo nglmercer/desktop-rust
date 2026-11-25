@@ -25,10 +25,17 @@ async function canFetchNatively(
   if (transport !== 'wry') {
     return false
   }
-  if (needsProgress && typeof (window as any).__desktop?.invokeWithProgress !== 'function') {
+  if (
+    needsProgress &&
+    typeof (window as any).__desktop?.invokeWithProgress !== 'function'
+  ) {
     return false
   }
-  if (['http_proxy', 'https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY'].some(key => key in process.env)) {
+  if (
+    ['http_proxy', 'https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY'].some(
+      key => key in process.env
+    )
+  ) {
     return false
   }
   return (await envForProxy(remoteUrl)) === undefined
@@ -78,36 +85,53 @@ export async function fetch(
   // preserve the existing proxy or progress behavior.
   if (await canFetchNatively(remote.url, progressCallback !== undefined)) {
     const title = `Fetching ${remote.name}`
-    const parser = progressCallback === undefined ? undefined : new FetchStreamProgressParser(progress => {
-      if (progress.kind === 'context' && !progress.text.startsWith('remote: Counting objects')) {
-        return
-      }
-      progressCallback({
-        kind: 'fetch',
-        title,
-        description: progress.kind === 'progress' ? progress.details.text : progress.text,
-        value: progress.percent,
-        remote: remote.name,
-      })
-    })
+    const parser =
+      progressCallback === undefined
+        ? undefined
+        : new FetchStreamProgressParser(progress => {
+            if (
+              progress.kind === 'context' &&
+              !progress.text.startsWith('remote: Counting objects')
+            ) {
+              return
+            }
+            progressCallback({
+              kind: 'fetch',
+              title,
+              description:
+                progress.kind === 'progress'
+                  ? progress.details.text
+                  : progress.text,
+              value: progress.percent,
+              remote: remote.name,
+            })
+          })
     progressCallback?.({ kind: 'fetch', title, value: 0, remote: remote.name })
     try {
-      const failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-        backend().fetchRepositoryRemote(
-          repository.path,
-          remote.name,
-          remote.url,
-          recurseSubmodules,
-          isBackgroundTask,
-          repository.gitHubRepository?.owner.login,
-          parser === undefined ? undefined : chunk => parser.push(chunk)
-        ), true)
+      const failure = await withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        () =>
+          backend().fetchRepositoryRemote(
+            repository.path,
+            remote.name,
+            remote.url,
+            recurseSubmodules,
+            isBackgroundTask,
+            repository.gitHubRepository?.owner.login,
+            parser === undefined ? undefined : chunk => parser.push(chunk)
+          ),
+        true
+      )
       if (failure !== undefined) {
         throw fetchFailureToGitError(failure, repository.path, remote.name)
       }
       return
     } catch (error) {
-      if (backend().transportKind !== 'wry' || !(error instanceof FetchPreviewUnsupported)) {
+      if (
+        backend().transportKind !== 'wry' ||
+        !(error instanceof FetchPreviewUnsupported)
+      ) {
         throw error
       }
     } finally {
@@ -174,14 +198,32 @@ export async function fetchRefspec(
   // cannot yet receive. Choose it before starting a native mutation.
   if (await canFetchNatively(remote.url, false)) {
     try {
-      const failure = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-        backend().fetchRepositoryRemote(repository.path, remote.name, remote.url, true, false, repository.gitHubRepository?.owner.login, undefined, refspec), true)
+      const failure = await withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        () =>
+          backend().fetchRepositoryRemote(
+            repository.path,
+            remote.name,
+            remote.url,
+            true,
+            false,
+            repository.gitHubRepository?.owner.login,
+            undefined,
+            refspec
+          ),
+        true
+      )
       if (failure !== undefined && failure.exitCode !== 128) {
         throw fetchFailureToGitError(failure, repository.path, remote.name)
       }
       return
     } catch (error) {
-      if (backend().transportKind !== 'wry' || !(error instanceof FetchPreviewUnsupported)) throw error
+      if (
+        backend().transportKind !== 'wry' ||
+        !(error instanceof FetchPreviewUnsupported)
+      )
+        throw error
     }
   }
   await git(
@@ -206,7 +248,17 @@ export async function fastForwardBranches(
   }
 
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().fastForwardRepositoryBranches(repository.path, branches, recurseSubmodules), true)
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().fastForwardRepositoryBranches(
+          repository.path,
+          branches,
+          recurseSubmodules
+        ),
+      true
+    )
     return
   }
 

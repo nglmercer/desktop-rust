@@ -1,105 +1,60 @@
-# Working with Packages
+# Working with packages
 
-Desktop uses the npm version bundled with the Node.js version in `.nvmrc`.
-Use npm 11.17.0 or newer for the package-specific install-script policy.
-Build dependencies live in the root `package.json`; application dependencies
-live in `app/package.json`. Each has its own `package-lock.json`.
+The root renderer/build workspace uses pnpm. The pinned version is in
+`packageManager` in `package.json` (currently pnpm 11.17.0). Rust dependencies
+use Cargo and `Cargo.lock`.
 
-### Install packages
+Build dependencies live in the root `package.json`; application runtime
+dependencies live in `app/package.json`, which is part of the pnpm workspace.
+The retired nested npm lockfile must not be recreated; release versioning now
+updates `app/package.json` directly.
 
-To ensure you have the right version of dependencies, run this command after
-cloning or switching branches.
-
-```sh
-> npm ci
-```
-
-This restores the locked versions to `node_modules`. The root postinstall also
-installs the application dependencies, initializes
-submodules, and checks the build scripts. Application packages are installed
-afresh so edited native sources rebuild after switching branches. CI uses the
-same command and fails if a manifest and its lockfile disagree.
-
-Use `npm install` when updating a manifest and its lockfile. For application
-dependencies, use `npm install --prefix app`; do not add them to the root package.
-Commit the corresponding `package.json` and `package-lock.json` together.
-
-### Add new packages
-
-Rather than updating the `package.json` explicitly, you can install new
-dependencies via the npm command line:
+## Install dependencies
 
 ```sh
-# adds the package to the dependencies list
-> npm install [package-name]
-# adds the package to the devDependencies list
-> npm install --save-dev [package-name]
-# adds an application dependency
-> npm install --prefix app [package-name]
+git submodule update --init --recursive
+pnpm install --frozen-lockfile --ignore-scripts
 ```
 
-### Updating packages
+Use `--ignore-scripts` for normal development and CI bootstrap. Native helpers
+needed by tests are provided through the Rust/web shims or built explicitly by
+their own commands; dependency install hooks must not be required for the Rust
+shell.
 
-To see which packages have newer versions available:
+## Add or update packages
+
+Use pnpm from the repository root:
 
 ```sh
-> npm outdated
-# checks application dependencies
-> npm outdated --prefix app
+pnpm add <package>
+pnpm add -D <package>
+pnpm add --filter desktop <package>   # application dependency
 ```
 
-To upgrade a package to its latest version:
+Commit `package.json` and `pnpm-lock.yaml` together.
+
+Prefer versions published at least several days ago. The repository's pnpm and
+npm settings deliberately preserve the existing dependency graph, disable
+implicit peer installation, and avoid relying on package install scripts.
+
+## Remove packages
 
 ```sh
-> npm install [package-name]@latest
+pnpm remove <package>
 ```
 
-To upgrade a package to a specific version (or [version range](https://docs.npmjs.com/misc/semver#x-ranges-12x-1x-12-)):
+After removal, search for imports, scripts, editor settings and documentation
+references before deleting the lockfile changes or obsolete configuration.
+
+## Run scripts and tools
+
+Use `pnpm <script>` or `pnpm run <script>`:
 
 ```sh
-> npm install [package-name]@[version]
+pnpm test -- app/test/unit/repository-test.ts
+pnpm lint
+pnpm exec tsc --noEmit -p tsconfig.json
 ```
 
-### Removing packages
-
-To remove any packages that are no longer needed:
-
-```sh
-> npm uninstall [package-name]
-```
-
-### Running scripts and tools
-
-Use `npm run [script-name]` for scripts in `package.json`, or `npm test` and
-`npm start` for their standard aliases. Put script arguments after `--`:
-
-```sh
-> npm test -- app/test/unit/repository-list-test.ts
-> npm run prettier -- --write
-> npm exec -- tsc --noEmit
-```
-
-### Dependency compatibility
-
-Project `.npmrc` files preserve the previous install behavior: the public npm
-registry, no minimum release age, no automatic peer dependency installation
-(`legacy-peer-deps=true`), and copies of local `file:` packages
-(`install-links=true`). Native packages build in `node_modules`, not their source
-directories. Keep these settings consistent when updating lockfiles.
-
-The lockfiles preserve the original direct, transitive, and optional dependency
-pins and integrity checks. Nested versions are retained where needed instead of
-deduplicating to a different version that also satisfies the dependency range.
-Use `npm ci` for reproducible installs and explicit update commands for intentional
-dependency upgrades.
-
-Cross-compilation installs build tools for the host CPU, but application optional
-packages for the target CPU via npm's `--cpu` option. The application's
-`allowScripts` policy skips only Koffi's install hook, which otherwise tries
-loading a host binary during target installation. Desktop uses the target's
-published Koffi prebuild instead of compiling Koffi from source; missing target
-packages fail the Vite build. Other native install hooks still run normally.
-
-`app/.prebuild-installrc` forces the pinned legacy downloader to attempt prebuilt
-native binaries even though modern npm omits its expected `_from` metadata.
-This setting applies only to prebuild downloads, not npm's dependency checks.
+Release scripts update `app/package.json` directly and do not require the npm
+CLI for version bumps.

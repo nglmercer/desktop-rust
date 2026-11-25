@@ -6,7 +6,9 @@ import type { IAccessibleRepository } from '../../src/lib/repository-matching'
 import type { CloningRepositoriesStore } from '../../src/lib/stores/cloning-repositories-store'
 import { createMockAPIRepository } from '../helpers/mock-api'
 
-const { clonedOptions } = vi.hoisted(() => ({ clonedOptions: [] as CloneOptions[] }))
+const { clonedOptions } = vi.hoisted(() => ({
+  clonedOptions: [] as CloneOptions[],
+}))
 
 vi.mock('../../src/lib/git', () => ({
   clone: async (_url: string, _path: string, options: CloneOptions) => {

@@ -174,7 +174,7 @@ function createCopilotStoreWithQuotaSnapshots(
           },
         },
       },
-    } as unknown as CopilotClient)
+    }) as unknown as CopilotClient
 
   return { accountsStore, store, quotaTokens, stopCount: () => stopCount }
 }
@@ -517,7 +517,7 @@ describe('CopilotStore quota snapshots', () => {
             },
           },
         },
-      } as unknown as CopilotClient)
+      }) as unknown as CopilotClient
 
     await accountsStore.addAccount(account, {
       accessToken: account.token,

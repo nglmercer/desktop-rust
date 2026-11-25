@@ -288,7 +288,7 @@ mod clone_destination_tests {
             use std::os::unix::fs::PermissionsExt;
             let private = root.join("private");
             tokio::fs::create_dir(&private).await.unwrap();
-            tokio::fs::set_permissions(&private, std::fs::Permissions::from_mode(0))
+            tokio::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o0))
                 .await
                 .unwrap();
             if tokio::fs::read_dir(&private).await.is_err() {

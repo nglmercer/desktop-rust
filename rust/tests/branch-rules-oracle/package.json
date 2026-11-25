@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "npm run typecheck && node --import @oxc-node/core/register oracle.mts --check && node --import @oxc-node/core/register oracle.mts --check --current-re2js && node --import @oxc-node/core/register build-engine.mts --check && cd ../../.. && node node_modules/vitest/vitest.mjs run --config vitest.config.ts rust/tests/branch-rules-oracle/embedded-parity.test.ts",
-    "typecheck": "node ../../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "typecheck": "node ../../../node_modules/typescript/bin/tsc6 -p tsconfig.json",
     "build:engine": "node --import @oxc-node/core/register build-engine.mts",
     "check:engine": "node --import @oxc-node/core/register build-engine.mts --check",
     "record": "node --import @oxc-node/core/register oracle.mts --record"

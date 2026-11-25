@@ -61,7 +61,7 @@ interface IVerticalSegmentedControlProps<T extends React.Key> {
  * of a radio button group but styled as a vertically oriented segmented control.
  */
 export class VerticalSegmentedControl<
-  T extends React.Key
+  T extends React.Key,
 > extends React.Component<IVerticalSegmentedControlProps<T>> {
   private onFieldsetRef = React.createRef<HTMLFieldSetElement>()
 

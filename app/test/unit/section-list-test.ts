@@ -4,7 +4,9 @@ import assert from 'node:assert'
 import { getRowOffsetInSection } from '../../src/ui/lib/list/section-list'
 
 // Row offset calculation does not send list-rendering telemetry.
-vi.mock('../../src/lib/helpers/non-fatal-exception', () => ({ sendNonFatalException: vi.fn() }))
+vi.mock('../../src/lib/helpers/non-fatal-exception', () => ({
+  sendNonFatalException: vi.fn(),
+}))
 
 describe('section-list', () => {
   describe('getRowOffsetInSection', () => {

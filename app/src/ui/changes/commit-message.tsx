@@ -1247,8 +1247,8 @@ export class CommitMessage extends React.Component<
         ? 'Remove Co-Authors'
         : 'Remove co-authors'
       : __DARWIN__
-      ? 'Add Co-Authors'
-      : 'Add co-authors'
+        ? 'Add Co-Authors'
+        : 'Add co-authors'
   }
 
   private getAddRemoveCoAuthorsMenuItem(): IMenuItem {
@@ -2078,13 +2078,13 @@ export class CommitMessage extends React.Component<
       ? buttonEnabled
         ? `${this.getButtonTitle()} with Copilot`
         : this.hasCommitAuthorRuleFailure
-        ? "Your commit author email does not meet this repository's rules."
-        : anyFilesSelected || allowEmptyCommit
-        ? undefined
-        : 'Select one or more files to commit'
+          ? "Your commit author email does not meet this repository's rules."
+          : anyFilesSelected || allowEmptyCommit
+            ? undefined
+            : 'Select one or more files to commit'
       : isGeneratingCommitMessage
-      ? 'Generating commit details…'
-      : this.getButtonTooltip(buttonEnabled)
+        ? 'Generating commit details…'
+        : this.getButtonTooltip(buttonEnabled)
 
     const ariaDescribedBy =
       isCopilotCommitMode && this.hasCommitAuthorRuleFailure
@@ -2229,12 +2229,12 @@ export class CommitMessage extends React.Component<
       hookName === 'pre-auto-gc' && status === 'finished'
         ? 'Optimizing repository…'
         : status === 'started'
-        ? `${hookName} hook running…`
-        : status === 'finished'
-        ? `${hookName} hook finished`
-        : status === 'failed'
-        ? `${hookName} hook failed`
-        : assertNever(status, `Unknown hook status: ${status}`)
+          ? `${hookName} hook running…`
+          : status === 'finished'
+            ? `${hookName} hook finished`
+            : status === 'failed'
+              ? `${hookName} hook failed`
+              : assertNever(status, `Unknown hook status: ${status}`)
 
     const cn = classNames('commit-progress', {
       'with-button': onShowCommitProgress !== undefined,

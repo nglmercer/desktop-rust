@@ -177,13 +177,15 @@ function resolveConflicts(
 describe('CopilotStore session credential wiring', () => {
   before(async () => {
     vi.doMock('@github/copilot-sdk', async () => ({
-        ...copilotSdk,
-        CopilotClient: function (options: CopilotClientOptions) {
-          clientOptions.push(options)
-          return new copilotSdk.CopilotClient(options)
-        },
-      }))
-    vi.doMock('../../../src/lib/path-exists', async () => ({ pathExists: () => runtimePathExists() }))
+      ...copilotSdk,
+      CopilotClient: function (options: CopilotClientOptions) {
+        clientOptions.push(options)
+        return new copilotSdk.CopilotClient(options)
+      },
+    }))
+    vi.doMock('../../../src/lib/path-exists', async () => ({
+      pathExists: () => runtimePathExists(),
+    }))
     const {
       CopilotStore,
       CommitMessageGenerationCancelledError,

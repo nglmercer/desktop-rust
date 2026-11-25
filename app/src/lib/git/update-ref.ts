@@ -296,11 +296,27 @@ export async function deleteRef(
   reason?: string,
   expectedOid?: string
 ) {
-  if (ref === 'HEAD' && expectedOid !== undefined && reason === 'Reverting first commit' && typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().repositoryDeleteInitialHead(repository.path, expectedOid), true)
+  if (
+    ref === 'HEAD' &&
+    expectedOid !== undefined &&
+    reason === 'Reverting first commit' &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().repositoryDeleteInitialHead(repository.path, expectedOid),
+      true
+    )
     return
   }
-  const args = ['update-ref', '-d', ref, ...(expectedOid === undefined ? [] : [expectedOid])]
+  const args = [
+    'update-ref',
+    '-d',
+    ref,
+    ...(expectedOid === undefined ? [] : [expectedOid]),
+  ]
 
   if (reason !== undefined) {
     args.push('-m', reason)

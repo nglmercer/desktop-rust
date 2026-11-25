@@ -9,9 +9,7 @@ import { createTempDirectory, type TestCleanupContext } from './temp'
  * rewrites. Tests may override these variables; teardown restores their original
  * values. Since the environment is process-wide, these tests must run serially.
  */
-export async function isolateGitConfig(
-  t: TestCleanupContext
-): Promise<void> {
+export async function isolateGitConfig(t: TestCleanupContext): Promise<void> {
   const config = join(await createTempDirectory(t), 'empty-config')
   await writeFile(config, '')
 

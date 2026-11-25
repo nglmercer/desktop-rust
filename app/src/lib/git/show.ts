@@ -46,17 +46,36 @@ export const getBlobContents = async (
 ) => {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     const read = async () => {
-      const snapshot = await backend().repositoryBlobSnapshot(repository.path, commitish, path)
-      if (snapshot === null) throw new Error('Blob path does not exist in the requested revision')
-      if (snapshot !== 'unsupported') return Buffer.from(snapshot.buffer, snapshot.byteOffset, snapshot.byteLength)
+      const snapshot = await backend().repositoryBlobSnapshot(
+        repository.path,
+        commitish,
+        path
+      )
+      if (snapshot === null)
+        throw new Error('Blob path does not exist in the requested revision')
+      if (snapshot !== 'unsupported')
+        return Buffer.from(
+          snapshot.buffer,
+          snapshot.byteOffset,
+          snapshot.byteLength
+        )
       const chunks: Buffer[] = []
       let offset = 0
       let oid: string | null = null
       let size: number | null = null
       do {
-        const chunk = await backend().repositoryBlobChunk(repository.path, commitish, path, offset, 1024 * 1024, oid)
-        if (chunk === null) throw new Error('Blob path does not exist in the requested revision')
-        if (size !== null && chunk.size !== size) throw new Error('Blob size changed during read')
+        const chunk = await backend().repositoryBlobChunk(
+          repository.path,
+          commitish,
+          path,
+          offset,
+          1024 * 1024,
+          oid
+        )
+        if (chunk === null)
+          throw new Error('Blob path does not exist in the requested revision')
+        if (size !== null && chunk.size !== size)
+          throw new Error('Blob size changed during read')
         oid = chunk.oid
         size = chunk.size
         const bytes = Buffer.from(chunk.data, 'base64')
@@ -124,10 +143,12 @@ export async function getPartialBlobContentsCatchPathNotInRef(
   length: number
 ): Promise<Buffer | null> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryBlobPrefix(repository.path, commitish, path, length)
-    const result = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+    const read = () =>
+      backend().repositoryBlobPrefix(repository.path, commitish, path, length)
+    const result =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     return result === null ? null : Buffer.from(result, 'base64')
   }
   const revision = await resolveBlobRevision(repository, commitish)

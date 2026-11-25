@@ -22,6 +22,14 @@ Other important folders:
  - `fixtures` - this folder contains Git repositories which can be used in tests
  - `helpers` - modules containing logic to help setup, manage and teardown tests
 
+
+## Runner
+
+Vitest is the only TypeScript test runner. New tests should import `describe`
+and `it` from `vitest` and assertions from `node:assert/strict`. Older files
+may still use the `node:test` API surface through the compatibility alias in
+`vitest.config.ts`, but no suite is executed by `node --test`.
+
 ## Adding Unit Tests
 
 Unit tests are ideal for functions that don't depend on the DOM or the host
@@ -40,14 +48,17 @@ If no test module exists, create a new file named `[app-module]-test.ts` where
 Start with this for the contents of the file:
 
 ```ts
-describe('module being tested', () => {
+import assert from 'node:assert/strict'
+import { describe, it } from 'vitest'
+
+describe('module being tested' , () => {
   it('can test some code', () => {
-    expect(true).toEqual(false)
+    assert.equal(true, false)
   })
 })
 ```
 
-If you run `npm run test:unit` from a shell you should see this error, which
+If you run `pnpm test` from a shell you should see this error, which
 indicates the file is loaded into our test runner successfully.
 
 Once you're happy that the test is being run, feel free to write some proper
@@ -67,7 +78,7 @@ but here are some guidelines to help you figure out what to test.
  - if you're not confident in writing tests, the [Arrange-Act-Assert](http://wiki.c2.com/?ArrangeActAssert)
    pattern is a nice way to get started
 
-As you're writing your tests, don't forget to `npm run test:unit` to verify that
+As you're writing your tests, don't forget to `pnpm test` to verify that
 your tests are working as expected.
 
 ## Specific Testing Scenarios

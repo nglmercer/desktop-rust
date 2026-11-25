@@ -38,7 +38,9 @@ describe('revert cleanup', () => {
       throw refreshFailure
     }
 
-    await expect(store.revertCommitCore(repository, commit)).rejects.toBe(conflict)
+    await expect(store.revertCommitCore(repository, commit)).rejects.toBe(
+      conflict
+    )
     expect(events).toEqual(['progress', 'clear', 'refresh'])
   })
 
@@ -52,14 +54,20 @@ describe('revert cleanup', () => {
       fn: (repo: unknown) => unknown
     ) => fn(repository)
     store.gitStoreCache = {
-      get: () => ({ revertCommit: async () => { events.push('revert') } }),
+      get: () => ({
+        revertCommit: async () => {
+          events.push('revert')
+        },
+      }),
     }
     store.updateRevertProgress = () => events.push('clear')
     store._refreshRepository = async () => {
       events.push('refresh')
     }
 
-    await expect(store.revertCommitCore(repository, {})).resolves.toBeUndefined()
+    await expect(
+      store.revertCommitCore(repository, {})
+    ).resolves.toBeUndefined()
     expect(events).toEqual(['revert', 'clear', 'refresh'])
     events.length = 0
     store._refreshRepository = async () => {
@@ -67,7 +75,9 @@ describe('revert cleanup', () => {
       throw refreshFailure
     }
 
-    await expect(store.revertCommitCore(repository, {})).rejects.toBe(refreshFailure)
+    await expect(store.revertCommitCore(repository, {})).rejects.toBe(
+      refreshFailure
+    )
     expect(events).toEqual(['revert', 'clear', 'refresh'])
   })
 

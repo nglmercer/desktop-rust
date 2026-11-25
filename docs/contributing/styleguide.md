@@ -1,11 +1,11 @@
 # TypeScript Style Guide
 
-Most of our preferred style when writing typescript is configured in our [`.eslintrc.yml`](../../.eslintrc.yml) files.
+Most of our preferred TypeScript style is enforced by [`.oxlintrc.json`](../../.oxlintrc.json), project rules in `oxlint-rules/`, and the formatter configuration in [`biome.json`](../../biome.json). A few legacy ESLint rules do not yet have oxlint equivalents; this guide remains the source of truth for those conventions.
 
 ## Do
  - Use camelCase for methods
  - Use PascalCase for class names
- - [ESLint](https://eslint.org/docs/user-guide/integrations) in your editor
+ - use the workspace oxlint and Biome editor integrations
 
 # Documenting your code
 
@@ -66,8 +66,7 @@ there's a compelling reason and no asynchronous alternative. In those cases the
 method should be suffixed with `Sync` to make it clear to the caller what's
 happening. We also fall back to `Sync` methods for readability in tests.
 
-We use [an ESLint rule](https://eslint.org/docs/rules/no-sync) to enforce
-this standard.
+The legacy ESLint `no-sync` gate does not yet have a clean oxlint migration because the migrated test and shim code has a large intentional exception backlog. Follow the standard anyway and document unavoidable synchronous calls.
 
 ### Scripts
 

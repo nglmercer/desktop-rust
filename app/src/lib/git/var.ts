@@ -50,7 +50,11 @@ async function getIdentity(
   name: string,
   options?: Pick<IGitExecutionOptions, 'env'>
 ): Promise<CommitIdentity | null> {
-  if (typeof window !== 'undefined' && backend().transportKind !== 'none' && options?.env === undefined) {
+  if (
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none' &&
+    options?.env === undefined
+  ) {
     const value = await backend().repositoryEffectiveGitIdentity(
       repository.path,
       variable === 'GIT_AUTHOR_IDENT' ? 'author' : 'committer'

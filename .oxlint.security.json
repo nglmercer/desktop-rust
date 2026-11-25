@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "off",
+    "suspicious": "off",
+    "pedantic": "off",
+    "style": "off",
+    "perf": "off",
+    "restriction": "off",
+    "nursery": "off"
+  },
+  "jsPlugins": ["./oxlint-rules/desktop.mjs"],
+  "rules": {
+    "desktop/insecure-random": "error",
+    "desktop/no-loosely-typed-webcontents-ipc": "error",
+    "desktop/react-no-unbound-dispatcher-props": "error",
+    "desktop/react-readonly-props-and-state": "error",
+    "desktop/react-proper-lifecycle-methods": "error"
+  }
+}

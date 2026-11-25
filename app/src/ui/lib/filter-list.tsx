@@ -26,7 +26,7 @@ export interface IFilterListItem {
 /** A group of items in the list. */
 export interface IFilterListGroup<
   Item extends IFilterListItem,
-  Identifier = string
+  Identifier = string,
 > {
   /** The identifier for this group. */
   readonly identifier: Identifier
@@ -201,7 +201,7 @@ export type SelectionSource = ListSelectionSource | IFilterSelectionSource
 /** A List which includes the ability to filter based on its contents. */
 export class FilterList<
   T extends IFilterListItem,
-  GroupIdentifier = string
+  GroupIdentifier = string,
 > extends React.Component<
   IFilterListProps<T, GroupIdentifier>,
   IFilterListState<T, GroupIdentifier>

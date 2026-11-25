@@ -1,7 +1,3 @@
 {
-  "recommendations": [
-    "esbenp.prettier-vscode",
-    "dbaeumer.vscode-eslint",
-    "stkb.rewrap"
-  ]
+  "recommendations": ["biomejs.biome", "oxc.oxc-vscode", "stkb.rewrap"]
 }

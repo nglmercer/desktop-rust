@@ -17,10 +17,12 @@ let lfsAvailable: Promise<boolean> | undefined
  */
 export function isLFSAvailable(): Promise<boolean> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    lfsAvailable ??= backend().lfsAvailable().catch(error => {
-      lfsAvailable = undefined
-      throw error
-    })
+    lfsAvailable ??= backend()
+      .lfsAvailable()
+      .catch(error => {
+        lfsAvailable = undefined
+        throw error
+      })
     return lfsAvailable
   }
   lfsAvailable ??= git(['lfs', 'version'], __dirname, 'isLFSAvailable', {
@@ -124,7 +126,9 @@ export async function isTrackedByLFS(
   path: string
 ): Promise<boolean> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const result = await backend().repositoryLfsFileTracking(repository.path, [path])
+    const result = await backend().repositoryLfsFileTracking(repository.path, [
+      path,
+    ])
     return result[0]
   }
   const { stdout } = await git(
@@ -169,7 +173,10 @@ export async function filesNotTrackedByLFS(
     const untracked: string[] = []
     for (let offset = 0; offset < filePaths.length; offset += 1000) {
       const paths = filePaths.slice(offset, offset + 1000)
-      const tracked = await backend().repositoryLfsFileTracking(repository.path, paths)
+      const tracked = await backend().repositoryLfsFileTracking(
+        repository.path,
+        paths
+      )
       paths.forEach((path, index) => {
         if (!tracked[index]) untracked.push(path)
       })

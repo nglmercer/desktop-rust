@@ -91,12 +91,24 @@ export async function getRebaseInternalState(
   repository: Repository
 ): Promise<RebaseInternalState | null> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const state = await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+    const state = await withRepositoryGitOperation(
+      repository.path,
+      'read',
+      () => backend().repositoryRebaseState(repository.path),
+      true
+    )
     const progress = state?.progress
-    if (progress?.original == null || progress.branch == null || progress.onto == null) return null
+    if (
+      progress?.original == null ||
+      progress.branch == null ||
+      progress.onto == null
+    )
+      return null
     return {
       originalBranchTip: progress.original.trim(),
-      targetBranch: progress.branch.startsWith('refs/heads/') ? progress.branch.substring(11).trim() : progress.branch,
+      targetBranch: progress.branch.startsWith('refs/heads/')
+        ? progress.branch.substring(11).trim()
+        : progress.branch,
       baseBranchTip: progress.onto.trim(),
     }
   }
@@ -163,19 +175,40 @@ export async function getRebaseSnapshot(repository: Repository): Promise<{
   progress: IMultiCommitOperationProgress
   commits: ReadonlyArray<CommitOneLine>
 } | null> {
-  const native = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  const native =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
   const state = native
-    ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+    ? await withRepositoryGitOperation(
+        repository.path,
+        'read',
+        () => backend().repositoryRebaseState(repository.path),
+        true
+      )
     : undefined
-  if (state === null || (!native && !(await isRebaseHeadSet(repository)))) return null
-  const readProgress = async (name: 'msgnum' | 'end' | 'orig-head' | 'onto'): Promise<string> => {
+  if (state === null || (!native && !(await isRebaseHeadSet(repository))))
+    return null
+  const readProgress = async (
+    name: 'msgnum' | 'end' | 'orig-head' | 'onto'
+  ): Promise<string> => {
     if (state !== undefined && state !== null) {
       const progress = state.progress
-      const value = progress === null ? null : name === 'msgnum' ? progress.current : name === 'end' ? progress.total : name === 'orig-head' ? progress.original : progress.onto
+      const value =
+        progress === null
+          ? null
+          : name === 'msgnum'
+            ? progress.current
+            : name === 'end'
+              ? progress.total
+              : name === 'orig-head'
+                ? progress.original
+                : progress.onto
       if (value === null) throw new Error('Missing rebase progress')
       return value
     }
-    return readFile(join(repository.resolvedGitDir, 'rebase-merge', name), 'utf8')
+    return readFile(
+      join(repository.resolvedGitDir, 'rebase-merge', name),
+      'utf8'
+    )
   }
 
   let next: number = -1
@@ -274,7 +307,12 @@ export async function getRebaseSnapshot(repository: Repository): Promise<{
 async function readRebaseHead(repository: Repository): Promise<string | null> {
   try {
     if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      const state = await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+      const state = await withRepositoryGitOperation(
+        repository.path,
+        'read',
+        () => backend().repositoryRebaseState(repository.path),
+        true
+      )
       return state?.head ?? null
     }
     const rebaseHead = join(repository.resolvedGitDir, 'REBASE_HEAD')
@@ -379,8 +417,16 @@ export async function rebase(
   expected?: { readonly head: string; readonly branch: string | null }
 ): Promise<RebaseResult> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    if (expected === undefined) throw new Error('Refresh the current branch before rebasing')
-    const request = { base_ref: baseBranch.ref, base_head: baseBranch.tip.sha, target_ref: targetBranch.ref, target_head: targetBranch.tip.sha, current_head: expected.head, current_branch: expected.branch }
+    if (expected === undefined)
+      throw new Error('Refresh the current branch before rebasing')
+    const request = {
+      base_ref: baseBranch.ref,
+      base_head: baseBranch.tip.sha,
+      target_ref: targetBranch.ref,
+      target_head: targetBranch.tip.sha,
+      current_head: expected.head,
+      current_branch: expected.branch,
+    }
     // The native rebase does not stream its steps yet. Read the commits it will
     // replay now and report each step once the operation has returned.
     const replayed =
@@ -391,11 +437,20 @@ export async function rebase(
             baseBranch.tip.sha,
             targetBranch.tip.sha
           )
-    const result = await withRepositoryGitOperation(repository.path, 'mutation', () => backend().startRepositoryRebase(repository.path, request), true)
-    if (progressCallback !== undefined && replayed !== null && result !== 'up_to_date') {
+    const result = await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().startRepositoryRebase(repository.path, request),
+      true
+    )
+    if (
+      progressCallback !== undefined &&
+      replayed !== null &&
+      result !== 'up_to_date'
+    ) {
       const steps =
         result === 'conflict'
-          ? (await getRebaseSnapshot(repository))?.progress.position ?? 0
+          ? ((await getRebaseSnapshot(repository))?.progress.position ?? 0)
           : replayed.length
       const parser = new GitRebaseParser(replayed)
       for (let step = 1; step <= steps; step++) {
@@ -403,7 +458,11 @@ export async function rebase(
         if (progress !== null) progressCallback(progress)
       }
     }
-    return result === 'conflict' ? RebaseResult.ConflictsEncountered : result === 'up_to_date' ? RebaseResult.AlreadyUpToDate : RebaseResult.CompletedWithoutError
+    return result === 'conflict'
+      ? RebaseResult.ConflictsEncountered
+      : result === 'up_to_date'
+        ? RebaseResult.AlreadyUpToDate
+        : RebaseResult.CompletedWithoutError
   }
   const baseOptions: IGitStringExecutionOptions = {
     expectedErrors: new Set([GitError.RebaseConflicts]),
@@ -453,8 +512,12 @@ export async function rebase(
 /** Abandon the current rebase operation */
 export async function abortRebase(repository: Repository) {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().abortRepositoryGitOperation(repository.path, 'rebase'), true)
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().abortRepositoryGitOperation(repository.path, 'rebase'),
+      true
+    )
     return
   }
   await git(['rebase', '--abort'], repository.path, 'abortRebase')
@@ -494,17 +557,31 @@ export async function continueRebase(
   manualResolutions: ReadonlyMap<string, ManualConflictResolution> = new Map(),
   opts?: RebaseInteractiveOptions
 ): Promise<RebaseResult> {
-  const native = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  const native =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
   if (native && opts?.gitEditor !== undefined && opts.gitEditor !== ':') {
-    throw new Error('Custom rebase editors are not supported by the native backend')
+    throw new Error(
+      'Custom rebase editors are not supported by the native backend'
+    )
   }
   const nativeState = native
-    ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryRebaseState(repository.path), true)
+    ? await withRepositoryGitOperation(
+        repository.path,
+        'read',
+        () => backend().repositoryRebaseState(repository.path),
+        true
+      )
     : undefined
-  if (nativeState !== undefined && nativeState !== null && nativeState.backend !== 'merge') {
-    throw new Error('Continuing an apply-backend rebase is not supported; use Git to continue or abort it')
+  if (
+    nativeState !== undefined &&
+    nativeState !== null &&
+    nativeState.backend !== 'merge'
+  ) {
+    throw new Error(
+      'Continuing an apply-backend rebase is not supported; use Git to continue or abort it'
+    )
   }
-  const expectedHead = native ? nativeState?.head ?? null : undefined
+  const expectedHead = native ? (nativeState?.head ?? null) : undefined
   if (native && expectedHead === null) return RebaseResult.Aborted
   const trackedFiles = files.filter(f => {
     return f.status.kind !== AppFileStatusKind.Untracked
@@ -587,8 +664,18 @@ export async function continueRebase(
       : null
     let result: 'complete' | 'conflict'
     try {
-      result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-        backend().continueRepositoryRebase(repository.path, expectedHead, trackedFilesAfter.length === 0, opts?.noVerify === true), true)
+      result = await withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        () =>
+          backend().continueRepositoryRebase(
+            repository.path,
+            expectedHead,
+            trackedFilesAfter.length === 0,
+            opts?.noVerify === true
+          ),
+        true
+      )
     } catch (error) {
       // Git refuses to continue while conflicts or tracked changes are not
       // staged; callers handle that as a result, not a failure.
@@ -616,15 +703,17 @@ export async function continueRebase(
       const reached =
         result === 'complete'
           ? total
-          : (await getRebaseSnapshot(repository))?.progress.position ??
-            before.progress.position
+          : ((await getRebaseSnapshot(repository))?.progress.position ??
+            before.progress.position)
       const parser = new GitRebaseParser(before.commits)
       for (let step = before.progress.position + 1; step <= reached; step++) {
         const progress = parser.parse(`Rebasing (${step}/${total})`)
         if (progress !== null) opts.progressCallback(progress)
       }
     }
-    return result === 'complete' ? RebaseResult.CompletedWithoutError : RebaseResult.ConflictsEncountered
+    return result === 'complete'
+      ? RebaseResult.CompletedWithoutError
+      : RebaseResult.ConflictsEncountered
   }
 
   if (trackedFilesAfter.length === 0) {

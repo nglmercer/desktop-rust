@@ -41,7 +41,10 @@ export function enumerateValues(
   return []
 }
 
-export function enumerateKeys(_hive: HKEY, _key: string): ReadonlyArray<string> {
+export function enumerateKeys(
+  _hive: HKEY,
+  _key: string
+): ReadonlyArray<string> {
   return []
 }
 

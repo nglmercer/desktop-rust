@@ -24,7 +24,9 @@ describe('remote branch deletion cleanup', () => {
       throw new Error('refresh failed')
     }
 
-    await expect(store._deleteReviewedRemoteBranch(repository, review)).rejects.toBe(failure)
+    await expect(
+      store._deleteReviewedRemoteBranch(repository, review)
+    ).rejects.toBe(failure)
     expect(events).toEqual(['delete', 'refresh'])
   })
 })

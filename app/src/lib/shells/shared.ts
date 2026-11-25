@@ -54,10 +54,16 @@ export function parse(label: string): Shell {
 export async function getAvailableShells(): Promise<
   ReadonlyArray<AnyFoundShell>
 > {
-  if (__LINUX__ && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+  if (
+    __LINUX__ &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
     const terminals = await backend().availableRustTerminals()
     return terminals.flatMap(terminal => {
-      const shell = Object.values(Linux.Shell).find(value => value === terminal.name)
+      const shell = Object.values(Linux.Shell).find(
+        value => value === terminal.name
+      )
       return shell === undefined ? [] : [{ shell, path: terminal.path }]
     })
   }
@@ -90,7 +96,9 @@ export async function findShellOrDefault(shell: Shell): Promise<AnyFoundShell> {
   } else {
     const fallback = available.find(s => s.shell === Default) ?? available[0]
     if (fallback === undefined) {
-      throw new ShellError('No supported terminal is available. Install a terminal and try again.')
+      throw new ShellError(
+        'No supported terminal is available. Install a terminal and try again.'
+      )
     }
     return fallback
   }

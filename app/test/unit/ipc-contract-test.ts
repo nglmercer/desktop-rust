@@ -14,7 +14,7 @@ import {
 describe('IPC channel contract', () => {
   type AssertExactUnion<TExpected, TActual> = [
     Exclude<TExpected, TActual>,
-    Exclude<TActual, TExpected>
+    Exclude<TActual, TExpected>,
   ] extends [never, never]
     ? true
     : never

@@ -283,7 +283,7 @@ export class ListRow extends React.Component<IListRowProps, {}> {
         role={
           sectionHasHeader && rowIndex.row === 0
             ? 'presentation'
-            : role ?? 'option'
+            : (role ?? 'option')
         }
         aria-setsize={ariaSetSize}
         aria-posinset={ariaPosInSet}

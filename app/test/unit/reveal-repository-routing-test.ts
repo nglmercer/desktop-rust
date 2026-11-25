@@ -33,9 +33,16 @@ describe('repository file manager routing', () => {
 
   it('opens the requested repository without changing it during an async selection', async () => {
     let finish: () => void = () => {}
-    mocks.reveal.mockReturnValue(new Promise<void>(resolve => { finish = resolve }))
+    mocks.reveal.mockReturnValue(
+      new Promise<void>(resolve => {
+        finish = resolve
+      })
+    )
     const onError = vi.fn()
-    const operation = showRepositoryInFileManager('/saved/other repository', onError)
+    const operation = showRepositoryInFileManager(
+      '/saved/other repository',
+      onError
+    )
     expect(mocks.reveal).toHaveBeenCalledWith('/saved/other repository')
     mocks.transport = 'wry'
     finish()
@@ -57,10 +64,15 @@ describe('repository file manager routing', () => {
     const reportFailure = new Error('Error handler failed')
     const logger = vi.spyOn(log, 'error')
     try {
-      await expect(showRepositoryInFileManager('/saved/repo', async () => {
-        throw reportFailure
-      })).resolves.toBeUndefined()
-      expect(logger).toHaveBeenCalledWith('Failed to report the file manager error', reportFailure)
+      await expect(
+        showRepositoryInFileManager('/saved/repo', async () => {
+          throw reportFailure
+        })
+      ).resolves.toBeUndefined()
+      expect(logger).toHaveBeenCalledWith(
+        'Failed to report the file manager error',
+        reportFailure
+      )
     } finally {
       logger.mockRestore()
     }
@@ -80,7 +92,9 @@ describe('repository file manager routing', () => {
       accounts: [],
       onViewOnGitHub: noop,
       onOpenInShell: noop,
-      onShowRepository: selected => { void showRepositoryInFileManager(selected.path, onError) },
+      onShowRepository: selected => {
+        void showRepositoryInFileManager(selected.path, onError)
+      },
       onOpenInExternalEditor: noop,
       onRemoveRepository: noop,
       onChangeRepositoryAlias: noop,
@@ -95,13 +109,16 @@ describe('repository file manager routing', () => {
     expect(mocks.reveal).toHaveBeenCalledWith('/saved/context target')
   })
 
-  it.each(['wry', 'none'])('keeps the existing %s file manager route', async transport => {
-    mocks.transport = transport
-    mocks.showFolder.mockResolvedValue(undefined)
-    const onError = vi.fn()
-    await showRepositoryInFileManager('/saved/repo', onError)
-    expect(mocks.showFolder).toHaveBeenCalledWith('/saved/repo')
-    expect(mocks.reveal).not.toHaveBeenCalled()
-    expect(onError).not.toHaveBeenCalled()
-  })
+  it.each(['wry', 'none'])(
+    'keeps the existing %s file manager route',
+    async transport => {
+      mocks.transport = transport
+      mocks.showFolder.mockResolvedValue(undefined)
+      const onError = vi.fn()
+      await showRepositoryInFileManager('/saved/repo', onError)
+      expect(mocks.showFolder).toHaveBeenCalledWith('/saved/repo')
+      expect(mocks.reveal).not.toHaveBeenCalled()
+      expect(onError).not.toHaveBeenCalled()
+    }
+  )
 })

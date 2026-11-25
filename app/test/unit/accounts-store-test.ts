@@ -161,9 +161,11 @@ describe('AccountsStore', () => {
     const events: TokenRefreshEvent[] = []
     const subscription = store.onTokenRefreshEvent(event => events.push(event))
     t.onTestFinished(() => subscription.dispose())
-    const deletion = vi.spyOn(secure, 'deleteItem').mockImplementation(async () => {
-      throw new Error('Secure deletion failed')
-    })
+    const deletion = vi
+      .spyOn(secure, 'deleteItem')
+      .mockImplementation(async () => {
+        throw new Error('Secure deletion failed')
+      })
     t.onTestFinished(() => deletion.mockRestore())
     await assert.rejects(
       store.getAccountWithFreshToken(account),

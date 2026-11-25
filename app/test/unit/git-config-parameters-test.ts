@@ -10,16 +10,17 @@ describe('Git environment configuration parameters', () => {
     'path\nwith newline',
   ])('passes the hook path literally to Git: %s', path => {
     const parameters = `'desktop.inherited=kept' ${quoteGitConfigParameter(`core.hooksPath=${path}`)}`
-    const run = (key: string) => spawnSync('git', ['config', '--get', key], {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        GIT_CONFIG_COUNT: '0',
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-        GIT_CONFIG_PARAMETERS: parameters,
-      },
-    })
+    const run = (key: string) =>
+      spawnSync('git', ['config', '--get', key], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GIT_CONFIG_COUNT: '0',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+          GIT_CONFIG_PARAMETERS: parameters,
+        },
+      })
 
     const hookPath = run('core.hooksPath')
     expect(hookPath.status, hookPath.stderr).toBe(0)

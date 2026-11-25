@@ -28,19 +28,16 @@ on:
       - 'script/test-discovery.mts'
       - 'script/generate-example-usage-data.mts'
       - 'script/highlighter-build.test.ts'
-      - 'script/cli-build.test.ts'
-      - 'script/crash-build.test.ts'
-      - 'eslint-rules/**'
+      - 'oxlint-rules/**'
       - 'vendor/desktop-trampoline/**'
       - 'vendor/printenvz/**'
       - 'vendor/desktop-notifications/lib/**'
       - 'tsconfig.json'
       - 'tsconfig.notifications.json'
       - 'biome.json'
-      - 'biome.security.json'
-      - 'biome-rules/**'
+      - '.oxlint.security.json'
+      - '.oxlintrc.json'
       - 'vitest.config.ts'
-      - 'vitest-suites.json'
       - 'vite.config.ts'
       - 'vite.highlighter.config.ts'
       - 'vite.ipc-shim.config.ts'
@@ -83,19 +80,16 @@ on:
       - 'script/test-discovery.mts'
       - 'script/generate-example-usage-data.mts'
       - 'script/highlighter-build.test.ts'
-      - 'script/cli-build.test.ts'
-      - 'script/crash-build.test.ts'
-      - 'eslint-rules/**'
+      - 'oxlint-rules/**'
       - 'vendor/desktop-trampoline/**'
       - 'vendor/printenvz/**'
       - 'vendor/desktop-notifications/lib/**'
       - 'tsconfig.json'
       - 'tsconfig.notifications.json'
       - 'biome.json'
-      - 'biome.security.json'
-      - 'biome-rules/**'
+      - '.oxlint.security.json'
+      - '.oxlintrc.json'
       - 'vitest.config.ts'
-      - 'vitest-suites.json'
       - 'vite.config.ts'
       - 'vite.highlighter.config.ts'
       - 'vite.ipc-shim.config.ts'
@@ -137,7 +131,7 @@ jobs:
         run: |
           npm install --global pnpm@11.17.0
           pnpm install --frozen-lockfile --ignore-scripts
-          npm run check:ipc
+          pnpm check:ipc
           pnpm migration:check
           pnpm vite:build
           test -f out/vite-dist/ipc-shim.js
@@ -146,16 +140,15 @@ jobs:
           test -f out/vite-dist/desktop-auth-scheme
       - name: Check migrated frontend tooling and tests
         run: |
-          npm run lint:biome
-          npm run lint:security
-          npm run check:eslint
-          npm run check:types
-          npm run compile:script
+          pnpm lint
+          pnpm lint:security
+          pnpm check:types
+          pnpm compile:script
           npm ci --prefix vendor/desktop-trampoline --no-audit --no-fund
           npm run lint --prefix vendor/desktop-trampoline
           npm test --prefix vendor/desktop-trampoline
-          node node_modules/typescript/bin/tsc -p app/test/backend-transport-tsconfig.json
-          node node_modules/typescript/bin/tsc -p rust/tests/tsconfig.json
+          pnpm exec tsc -p app/test/backend-transport-tsconfig.json
+          pnpm exec tsc -p rust/tests/tsconfig.json
           node node_modules/vitest/vitest.mjs run --config vitest.config.ts
           npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts --no-audit --no-fund
           npm run typecheck --prefix rust/tests/branch-rules-oracle

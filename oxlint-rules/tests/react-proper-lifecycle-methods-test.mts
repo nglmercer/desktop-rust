@@ -12,7 +12,7 @@ interface Fixture {
 
 function lint(fixture: Fixture) {
   const root = resolve('.')
-  const dir = mkdtempSync(join(root, 'app/test/biome-lifecycle-'))
+  const dir = mkdtempSync(join(root, 'app/test/oxlint-lifecycle-'))
   try {
     const file = join(
       dir,
@@ -22,11 +22,10 @@ function lint(fixture: Fixture) {
     const result = spawnSync(
       process.execPath,
       [
-        resolve('node_modules/@biomejs/biome/bin/biome'),
-        'lint',
-        '--config-path=biome.security.json',
+        resolve('node_modules/oxlint/bin/oxlint'),
+        '--config=.oxlint.security.json',
         file,
-        '--reporter=json',
+        '--format=json',
       ],
       { cwd: root, encoding: 'utf8' }
     )
@@ -611,7 +610,7 @@ export class CloningRepositoryView extends React.Component {
   })
 })
 
-describe('Biome lifecycle validation', () => {
+describe('Oxlint lifecycle validation', () => {
   it('checks parenthesized React bases and computed method names', () => {
     for (const base of [
       '(React.Component)',

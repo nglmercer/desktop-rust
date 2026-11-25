@@ -35,7 +35,10 @@ describe('automatic remote URL updates', () => {
   it('still updates an unchanged credential-free remote', async () => {
     const setRemoteURL = vi.fn()
     const store = {
-      defaultRemote: { name: 'origin', url: 'https://github.com/my-user/my-repo' },
+      defaultRemote: {
+        name: 'origin',
+        url: 'https://github.com/my-user/my-repo',
+      },
       setRemoteURL,
     } as unknown as GitStore
     const repository = {

@@ -1,5 +1,8 @@
 import { Disposable } from 'event-kit'
-import type { IRemoteBranchDeletionReview, IRemoteBranchDeletionResult } from '../../backend/client'
+import type {
+  IRemoteBranchDeletionReview,
+  IRemoteBranchDeletionResult,
+} from '../../backend/client'
 import { backend } from '../../backend/client'
 
 import {
@@ -986,12 +989,18 @@ export class Dispatcher {
   }
 
   /** Review every push destination before deleting an upstream branch. */
-  public previewRemoteBranchDeletion(repository: Repository, branch: Branch): Promise<IRemoteBranchDeletionReview> {
+  public previewRemoteBranchDeletion(
+    repository: Repository,
+    branch: Branch
+  ): Promise<IRemoteBranchDeletionReview> {
     return this.appStore._previewRemoteBranchDeletion(repository, branch)
   }
 
   /** Apply the exact branch and destination review confirmed by the user. */
-  public deleteReviewedRemoteBranch(repository: Repository, review: IRemoteBranchDeletionReview): Promise<IRemoteBranchDeletionResult> {
+  public deleteReviewedRemoteBranch(
+    repository: Repository,
+    review: IRemoteBranchDeletionReview
+  ): Promise<IRemoteBranchDeletionResult> {
     return this.appStore._deleteReviewedRemoteBranch(repository, review)
   }
 
@@ -1002,7 +1011,12 @@ export class Dispatcher {
     moveToTrash: boolean = true,
     reviewBasis?: string
   ): Promise<void> {
-    return this.appStore._discardChanges(repository, files, moveToTrash, reviewBasis)
+    return this.appStore._discardChanges(
+      repository,
+      files,
+      moveToTrash,
+      reviewBasis
+    )
   }
 
   /** Discard the changes from the given diff selection. */
@@ -1020,23 +1034,38 @@ export class Dispatcher {
     )
   }
 
-  public undoRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+  public undoRepositoryDiscard(
+    repository: Repository,
+    undoId: string
+  ): Promise<void> {
     return this.appStore._undoRepositoryDiscard(repository, undoId)
   }
 
-  public recoverPublishedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+  public recoverPublishedCommitCheckpoint(
+    repository: Repository,
+    id: string
+  ): Promise<void> {
     return this.appStore._recoverPublishedCommitCheckpoint(repository, id)
   }
 
-  public closeUnchangedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+  public closeUnchangedCommitCheckpoint(
+    repository: Repository,
+    id: string
+  ): Promise<void> {
     return this.appStore._closeUnchangedCommitCheckpoint(repository, id)
   }
 
-  public forgetPreparedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+  public forgetPreparedCommitCheckpoint(
+    repository: Repository,
+    id: string
+  ): Promise<void> {
     return this.appStore._forgetPreparedCommitCheckpoint(repository, id)
   }
 
-  public forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+  public forgetRepositoryDiscard(
+    repository: Repository,
+    undoId: string
+  ): Promise<void> {
     return this.appStore._forgetRepositoryDiscard(repository, undoId)
   }
 

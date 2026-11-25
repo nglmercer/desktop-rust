@@ -20,22 +20,19 @@ describe('repository Git description', () => {
     vi.clearAllMocks()
   })
 
-  it.each(['ws', 'wry'])(
-    'uses the scoped Rust reader on %s',
-    async () => {
-      mocks.description.mockResolvedValueOnce('  project\n')
-      await expect(getGitDescription('/repo')).resolves.toBe('  project\n')
-      expect(mocks.description).toHaveBeenCalledWith('/repo')
+  it.each(['ws', 'wry'])('uses the scoped Rust reader on %s', async () => {
+    mocks.description.mockResolvedValueOnce('  project\n')
+    await expect(getGitDescription('/repo')).resolves.toBe('  project\n')
+    expect(mocks.description).toHaveBeenCalledWith('/repo')
 
-      // The default-description normalization is a backend concern: whatever
-      // the Rust reader returns is passed through unchanged.
-      mocks.description.mockResolvedValueOnce('')
-      await expect(getGitDescription('/repo')).resolves.toBe('')
+    // The default-description normalization is a backend concern: whatever
+    // the Rust reader returns is passed through unchanged.
+    mocks.description.mockResolvedValueOnce('')
+    await expect(getGitDescription('/repo')).resolves.toBe('')
 
-      mocks.description.mockRejectedValueOnce(new Error('disconnected'))
-      await expect(getGitDescription('/repo')).rejects.toThrow('disconnected')
-    }
-  )
+    mocks.description.mockRejectedValueOnce(new Error('disconnected'))
+    await expect(getGitDescription('/repo')).rejects.toThrow('disconnected')
+  })
 
   it.each(['ws', 'wry'])(
     'writes via the Rust repository operation on %s',

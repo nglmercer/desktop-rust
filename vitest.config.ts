@@ -2,10 +2,8 @@ import { defineConfig } from 'vitest/config'
 import { readFileSync } from 'node:fs'
 import { parseEnv } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import suites from './vitest-suites.json'
 
-// Migrated suites are explicitly routed here by script/test.mts. Do not load
-// the application Vite config: it aliases Node modules for the webview.
+// Do not load the application Vite config: it aliases Node modules for the webview.
 Object.assign(
   process.env,
   parseEnv(readFileSync(new URL('.test.env', import.meta.url), 'utf8'))
@@ -64,7 +62,16 @@ export default defineConfig({
     ],
   },
   test: {
-    include: suites,
+    include: [
+      'app/test/unit/**/*-test.{ts,tsx,js,jsx,mts,mjs}',
+      'app/test/unit/**/*.test.{ts,tsx,js,jsx,mts,mjs}',
+      'script/**/*-test.{ts,tsx,js,jsx,mts,mjs}',
+      'script/**/*.test.{ts,tsx,js,jsx,mts,mjs}',
+      'rust/tests/**/*-test.{ts,tsx,js,jsx,mts,mjs}',
+      'rust/tests/**/*.test.{ts,tsx,js,jsx,mts,mjs}',
+      'oxlint-rules/tests/**/*-test.{ts,tsx,js,jsx,mts,mjs}',
+      'oxlint-rules/tests/**/*.test.{ts,tsx,js,jsx,mts,mjs}',
+    ],
     maxWorkers: 2,
     testTimeout: 15_000,
     hookTimeout: 60_000,

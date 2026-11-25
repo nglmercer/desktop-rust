@@ -3,7 +3,9 @@ import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
 /** Prepare bounded literal-path batches before starting an index mutation. */
-export function batchIndexPaths(paths: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> {
+export function batchIndexPaths(
+  paths: ReadonlyArray<string>
+): ReadonlyArray<ReadonlyArray<string>> {
   const batches: Array<Array<string>> = []
   let batch: Array<string> = []
   let size = 0

@@ -224,7 +224,7 @@ export async function pull(
                 gitErrorDescription:
                   kind === null
                     ? description
-                    : getDescriptionForError(kind, '') ?? description,
+                    : (getDescriptionForError(kind, '') ?? description),
               },
               ['pull', '--', remote.name],
               ''

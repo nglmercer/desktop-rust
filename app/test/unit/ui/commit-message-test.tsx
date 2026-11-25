@@ -1801,8 +1801,8 @@ describe('CommitMessage', () => {
             retry === null
               ? 'Dismiss'
               : retry === 'recovery'
-              ? 'Retry rollback'
-              : 'Retry refresh',
+                ? 'Retry rollback'
+                : 'Retry refresh',
             false,
           ] as const
       ),

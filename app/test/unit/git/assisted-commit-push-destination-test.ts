@@ -205,8 +205,8 @@ describe('frozen assisted push destination inputs', () => {
         prepareAssistedCommitPushDestination(requested, destination, head)
       )
       .then(
-        () => ({ kind: 'accepted' } as const),
-        error => ({ kind: 'refused', error } as const)
+        () => ({ kind: 'accepted' }) as const,
+        error => ({ kind: 'refused', error }) as const
       )
     try {
       const outcome = await Promise.race([

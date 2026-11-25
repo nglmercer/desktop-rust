@@ -6,7 +6,12 @@ import { Repository } from '../../../src/models/repository'
 import { GitHubRepository } from '../../../src/models/github-repository'
 import { Owner } from '../../../src/models/owner'
 import { RepositoryListItem } from '../../../src/ui/repositories-list/repository-list-item'
-import { render, fireEvent, screen, waitFor } from '../../helpers/ui/vitest-render'
+import {
+  render,
+  fireEvent,
+  screen,
+  waitFor,
+} from '../../helpers/ui/vitest-render'
 import { IMatches } from '../../../src/lib/fuzzy-find'
 import {
   advanceTimersBy,

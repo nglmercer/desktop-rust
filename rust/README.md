@@ -5,7 +5,7 @@
 > `embedded-ui` feature also serves this renderer over the authenticated
 > WebSocket bridge. The default CLI build still returns 503 for the page.
 > Descriptions of the removed `rust/web` frontend below do not establish parity
-> for the shared renderer. See [MIGRATION.md](../MIGRATION.md) for current
+> for the shared renderer. See [MIGRATION.md](MIGRATION.md) for current
 > implementation and validation status.
 
 Rust replacement for GitHub Desktop's backend, CLI, and platform transports. The
@@ -49,7 +49,7 @@ The older `desktop-native` crate hosts the authenticated WebSocket bridge
 using Wry and Tao, but its browser frontend is currently missing. It is separate
 from `desktop-rs`; default builds do not compile Wry/Tao or link desktop
 libraries. The active React desktop shell is `desktop-app`, described in the
-root [migration overview](../MIGRATION.md).
+[migration overview](MIGRATION.md).
 
 On a Linux, macOS, or Windows desktop:
 
@@ -97,7 +97,7 @@ still use the prior renderer paths. A Linux WebKitGTK/Wry integration test
 builds the shared UI, completes setup, creates a repository and opens it through
 the native Repository menu using an isolated terminal fixture. Run it after
 building the debug desktop host with
-`DESKTOP_WRY_WEBVIEW_TEST=1 npm test -- rust/tests/wry-terminal-ui.test.ts`.
+`DESKTOP_WRY_WEBVIEW_TEST=1 pnpm test -- rust/tests/wry-terminal-ui.test.ts`.
 It requires Xvfb, xdotool, Linux user/mount namespaces and `/usr/bin/konsole` as
 an unmodified bind-mount target; it does not validate other terminal programs
 or platforms.

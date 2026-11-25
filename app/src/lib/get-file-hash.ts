@@ -31,5 +31,8 @@ const hashInStream = (path: string, type: 'sha1' | 'sha256') =>
 /**
  * Calculates the hex encoded hash digest of a given file on disk.
  */
-export const getFileHash = (path: string, type: 'sha1' | 'sha256'): Promise<string> =>
+export const getFileHash = (
+  path: string,
+  type: 'sha1' | 'sha256'
+): Promise<string> =>
   hashedByShell() ? hashInShell(path, type) : hashInStream(path, type)

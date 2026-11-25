@@ -4,25 +4,24 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-/** Exercise the actual Biome plugin, not a copy of its matching logic. */
+/** Exercise the actual Oxlint plugin, not a copy of its matching logic. */
 function lint(source: string): {
   status: number | null
   lines: number[]
   messages: string[]
 } {
   const root = resolve('.')
-  const dir = mkdtempSync(join(root, 'app/test/biome-dispatcher-'))
+  const dir = mkdtempSync(join(root, 'app/test/oxlint-dispatcher-'))
   try {
     const fixture = join(dir, 'input.tsx')
     writeFileSync(fixture, source)
     const result = spawnSync(
       process.execPath,
       [
-        resolve('node_modules/@biomejs/biome/bin/biome'),
-        'lint',
-        '--config-path=biome.security.json',
+        resolve('node_modules/oxlint/bin/oxlint'),
+        '--config=.oxlint.security.json',
         fixture,
-        '--reporter=json',
+        '--format=json',
       ],
       { cwd: root, encoding: 'utf8' }
     )
@@ -33,14 +32,14 @@ function lint(source: string): {
       diagnostics: Array<{
         severity: string
         message: string
-        location: { start: { line: number } }
+        labels: Array<{ span: { line: number } }>
       }>
     }
     return {
       status: result.status,
       lines: report.diagnostics
         .filter(item => item.severity === 'error')
-        .map(item => item.location.start.line),
+        .map(item => item.labels[0]?.span.line ?? 0),
       messages: report.diagnostics
         .filter(item => item.severity === 'error')
         .map(item => item.message),
@@ -50,7 +49,7 @@ function lint(source: string): {
   }
 }
 
-describe('Biome react-no-unbound-dispatcher-props rule', () => {
+describe('Oxlint react-no-unbound-dispatcher-props rule', () => {
   it('detects the original exact JSX expression prefix in attributes and children', () => {
     const source = `<>
 <X a={this.props.dispatcher.action} />
@@ -95,7 +94,7 @@ describe('Biome react-no-unbound-dispatcher-props rule', () => {
   })
 
   it('does not suppress the security rule for insecure randomness', () => {
-    const source = `// biome-ignore lint/plugin/reactNoUnboundDispatcherProps: callback wrapped elsewhere
+    const source = `// oxlint-disable-next-line desktop/react-no-unbound-dispatcher-props
 const x = <X a={this.props.dispatcher.foo(Math.random())} />`
     const result = lint(source)
     expect(result).toMatchObject({ status: 1, lines: [2] })
@@ -105,7 +104,7 @@ const x = <X a={this.props.dispatcher.foo(Math.random())} />`
   })
 
   it('does not hide the dispatcher rule when randomness is suppressed', () => {
-    const source = `// biome-ignore lint/plugin/insecureRandom: test-only value
+    const source = `// oxlint-disable-next-line desktop/insecure-random
 const x = <X a={this.props.dispatcher.foo(Math.random())} />`
     const result = lint(source)
     expect(result).toMatchObject({ status: 1, lines: [2] })

@@ -912,7 +912,10 @@ fn interrupted_push_records_uncertainty_and_rejects_unsafe_journals() {
         record["endpoints"][0]["backup_oid"],
         s.git(&repo, &["rev-parse", "HEAD"])
     );
-    assert!(!records.to_string().contains(s.root.to_str().unwrap()));
+    assert!(
+        !records.to_string().contains(s.root.to_str().unwrap()),
+        "history leaked the test root: {records}"
+    );
     let journal = repo
         .join(".git/desktop-remote-branch-deletions")
         .join(format!("{}.json", record["id"].as_str().unwrap()));

@@ -67,7 +67,9 @@ export async function showRepositoryInFileManager(
     } catch (reportingError) {
       log.error(
         'Failed to report the file manager error',
-        reportingError instanceof Error ? reportingError : new Error(String(reportingError))
+        reportingError instanceof Error
+          ? reportingError
+          : new Error(String(reportingError))
       )
     }
   }

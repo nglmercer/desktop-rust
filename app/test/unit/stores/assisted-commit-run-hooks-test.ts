@@ -106,8 +106,8 @@ describe('AppStore assisted runs with real hook interception', () => {
         action === 'ignore' || index === 0
           ? 'ignore'
           : action === 'decline'
-          ? 'abort'
-          : 'cancel'
+            ? 'abort'
+            : 'cancel'
       )
       t.after(() => subscription.dispose())
       const outcome = await h.dispatcher.createCopilotAssistedCommits(
@@ -131,8 +131,8 @@ describe('AppStore assisted runs with real hook interception', () => {
         action === 'ignore'
           ? 'local-ready'
           : action === 'cancel'
-          ? 'cancelled'
-          : 'error'
+            ? 'cancelled'
+            : 'error'
       )
       if (action === 'ignore') {
         assert.strictEqual(await fixtures.count(repository), 3)

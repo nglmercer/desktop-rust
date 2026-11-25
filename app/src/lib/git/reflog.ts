@@ -70,7 +70,8 @@ export async function getBranchCheckouts(
   const regex = new RegExp(
     /^(?:[a-f0-9]{40}|[a-f0-9]{64})\sHEAD@{(.*)}\scheckout: moving from\s.*\sto\s(.*)$/
   )
-  const read = () => backend().repositoryBranchCheckouts(repository.path, afterDate)
+  const read = () =>
+    backend().repositoryBranchCheckouts(repository.path, afterDate)
   const result =
     backend().transportKind === 'wry'
       ? await withRepositoryGitOperation(repository.path, 'read', read, true)

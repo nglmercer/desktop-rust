@@ -299,7 +299,9 @@ describe('git/status', () => {
         // The Rust backend refuses to bind a directory that is not a working
         // tree; the Node path reports it as no status.
         const status = await getStatus(repository).catch(error =>
-          /not a working tree/.test(String(error)) ? null : Promise.reject(error)
+          /not a working tree/.test(String(error))
+            ? null
+            : Promise.reject(error)
         )
         assert(status === null)
       })

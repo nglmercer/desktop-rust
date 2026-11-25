@@ -22,10 +22,10 @@ describe('AppStore token refresh usage stats wiring', () => {
 
   before(async () => {
     vi.doMock('../../../src/ui/main-process-proxy', async () => ({
-        ...(await vi.importActual('../../../src/ui/main-process-proxy')),
-        getAppMenu: () => {},
-        updateAccounts: () => {},
-      }))
+      ...(await vi.importActual('../../../src/ui/main-process-proxy')),
+      getAppMenu: () => {},
+      updateAccounts: () => {},
+    }))
     const { AppStore } = await import('../../../src/lib/stores/app-store')
     const { AccountsStore } = await import(
       '../../../src/lib/stores/accounts-store'

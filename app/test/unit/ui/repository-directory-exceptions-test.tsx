@@ -23,13 +23,15 @@ const addSafeDirectory = mock.fn(async (_path: string) => {})
 
 before(() => {
   vi.doMock('../../../src/lib/git/index.ts', async () => ({
-  ...(await vi.importActual('../../../src/lib/git/index.ts')),
-  getRepositoryType, addSafeDirectory }))
+    ...(await vi.importActual('../../../src/lib/git/index.ts')),
+    getRepositoryType,
+    addSafeDirectory,
+  }))
   vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({
-  ...(await vi.importActual('../../../src/ui/main-process-proxy.ts')),
-  sendDialogDidOpen: () => {},
-      showOpenDialog: async () => null,
-    }))
+    ...(await vi.importActual('../../../src/ui/main-process-proxy.ts')),
+    sendDialogDidOpen: () => {},
+    showOpenDialog: async () => null,
+  }))
 })
 
 function createDispatcher() {

@@ -54,51 +54,46 @@ describe('git/add', () => {
       )
     })
 
-    it(
-      'stages only the conflicted file when its name contains pathspec magic',
-      { skip: process.platform === 'win32' },
-      async t => {
-        const repo = await setupConflictedRepoWithPathspecMagicFile(t)
-        const unrelatedFilePath = path.join(
-          repo.path,
-          'unrelated-untracked.txt'
-        )
-        await writeFile(unrelatedFilePath, 'untracked content\n')
+    it('stages only the conflicted file when its name contains pathspec magic', {
+      skip: process.platform === 'win32',
+    }, async t => {
+      const repo = await setupConflictedRepoWithPathspecMagicFile(t)
+      const unrelatedFilePath = path.join(repo.path, 'unrelated-untracked.txt')
+      await writeFile(unrelatedFilePath, 'untracked content\n')
 
-        const status = await getStatusOrThrow(repo)
-        const file = status.workingDirectory.files.find(
-          f => f.path === PathspecMagicFileName
-        )
-        assert.ok(file, 'Expected the pathspec-magic file to be conflicted')
+      const status = await getStatusOrThrow(repo)
+      const file = status.workingDirectory.files.find(
+        f => f.path === PathspecMagicFileName
+      )
+      assert.ok(file, 'Expected the pathspec-magic file to be conflicted')
 
-        await writeFile(
-          path.join(repo.path, PathspecMagicFileName),
-          'resolved content\n'
-        )
-        await rawGit(repo, ['--literal-pathspecs', 'add', '--', file.path])
+      await writeFile(
+        path.join(repo.path, PathspecMagicFileName),
+        'resolved content\n'
+      )
+      await rawGit(repo, ['--literal-pathspecs', 'add', '--', file.path])
 
-        const stagedFiles = await exec(
-          ['diff', '--cached', '--name-only', '-z'],
-          repo.path
-        )
-        assert.deepEqual(stagedFiles.stdout.split('\0').filter(Boolean), [
-          PathspecMagicFileName,
-        ])
+      const stagedFiles = await exec(
+        ['diff', '--cached', '--name-only', '-z'],
+        repo.path
+      )
+      assert.deepEqual(stagedFiles.stdout.split('\0').filter(Boolean), [
+        PathspecMagicFileName,
+      ])
 
-        await exec(['commit', '-m', 'Resolve conflict'], repo.path)
-        const committedFiles = await exec(
-          ['show', '--pretty=format:', '--name-only', '-z', 'HEAD'],
-          repo.path
-        )
-        assert.deepEqual(committedFiles.stdout.split('\0').filter(Boolean), [
-          PathspecMagicFileName,
-        ])
-        assert.equal(await pathExists(unrelatedFilePath), true)
-        assert.equal(
-          await readFile(unrelatedFilePath, 'utf8'),
-          'untracked content\n'
-        )
-      }
-    )
+      await exec(['commit', '-m', 'Resolve conflict'], repo.path)
+      const committedFiles = await exec(
+        ['show', '--pretty=format:', '--name-only', '-z', 'HEAD'],
+        repo.path
+      )
+      assert.deepEqual(committedFiles.stdout.split('\0').filter(Boolean), [
+        PathspecMagicFileName,
+      ])
+      assert.equal(await pathExists(unrelatedFilePath), true)
+      assert.equal(
+        await readFile(unrelatedFilePath, 'utf8'),
+        'untracked content\n'
+      )
+    })
   })
 })

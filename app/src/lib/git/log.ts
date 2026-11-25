@@ -36,13 +36,13 @@ function mapSubmoduleStatusFileModes(
         modifiedChanges: false,
       }
     : (srcMode === SubmoduleFileMode && status === 'D') ||
-      (dstMode === SubmoduleFileMode && status === 'A')
-    ? {
-        commitChanged: false,
-        untrackedChanges: false,
-        modifiedChanges: false,
-      }
-    : undefined
+        (dstMode === SubmoduleFileMode && status === 'A')
+      ? {
+          commitChanged: false,
+          untrackedChanges: false,
+          modifiedChanges: false,
+        }
+      : undefined
 }
 
 /**
@@ -120,18 +120,18 @@ const isCopyOrRename = (
  * Get the repository's commits using `revisionRange` and limited to `limit`
  */
 const commitLogParser = createLogParser({
-    sha: '%H', // SHA
-    shortSha: '%h', // short SHA
-    summary: '%s', // summary
-    body: '%b', // body
-    // author identity string, matching format of GIT_AUTHOR_IDENT.
-    //   author name <author email> <author date>
-    // author date format dependent on --date arg, should be raw
-    author: '%an <%ae> %ad',
-    committer: '%cn <%ce> %cd',
-    parents: '%P', // parent SHAs,
-    trailers: '%(trailers:unfold,only)',
-    refs: '%D',
+  sha: '%H', // SHA
+  shortSha: '%h', // short SHA
+  summary: '%s', // summary
+  body: '%b', // body
+  // author identity string, matching format of GIT_AUTHOR_IDENT.
+  //   author name <author email> <author date>
+  // author date format dependent on --date arg, should be raw
+  author: '%an <%ae> %ad',
+  committer: '%cn <%ce> %cd',
+  parents: '%P', // parent SHAs,
+  trailers: '%(trailers:unfold,only)',
+  refs: '%D',
 })
 
 export async function getCommits(
@@ -142,16 +142,31 @@ export async function getCommits(
   additionalArgs: ReadonlyArray<string> = []
 ): Promise<ReadonlyArray<Commit>> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const firstParent = additionalArgs.length === 1 && additionalArgs[0] === '--first-parent'
-    const excludeRemotes = additionalArgs.length === 2 && additionalArgs[0] === '--not' && additionalArgs[1] === '--remotes'
+    const firstParent =
+      additionalArgs.length === 1 && additionalArgs[0] === '--first-parent'
+    const excludeRemotes =
+      additionalArgs.length === 2 &&
+      additionalArgs[0] === '--not' &&
+      additionalArgs[1] === '--remotes'
     if (additionalArgs.length !== 0 && !firstParent && !excludeRemotes) {
       throw new Error('Unsupported history options for the Rust backend')
     }
-    const read = () => backend().repositoryRendererHistory(repository.path, revisionRange, limit, skip, firstParent, excludeRemotes)
-    const encoded = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
-    return encoded === null ? [] : parseCommitLog(Buffer.from(encoded, 'base64'))
+    const read = () =>
+      backend().repositoryRendererHistory(
+        repository.path,
+        revisionRange,
+        limit,
+        skip,
+        firstParent,
+        excludeRemotes
+      )
+    const encoded =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+    return encoded === null
+      ? []
+      : parseCommitLog(Buffer.from(encoded, 'base64'))
   }
   const { formatArgs } = commitLogParser
 
@@ -249,11 +264,11 @@ export async function getChangedFiles(
 ): Promise<IChangesetData> {
   const read = () =>
     backend().repositoryRendererCommitChanges(repository.path, sha)
-  const stdout = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-    : await read()
+  const stdout =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
   return parseRawLogWithNumstat(stdout, sha, `${sha}^`)
-
 }
 
 /**
@@ -351,12 +366,12 @@ export async function getCommit(
   ref: string
 ): Promise<Commit | null> {
   const read = () => backend().repositoryRendererCommit(repository.path, ref)
-  const encoded = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-    : await read()
+  const encoded =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
   if (encoded === null) return null
   return parseCommitLog(Buffer.from(encoded, 'base64'))[0] ?? null
-
 }
 
 /** Get the author identity for the given shas */
@@ -376,9 +391,10 @@ export async function getAuthors(repository: Repository, shas: string[]) {
     batch = []
     size = 0
     const read = () => backend().repositoryAuthors(repository.path, revisions)
-    const entries = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+    const entries =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     for (const entry of entries) {
       if (!seen.has(entry.oid)) {
         seen.add(entry.oid)
@@ -396,5 +412,4 @@ export async function getAuthors(repository: Repository, shas: string[]) {
   await flush()
   assert.equal(authors.length, shas.length, 'Commit to author mismatch')
   return authors
-
 }

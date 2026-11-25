@@ -81,15 +81,28 @@ describe('browser Windows path compatibility', () => {
       )
     }
     const namespaced = '\\\\.\\CON:/file'
-    expect(browserWin32.normalize(namespaced)).toBe(nodeWin32.normalize(namespaced))
-    expect(browserWin32.join('C:\\base', namespaced)).toBe(nodeWin32.join('C:\\base', namespaced))
-    expect(browserWin32.resolve('C:\\base', namespaced)).toBe(nodeWin32.resolve('C:\\base', namespaced))
+    expect(browserWin32.normalize(namespaced)).toBe(
+      nodeWin32.normalize(namespaced)
+    )
+    expect(browserWin32.join('C:\\base', namespaced)).toBe(
+      nodeWin32.join('C:\\base', namespaced)
+    )
+    expect(browserWin32.resolve('C:\\base', namespaced)).toBe(
+      nodeWin32.resolve('C:\\base', namespaced)
+    )
   })
 
   it('matches Node across Windows roots, separators, dots and suffixes', () => {
     const roots = [
-      '', 'C:', 'C:\\', 'D:/', '/', '\\',
-      '\\\\server\\share', '\\\\server\\share\\', '//server/share/',
+      '',
+      'C:',
+      'C:\\',
+      'D:/',
+      '/',
+      '\\',
+      '\\\\server\\share',
+      '\\\\server\\share\\',
+      '//server/share/',
       '\\\\?\\C:\\',
     ]
     const parts = ['', 'a', '.', '..', '...', '.foo', 'a.', 'a..', 'file.ext']
@@ -99,13 +112,20 @@ describe('browser Windows path compatibility', () => {
         for (const separator of separators) {
           for (const right of parts) {
             const path = root + left + separator + right
-            expect(browserWin32.basename(path), path).toBe(nodeWin32.basename(path))
-            expect(browserWin32.extname(path), path).toBe(nodeWin32.extname(path))
-            expect(browserWin32.parse(path), path).toEqual(nodeWin32.parse(path))
+            expect(browserWin32.basename(path), path).toBe(
+              nodeWin32.basename(path)
+            )
+            expect(browserWin32.extname(path), path).toBe(
+              nodeWin32.extname(path)
+            )
+            expect(browserWin32.parse(path), path).toEqual(
+              nodeWin32.parse(path)
+            )
             for (const suffix of ['', left, right, '.', 'a', 'file.ext']) {
-              expect(browserWin32.basename(path, suffix), `${path} / ${suffix}`).toBe(
-                nodeWin32.basename(path, suffix)
-              )
+              expect(
+                browserWin32.basename(path, suffix),
+                `${path} / ${suffix}`
+              ).toBe(nodeWin32.basename(path, suffix))
             }
           }
         }

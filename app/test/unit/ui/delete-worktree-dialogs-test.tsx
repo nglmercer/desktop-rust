@@ -7,7 +7,12 @@ import { Repository } from '../../../src/models/repository'
 import { IDeleteWorktreeOptions } from '../../../src/models/worktree'
 import { DeleteWorktreeDialog } from '../../../src/ui/worktrees/delete-worktree-dialog'
 import { DeleteWorktreeFailedDialog } from '../../../src/ui/worktrees/delete-worktree-failed-dialog'
-import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '../../helpers/ui/vitest-render'
 
 vi.mock('keytar', () => ({ default: {} }))
 vi.mock('react-confetti', () => ({ default: () => null }))

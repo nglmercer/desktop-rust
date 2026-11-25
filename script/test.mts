@@ -9,10 +9,6 @@ import {
   filterByGitCapabilities,
 } from './test-capabilities'
 
-function reporter(r: string): string[] {
-  return ['--test-reporter', r, '--test-reporter-destination', 'stdout']
-}
-
 // pnpm forwards the conventional option separator, while npm removes it.
 // It must not be passed through as a Node runtime flag.
 const cliArgs = process.argv.slice(2).filter(a => a !== '--')
@@ -30,7 +26,7 @@ const discovered =
 const capableGit = createCapableGitDirectory()
 if (capableGit !== undefined) {
   console.warn(
-    `Using ${capableGit.git} for tests: the configured Git (${process.env.LOCAL_GIT_DIRECTORY ?? 'dugite default'}) lacks required behavior`
+    `Using ${capableGit.git} for tests through a temporary dugite-compatible Git layout`
   )
   process.env.LOCAL_GIT_DIRECTORY = capableGit.directory
   process.on('exit', () => {
@@ -47,33 +43,15 @@ for (const { file, reason } of skipped) {
   console.warn(`SKIPPED ${file}: ${reason}`)
 }
 
-// Suites move to Vitest one at a time; the rest still require Node's module
-// mocking setup. Keep explicit routing until those suites have been migrated.
-const suitePaths: unknown = JSON.parse(
-  await readFile(join(projectRoot, 'vitest-suites.json'), 'utf8')
-)
-if (
-  !Array.isArray(suitePaths) ||
-  !suitePaths.every(path => typeof path === 'string')
-) {
-  throw new Error('vitest-suites.json must contain an array of paths')
-}
-const vitestSuites = new Set(suitePaths.map(file => resolve(projectRoot, file)))
-const vitestFiles = files.filter(file => vitestSuites.has(resolve(file)))
-const nodeFiles = files.filter(file => !vitestSuites.has(resolve(file)))
 const vitestArgs: string[] = []
-if (vitestFiles.length > 0) {
-  for (const option of switchArgs) {
-    if (option.startsWith('--test-name-pattern=')) {
-      vitestArgs.push(
-        '--testNamePattern',
-        option.slice('--test-name-pattern='.length)
-      )
-    } else {
-      throw new Error(
-        `Unsupported option for migrated Vitest suites: ${option}`
-      )
-    }
+for (const option of switchArgs) {
+  if (option.startsWith('--test-name-pattern=')) {
+    vitestArgs.push(
+      '--testNamePattern',
+      option.slice('--test-name-pattern='.length)
+    )
+  } else {
+    throw new Error(`Unsupported Vitest option: ${option}`)
   }
 }
 
@@ -81,20 +59,6 @@ if (vitestFiles.length > 0) {
 // existing environment variables and we need to override some of them.
 const testEnv = parseEnv(await readFile(join(projectRoot, '.test.env'), 'utf8'))
 Object.assign(process.env, testEnv)
-
-const args = [
-  '--disable-warning=ExperimentalWarning',
-  '--experimental-test-module-mocks',
-  // Compile to CommonJS like the previous loader: these suites patch built-in
-  // modules through their default export objects.
-  ...['--require', './script/ts-register.cjs'],
-  ...['--require', './app/test/globals.cjs'],
-  ...switchArgs,
-  '--test',
-  ...reporter('spec'),
-  ...(process.env.GITHUB_ACTIONS ? reporter('node-test-github-reporter') : []),
-  ...nodeFiles,
-]
 
 function run(command: string, commandArgs: readonly string[]): Promise<number> {
   return new Promise((resolveRun, rejectRun) => {
@@ -110,7 +74,7 @@ function run(command: string, commandArgs: readonly string[]): Promise<number> {
 // The Vitest suites run against the real Rust backend by default (see
 // rust/ROADMAP.md, R1/R2): build the server they start, unless the caller opted
 // out with DESKTOP_TEST_RUST_BACKEND=0 or this platform is not validated yet.
-if (vitestFiles.length > 0 && process.env.DESKTOP_TEST_RUST_BACKEND !== '0') {
+if (files.length > 0 && process.env.DESKTOP_TEST_RUST_BACKEND !== '0') {
   if (process.platform === 'linux') {
     const built = await run('cargo', [
       'build',
@@ -129,16 +93,14 @@ if (vitestFiles.length > 0 && process.env.DESKTOP_TEST_RUST_BACKEND !== '0') {
   }
 }
 
-const nodeResult = nodeFiles.length > 0 ? await run(process.execPath, args) : 0
-const vitestResult =
-  vitestFiles.length > 0
+process.exitCode =
+  files.length > 0
     ? await run(process.execPath, [
         'node_modules/vitest/vitest.mjs',
         'run',
         '--config',
         'vitest.config.ts',
         ...vitestArgs,
-        ...vitestFiles,
+        ...files,
       ])
     : 0
-process.exitCode = nodeResult || vitestResult

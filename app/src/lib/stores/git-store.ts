@@ -785,7 +785,9 @@ export class GitStore extends BaseStore {
     }
 
     if (status.currentTip !== expectedOid) {
-      throw new Error('HEAD changed since the commit was selected; refresh before undoing it')
+      throw new Error(
+        'HEAD changed since the commit was selected; refresh before undoing it'
+      )
     }
 
     const paths = status.workingDirectory.files
@@ -817,15 +819,21 @@ export class GitStore extends BaseStore {
     // For an initial commit, just delete the reference but leave HEAD. This
     // will make the branch unborn again.
     const tip = this.tip
-    const expected = tip.kind === TipState.Valid
-      ? { head: commit.sha, branch: tip.branch.ref, undo: true }
-      : tip.kind === TipState.Detached
-      ? { head: commit.sha, branch: null, undo: true }
-      : undefined
+    const expected =
+      tip.kind === TipState.Valid
+        ? { head: commit.sha, branch: tip.branch.ref, undo: true }
+        : tip.kind === TipState.Detached
+          ? { head: commit.sha, branch: null, undo: true }
+          : undefined
     const success = await this.performFailableOperation(() =>
       commit.parentSHAs.length === 0
         ? this.undoFirstCommit(this.repository, commit.sha)
-        : reset(this.repository, GitResetMode.Mixed, commit.parentSHAs[0], expected)
+        : reset(
+            this.repository,
+            GitResetMode.Mixed,
+            commit.parentSHAs[0],
+            expected
+          )
     )
 
     if (success === undefined) {
@@ -1642,7 +1650,9 @@ export class GitStore extends BaseStore {
         const result = await backend().repositoryLastFetch(this.repository.path)
         if (result.kind === 'fetched') this._lastFetched = new Date(result.time)
         else if (result.kind === 'unavailable') this._lastFetched = null
-      } catch { /* A failed read does not establish that FETCH_HEAD is absent. */ }
+      } catch {
+        /* A failed read does not establish that FETCH_HEAD is absent. */
+      }
       this.emitUpdate()
       return this._lastFetched
     }
@@ -1686,22 +1696,27 @@ export class GitStore extends BaseStore {
 
     return this.performFailableOperation(
       () =>
-        merge(this.repository, branch.name, {
-          ...options,
-          onHookFailure:
-            onHookFailure === undefined
-              ? undefined
-              : (hookName, terminalOutput) =>
-                  onHookFailure(hookName, terminalOutput).then(result => {
-                    aborted = result === 'abort'
-                    return result
-                  }),
-        }, {
-          sourceRef: branch.ref,
-          sourceHead: branch.tip.sha,
-          currentRef: tip.branch.ref,
-          currentHead: tip.branch.tip.sha,
-        }).catch(e => (aborted ? MergeResult.Failed : Promise.reject(e))),
+        merge(
+          this.repository,
+          branch.name,
+          {
+            ...options,
+            onHookFailure:
+              onHookFailure === undefined
+                ? undefined
+                : (hookName, terminalOutput) =>
+                    onHookFailure(hookName, terminalOutput).then(result => {
+                      aborted = result === 'abort'
+                      return result
+                    }),
+          },
+          {
+            sourceRef: branch.ref,
+            sourceHead: branch.tip.sha,
+            currentRef: tip.branch.ref,
+            currentHead: tip.branch.tip.sha,
+          }
+        ).catch(e => (aborted ? MergeResult.Failed : Promise.reject(e))),
       {
         gitContext: {
           kind: 'merge',
@@ -1853,13 +1868,20 @@ export class GitStore extends BaseStore {
     progressCallback?: (fetchProgress: IRevertProgress) => void
   ): Promise<void> {
     const tip = this.tip
-    const expected = tip.kind === TipState.Valid
-      ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
-      : tip.kind === TipState.Detached
-      ? { head: tip.currentSha, branch: null }
-      : undefined
+    const expected =
+      tip.kind === TipState.Valid
+        ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
+        : tip.kind === TipState.Detached
+          ? { head: tip.currentSha, branch: null }
+          : undefined
     await this.performFailableOperation(() =>
-      revertCommit(repository, commit, this.currentRemote, progressCallback, expected)
+      revertCommit(
+        repository,
+        commit,
+        this.currentRemote,
+        progressCallback,
+        expected
+      )
     )
 
     this.emitUpdate()

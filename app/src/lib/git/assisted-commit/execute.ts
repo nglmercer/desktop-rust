@@ -831,13 +831,13 @@ export async function executeAssistedCommitPlan(
       allErrors.length > 0
         ? 'recovery-failed'
         : error instanceof AssistedCommitError
-        ? error.code
-        : 'commit-failed',
+          ? error.code
+          : 'commit-failed',
       allErrors.length > 0
         ? 'Assisted commit interrupted; external interference or cleanup failure prevented complete recovery'
         : error instanceof Error
-        ? error.message
-        : 'Assisted commit failed',
+          ? error.message
+          : 'Assisted commit failed',
       { cause: error, recovery: fullRecovery }
     )
   }

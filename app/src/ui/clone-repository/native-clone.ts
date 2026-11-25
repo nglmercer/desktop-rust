@@ -1,4 +1,8 @@
-import { backend, BackendError, type FetchProgressChunk } from '../../backend/client'
+import {
+  backend,
+  BackendError,
+  type FetchProgressChunk,
+} from '../../backend/client'
 import { isRecord } from '../../lib/is-record'
 import { getHTMLURL } from '../../lib/api'
 import {
@@ -49,9 +53,14 @@ export async function listNativeCloneRecoveries(): Promise<
   ReadonlyArray<INativeCloneRecovery>
 > {
   const client = backend()
-  const result = client.transportKind === 'wry'
-    ? await client.request('git_info', { operation: { type: 'list_clone_recoveries' } })
-    : await client.request('list_clone_recoveries', { report_recovery_status: true })
+  const result =
+    client.transportKind === 'wry'
+      ? await client.request('git_info', {
+          operation: { type: 'list_clone_recoveries' },
+        })
+      : await client.request('list_clone_recoveries', {
+          report_recovery_status: true,
+        })
   if (!Array.isArray(result)) {
     throw new Error('Unable to read clone recovery history.')
   }
@@ -112,7 +121,13 @@ export async function nativeClone(
     const canonical = await canonicalMutationPath(path)
     return withRepositoryGitResourceMutation([canonical], async () => {
       try {
-        return await nativeCloneReserved(url, path, account, defaultBranch, onProgress)
+        return await nativeCloneReserved(
+          url,
+          path,
+          account,
+          defaultBranch,
+          onProgress
+        )
       } catch (error) {
         retainUncertainCloneResources(error, [path, canonical])
         throw error
@@ -122,10 +137,22 @@ export async function nativeClone(
 }
 
 /** A lost transport cannot confirm that the host has stopped mutating files. */
-function retainUncertainCloneResources(error: unknown, paths: ReadonlyArray<string>): void {
-  if (error instanceof BackendError &&
-      (['disconnected', 'protocol', 'unauthorized', 'cancelled', 'ETIMEDOUT', 'timeout'].includes(error.code) ||
-        error.message.startsWith('IPC timeout:'))) {
+function retainUncertainCloneResources(
+  error: unknown,
+  paths: ReadonlyArray<string>
+): void {
+  if (
+    error instanceof BackendError &&
+    ([
+      'disconnected',
+      'protocol',
+      'unauthorized',
+      'cancelled',
+      'ETIMEDOUT',
+      'timeout',
+    ].includes(error.code) ||
+      error.message.startsWith('IPC timeout:'))
+  ) {
     protectAssistedCommitResources(paths[0], paths)
     throw new Error(
       'Clone completion could not be confirmed. The destination is protected only in this session, and recovery is unavailable in this session. Inspect the destination and any staging directories.'
@@ -146,16 +173,21 @@ async function nativeCloneReserved(
 ): Promise<{ readonly path: string; readonly staging: string }> {
   const client = backend()
   const options = {
-      url,
-      path,
-      account,
-      default_branch: defaultBranch,
+    url,
+    path,
+    account,
+    default_branch: defaultBranch,
   }
   const result = await client.request(
     client.transportKind === 'wry' ? 'git_info' : 'clone_repository',
     client.transportKind === 'wry'
       ? { operation: { type: 'clone_selected', ...options } }
-      : { ...options, recursive: false, report_progress: true, report_retained_staging: true },
+      : {
+          ...options,
+          recursive: false,
+          report_progress: true,
+          report_retained_staging: true,
+        },
     {
       deadlineMs: 3_600_000,
       onProgress: chunk => {

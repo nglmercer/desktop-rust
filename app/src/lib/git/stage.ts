@@ -60,9 +60,19 @@ export async function stageManualConflictResolution(
     default:
       return assertNever(chosen, 'unaccounted for git status entry possibility')
   }
-  await withRepositoryGitOperation(repository.path, 'mutation', () =>
-    backend().repositoryResolveManualConflict(repository.path, file.path, choice, {
-      ours: status.entry.us !== GitStatusEntry.Deleted,
-      theirs: status.entry.them !== GitStatusEntry.Deleted,
-    }), true)
+  await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () =>
+      backend().repositoryResolveManualConflict(
+        repository.path,
+        file.path,
+        choice,
+        {
+          ours: status.entry.us !== GitStatusEntry.Deleted,
+          theirs: status.entry.them !== GitStatusEntry.Deleted,
+        }
+      ),
+    true
+  )
 }

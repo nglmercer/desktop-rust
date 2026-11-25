@@ -7,21 +7,20 @@ import { describe, expect, it } from 'vitest'
 const readonly = 'Property and state signatures should be read-only'
 const array = 'Prop and State arrays should be read only (ReadOnlyArray)'
 
-/** Run the installed Biome plugin against a real file. */
+/** Run the installed Oxlint plugin against a real file. */
 function lint(source: string, extension = 'tsx') {
   const root = resolve('.')
-  const dir = mkdtempSync(join(root, 'app/test/biome-readonly-'))
+  const dir = mkdtempSync(join(root, 'app/test/oxlint-readonly-'))
   try {
     const fixture = join(dir, `input.${extension}`)
     writeFileSync(fixture, source)
     const result = spawnSync(
       process.execPath,
       [
-        resolve('node_modules/@biomejs/biome/bin/biome'),
-        'lint',
-        '--config-path=biome.security.json',
+        resolve('node_modules/oxlint/bin/oxlint'),
+        '--config=.oxlint.security.json',
         fixture,
-        '--reporter=json',
+        '--format=json',
       ],
       { cwd: root, encoding: 'utf8' }
     )
@@ -32,18 +31,18 @@ function lint(source: string, extension = 'tsx') {
       diagnostics: Array<{
         severity: string
         message: string
-        location: { start: { line: number } }
+        labels: Array<{ span: { line: number } }>
       }>
     }
     return report.diagnostics
       .filter(item => item.severity === 'error')
-      .map(item => [item.location.start.line, item.message])
+      .map(item => [item.labels[0]?.span.line ?? 0, item.message])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
-describe('Biome react-readonly-props-and-state rule', () => {
+describe('Oxlint react-readonly-props-and-state rule', () => {
   it('reports both mutable signatures and mutable arrays in Props and State', () => {
     const source = `interface IProps {
   name: string
@@ -97,7 +96,7 @@ string>
   })
 
   it('allows suppressing this rule without hiding other security rules', () => {
-    const source = `// biome-ignore lint/plugin/reactReadonlyPropsAndState: legacy interface
+    const source = `// oxlint-disable-next-line desktop/react-readonly-props-and-state
 interface IProps { mutable: string }
 const value = Math.random()`
     expect(lint(source)).toEqual([

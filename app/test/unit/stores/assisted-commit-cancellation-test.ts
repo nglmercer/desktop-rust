@@ -18,35 +18,33 @@ import { writeFileSync } from 'fs'
 import { getWorkingDirectoryDiff } from '../../../src/lib/git/diff'
 
 describe('AppStore assisted commit cancellation', () => {
-  it(
-    'requires reselection after a newly introduced executable mode change during cancellation',
-    { skip: __WIN32__ },
-    async t => {
-      const source = await seed(t, { file: 'before\n' })
-      await writeFile(join(source.path, 'file'), 'selected\n')
-      const h = await createAssistedCommitRunHarness(t)
-      const repository = await h.register(source)
-      h.propose.mock.mockImplementation(async (_account, analysis) => {
-        await chmod(join(repository.path, 'file'), 0o755)
-        h.cancel(repository)
-        return wholeSelectionResponse(analysis)
-      })
-      await h.dispatcher.createCopilotAssistedCommits(
-        repository,
-        h.request(repository)
+  it('requires reselection after a newly introduced executable mode change during cancellation', {
+    skip: __WIN32__,
+  }, async t => {
+    const source = await seed(t, { file: 'before\n' })
+    await writeFile(join(source.path, 'file'), 'selected\n')
+    const h = await createAssistedCommitRunHarness(t)
+    const repository = await h.register(source)
+    h.propose.mock.mockImplementation(async (_account, analysis) => {
+      await chmod(join(repository.path, 'file'), 0o755)
+      h.cancel(repository)
+      return wholeSelectionResponse(analysis)
+    })
+    await h.dispatcher.createCopilotAssistedCommits(
+      repository,
+      h.request(repository)
+    )
+    const state = h.state(repository)
+    assert.ok(
+      state.changesState.workingDirectory.files.every(
+        file => file.selection.getSelectionType() === DiffSelectionType.None
       )
-      const state = h.state(repository)
-      assert.ok(
-        state.changesState.workingDirectory.files.every(
-          file => file.selection.getSelectionType() === DiffSelectionType.None
-        )
-      )
-      assert.ok(
-        state.changesState.assistedCommit.kind === 'error' &&
-          state.changesState.assistedCommit.selectionNeedsReview
-      )
-    }
-  )
+    )
+    assert.ok(
+      state.changesState.assistedCommit.kind === 'error' &&
+        state.changesState.assistedCommit.selectionNeedsReview
+    )
+  })
 
   it('registers consent cancellation before publishing awaiting-consent to reentrant observers', async t => {
     const source = await seed(t, { file: 'before\n' })

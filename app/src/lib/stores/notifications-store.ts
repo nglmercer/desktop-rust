@@ -166,9 +166,8 @@ export class NotificationsStore {
       return
     }
 
-    const pullRequests = await this.pullRequestCoordinator.getAllPullRequests(
-      repository
-    )
+    const pullRequests =
+      await this.pullRequestCoordinator.getAllPullRequests(repository)
     const pullRequest = pullRequests.find(
       pr => pr.pullRequestNumber === event.pull_request_number
     )
@@ -251,9 +250,8 @@ export class NotificationsStore {
       return
     }
 
-    const pullRequests = await this.pullRequestCoordinator.getAllPullRequests(
-      repository
-    )
+    const pullRequests =
+      await this.pullRequestCoordinator.getAllPullRequests(repository)
     const pullRequest = pullRequests.find(
       pr => pr.pullRequestNumber === event.pull_request_number
     )
@@ -339,9 +337,8 @@ export class NotificationsStore {
       return
     }
 
-    const pullRequests = await this.pullRequestCoordinator.getAllPullRequests(
-      repository
-    )
+    const pullRequests =
+      await this.pullRequestCoordinator.getAllPullRequests(repository)
     const pullRequest = pullRequests.find(
       pr => pr.pullRequestNumber === event.pull_request_number
     )

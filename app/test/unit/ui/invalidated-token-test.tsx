@@ -5,7 +5,12 @@ import { InvalidatedToken } from '../../../src/ui/invalidated-token/invalidated-
 import { Accounts } from '../../../src/ui/preferences/accounts'
 import { Account } from '../../../src/models/account'
 import { DialogStackContext } from '../../../src/ui/dialog/dialog'
-import { render, screen, fireEvent, waitFor } from '../../helpers/ui/vitest-render'
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from '../../helpers/ui/vitest-render'
 
 describe('Session recovery dialog', () => {
   let view: ReturnType<typeof render> | undefined

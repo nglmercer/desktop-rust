@@ -34,13 +34,27 @@ export async function getLargeFilePaths(
       const paths = batch
       batch = []
       const read = () => backend().repositoryLargeFiles(repository.path, paths)
-      const large = backend().transportKind === 'wry'
-        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-        : await read()
-      paths.forEach((path, index) => { if (large[index]) fileNames.push(path) })
+      const large =
+        backend().transportKind === 'wry'
+          ? await withRepositoryGitOperation(
+              repository.path,
+              'read',
+              read,
+              true
+            )
+          : await read()
+      paths.forEach((path, index) => {
+        if (large[index]) fileNames.push(path)
+      })
     }
     for (const file of includedFiles) {
-      if (batch.length >= 1000 || new TextEncoder().encode(JSON.stringify({ paths: [...batch, file.path] })).length > 60_000) await review()
+      if (
+        batch.length >= 1000 ||
+        new TextEncoder().encode(
+          JSON.stringify({ paths: [...batch, file.path] })
+        ).length > 60_000
+      )
+        await review()
       batch.push(file.path)
     }
     await review()

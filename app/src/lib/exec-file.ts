@@ -1,7 +1,4 @@
-import {
-  execFile as execFileOrig,
-  type ExecFileOptions,
-} from 'child_process'
+import { execFile as execFileOrig, type ExecFileOptions } from 'child_process'
 
 /**
  * A version of execFile which returns a Promise rather than the traditional

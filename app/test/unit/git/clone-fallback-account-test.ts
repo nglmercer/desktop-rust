@@ -21,7 +21,9 @@ vi.mock('../../../src/lib/git/core', async importOriginal => ({
   },
 }))
 vi.mock('../../../src/lib/git/environment', async importOriginal => ({
-  ...(await importOriginal<typeof import('../../../src/lib/git/environment')>()),
+  ...(await importOriginal<
+    typeof import('../../../src/lib/git/environment')
+  >()),
   envForRemoteOperation: async () => ({}),
 }))
 

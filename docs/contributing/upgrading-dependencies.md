@@ -111,9 +111,18 @@ specific set of dependencies - this will make reviews easier to perform.
 
 ## TypeScript upgrades
 
-The application, build scripts, custom ESLint rules, and native modules use
-TypeScript 6. Keep the compiler versions in the root package and the three
-TypeScript-based packages under `vendor/` aligned, including their lockfiles.
+TypeScript 7 is the command-line type checker through the `@typescript/native`
+package alias. TypeScript 6 remains installed as `typescript` only for the
+legacy compiler API used by `script/ts-register.cjs`, native-module emission
+tests, usage-data introspection, and the branch-rules oracle.
+
+When upgrading either compiler:
+
+- keep the root aliases and the TypeScript-based packages under `vendor/`
+  intentionally aligned with the API they consume;
+- preserve strictness and library declaration checking;
+- update incompatible dependencies or callers rather than disabling checks;
+- do not add new consumers of the TypeScript 6 compiler API.
 
 Vite compiles the application and syntax-highlighting worker using `bundler`
 module resolution. Build scripts use `nodenext`, and native modules use `node16`
@@ -122,35 +131,32 @@ explicitly. Use public package exports when importing types; for SDK types that
 are not exported directly, derive them from the public API instead of importing
 private implementation paths.
 
-Compiler upgrades must preserve strictness and library declaration checking.
-Update incompatible dependencies or fix their callers rather than disabling
-checks or suppressing deprecation diagnostics. Keep the TypeScript ESLint parser,
-plugin, and utilities on a release that supports the installed compiler.
-
-Validate all compiler projects, development and production builds, the unit and
-script suites, and custom ESLint rule tests:
+Validate all compiler projects, renderer builds, unit and script suites, and
+custom oxlint rule tests:
 
 ```shell
-npm exec -- tsc --noEmit
-npm run compile:script
-npm exec -- tsc -p app/src/highlighter --noEmit
-npm run check:eslint
-npm run compile:dev
-npm run compile:prod
-npm test
-npm run test:script
-npm run test:eslint
-npm run lint
+pnpm check:types
+pnpm compile:script
+pnpm exec tsc -p app/src/highlighter --noEmit
+pnpm vite:build
+pnpm test
+pnpm test:script
+pnpm test:oxlint
+pnpm lint
 ```
 
-Also run `npm run build` in each TypeScript-based native module and `npm test` in
-`vendor/desktop-trampoline`.
+For compiler-API compatibility, additionally run the branch-rules oracle
+typecheck in `rust/tests/branch-rules-oracle` and the script tests that exercise
+`script/ts-register.cjs` and native-module output.
+
+Also run the native-module build/test commands for each TypeScript-based package
+under `vendor/` when their compiler or emitted module format changes.
 
 Check emitted paths, not only successful compilation: a `rootDir` change can
 move output away from a package's published entry points. For example,
 `desktop-notifications` uses `lib/` as its source root to emit `dist/index.js`,
-not `dist/lib/index.js`. The native-module output tests in `npm run test:script`
-capture fresh compiler output in memory so stale build files cannot hide this
+not `dist/lib/index.js`. The native-module output tests in `pnpm test:script`
+capture compiler output in memory so stale build files cannot hide this
 regression.
 
 ## DefinitelyTyped dependencies

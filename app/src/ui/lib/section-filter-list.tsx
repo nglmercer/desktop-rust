@@ -203,7 +203,7 @@ interface IFilterListState<T extends IFilterListItem, GroupIdentifier> {
 /** A List which includes the ability to filter based on its contents. */
 export class SectionFilterList<
   T extends IFilterListItem,
-  GroupIdentifier = string
+  GroupIdentifier = string,
 > extends React.Component<
   ISectionFilterListProps<T, GroupIdentifier>,
   IFilterListState<T, GroupIdentifier>

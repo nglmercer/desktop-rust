@@ -1,5 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
+  copyFileSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -121,28 +123,43 @@ export function filterByGitCapabilities(
 }
 
 /**
- * When the configured Git lacks a capability the suites need but the Git on
- * PATH has it, describe that Git in the layout dugite expects
- * (`bin/git`, `libexec/git-core`, `share`) so the suites can run against it.
- * Returns the directory to use as LOCAL_GIT_DIRECTORY, or undefined when the
- * configured Git is already capable or no better Git exists. POSIX only.
+ * Describe the Git on PATH in the layout dugite expects (`bin/git`,
+ * `libexec/git-core`, `share`). This is required because dependencies are
+ * installed with install scripts disabled, so dugite's embedded Git download is
+ * not present. When a caller explicitly configured LOCAL_GIT_DIRECTORY, keep it
+ * unless it lacks a capability that the system Git can provide.
  */
 export function createCapableGitDirectory(
   env: NodeJS.ProcessEnv = process.env
 ): { directory: string; git: string } | undefined {
-  if (process.platform === 'win32') {
+  const configuredDirectory = env.LOCAL_GIT_DIRECTORY
+  if (
+    configuredDirectory !== undefined &&
+    configuredDirectory !== '' &&
+    gitHasCapability('remote-url-reset', env)
+  ) {
     return undefined
   }
-  if (gitHasCapability('remote-url-reset', env)) {
-    return undefined
+  const pathEnv = {
+    ...process.env,
+    ...env,
+    LOCAL_GIT_DIRECTORY: '',
   }
-  const pathEnv = { ...env, LOCAL_GIT_DIRECTORY: '' }
   let git: string
   let execPath: string
   try {
-    git = realpathSync(
-      execFileSync('which', ['git'], { encoding: 'utf8', env: pathEnv }).trim()
-    )
+    const locator = process.platform === 'win32' ? 'where' : 'which'
+    const located = execFileSync(locator, ['git'], {
+      encoding: 'utf8',
+      env: pathEnv,
+    })
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0)[0]
+    if (located === undefined) {
+      return undefined
+    }
+    git = realpathSync(located)
     execPath = realpathSync(
       execFileSync(git, ['--exec-path'], {
         encoding: 'utf8',
@@ -152,22 +169,45 @@ export function createCapableGitDirectory(
   } catch {
     return undefined
   }
-  const prefix = dirname(dirname(git))
   const directory = mkdtempSync(join(tmpdir(), 'desktop-test-git-'))
+  if (process.platform === 'win32') {
+    // Dugite expects a Git-for-Windows layout whose runtime subdirectory name
+    // depends on the Node architecture. Link the system Git's actual runtime
+    // directory into that layout without copying the whole installation.
+    const runtime =
+      process.arch === 'x64'
+        ? 'ucrt64'
+        : process.arch === 'arm64'
+          ? 'clangarm64'
+          : 'mingw32'
+    const runtimeRoot = dirname(dirname(execPath))
+    const runtimeLink = join(directory, runtime)
+    mkdirSync(join(directory, 'cmd'))
+    mkdirSync(join(runtimeLink, 'libexec'), { recursive: true })
+    mkdirSync(join(runtimeLink, 'usr'), { recursive: true })
+    try {
+      linkSync(git, join(directory, 'cmd', 'git.exe'))
+    } catch {
+      copyFileSync(git, join(directory, 'cmd', 'git.exe'))
+    }
+    symlinkSync(execPath, join(runtimeLink, 'libexec', 'git-core'), 'junction')
+    symlinkSync(join(runtimeRoot, 'bin'), join(runtimeLink, 'bin'), 'junction')
+    symlinkSync(
+      join(runtimeRoot, 'usr', 'bin'),
+      join(runtimeLink, 'usr', 'bin'),
+      'junction'
+    )
+    return { directory, git }
+  }
+  const prefix = dirname(dirname(git))
   mkdirSync(join(directory, 'bin'))
   mkdirSync(join(directory, 'libexec'))
   symlinkSync(git, join(directory, 'bin', 'git'))
   symlinkSync(execPath, join(directory, 'libexec', 'git-core'))
   symlinkSync(join(prefix, 'share'), join(directory, 'share'))
-  if (
-    !gitHasCapability('remote-url-reset', {
-      ...env,
-      LOCAL_GIT_DIRECTORY: directory,
-    })
-  ) {
-    rmSync(directory, { recursive: true, force: true })
-    return undefined
-  }
+  // Even when this Git lacks optional capabilities, returning the layout is
+  // necessary: it gives dugite a real executable and the capability filter can
+  // then skip only the suites that need behavior this Git does not provide.
   return { directory, git }
 }
 

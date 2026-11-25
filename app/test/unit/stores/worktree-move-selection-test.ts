@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Repository, getRepositoryStateKey } from '../../../src/models/repository'
+import {
+  Repository,
+  getRepositoryStateKey,
+} from '../../../src/models/repository'
 import { AppStore } from '../../../src/lib/stores/app-store'
 
 const mocks = vi.hoisted(() => ({ move: vi.fn(), repositoryType: vi.fn() }))
 vi.mock('keytar', () => ({ default: {} }))
-vi.mock('../../../src/lib/custom-integration', () => ({ TargetPathArgument: '$PATH', isValidCustomIntegration: vi.fn() }))
+vi.mock('../../../src/lib/custom-integration', () => ({
+  TargetPathArgument: '$PATH',
+  isValidCustomIntegration: vi.fn(),
+}))
 vi.mock('../../../src/lib/git', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/lib/git')>()),
   moveWorktree: mocks.move,
@@ -29,12 +35,18 @@ describe('moving the selected worktree', () => {
     const oldRepo = new Repository('/old', 1, null, false)
     const mainRepo = new Repository('/main', 1, null, false)
     let finish!: (value: unknown) => void
-    mocks.repositoryType.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    mocks.repositoryType.mockReturnValueOnce(
+      new Promise(resolve => {
+        finish = resolve
+      })
+    )
     const store = Object.create(AppStore.prototype)
     store.repositorySelectionRevision = 1
     store.movingWorktrees = new Set()
     store.findMainWorktreePath = vi.fn().mockResolvedValue('/main')
-    store.repositoriesStore = { switchWorktree: vi.fn().mockResolvedValue({ repository: mainRepo }) }
+    store.repositoriesStore = {
+      switchWorktree: vi.fn().mockResolvedValue({ repository: mainRepo }),
+    }
     store.repositoryStateCache = { seedFromWorktree: vi.fn() }
     store.adoptRepository = vi.fn()
     store._selectRepository = vi.fn()
@@ -52,22 +64,39 @@ describe('moving the selected worktree', () => {
     mocks.move.mockResolvedValueOnce(undefined)
     const store = Object.create(AppStore.prototype)
     store.repositories = [main, oldRepo]
-    store.repositoriesStore = { switchWorktree: vi.fn().mockResolvedValue({ repository: movedRepo, existingRepository: false }) }
+    store.repositoriesStore = {
+      switchWorktree: vi.fn().mockResolvedValue({
+        repository: movedRepo,
+        existingRepository: false,
+      }),
+    }
     store.repositoryStateCache = { transferState: vi.fn() }
     store.gitStoreCache = { transfer: vi.fn() }
     store.adoptRepository = vi.fn()
     store._refreshWorktrees = vi.fn().mockResolvedValue(undefined)
     await store.moveWorktreeCore(main, '/old', '/new')
-    expect(store.repositoriesStore.switchWorktree).toHaveBeenCalledWith(oldRepo, '/new')
-    expect(store.repositoryStateCache.transferState).toHaveBeenCalledWith(oldRepo, movedRepo)
+    expect(store.repositoriesStore.switchWorktree).toHaveBeenCalledWith(
+      oldRepo,
+      '/new'
+    )
+    expect(store.repositoryStateCache.transferState).toHaveBeenCalledWith(
+      oldRepo,
+      movedRepo
+    )
   })
 
   it('rejects a separately saved destination before moving', async () => {
     const main = new Repository('/main', 1, null, false)
     const store = Object.create(AppStore.prototype)
-    store.repositories = [main, new Repository('/old', 2, null, false), new Repository('/new', 3, null, false)]
+    store.repositories = [
+      main,
+      new Repository('/old', 2, null, false),
+      new Repository('/new', 3, null, false),
+    ]
     mocks.move.mockClear()
-    await expect(store.moveWorktreeCore(main, '/old', '/new')).rejects.toThrow('already saved')
+    await expect(store.moveWorktreeCore(main, '/old', '/new')).rejects.toThrow(
+      'already saved'
+    )
     expect(mocks.move).not.toHaveBeenCalled()
   })
 
@@ -77,8 +106,16 @@ describe('moving the selected worktree', () => {
     const store = Object.create(AppStore.prototype)
     store.repositorySelectionRevision = 1
     store.selectedRepository = oldRepo
-    store.repositoriesStore = { switchWorktree: vi.fn().mockRejectedValue(new Error('database unavailable')) }
-    await expect(store.moveCurrentWorktree(oldRepo, '/old', '/new')).rejects.toThrow('worktree moved, but its saved repository could not be updated')
+    store.repositoriesStore = {
+      switchWorktree: vi
+        .fn()
+        .mockRejectedValue(new Error('database unavailable')),
+    }
+    await expect(
+      store.moveCurrentWorktree(oldRepo, '/old', '/new')
+    ).rejects.toThrow(
+      'worktree moved, but its saved repository could not be updated'
+    )
   })
   it('does not auto-select a moved repository while its saved path is being updated', () => {
     const oldRepo = new Repository('/old', 1, null, false)
@@ -91,29 +128,43 @@ describe('moving the selected worktree', () => {
     store.updateRepositorySelectionAfterRepositoriesChanged()
     expect(store._selectRepository).not.toHaveBeenCalled()
   })
-  it.each([true, false])('follows the moved path only if selection stays current: %s', async changeSelection => {
-    const oldRepo = new Repository('/old', 1, null, false)
-    const movedRepo = new Repository('/new', 1, null, false)
-    const otherRepo = new Repository('/other', 2, null, false)
-    let finish!: () => void
-    mocks.move.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
-    const store = Object.create(AppStore.prototype)
-    store.repositorySelectionRevision = 1
-    store.selectedRepository = oldRepo
-    store.repositoriesStore = { switchWorktree: vi.fn().mockResolvedValue({ repository: movedRepo }) }
-    store.repositoryStateCache = { transferState: vi.fn() }
-    store.gitStoreCache = { transfer: vi.fn() }
-    store.adoptRepository = vi.fn()
-    store._selectRepository = vi.fn().mockResolvedValue(movedRepo)
-    store._refreshWorktrees = vi.fn().mockResolvedValue(undefined)
-    const pending = store.moveCurrentWorktree(oldRepo, '/old', '/new')
-    if (changeSelection) {
-      store.repositorySelectionRevision++
-      store.selectedRepository = otherRepo
+  it.each([true, false])(
+    'follows the moved path only if selection stays current: %s',
+    async changeSelection => {
+      const oldRepo = new Repository('/old', 1, null, false)
+      const movedRepo = new Repository('/new', 1, null, false)
+      const otherRepo = new Repository('/other', 2, null, false)
+      let finish!: () => void
+      mocks.move.mockReturnValueOnce(
+        new Promise<void>(resolve => {
+          finish = resolve
+        })
+      )
+      const store = Object.create(AppStore.prototype)
+      store.repositorySelectionRevision = 1
+      store.selectedRepository = oldRepo
+      store.repositoriesStore = {
+        switchWorktree: vi.fn().mockResolvedValue({ repository: movedRepo }),
+      }
+      store.repositoryStateCache = { transferState: vi.fn() }
+      store.gitStoreCache = { transfer: vi.fn() }
+      store.adoptRepository = vi.fn()
+      store._selectRepository = vi.fn().mockResolvedValue(movedRepo)
+      store._refreshWorktrees = vi.fn().mockResolvedValue(undefined)
+      const pending = store.moveCurrentWorktree(oldRepo, '/old', '/new')
+      if (changeSelection) {
+        store.repositorySelectionRevision++
+        store.selectedRepository = otherRepo
+      }
+      finish()
+      await pending
+      expect(store.repositoriesStore.switchWorktree).toHaveBeenCalledWith(
+        oldRepo,
+        '/new'
+      )
+      expect(store._selectRepository).toHaveBeenCalledTimes(
+        changeSelection ? 0 : 1
+      )
     }
-    finish()
-    await pending
-    expect(store.repositoriesStore.switchWorktree).toHaveBeenCalledWith(oldRepo, '/new')
-    expect(store._selectRepository).toHaveBeenCalledTimes(changeSelection ? 0 : 1)
-  })
+  )
 })

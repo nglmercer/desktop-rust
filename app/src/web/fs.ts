@@ -134,7 +134,10 @@ export class Stats {
   public readonly ctime: Date
   public readonly birthtime: Date
 
-  public constructor(private readonly raw: IRawStats, bigint = false) {
+  public constructor(
+    private readonly raw: IRawStats,
+    bigint = false
+  ) {
     this.size = raw.size
     this.mode = raw.mode
     this.dev = bigint ? BigInt(raw.dev) : raw.dev
@@ -178,7 +181,10 @@ export class Dirent {
   public readonly parentPath: string
   public readonly path: string
 
-  public constructor(private readonly raw: IRawDirent, parent: string) {
+  public constructor(
+    private readonly raw: IRawDirent,
+    parent: string
+  ) {
     this.name = raw.name
     this.parentPath = parent
     this.path = parent

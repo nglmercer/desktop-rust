@@ -11,17 +11,31 @@ async function main(): Promise<void> {
   const releaseLock = acquirePackageOutputLock(repo, 'production')
   let safeToRelease = true
   try {
-    await runDesktop(repo, () => { safeToRelease = false }, () => { safeToRelease = true })
+    await runDesktop(
+      repo,
+      () => {
+        safeToRelease = false
+      },
+      () => {
+        safeToRelease = true
+      }
+    )
   } finally {
     if (safeToRelease) {
       releaseLock()
     } else {
-      console.error('Package lock retained: inspect the desktop process and its work before removing it.')
+      console.error(
+        'Package lock retained: inspect the desktop process and its work before removing it.'
+      )
     }
   }
 }
 
-async function runDesktop(repo: string, markRunning: () => void, markDrained: () => void): Promise<void> {
+async function runDesktop(
+  repo: string,
+  markRunning: () => void,
+  markDrained: () => void
+): Promise<void> {
   const executable = stagedRustDesktop(repo, {
     channel: 'production',
     profile: 'release',
@@ -58,7 +72,11 @@ async function runDesktop(repo: string, markRunning: () => void, markDrained: ()
       console.error('The desktop did not drain; forcing termination.')
       host?.kill('SIGKILL')
       hardTimer = setTimeout(() => {
-        rejectHardTimeout?.(new Error('The desktop did not exit; inspect the process before retrying.'))
+        rejectHardTimeout?.(
+          new Error(
+            'The desktop did not exit; inspect the process before retrying.'
+          )
+        )
       }, 2_000)
     }, 8_000)
   }
@@ -91,7 +109,8 @@ async function runDesktop(repo: string, markRunning: () => void, markDrained: ()
     }
     if (failed || result.code !== 0 || result.signal !== null || !drained) {
       console.error(`Desktop host exited (${result.signal ?? result.code})`)
-      if (!drained) console.error('Desktop shutdown was not confirmed as drained.')
+      if (!drained)
+        console.error('Desktop shutdown was not confirmed as drained.')
       process.exitCode = 1
     } else {
       markDrained()

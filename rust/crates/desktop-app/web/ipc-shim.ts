@@ -239,21 +239,30 @@ type NativeWindow = Window & {
       } catch {
         pending.delete(id)
         clearTimeout(timer)
-        reject(Object.assign(new Error('Native IPC submission could not be confirmed'), { code: 'disconnected' }))
+        reject(
+          Object.assign(
+            new Error('Native IPC submission could not be confirmed'),
+            { code: 'disconnected' }
+          )
+        )
         return
       }
       if (!posted) {
         // The HTTP fallback cannot deliver request-owned progress. Refuse
         // before submitting the operation instead of silently dropping it.
-        if (onProgress || (channel === 'desktop.backend.git_info' && operation &&
-          (operation.type === 'clone_selected' || operation.type === 'recover_clone'))) {
+        if (
+          onProgress ||
+          (channel === 'desktop.backend.git_info' &&
+            operation &&
+            (operation.type === 'clone_selected' ||
+              operation.type === 'recover_clone'))
+        ) {
           pending.delete(id)
           clearTimeout(timer)
           reject(
-            Object.assign(
-              new Error('This operation requires native IPC'),
-              { code: 'unsupported' }
-            )
+            Object.assign(new Error('This operation requires native IPC'), {
+              code: 'unsupported',
+            })
           )
           return
         }

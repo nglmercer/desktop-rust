@@ -394,17 +394,18 @@ describe('snapshot-only assisted commit planning', () => {
         change => change.path === 'replaced'
       )
       assert.ok(addition && deletion)
-      const propose = t.mock.fn<AssistedCommitPlanner>(async (analysis, mode) =>
-        mode === 'single-commit'
-          ? wholeSelectionResponse(analysis, 'Replace file with directory')
-          : {
-              kind: 'plan',
-              snapshotId: analysis.snapshotId,
-              commits: [
-                { title: 'Add child', changeIds: [addition.id] },
-                { title: 'Delete file', changeIds: [deletion.id] },
-              ],
-            }
+      const propose = t.mock.fn<AssistedCommitPlanner>(
+        async (analysis, mode) =>
+          mode === 'single-commit'
+            ? wholeSelectionResponse(analysis, 'Replace file with directory')
+            : {
+                kind: 'plan',
+                snapshotId: analysis.snapshotId,
+                commits: [
+                  { title: 'Add child', changeIds: [addition.id] },
+                  { title: 'Delete file', changeIds: [deletion.id] },
+                ],
+              }
       )
       let validations = 0
       const failure = new AssistedCommitError(

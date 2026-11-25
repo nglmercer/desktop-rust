@@ -1387,7 +1387,7 @@ export class App extends React.Component<IAppProps, IAppState> {
   private get externalEditorLabel() {
     return this.state.useCustomEditor
       ? undefined
-      : this.state.selectedExternalEditor ?? undefined
+      : (this.state.selectedExternalEditor ?? undefined)
   }
 
   private openCurrentRepositoryInExternalEditor() {

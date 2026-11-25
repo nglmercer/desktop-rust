@@ -1,36 +1,67 @@
-# Known Issues
+# Troubleshooting
 
 Here's a non-exhaustive list of environmental issues that you may encounter
-while working on GitHub Desktop:
+while working on GitHub Desktop.
 
-### Issues compiling node-keytar on Windows
+## Dependencies are out of sync
 
-If keytar fails to build on Windows with the following error during `npm install`:
+Use the pinned package manager from the repository root:
 
-```
-npm ERR! keytar@3.0.2 install: `node-gyp rebuild`
-npm ERR! Exit status 1
-npm ERR!
-npm ERR! Failed at the keytar@3.0.2 install script 'node-gyp rebuild'.
-npm ERR! Make sure you have the latest version of node.js and npm installed.
-npm ERR! If you do, this is most likely a problem with the keytar package,
-npm ERR! not with npm itself.
-npm ERR! Tell the author that this fails on your system:
-npm ERR!     node-gyp rebuild
-npm ERR! You can get information on how to open an issue for this project with:
-npm ERR!     npm bugs keytar
-npm ERR! Or if that isn't available, you can get their info via:
-npm ERR!     npm owner ls keytar
+```sh
+git submodule update --init --recursive
+pnpm install --frozen-lockfile --ignore-scripts
 ```
 
-Make sure you're using npm >= 2.15.9
+Do not run `npm install` in the root workspace. The root npm lockfile has been
+retired along with the nested `app/package-lock.json`; `pnpm-lock.yaml` is
+authoritative.
 
+If the install appears correct but scripts report missing executables, remove
+only the generated dependency directories and reinstall:
+
+```sh
+rm -rf node_modules app/node_modules
+pnpm install --frozen-lockfile --ignore-scripts
 ```
-PS> npm -g install npm@latest
+
+## Linux webview build failures
+
+The Rust shell uses Tao/Wry. On Debian/Ubuntu-like systems install the WebKitGTK
+and D-Bus development packages before building `desktop-app`:
+
+```sh
+sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev
 ```
 
-and run `npm install` again
+CI also installs Xvfb and related X11/GL packages for the GUI smoke test. The
+headless CLI/workspace build deliberately excludes `desktop-app` and does not
+need those GUI libraries.
 
-For more information see
-[atom/node-keytar#45](https://github.com/atom/node-keytar/issues/45) and
-[nodejs/node-gyp#972](https://github.com/nodejs/node-gyp/issues/972).
+## TypeScript version confusion
+
+`node_modules/.bin/tsc` is TypeScript 7. TypeScript 6 is still present as the
+`typescript` package for compiler-API compatibility. If a script fails because
+it imports the compiler API, do not replace it with the TypeScript 7 CLI: keep
+the TypeScript 6 dependency aligned or migrate the script away from the compiler
+API deliberately.
+
+## Renderer changes do not appear
+
+Vite performs bundling but not typechecking. Run:
+
+```sh
+pnpm check:types
+pnpm vite:build
+```
+
+When using the watcher started by `pnpm start`, reload the webview with
+<kbd>Ctrl/Command+Alt+R</kbd> after a successful renderer rebuild. Restart the
+launcher after changing Vite configuration, dependencies, or license-generation
+code.
+
+## Tests need the Rust backend
+
+On Linux, `pnpm test` builds `desktop-cli` before Vitest and uses the real Rust
+backend by default. If Cargo or the backend build is broken, fix that first;
+setting `DESKTOP_TEST_RUST_BACKEND=0` is only a temporary diagnostic because
+tests for already-migrated operations no longer have Node fallbacks.

@@ -764,18 +764,22 @@ describe('AppStore assisted repository operation admission', () => {
         mutation === 'delete'
           ? h.appStore._deleteWorktree(repository, ancestor, { force: true })
           : mutation === 'move'
-          ? h.appStore._moveWorktree(repository, ancestor, `${ancestor}-moved`)
-          : h.appStore._discardChanges(
-              repository,
-              [
-                new WorkingDirectoryFileChange(
-                  targetRelative,
-                  { kind: AppFileStatusKind.Untracked },
-                  DiffSelection.fromInitialSelection(DiffSelectionType.All)
-                ),
-              ],
-              true
-            )
+            ? h.appStore._moveWorktree(
+                repository,
+                ancestor,
+                `${ancestor}-moved`
+              )
+            : h.appStore._discardChanges(
+                repository,
+                [
+                  new WorkingDirectoryFileChange(
+                    targetRelative,
+                    { kind: AppFileStatusKind.Untracked },
+                    DiffSelection.fromInitialSelection(DiffSelectionType.All)
+                  ),
+                ],
+                true
+              )
       await assert.rejects(operation, /assisted commit run/)
       assert.strictEqual(entered, false)
     })

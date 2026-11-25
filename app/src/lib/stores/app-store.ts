@@ -38,9 +38,18 @@ import {
   getCleanedEnforcedRuleDescriptions,
   migrateCopilotModelSelectionsToAccounts,
 } from './copilot-store'
-import { backend, BackendError, type ICustomEditorCommand, type IRemoteBranchDeletionReview, type IRemoteBranchDeletionResult } from '../../backend/client'
+import {
+  backend,
+  BackendError,
+  type ICustomEditorCommand,
+  type IRemoteBranchDeletionReview,
+  type IRemoteBranchDeletionResult,
+} from '../../backend/client'
 import { RepositorySelectionQueue } from '../../backend/repository-selection'
-import { discardBatchWithoutDialog, discardReviewedSelection } from '../git/reviewed-discard'
+import {
+  discardBatchWithoutDialog,
+  discardReviewedSelection,
+} from '../git/reviewed-discard'
 import { reviewSelectedCommit } from '../git/selected-commit-review'
 import {
   getReviewedCopilotLines,
@@ -644,15 +653,23 @@ export const showChangesFilterDefault = true
 
 export class AppStore extends TypedBaseStore<IAppState> {
   private repositorySelectionRevision = 0
-  private requestedRepositorySelection: Repository | CloningRepository | null | undefined
-  private readonly browserRepositorySelection = new RepositorySelectionQueue(async path => {
-    if (path === null) {
-      await backend().selectBrowserRepository(null)
-      return
+  private requestedRepositorySelection:
+    | Repository
+    | CloningRepository
+    | null
+    | undefined
+  private readonly browserRepositorySelection = new RepositorySelectionQueue(
+    async path => {
+      if (path === null) {
+        await backend().selectBrowserRepository(null)
+        return
+      }
+      const type = await getRepositoryType(path)
+      await backend().selectBrowserRepository(
+        type.kind === 'regular' ? type.topLevelWorkingDirectory : null
+      )
     }
-    const type = await getRepositoryType(path)
-    await backend().selectBrowserRepository(type.kind === 'regular' ? type.topLevelWorkingDirectory : null)
-  })
+  )
   private readonly gitStoreCache: GitStoreCache
   private readonly assistedCommits: AssistedCommitCoordinator
 
@@ -2366,10 +2383,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.requestedRepositorySelection = repository
     if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
       try {
-        const current = await this.browserRepositorySelection.select(repository instanceof Repository ? repository.path : null)
+        const current = await this.browserRepositorySelection.select(
+          repository instanceof Repository ? repository.path : null
+        )
         if (!current) return null
       } catch (error) {
-        if (selectionRevision === this.repositorySelectionRevision) this.requestedRepositorySelection = this.selectedRepository
+        if (selectionRevision === this.repositorySelectionRevision)
+          this.requestedRepositorySelection = this.selectedRepository
         this.emitError(error)
         return null
       }
@@ -3244,10 +3264,22 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private updateRepositorySelectionAfterRepositoriesChanged() {
     const selectedRepository = this.selectedRepository
     const requested = this.requestedRepositorySelection
-    if (requested !== undefined && (requested?.constructor !== selectedRepository?.constructor || requested?.id !== selectedRepository?.id || (requested instanceof Repository && selectedRepository instanceof Repository && requested.path !== selectedRepository.path))) return
+    if (
+      requested !== undefined &&
+      (requested?.constructor !== selectedRepository?.constructor ||
+        requested?.id !== selectedRepository?.id ||
+        (requested instanceof Repository &&
+          selectedRepository instanceof Repository &&
+          requested.path !== selectedRepository.path))
+    )
+      return
     // A move updates the saved path before it is safe to follow that path.
     // Let moveCurrentWorktree reconcile it after checking newer user choices.
-    if (selectedRepository instanceof Repository && this.movingWorktrees.has(getRepositoryStateKey(selectedRepository))) return
+    if (
+      selectedRepository instanceof Repository &&
+      this.movingWorktrees.has(getRepositoryStateKey(selectedRepository))
+    )
+      return
     let newSelectedRepository: Repository | CloningRepository | null =
       this.selectedRepository
     if (selectedRepository) {
@@ -4005,11 +4037,15 @@ export class AppStore extends TypedBaseStore<IAppState> {
     })
 
     const gitStore = this.gitStoreCache.get(repository)
-    let selectedReview: Awaited<ReturnType<typeof reviewSelectedCommit>> | undefined
+    let selectedReview:
+      | Awaited<ReturnType<typeof reviewSelectedCommit>>
+      | undefined
     if (
       typeof window !== 'undefined' &&
       backend().transportKind !== 'none' &&
-      (selectedFiles.length > 0 || context.amend === true || state.allowEmptyCommit)
+      (selectedFiles.length > 0 ||
+        context.amend === true ||
+        state.allowEmptyCommit)
     ) {
       const reviewed = await gitStore.performFailableOperation(
         async () => {
@@ -4058,7 +4094,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
           const oversized = review.review.large_files
             .filter(file => !file.tracked_by_lfs)
             .map(file => file.display_path)
-          if (oversized.length > 0 && context.allowedLargeFileReviewBasis !== review.basis) {
+          if (
+            oversized.length > 0 &&
+            context.allowedLargeFileReviewBasis !== review.basis
+          ) {
             await this._showPopup({
               type: PopupType.OversizedFiles,
               oversizedFiles: oversized,
@@ -4101,7 +4140,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
             noVerify: state.skipCommitHooks,
             signOff: state.signOffCommits,
             allowEmpty: state.allowEmptyCommit,
-            allowLargeFiles: selectedReview !== undefined && context.allowedLargeFileReviewBasis === selectedReview.basis,
+            allowLargeFiles:
+              selectedReview !== undefined &&
+              context.allowedLargeFileReviewBasis === selectedReview.basis,
           }).catch(err => (aborted ? undefined : Promise.reject(err)))
         },
         { gitContext: { kind: 'commit' }, repository }
@@ -5197,12 +5238,23 @@ export class AppStore extends TypedBaseStore<IAppState> {
       return this._switchWorktree(repository, wt)
     }
 
-    const review = typeof window !== 'undefined' && backend().transportKind !== 'none'
-      ? await backend().reviewBranchCheckout(repository.path, branch.ref, branch.tip.sha)
-      : null
+    const review =
+      typeof window !== 'undefined' && backend().transportKind !== 'none'
+        ? await backend().reviewBranchCheckout(
+            repository.path,
+            branch.ref,
+            branch.tip.sha
+          )
+        : null
     if (review !== null) {
-      if (tip.kind === TipState.Valid && (review.sourceBranch !== tip.branch.name || review.sourceHead !== tip.branch.tip.sha)) {
-        throw new Error('The current branch changed; refresh the repository before switching')
+      if (
+        tip.kind === TipState.Valid &&
+        (review.sourceBranch !== tip.branch.name ||
+          review.sourceHead !== tip.branch.tip.sha)
+      ) {
+        throw new Error(
+          'The current branch changed; refresh the repository before switching'
+        )
       }
       hasChanges = review.dirty
     }
@@ -5213,7 +5265,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
       // Even if the user has chosen to "always stash on current branch" in
       // preferences we still want to let them know changes might be lost
       if (strategy === UncommittedChangesStrategy.StashOnCurrentBranch) {
-        if (hasChanges && (review !== null ? review.sourceStash !== null : stashEntry !== null)) {
+        if (
+          hasChanges &&
+          (review !== null ? review.sourceStash !== null : stashEntry !== null)
+        ) {
           const type = PopupType.ConfirmOverwriteStash
           this._showPopup({ type, repository, branchToCheckout: branch })
           return repository
@@ -5223,7 +5278,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     // An explicit choice may have been made before a different stash appeared.
     // Refresh and require a new choice if it was not the one the UI showed.
-    if (review !== null && explicitStrategy === UncommittedChangesStrategy.StashOnCurrentBranch && hasChanges && review.sourceStash !== null && review.sourceStash !== stashEntry?.stashSha) {
+    if (
+      review !== null &&
+      explicitStrategy === UncommittedChangesStrategy.StashOnCurrentBranch &&
+      hasChanges &&
+      review.sourceStash !== null &&
+      review.sourceStash !== stashEntry?.stashSha
+    ) {
       await this._refreshRepository(repository)
       throw new Error('Saved changes changed; review the branch switch again')
     }
@@ -5246,10 +5307,26 @@ export class AppStore extends TypedBaseStore<IAppState> {
       // We always want to end with refreshing the repository regardless of
       // whether the checkout succeeded or not in order to present the most
       // up-to-date information to the user.
-      if (review !== null) this.updateCheckoutProgress(repository, { kind: 'checkout', title: `Checking out branch ${branch.name}`, description: 'Switching branches', value: 0, target: branch.name })
-      const checkout = review === null
-        ? this.checkoutImplementation(repository, branch, strategy)
-        : backend().checkoutReviewedBranch(repository.path, branch.ref, review.basis, strategy, strategy === UncommittedChangesStrategy.StashOnCurrentBranch && explicitStrategy !== undefined && review.sourceStash !== null)
+      if (review !== null)
+        this.updateCheckoutProgress(repository, {
+          kind: 'checkout',
+          title: `Checking out branch ${branch.name}`,
+          description: 'Switching branches',
+          value: 0,
+          target: branch.name,
+        })
+      const checkout =
+        review === null
+          ? this.checkoutImplementation(repository, branch, strategy)
+          : backend().checkoutReviewedBranch(
+              repository.path,
+              branch.ref,
+              review.basis,
+              strategy,
+              strategy === UncommittedChangesStrategy.StashOnCurrentBranch &&
+                explicitStrategy !== undefined &&
+                review.sourceStash !== null
+            )
       return checkout
         .then(() => this.onSuccessfulCheckout(repository, branch))
         .catch(async e => {
@@ -5618,9 +5695,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
   /** Clear the GitHub association, keeping the repository's in-memory state. */
   private async clearGitHubRepository(repository: Repository) {
-    const updated = await this.repositoriesStore.clearGitHubRepository(
-      repository
-    )
+    const updated =
+      await this.repositoriesStore.clearGitHubRepository(repository)
     this.adoptRepository(updated)
     return updated
   }
@@ -5830,7 +5906,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       await renameBranch(repository, branch, newName)
 
       // The Rust rename already transfers every Desktop-associated stash.
-      if (typeof window !== 'undefined' && backend().transportKind !== 'none') return
+      if (typeof window !== 'undefined' && backend().transportKind !== 'none')
+        return
       const stashEntry = gitStore.desktopStashEntries.get(branch.name)
 
       if (stashEntry) {
@@ -5842,25 +5919,54 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */
-  public async _previewRemoteBranchDeletion(repository: Repository, branch: Branch): Promise<IRemoteBranchDeletionReview> {
+  public async _previewRemoteBranchDeletion(
+    repository: Repository,
+    branch: Branch
+  ): Promise<IRemoteBranchDeletionReview> {
     if (branch.type === BranchType.Remote) {
-      if (branch.remoteName === null) throw new Error('Cannot determine the remote for this branch')
-      return backend().previewRemoteBranchDeletion(repository.path, branch.remoteName, branch.nameWithoutRemote)
+      if (branch.remoteName === null)
+        throw new Error('Cannot determine the remote for this branch')
+      return backend().previewRemoteBranchDeletion(
+        repository.path,
+        branch.remoteName,
+        branch.nameWithoutRemote
+      )
     }
-    if (branch.upstreamRemoteName === null || branch.upstreamWithoutRemote === null) throw new Error('This branch has no remote upstream')
+    if (
+      branch.upstreamRemoteName === null ||
+      branch.upstreamWithoutRemote === null
+    )
+      throw new Error('This branch has no remote upstream')
     const target = this.getBranchToCheckoutAfterDelete(branch, repository)
-    return backend().previewCombinedBranchDeletion(repository.path, branch.name, branch.tip.sha, target?.name ?? null, branch.upstreamRemoteName, branch.upstreamWithoutRemote)
+    return backend().previewCombinedBranchDeletion(
+      repository.path,
+      branch.name,
+      branch.tip.sha,
+      target?.name ?? null,
+      branch.upstreamRemoteName,
+      branch.upstreamWithoutRemote
+    )
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */
-  public async _deleteReviewedRemoteBranch(repository: Repository, review: IRemoteBranchDeletionReview): Promise<IRemoteBranchDeletionResult> {
+  public async _deleteReviewedRemoteBranch(
+    repository: Repository,
+    review: IRemoteBranchDeletionReview
+  ): Promise<IRemoteBranchDeletionResult> {
     let receipt: IRemoteBranchDeletionResult
     try {
-      receipt = await this.withAssistedCommitMutationResources(repository, () => backend().applyRemoteBranchDeletion(repository.path, review))
+      receipt = await this.withAssistedCommitMutationResources(repository, () =>
+        backend().applyRemoteBranchDeletion(repository.path, review)
+      )
     } catch (error) {
       // A combined operation can switch or delete the local branch before a
       // later remote push fails. Refresh without masking the original error.
-      await this._refreshRepository(repository).catch(refreshError => log.warn('Could not refresh after partial branch deletion', refreshError))
+      await this._refreshRepository(repository).catch(refreshError =>
+        log.warn(
+          'Could not refresh after partial branch deletion',
+          refreshError
+        )
+      )
       throw error
     }
     await this._refreshRepository(repository)
@@ -5888,8 +5994,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
     includeUpstream?: boolean,
     toCheckout?: Branch | null
   ): Promise<void> {
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none' && (branch.type === BranchType.Remote || includeUpstream === true)) {
-      throw new Error('Review each push destination before deleting a remote branch')
+    if (
+      typeof window !== 'undefined' &&
+      backend().transportKind !== 'none' &&
+      (branch.type === BranchType.Remote || includeUpstream === true)
+    ) {
+      throw new Error(
+        'Review each push destination before deleting a remote branch'
+      )
     }
     return this.withRefreshedGitHubRepository(repository, async repository => {
       const gitStore = this.gitStoreCache.get(repository)
@@ -6131,25 +6243,22 @@ export class AppStore extends TypedBaseStore<IAppState> {
       }
 
       const gitStore = this.gitStoreCache.get(repository)
-      await gitStore.performFailableOperation(
-        async () => {
-          const outcome = await this.performPushBranch(
-            repository,
-            branch,
-            safeRemote,
-            options
-          )
-          if (outcome.kind === 'error') {
-            suppressUnsafePushRetry(pushErrorMetadata, outcome.error, false)
-            throw outcome.error
-          }
-          if (outcome.kind === 'pushed' && outcome.refreshError !== undefined) {
-            suppressUnsafePushRetry(pushErrorMetadata, outcome.refreshError, true)
-            throw outcome.refreshError
-          }
-        },
-        pushErrorMetadata
-      )
+      await gitStore.performFailableOperation(async () => {
+        const outcome = await this.performPushBranch(
+          repository,
+          branch,
+          safeRemote,
+          options
+        )
+        if (outcome.kind === 'error') {
+          suppressUnsafePushRetry(pushErrorMetadata, outcome.error, false)
+          throw outcome.error
+        }
+        if (outcome.kind === 'pushed' && outcome.refreshError !== undefined) {
+          suppressUnsafePushRetry(pushErrorMetadata, outcome.refreshError, true)
+          throw outcome.refreshError
+        }
+      }, pushErrorMetadata)
 
       this.updatePushPullFetchProgress(repository, null)
 
@@ -6611,9 +6720,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
     assistedCommit: boolean = false
   ) {
     try {
-      const eligibleBranches = await getBranchesDifferingFromUpstream(
-        repository
-      )
+      const eligibleBranches =
+        await getBranchesDifferingFromUpstream(repository)
 
       await fastForwardBranches(repository, eligibleBranches, !assistedCommit)
     } catch (e) {
@@ -6833,9 +6941,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
     if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
       try {
         const paths = files.map(file => file.path)
-        const undoId = reviewBasis === undefined
-          ? await discardBatchWithoutDialog(repository, paths)
-          : await backend().repositoryDiscardBatch(repository.path, paths, reviewBasis)
+        const undoId =
+          reviewBasis === undefined
+            ? await discardBatchWithoutDialog(repository, paths)
+            : await backend().repositoryDiscardBatch(
+                repository.path,
+                paths,
+                reviewBasis
+              )
         this.showDiscardUndoBanner(repository, undoId)
         await this._refreshRepository(repository)
       } catch (error) {
@@ -6894,7 +7007,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
   ) {
     if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
       try {
-        const undoId = await discardReviewedSelection(repository, filePath, diff, selection)
+        const undoId = await discardReviewedSelection(
+          repository,
+          filePath,
+          diff,
+          selection
+        )
         if (undoId !== null) {
           this.showDiscardUndoBanner(repository, undoId)
         }
@@ -6920,7 +7038,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this._setBanner({ type: BannerType.DiscardedSelection, undoId, onUndo })
   }
 
-  public async _undoRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+  public async _undoRepositoryDiscard(
+    repository: Repository,
+    undoId: string
+  ): Promise<void> {
     this.assistedCommits.state.assertAvailable(repository)
     await this.assistedCommits.state.withDestruction(repository.path, () =>
       withRepositoryGitOperation(repository.path, 'mutation', async () => {
@@ -6936,7 +7057,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** This shouldn't be called directly. See 'Dispatcher'. */
-  public async _recoverPublishedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+  public async _recoverPublishedCommitCheckpoint(
+    repository: Repository,
+    id: string
+  ): Promise<void> {
     this.assistedCommits.state.assertAvailable(repository)
     await this.assistedCommits.state.withDestruction(repository.path, () =>
       withRepositoryGitOperation(repository.path, 'mutation', async () => {
@@ -6952,7 +7076,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** This shouldn't be called directly. See 'Dispatcher'. */
-  public async _closeUnchangedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+  public async _closeUnchangedCommitCheckpoint(
+    repository: Repository,
+    id: string
+  ): Promise<void> {
     this.assistedCommits.state.assertAvailable(repository)
     await this.assistedCommits.state.withDestruction(repository.path, () =>
       withRepositoryGitOperation(repository.path, 'mutation', async () => {
@@ -6962,7 +7089,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
     )
   }
 
-  public async _forgetPreparedCommitCheckpoint(repository: Repository, id: string): Promise<void> {
+  public async _forgetPreparedCommitCheckpoint(
+    repository: Repository,
+    id: string
+  ): Promise<void> {
     this.assistedCommits.state.assertAvailable(repository)
     await this.assistedCommits.state.withDestruction(repository.path, () =>
       withRepositoryGitOperation(repository.path, 'mutation', async () => {
@@ -6972,7 +7102,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
     )
   }
 
-  public async _forgetRepositoryDiscard(repository: Repository, undoId: string): Promise<void> {
+  public async _forgetRepositoryDiscard(
+    repository: Repository,
+    undoId: string
+  ): Promise<void> {
     this.assistedCommits.state.assertAvailable(repository)
     await this.assistedCommits.state.withDestruction(repository.path, () =>
       withRepositoryGitOperation(repository.path, 'mutation', async () => {
@@ -6980,7 +7113,10 @@ export class AppStore extends TypedBaseStore<IAppState> {
         await backend().forgetRepositoryDiscard(repository.path, undoId)
       })
     )
-    if (this.currentBanner?.type === BannerType.DiscardedSelection && this.currentBanner.undoId === undoId) {
+    if (
+      this.currentBanner?.type === BannerType.DiscardedSelection &&
+      this.currentBanner.undoId === undoId
+    ) {
       this._clearBanner(BannerType.DiscardedSelection)
     }
   }
@@ -7162,11 +7298,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
     )
 
     const tip = gitStore.tip
-    const expected = tip.kind === TipState.Valid
-      ? { head: tip.branch.tip.sha, branch: tip.branch.ref, undo: false }
-      : tip.kind === TipState.Detached
-      ? { head: tip.currentSha, branch: null, undo: false }
-      : undefined
+    const expected =
+      tip.kind === TipState.Valid
+        ? { head: tip.branch.tip.sha, branch: tip.branch.ref, undo: false }
+        : tip.kind === TipState.Detached
+          ? { head: tip.currentSha, branch: null, undo: false }
+          : undefined
     await gitStore.performFailableOperation(() =>
       reset(repository, GitResetMode.Mixed, commit.sha, expected)
     )
@@ -7476,7 +7613,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
     if (ownsSuppression) this.movingWorktrees.add(key)
     let result: Awaited<ReturnType<RepositoriesStore['switchWorktree']>>
     try {
-      result = await this.repositoriesStore.switchWorktree(repository, worktree.path, missing, gitDir, mainWorktreePath)
+      result = await this.repositoriesStore.switchWorktree(
+        repository,
+        worktree.path,
+        missing,
+        gitDir,
+        mainWorktreePath
+      )
     } finally {
       if (ownsSuppression) this.movingWorktrees.delete(key)
     }
@@ -7490,7 +7633,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
       worktree
     )
 
-    if (this.repositorySelectionRevision === selectionRevision) await this._selectRepository(result.repository)
+    if (this.repositorySelectionRevision === selectionRevision)
+      await this._selectRepository(result.repository)
 
     this.statsStore.increment('worktreeSwitchCount')
 
@@ -7586,7 +7730,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
     try {
       await removeWorktree(repository.path, worktreePath, options.force)
     } catch (e) {
-      if (e instanceof BackendError && (e.code === 'worktree_outcome_uncertain' || e.code === 'worktree_review_failed')) {
+      if (
+        e instanceof BackendError &&
+        (e.code === 'worktree_outcome_uncertain' ||
+          e.code === 'worktree_review_failed')
+      ) {
         this.emitError(e)
         return
       }
@@ -7632,8 +7780,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
     const isCurrentWorktree = repository.path === worktreePath
     const key = getRepositoryStateKey(repository)
     const selectionRevision = this.repositorySelectionRevision
-    const savedWorktree = this.repositories.find(candidate => candidate.path === worktreePath)
-    const savedKey = savedWorktree === undefined ? undefined : getRepositoryStateKey(savedWorktree)
+    const savedWorktree = this.repositories.find(
+      candidate => candidate.path === worktreePath
+    )
+    const savedKey =
+      savedWorktree === undefined
+        ? undefined
+        : getRepositoryStateKey(savedWorktree)
     if (
       isCurrentWorktree &&
       (this.isRepositoryBusy(repository) || this.movingWorktrees.has(key))
@@ -7663,7 +7816,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
         this.movingWorktrees.delete(key)
       }
       if (savedKey !== undefined) this.movingWorktrees.delete(savedKey)
-      if (this.repositorySelectionRevision === selectionRevision) this.updateRepositorySelectionAfterRepositoriesChanged()
+      if (this.repositorySelectionRevision === selectionRevision)
+        this.updateRepositorySelectionAfterRepositoriesChanged()
     }
   }
 
@@ -7673,26 +7827,56 @@ export class AppStore extends TypedBaseStore<IAppState> {
     newPath: string
   ): Promise<void> {
     if (repository.path !== worktreePath) {
-      const saved = this.repositories.find(candidate => candidate.path === worktreePath)
-      if (saved !== undefined && this.repositories.some(candidate => candidate.path === newPath && candidate.id !== saved.id)) {
-        throw new Error('The destination is already saved as another repository. Remove that saved entry before moving the worktree.')
+      const saved = this.repositories.find(
+        candidate => candidate.path === worktreePath
+      )
+      if (
+        saved !== undefined &&
+        this.repositories.some(
+          candidate => candidate.path === newPath && candidate.id !== saved.id
+        )
+      ) {
+        throw new Error(
+          'The destination is already saved as another repository. Remove that saved entry before moving the worktree.'
+        )
       }
       await moveWorktree(repository, worktreePath, newPath)
       if (saved !== undefined) {
-        const current = this.repositories.find(candidate => candidate.id === saved.id)
+        const current = this.repositories.find(
+          candidate => candidate.id === saved.id
+        )
         if (current !== undefined && current.path !== worktreePath) {
-          throw new Error('The worktree moved, but its saved repository changed. Inspect the new location before retrying.')
+          throw new Error(
+            'The worktree moved, but its saved repository changed. Inspect the new location before retrying.'
+          )
         }
         if (current !== undefined) {
           const selectionRevision = this.repositorySelectionRevision
           let result: Awaited<ReturnType<RepositoriesStore['switchWorktree']>>
-          try { result = await this.repositoriesStore.switchWorktree(current, newPath) }
-          catch (error) { throw new Error('The worktree moved, but its saved repository could not be updated. Inspect the new location before retrying.', { cause: error }) }
-          if (result.existingRepository) throw new Error('The worktree moved, but the destination has another saved repository. Inspect both entries before retrying.')
+          try {
+            result = await this.repositoriesStore.switchWorktree(
+              current,
+              newPath
+            )
+          } catch (error) {
+            throw new Error(
+              'The worktree moved, but its saved repository could not be updated. Inspect the new location before retrying.',
+              { cause: error }
+            )
+          }
+          if (result.existingRepository)
+            throw new Error(
+              'The worktree moved, but the destination has another saved repository. Inspect both entries before retrying.'
+            )
           this.repositoryStateCache.transferState(current, result.repository)
           this.gitStoreCache.transfer(current, result.repository)
           this.adoptRepository(result.repository)
-          if (this.repositorySelectionRevision === selectionRevision && this.selectedRepository instanceof Repository && this.selectedRepository.id === current.id && this.selectedRepository.path === current.path) {
+          if (
+            this.repositorySelectionRevision === selectionRevision &&
+            this.selectedRepository instanceof Repository &&
+            this.selectedRepository.id === current.id &&
+            this.selectedRepository.path === current.path
+          ) {
             await this._selectRepository(result.repository)
           }
         }
@@ -7716,8 +7900,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // its new path so that the subsequent refresh (and any further git calls)
     // operate on the renamed directory rather than the now non-existing one.
     let result: Awaited<ReturnType<RepositoriesStore['switchWorktree']>>
-    try { result = await this.repositoriesStore.switchWorktree(repository, newPath) }
-    catch (error) { throw new Error('The worktree moved, but its saved repository could not be updated. Inspect the new location before retrying.', { cause: error }) }
+    try {
+      result = await this.repositoriesStore.switchWorktree(repository, newPath)
+    } catch (error) {
+      throw new Error(
+        'The worktree moved, but its saved repository could not be updated. Inspect the new location before retrying.',
+        { cause: error }
+      )
+    }
 
     // Renaming changes the repository's path, which is part of the key used
     // by the state and GitStore caches. Carry the existing state over to the
@@ -7727,7 +7917,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
     this.gitStoreCache.transfer(repository, result.repository)
     this.adoptRepository(result.repository)
 
-    if (this.repositorySelectionRevision === selectionRevision && this.selectedRepository instanceof Repository && this.selectedRepository.id === repository.id && this.selectedRepository.path === repository.path) {
+    if (
+      this.repositorySelectionRevision === selectionRevision &&
+      this.selectedRepository instanceof Repository &&
+      this.selectedRepository.id === repository.id &&
+      this.selectedRepository.path === repository.path
+    ) {
       await this._selectRepository(result.repository)
     }
     await this._refreshWorktrees(result.repository)
@@ -8491,9 +8686,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
 
     try {
-      const allPRs = await this.pullRequestCoordinator.getAllPullRequests(
-        repository
-      )
+      const allPRs =
+        await this.pullRequestCoordinator.getAllPullRequests(repository)
       for (const pr of findPullRequestsByNumbers(lookups, allPRs)) {
         byNumber.set(pr.pullRequestNumber, {
           number: pr.pullRequestNumber,
@@ -8914,13 +9108,16 @@ export class AppStore extends TypedBaseStore<IAppState> {
         repository.path,
         'mutation',
         async () => {
-          const original = this.repositoryStateCache.get(repository)
-            .multiCommitOperationState?.copilotResolutions
+          const original =
+            this.repositoryStateCache.get(repository).multiCommitOperationState
+              ?.copilotResolutions
           try {
             await this.applyCopilotConflictResolutionsCore(repository)
           } finally {
-            const current = this.repositoryStateCache.get(repository)
-              .multiCommitOperationState
+            const current =
+              this.repositoryStateCache.get(
+                repository
+              ).multiCommitOperationState
             if (original != null && current?.copilotResolutions === original) {
               this.repositoryStateCache.updateMultiCommitOperationState(
                 repository,
@@ -8967,12 +9164,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
         copilotResolutions,
         new Set(manualResolutions.keys()),
         async resolution =>
-          (await backend().repositoryCopilotConflictBasis(
-            repository.path,
-            resolution.path,
-            resolution.deleteConflictAction === undefined ? 10_485_760 : null,
-            resolution.deleteConflictAction !== undefined
-          )).basis
+          (
+            await backend().repositoryCopilotConflictBasis(
+              repository.path,
+              resolution.path,
+              resolution.deleteConflictAction === undefined ? 10_485_760 : null,
+              resolution.deleteConflictAction !== undefined
+            )
+          ).basis
       )
     }
 
@@ -9005,8 +9204,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
               ? ManualConflictResolution.theirs
               : ManualConflictResolution.ours
             : deletedSide === 'ours'
-            ? ManualConflictResolution.ours
-            : ManualConflictResolution.theirs
+              ? ManualConflictResolution.ours
+              : ManualConflictResolution.theirs
         this._updateManualConflictResolution(
           repository,
           resolution.path,
@@ -9238,13 +9437,21 @@ export class AppStore extends TypedBaseStore<IAppState> {
       this.getMultiCommitOperationProgressCallBack(repository)
     const gitStore = this.gitStoreCache.get(repository)
     const tip = gitStore.tip
-    const expected = tip.kind === TipState.Valid
-      ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
-      : tip.kind === TipState.Detached
-      ? { head: tip.currentSha, branch: null }
-      : undefined
+    const expected =
+      tip.kind === TipState.Valid
+        ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
+        : tip.kind === TipState.Detached
+          ? { head: tip.currentSha, branch: null }
+          : undefined
     const result = await gitStore.performFailableOperation(
-      () => rebase(repository, baseBranch, targetBranch, progressCallback, expected),
+      () =>
+        rebase(
+          repository,
+          baseBranch,
+          targetBranch,
+          progressCallback,
+          expected
+        ),
       {
         retryAction: {
           type: RetryActionType.Rebase,
@@ -9342,11 +9549,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
     if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
       const { tip } = branchesState
       if (tip.kind !== TipState.Valid) {
-        log.error('Could not abort squash merge: the current branch is unavailable')
+        log.error(
+          'Could not abort squash merge: the current branch is unavailable'
+        )
         return
       }
       await gitStore.performFailableOperation(() =>
-        backend().abortRepositorySquashMerge(repository.path, tip.branch.tip.sha, tip.branch.ref)
+        backend().abortRepositorySquashMerge(
+          repository.path,
+          tip.branch.tip.sha,
+          tip.branch.ref
+        )
       )
       return
     }
@@ -9466,7 +9679,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
     try {
       if (useCustomShell && customShell) {
         if (__LINUX__ && backend().transportKind !== 'none') {
-          throw new Error('Custom terminals are not yet supported by the native backend. Select an available terminal in Options.')
+          throw new Error(
+            'Custom terminals are not yet supported by the native backend. Select an available terminal in Options.'
+          )
         }
         await launchCustomShell(customShell, path, error =>
           this._pushError(error)
@@ -9474,10 +9689,18 @@ export class AppStore extends TypedBaseStore<IAppState> {
       } else {
         const match = await findShellOrDefault(this.selectedShell)
         if (__LINUX__ && backend().transportKind !== 'none') {
-          if (!(repository instanceof Repository) || !Path.isAbsolute(path) || !Path.isAbsolute(repository.path)) {
+          if (
+            !(repository instanceof Repository) ||
+            !Path.isAbsolute(path) ||
+            !Path.isAbsolute(repository.path)
+          ) {
             throw new Error('Select a repository before opening a terminal.')
           }
-          await backend().openRepositoryTerminal(repository.path, match.shell, path)
+          await backend().openRepositoryTerminal(
+            repository.path,
+            match.shell,
+            path
+          )
         } else {
           await launchShell(match, path, error => this._pushError(error))
         }
@@ -9495,14 +9718,20 @@ export class AppStore extends TypedBaseStore<IAppState> {
   public async _editGlobalGitConfig() {
     if (backend().transportKind !== 'none') {
       try {
-        const { selectedExternalEditor, useCustomEditor, customEditor } = this.getState()
+        const { selectedExternalEditor, useCustomEditor, customEditor } =
+          this.getState()
         if (useCustomEditor && customEditor) {
-          await backend().openCustomGlobalGitConfigEditor(await this.nativeCustomEditorCommand(customEditor))
+          await backend().openCustomGlobalGitConfigEditor(
+            await this.nativeCustomEditorCommand(customEditor)
+          )
           return
         }
         const match = await findEditorOrDefault(selectedExternalEditor)
         if (match === null) {
-          throw new ExternalEditorError('No suitable editors are installed for GitHub Desktop to launch.', { suggestDefaultEditor: true })
+          throw new ExternalEditorError(
+            'No suitable editors are installed for GitHub Desktop to launch.',
+            { suggestDefaultEditor: true }
+          )
         }
         await backend().openGlobalGitConfigEditor(match.editor)
       } catch (error) {
@@ -9561,7 +9790,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       const appPath =
         this.copilotAppPath !== null
           ? this.copilotAppPath
-          : (await findCopilotApp()) ?? undefined
+          : ((await findCopilotApp()) ?? undefined)
       if (appPath === undefined) {
         throw new CopilotAppError(
           'not-found',
@@ -9634,24 +9863,42 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
   }
 
-  private async openInNativeEditor(fullPath: string, name: string): Promise<void> {
+  private async openInNativeEditor(
+    fullPath: string,
+    name: string
+  ): Promise<void> {
     const { repositoryPath, path } = this.nativeEditorTarget(fullPath)
     await backend().openNamedRepositoryEditor(repositoryPath, path, name)
   }
 
-  private nativeEditorTarget(fullPath: string): { repositoryPath: string; path: string | null } {
+  private nativeEditorTarget(fullPath: string): {
+    repositoryPath: string
+    path: string | null
+  } {
     const repository = this.selectedRepository
-    if (!(repository instanceof Repository) || !Path.isAbsolute(fullPath) || !Path.isAbsolute(repository.path)) {
+    if (
+      !(repository instanceof Repository) ||
+      !Path.isAbsolute(fullPath) ||
+      !Path.isAbsolute(repository.path)
+    ) {
       throw new Error('Select a repository before opening a file in an editor.')
     }
     const relative = Path.relative(repository.path, fullPath)
-    if (Path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${Path.sep}`)) {
-      throw new Error('The native editor can only open files within the selected repository.')
+    if (
+      Path.isAbsolute(relative) ||
+      relative === '..' ||
+      relative.startsWith(`..${Path.sep}`)
+    ) {
+      throw new Error(
+        'The native editor can only open files within the selected repository.'
+      )
     }
     return { repositoryPath: repository.path, path: relative || null }
   }
 
-  private async nativeCustomEditorCommand(editor: ICustomIntegration): Promise<ICustomEditorCommand> {
+  private async nativeCustomEditorCommand(
+    editor: ICustomIntegration
+  ): Promise<ICustomEditorCommand> {
     return {
       program: editor.path,
       args: await parseCustomIntegrationArgumentsForRuntime(editor.arguments),
@@ -9659,9 +9906,16 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
   }
 
-  private async openInNativeCustomEditor(fullPath: string, editor: ICustomIntegration): Promise<void> {
+  private async openInNativeCustomEditor(
+    fullPath: string,
+    editor: ICustomIntegration
+  ): Promise<void> {
     const { repositoryPath, path } = this.nativeEditorTarget(fullPath)
-    await backend().openCustomRepositoryEditor(repositoryPath, path, await this.nativeCustomEditorCommand(editor))
+    await backend().openCustomRepositoryEditor(
+      repositoryPath,
+      path,
+      await this.nativeCustomEditorCommand(editor)
+    )
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */
@@ -10436,19 +10690,19 @@ export class AppStore extends TypedBaseStore<IAppState> {
           clonedAssignment !== undefined
             ? clonedAssignment
             : remote === null
-            ? null
-            : await chooseAccountForRemoteRepository(
-                accounts,
-                remote.url,
-                validatedPath,
-                (repository, candidates) =>
-                  this._chooseRepositoryAccount(repository, candidates)
-              ).catch(e => {
-                // Add the repository unassigned rather than leaving it
-                // half-added.
-                this.emitError(e)
-                return null
-              })
+              ? null
+              : await chooseAccountForRemoteRepository(
+                  accounts,
+                  remote.url,
+                  validatedPath,
+                  (repository, candidates) =>
+                    this._chooseRepositoryAccount(repository, candidates)
+                ).catch(e => {
+                  // Add the repository unassigned rather than leaving it
+                  // half-added.
+                  this.emitError(e)
+                  return null
+                })
         let refreshedRepo = addedRepo
         if (assignment != null) {
           const gitHubRepository = isAccessibleRepository(assignment)
@@ -10694,9 +10948,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // association is out of date. So try again before we bail on providing an
     // authenticating user.
     if (!account) {
-      updatedRepository = await this.repositoryWithRefreshedGitHubRepository(
-        repository
-      )
+      updatedRepository =
+        await this.repositoryWithRefreshedGitHubRepository(repository)
     }
 
     return fn(updatedRepository)
@@ -11703,11 +11956,12 @@ export class AppStore extends TypedBaseStore<IAppState> {
       this.getMultiCommitOperationProgressCallBack(repository)
     const gitStore = this.gitStoreCache.get(repository)
     const tip = gitStore.tip
-    const expected = tip.kind === TipState.Valid
-      ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
-      : tip.kind === TipState.Detached
-      ? { head: tip.currentSha, branch: null }
-      : undefined
+    const expected =
+      tip.kind === TipState.Valid
+        ? { head: tip.branch.tip.sha, branch: tip.branch.ref }
+        : tip.kind === TipState.Detached
+          ? { head: tip.currentSha, branch: null }
+          : undefined
     const result = await gitStore.performFailableOperation(() =>
       cherryPick(repository, orderedCommits, progressCallback, expected)
     )
@@ -12153,13 +12407,22 @@ export class AppStore extends TypedBaseStore<IAppState> {
     ) {
       const gitStore = this.gitStoreCache.get(repository)
       const result = await gitStore.performFailableOperation(async () => {
-        const target = operationDetail.sourceBranch ?? this.getBranchToCheckoutAfterDelete(tip.branch, repository)
-        if (target === null) throw new Error('No branch is available to check out before undo')
+        const target =
+          operationDetail.sourceBranch ??
+          this.getBranchToCheckoutAfterDelete(tip.branch, repository)
+        if (target === null)
+          throw new Error('No branch is available to check out before undo')
         await checkoutBranch(repository, target, gitStore.currentRemote)
-        await this.deleteLocalBranchAndUpstreamBranch(repository, tip.branch, false)
+        await this.deleteLocalBranchAndUpstreamBranch(
+          repository,
+          tip.branch,
+          false
+        )
         return true
       })
-      await this._refreshRepository(repository).catch(error => log.warn('Could not refresh after undoing branch creation', error))
+      await this._refreshRepository(repository).catch(error =>
+        log.warn('Could not refresh after undoing branch creation', error)
+      )
       return result === true
     }
 

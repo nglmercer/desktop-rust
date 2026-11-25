@@ -1299,8 +1299,8 @@ export class CopilotStore extends BaseStore {
             cause: failed
               ? failure
               : signal.aborted
-              ? cancellationError()
-              : undefined,
+                ? cancellationError()
+                : undefined,
             cleanupErrors,
           }
         )
@@ -1493,7 +1493,7 @@ export class CopilotStore extends BaseStore {
       throw new CommitMessageGenerationCancelledError()
     }
     const resolvedModel = requestedModelId
-      ? cachedModels.find(m => m.id === requestedModelId) ?? null
+      ? (cachedModels.find(m => m.id === requestedModelId) ?? null)
       : getPreferredDefaultModel(cachedModels)
     const modelId = resolvedModel?.id ?? requestedModelId ?? DefaultCopilotModel
     return {
@@ -1533,7 +1533,7 @@ export class CopilotStore extends BaseStore {
     // cache is treated as "metadata unavailable" (raw id, no effort).
     const cachedModels = this.getCachedModelList(account) ?? []
     const resolvedModel = requestedModelId
-      ? cachedModels.find(m => m.id === requestedModelId) ?? null
+      ? (cachedModels.find(m => m.id === requestedModelId) ?? null)
       : getPreferredDefaultModel(cachedModels)
 
     return {

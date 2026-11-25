@@ -1,9 +1,23 @@
 import { describe, it, beforeEach, afterEach } from 'vitest'
 import assert from 'node:assert'
-import { mkdtempSync, openSync as nodeOpen, readSync as nodeRead, closeSync as nodeClose, writeFileSync, rmSync, renameSync, statSync } from 'node:fs'
+import {
+  mkdtempSync,
+  openSync as nodeOpen,
+  readSync as nodeRead,
+  closeSync as nodeClose,
+  writeFileSync,
+  rmSync,
+  renameSync,
+  statSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createReadStream, openSync, readSync, closeSync } from '../../src/web/fs'
+import {
+  createReadStream,
+  openSync,
+  readSync,
+  closeSync,
+} from '../../src/web/fs'
 
 // The `fs` adapter against a bridge that answers `fs-read-range` from the real
 // file system, the way Rust does. What is under test is the adapter's block
@@ -22,7 +36,12 @@ function installRangeBridge() {
         data: buffer.subarray(0, bytesRead).toString('base64'),
         bytesRead,
         eof: o.offset + bytesRead >= meta.size,
-        identity: { dev: meta.dev, ino: String(meta.ino), size: meta.size, mtimeMs: meta.mtimeMs },
+        identity: {
+          dev: meta.dev,
+          ino: String(meta.ino),
+          size: meta.size,
+          mtimeMs: meta.mtimeMs,
+        },
       }
     } finally {
       nodeClose(fd)
@@ -37,7 +56,11 @@ function installRangeBridge() {
       if (channel === 'desktop.io.fs-stat') {
         // `openSync` only needs the path to exist.
         const meta = statSync(options.path)
-        return { isFile: meta.isFile(), isDirectory: meta.isDirectory(), size: meta.size }
+        return {
+          isFile: meta.isFile(),
+          isDirectory: meta.isDirectory(),
+          size: meta.size,
+        }
       }
       if (channel !== 'desktop.io.fs-read-range') {
         throw new Error(`unexpected ${channel}`)
@@ -78,7 +101,9 @@ describe('fs adapter ranges', () => {
     dir = mkdtempSync(join(tmpdir(), 'desktop-fs-range-'))
     file = join(dir, 'data.bin')
     // Larger than two blocks, so reads must be chained.
-    content = Buffer.from(Array.from({ length: 2 * BLOCK + 300 }, (_, i) => i % 251))
+    content = Buffer.from(
+      Array.from({ length: 2 * BLOCK + 300 }, (_, i) => i % 251)
+    )
     writeFileSync(file, content)
   })
 
@@ -90,7 +115,10 @@ describe('fs adapter ranges', () => {
   it('streams a whole file across blocks, byte for byte', async () => {
     const chunks = await collect(createReadStream(file))
     assert.deepStrictEqual(Buffer.concat(chunks), content)
-    assert.ok(chunks.length >= 3, 'a file larger than a block arrives in several chunks')
+    assert.ok(
+      chunks.length >= 3,
+      'a file larger than a block arrives in several chunks'
+    )
   })
 
   it('treats start and end as Node does, with an inclusive end', async () => {
@@ -100,10 +128,17 @@ describe('fs adapter ranges', () => {
 
   it('decodes text whose characters straddle a block boundary', async () => {
     // "é" straddles the first boundary: the first byte ends one block, the second starts the next.
-    const text = Buffer.concat([Buffer.alloc(BLOCK - 1, 0x61), Buffer.from('é', 'utf8'), Buffer.from('z')])
+    const text = Buffer.concat([
+      Buffer.alloc(BLOCK - 1, 0x61),
+      Buffer.from('é', 'utf8'),
+      Buffer.from('z'),
+    ])
     writeFileSync(file, text)
     const chunks = await collect(createReadStream(file, { encoding: 'utf8' }))
-    assert.strictEqual(chunks.map(c => c.toString()).join(''), text.toString('utf8'))
+    assert.strictEqual(
+      chunks.map(c => c.toString()).join(''),
+      text.toString('utf8')
+    )
   })
 
   it('fails explicitly when the file is replaced between blocks', async () => {
@@ -130,12 +165,19 @@ describe('fs adapter ranges', () => {
     assert.strictEqual(readSync(fd, first, 0, 8, null), 8)
     assert.deepStrictEqual(first, content.subarray(0, 8))
     const second = Buffer.alloc(8)
-    assert.strictEqual(readSync(fd, second, 0, 8, null), 8, 'the cursor advances')
+    assert.strictEqual(
+      readSync(fd, second, 0, 8, null),
+      8,
+      'the cursor advances'
+    )
     assert.deepStrictEqual(second, content.subarray(8, 16))
 
     // Replacing the file under an open descriptor is an explicit failure.
     replaceFile(file, Buffer.alloc(content.length, 0x01))
-    assert.throws(() => readSync(fd, Buffer.alloc(8), 0, 8, 0), (error: any) => error.code === 'EIO')
+    assert.throws(
+      () => readSync(fd, Buffer.alloc(8), 0, 8, 0),
+      (error: any) => error.code === 'EIO'
+    )
     closeSync(fd)
   })
 
@@ -157,8 +199,17 @@ describe('fs adapter ranges', () => {
     const read = readSync(fd, buffer, 0, buffer.length, BLOCK - 5)
     closeSync(fd)
     assert.strictEqual(read, buffer.length)
-    assert.deepStrictEqual(buffer.subarray(0, read), content.subarray(BLOCK - 5, BLOCK - 5 + read))
-    assert.ok(transferred.every(length => length <= BLOCK), 'no call asks for more than one block')
-    assert.ok(statSync(file).size > transferred.reduce((a, b) => a + b, 0), 'the file was not read whole')
+    assert.deepStrictEqual(
+      buffer.subarray(0, read),
+      content.subarray(BLOCK - 5, BLOCK - 5 + read)
+    )
+    assert.ok(
+      transferred.every(length => length <= BLOCK),
+      'no call asks for more than one block'
+    )
+    assert.ok(
+      statSync(file).size > transferred.reduce((a, b) => a + b, 0),
+      'the file was not read whole'
+    )
   })
 })

@@ -1,180 +1,56 @@
 # Retiradas — desktop-rust
 
-> Fase 0 — inventario de candidatos. Cada entrada: ruta → responsabilidad → reemplazo → consumidores revisados → compatibilidad → prueba → commit de retirada.
-> No borra todavía; la Fase final ejecuta la eliminación después de conectar y verificar.
+Este documento distingue lo que ya salió del flujo activo de lo que todavía es
+un candidato de retirada. No uses entradas históricas como evidencia actual: la
+prueba vigente es la que se puede ejecutar desde este checkout.
 
-## 1. Registro por ruta
+## 1. Ya retirado del flujo activo
 
-```text
-Ruta retirada: (pendiente) rust/crates/desktop-core  [renombrado a desktop-shell-core-legacy]
-Responsabilidad anterior: dominio desktop GUI-free: models, git, storage, api, state, ipc, platform, io/limits/executor/process
-Reemplazo conectado: rust/crates/core (único desktop-core definitivo) + rust/crates/desktop-app (Tao/Wry)
-Consumidores, imports dinámicos y scripts revisados: rust/crates/desktop-app/Cargo.toml (antes desktop-core), Cargo.toml raíz workspace.dependencies, todo el crate desktop-app/src/*.rs (DesktopApp, io::executor/limits/lane, ipc::channels/protocol)
-Datos o formatos que deben seguir siendo compatibles: state JSON sanitizado sin tokens, SecureStore DPAPI, AppPaths, persistencia atómica
-Prueba o recorrido que acredita la sustitución: cargo test --workspace (raíz) + app_smoke.rs + suites rust/tests/*.py
-Commit de retirada: (pendiente Fase final)
-```
+| Ruta o pieza | Sustitución actual | Evidencia rutinaria |
+|---|---|---|
+| `app/src/main-process/**`, entradas Electron y crash shell | `rust/crates/desktop-app` (Tao/Wry) | `pnpm build:dev`, `cargo test -p desktop-app` y smoke Xvfb en CI |
+| `app/webpack.*`, `script/build.ts`, `script/package.ts`, `script/post-install.ts` | Vite + `script/package-rust.ts` | `pnpm vite:build`, `pnpm package` |
+| Electron, electron-packager/installer/devtools y dependencias exclusivas | host Rust nativo | root `package.json`/`pnpm-lock.yaml` sin esas dependencias |
+| `package-lock.json` raíz y `app/package-lock.json` | `pnpm-lock.yaml` | `pnpm install --frozen-lockfile --ignore-scripts` |
+| ESLint, typescript-eslint, plugins ESLint y Prettier raíz | oxlint + reglas `oxlint-rules/` + Biome format | `pnpm lint`, `pnpm test:oxlint` |
+| `eslint-rules/`, `biome-rules/`, `biome.security.json`, `.eslintrc*`, `.prettierrc*` | `.oxlintrc.json`, `.oxlint.security.json`, `biome.json` | `pnpm lint`, `pnpm format:check` |
+| `vitest-suites.json` y enrutado explícito de suites | Vitest como único runner | `pnpm test`, `pnpm test:script` |
+| Suites Python ya reemplazadas | tests Rust/Vitest equivalentes | `cargo test`, `pnpm test` |
+| `rust/Cargo.toml`/`rust/Cargo.lock` separados | workspace Cargo raíz | `cargo metadata`, `cargo test --workspace` |
+| `ipc-shim.js` fuente manual | `web/ipc-shim.ts` compilado por Vite | `pnpm vite:build` |
 
-```text
-Ruta retirada: rust/Cargo.toml + rust/Cargo.lock (workspace shell)
-Responsabilidad anterior: workspace shell separado (desktop-core legacy + desktop-app)
-Reemplazo conectado: Cargo.toml raíz consolidado (un solo workspace, un solo lock)
-Consumidores, imports dinámicos y scripts revisados: .github/workflows/rust.yml, script/package-rust.ts, MIGRATION.md, rust/README.md
-Datos o formatos que deben seguir siendo compatibles: MSRV 1.85, edition, features, perfiles, dependencias heredadas propias del shell
-Prueba o recorrido que acredita la sustitución: cargo metadata (raíz) single workspace; build CLI/core/bridge sin GTK via default-members; shell build explícito en CI
-Commit de retirada: (pendiente)
-```
+## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
-```text
-Ruta retirada: (pendiente) rust/crates/native como host independiente
-Responsabilidad anterior: host Wry/Tao alternativo que sirve assets del bridge (desktop-native)
-Reemplazo conectado: rust/crates/desktop-app (github-desktop-rs, Tao/Wry + desktop://) + rust/crates/cli (desktop-rs serve) para Termux/browser
-Consumidores, imports dinámicos y scripts revisados: rust/crates/native/tests/{smoke_launch,headless_cli}.rs, .github/workflows/rust.yml (job native), rust/README.md
-Datos o formatos que deben seguir siendo compatibles: argumentos (--empty/--selected/-C/--config/--smoke-test) y códigos de retorno vía wrapper de compatibilidad
-Prueba o recorrido que acredita la sustitución: native job en CI (xvfb smoke) + wrapper de compatibilidad verificado
-Commit de retirada: (pendiente Fase final; conservar wrapper fino si hay consumidores del ejecutable anterior)
-```
+Estas piezas ya no son dependencias nativas del runtime Electron, pero sus
+fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 
-```text
-Ruta retirada: app/src/main-process/** + entradas Electron + crash shell
-Responsabilidad anterior: main process Electron (ventana, menú, dialogs, updater, crash)
-Reemplazo conectado: rust/crates/desktop-app/src/{main,host,instance,menu,protocol}.rs (Tao/Wry, instancia única, protocolos)
-Consumidores, imports dinámicos y scripts revisados: app/src/** imports electron, shims app/src/web/electron*.ts, vite.config.ts (ya no usa webpack), package.json (electron/packager)
-Datos o formatos que deben seguir siendo compatibles: identidad fork propia, directorios propios (no colisión con desktop oficial), protocolo x-github-client://
-Prueba o recorrido que acredita la sustitución: app_smoke.rs (arranque real), prueba GUI Windows/macOS/Linux
-Commit de retirada: (pendiente)
-```
+| Pieza | Estado actual | Condición de borrado final |
+|---|---|---|
+| `keytar`, `registry-js`, `fs-admin` | imports dirigidos a shims web o Rust | ningún consumidor ni test dependa del shim |
+| `desktop-notifications`, `windows-argv-parser` | fuentes vendorizadas/resolución de tipos para consumidores existentes | reemplazo Rust/tipado completo en notificaciones e integración de comandos |
+| `desktop-trampoline` | dependencia real en `app/package.json` | entorno Git/SSH/askpass servido completamente por Rust |
+| `printenvz` | helper Rust vendorizado usado por scripts de entorno de hooks | integración de hooks migrada o eliminada |
+| `dugite` | dependencia real mientras existen fallbacks Git Node | 0 imports del renderer y tests usando Rust |
+| shims `app/src/web/*` | compatibilidad para renderer/tests | retirar archivo por archivo tras eliminar consumidores |
 
-```text
-Ruta retirada: app/webpack.* + loaders + postinstall Electron
-Responsabilidad anterior: build Electron (webpack), post-install downloads
-Reemplazo conectado: vite.config.ts + vite.highlighter.config.ts + pnpm-lock.yaml + script/package-rust.*
-Consumidores, imports dinámicos y scripts revisados: package.json scripts (compile:dev/prod, build, postinstall), script/build.ts, CI
-Datos o formatos que deben seguir siendo compatibles: out/vite-dist (index.html, assets, highlighter.js, emoji) consumido por bridge y desktop-app
-Prueba o recorrido que acredita la sustitución: pnpm vite:build + cargo build embedding + CI sin --ignore-scripts como dependencia permanente
-Commit de retirada: (pendiente Fase final)
-```
-
-```text
-Ruta retirada: script/{build,package,copilot,dist-info,post-install}.ts + scripts antiguos de release
-Responsabilidad anterior: packaging, copia Copilot, firma, distribución
-Reemplazo conectado: script/package-rust.* + packaging/{windows,macos,linux}/
-Consumidores, imports dinámicos y scripts revisados: package.json (package, start, draft-release), .github/workflows/*, script/copilot.ts (validación runtime.node)
-Datos o formatos que deben seguir siendo compatibles: runtime Copilot completo (exe + runtime.node + adyacentes), licencias, Git/LFS por plataforma, metadatos fork
-Prueba o recorrido que acredita la sustitución: paquete limpio sin checkout/node_modules, instalación sin Electron
-Commit de retirada: (pendiente)
-```
-
-```text
-Ruta retirada: Electron, electron-packager, electron-builder, devtools y dependencias exclusivas (package.json + package-lock.json npm)
-Responsabilidad anterior: runtime y build Electron
-Reemplazo conectado: Tao/Wry + Rust toolchain + pnpm/Vite
-Consumidores, imports dinámicos y scripts revisados: app/package.json, package.json (electron version), .eslintrc, script/*.ts, tests E2E playwright._electron
-Datos o formatos que deben seguir siendo compatibles: none (reemplazo binario nativo)
-Prueba o recorrido que acredita la sustitución: cargo build + pnpm vite:build + instalación limpia sin descarga Electron
-Commit de retirada: (pendiente)
-```
-
-```text
-Ruta retirada: SDK Copilot en renderer (@github/copilot-sdk) + adaptadores de procesos TS
-Responsabilidad anterior: sesiones Copilot y assisted-commit (copilot-store.ts, copilot-operation.ts, copilot-runtime.ts, lib/git/assisted-commit/*)
-Reemplazo conectado: cliente Rust acotado en core con protocolo real del runtime
-Consumidores, imports dinámicos y scripts revisados: app/src/lib/copilot*.ts, app/src/lib/stores/copilot-store.ts, lib/git/assisted-commit/*
-Datos o formatos que deben seguir siendo compatibles: snapshot/captura/valida, lease de transacción, frontera push asistido (rollback solo antes de push nativo)
-Prueba o recorrido que acredita la sustitución: crear sesión + completar acción desde UI, cancelación/recuperación, runtime distribuido verificado
-Commit de retirada: (pendiente Fase 5)
-```
-
-```text
-Ruta retirada: shims app/src/web/* (individuales), aliases, polyfills
-Responsabilidad anterior: child_process, fs, keytar, dugite, url, crypto, electron-window-state, etc. sobre Node/Electron
-Reemplazo conectado: app/src/backend/client.ts + transportes Wry/WebSocket; utilidades puras web quedan
-Consumidores, imports dinámicos y scripts revisados: rg imports directos/transitivos/dinámicos en app/src/{ui,lib,stores}/**; vite.config.ts ya alias those shims
-Datos o formatos que deben seguir siendo compatibles: utilidades web puras (path/url/stream bufferizados) que siguen usándose
-Prueba o recorrido que acredita la sustitución: pnpm vite:build sin Node shims; tests web-* migrados a su equivalente Rust
-Commit de retirada: (pendiente, revisión individual por archivo)
-```
-
-```text
-Ruta retirada: rust/crates/desktop-app/web/ipc-shim.js
-Responsabilidad anterior: shim ipcRenderer sobre window.ipc.postMessage + evaluate_script
-Reemplazo conectado: web/ipc-shim.ts, compilado por Vite e inyectado por el host Wry
-Consumidores, imports dinámicos y scripts revisados: desktop-app/src/{bridge,host,main}.rs INIT_SCRIPT, build.rs, empaquetado y pruebas
-Datos o formatos que deben seguir siendo compatibles: wire format __rpc/__invoke (version 3, capabilities cancel/max_pending) si aún lo usa Wry
-Prueba o recorrido que acredita la sustitución: pruebas IPC, eventos, menú y HTTP sobre el artefacto compilado; smoke real de Wry
-Commit de retirada: el puente de compatibilidad continúa activo, ahora en TypeScript
-```
-
-```text
-Ruta retirada: dugite, keytar, trampolines, módulos nativos (fs-admin, koffi, registry-js)
-Responsabilidad anterior: git exec, keychain, helpers de plataforma
-Reemplazo conectado: Rust: git via process runner, SecretStore nativo (DPAPI/Keychain/Secret Service), trampolines via crate dedicated
-Consumidores, imports dinámicos y scripts revisados: app/src/lib/git/*, app/src/web/{dugite,keytar,registry-js,fs-admin,koffi}.ts, app/src/lib/api.ts
-Datos o formatos que deben seguir siendo compatibles: credenciales migradas solo tras comprobar destino; sin tokens en logs/URLs
-Prueba o recorrido que acredita la sustitución: suites Rust y Vitest de credenciales, GitHub y descarte.
-Commit de retirada: (pendiente)
-```
-
-```text
-Ruta retirada: vendor/desktop-notifications, vendor/desktop-trampoline, printenvz, windows-argv-parser
-Responsabilidad anterior: binarios helpers Windows
-Reemplazo conectado: Rust nativo (notificaciones, argv, trampolines)
-Consumidores, imports dinámicos y scripts revisados: app/package.json deps "file:../vendor/*", app/src/web/{desktop-notifications,desktop-trampoline,windows-argv-parser}.ts
-Datos o formatos que deben seguir siendo compatibles: argv quoting, notificaciones, Unicode
-Prueba o recorrido que acredita la sustitución: Windows x64 CI, rutas Unicode/espacios
-Commit de retirada: (pendiente, verificación individual)
-```
-
-```text
-Ruta retirada: lockfiles npm (package-lock.json) + scripts npm exclusivos
-Responsabilidad anterior: install lock npm universal
-Reemplazo conectado: pnpm-lock.yaml (actual) + Cargo.lock (único a final)
-Consumidores, imports dinámicos y scripts revisados: package.json (postinstall, clean-slate, npm scripts), scripts/*, CI
-Datos o formatos que deben seguir siendo compatibles: pnpm-lock.yaml actual; fixtures/tools independientes conservan sus lockfiles si se necesitan
-Prueba o recorrido que acredita la sustitución: pnpm install --frozen-lockfile + cargo build --locked limpio
-Commit de retirada: (pendiente Fase final)
-```
-
-```text
-Ruta retirada: Tests/fixtures/documentation anteriores exclusivas de rutas eliminadas
-Responsabilidad anterior: suites Electron, fixtures obsoletas, docs Electron
-Reemplazo conectado: suites rust/tests/*.py (41 headless), app_smoke.rs (GUI), docs/migration/*, rust/{README,MIGRATION}.md, MIGRATION.md actualizado
-Consumidores, imports dinámicos y scripts revisados: app/test/unit/** Electron, script/*.ts, docs/**, README.md, AGENTS.md, CONTRIBUTING
-Datos o formatos que deben seguir siendo compatibles: oráculos branch/lfs (branch-rules-oracle, lfs-attributes-oracle.json), licencias, procedencia (THIRD_PARTY_NOTICES), gemoji/gitignore/choosealicense submódulos
-Prueba o recorrido que acredita la sustitución: suites Cargo y Vitest + vite build + app_smoke + build limpio con submódulos
-Commit de retirada: (pendiente — conservar React/Primer, estilos, componentes, recursos vigentes, highlighter, submódulos, licencias, oráculos)
-```
-
-## 2. Candidatos y condiciones (tabla ejecutiva)
+## 3. Candidatos estructurales pendientes
 
 | Candidato | Condición antes de eliminar |
 |---|---|
-| `rust/crates/desktop-core` legacy → `desktop-shell-core-legacy` (renombrado Fase 2) | Todos los servicios útiles integrados al `core` definitivo y GUI/CLI/bridge usan `desktop-core` |
-| `rust/Cargo.toml`/`lock` | Retirados; workspace raíz consolidado y comandos migrados |
-| `rust/crates/native` host independiente | Shell definitivo probado; wrapper compatibilidad solo si quedan consumidores |
-| Dominio TS en stores/`lib/git` | No decide efectos ni persistencia; conserva interfaces/proyecciones |
-| `app/src/main-process/**`, entradas Electron, crash shell | Responsabilidades portadas, referencias resueltas, plataforma verificada |
-| `app/webpack.*`, loaders Electron | Vite cubre UI, workers, highlighter, recursos, dev |
-| Scripts build/package/postinstall/release antiguos | Recursos/Copilot/licencias/firma/distribución trasladados y verificados |
-| Electron/packager/installer/devtools/deps exclusivas | Sin consumidores runtime/tests/scripts/tipos/build; instalación limpia sin ellos |
-| SDK Copilot renderer + adaptadores | Cliente Rust con paridad; runtime externo en paquete |
-| Shims `app/src/web/*`, aliases, polyfills | Revisión individual; conservar utilidades web puras |
-| `ipc-shim.js` | Retirado; Wry inyecta el bootstrap compilado desde TypeScript |
-| `dugite`/`keytar`/trampolines/módulos nativos | Operaciones/parsers/credenciales/persistencia migradas |
-| `vendor/desktop-*`, `printenvz`, `windows-argv-parser` | Verificación individual por función |
-| Lockfiles npm y scripts npm exclusivos | Consumidores migrados; conservar fixtures/tooling independientes |
-| Tests/fixtures/docs anteriores | Casos trasladados; retirar solo exclusivos de rutas eliminadas |
+| `rust/crates/desktop-shell-core-legacy` | servicios útiles integrados en `rust/crates/core`; GUI/CLI/bridge sin dependencia legacy |
+| `rust/crates/native` como host independiente | shell definitivo validado en plataformas; conservar wrapper fino solo si hay consumidores del ejecutable |
+| fallbacks `transportKind` en renderer | cada módulo probado contra backend Rust y sin consumidores backend-less |
+| llamadas legacy `git()` en `app/src/lib/git` | operaciones Rust tipadas con paridad, progreso, cancelación y recuperación |
+| persistencia/proyecciones TS que duplican dominio | autoridad de dominio en Rust y contratos TypeScript generados |
+| scripts npm residuales de release | publicación/versionado verificados con pnpm/Rust sin npm CLI |
+| documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
-## 3. Qué se conserva
+La línea base numérica viva está en `pnpm migration:status` (181 comprobaciones
+`transportKind`, 104 llamadas legacy Git, 22 imports `dugite`, 0 suites en el
+runner Node a 2026-11-25). `rust/ROADMAP.md` ordena el trabajo restante.
 
-React/Primer, componentes, estilos, recursos vigentes, highlighter, submódulos `gemoji`, `gitignore`, `choosealicense.com`, licencias, procedencia y oráculos útiles. No se borran por parecer antiguos ni por ausencia en un import TS.
-Los tres archivos UI de `desktop-app/web` (`app.js`, `index.html`, `styles.css`) ya se eliminaron en la base auditada `ca6acec28f` — no se restauran ni cuentan como trabajo nuevo.
+## 4. Qué se conserva
 
-## 4. Fase final
-
-La limpieza se hace en commits identificables. Empieza tras conectar reemplazos y superar verificaciones. Consta de:
-1) Consolidar workspace único + single `Cargo.lock` (`cargo metadata` limpia);
-2) Reconstruir (headless + shell);
-3) Eliminar legacy con registro en esta lista (con commit SHA);
-4) `git status` limpio sin collateral, referencias/manifiestos/scripts/workflows/docs actualizados;
-5) Instalación desde checkout limpio con submódulos, sin artefactos, sin descarga Electron.
+React/Primer, componentes, estilos, recursos vigentes, highlighter, submódulos
+`gemoji`, `gitignore`, `choosealicense.com`, licencias, procedencia y oráculos
+útiles. No se borran por parecer antiguos ni por ausencia en un import TS.

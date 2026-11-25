@@ -144,7 +144,8 @@ export async function setRemoteURL(
   name: string,
   url: string
 ): Promise<true> {
-  if (await manageRemote(repository, { type: 'set_url', name, url })) return true
+  if (await manageRemote(repository, { type: 'set_url', name, url }))
+    return true
   await git(
     ['remote', 'set-url', '--', name, url],
     repository.path,
@@ -155,9 +156,16 @@ export async function setRemoteURL(
 
 async function manageRemote(
   repository: Repository,
-  action: { readonly type: 'add' | 'set_url'; readonly name: string; readonly url: string } | { readonly type: 'remove'; readonly name: string }
+  action:
+    | {
+        readonly type: 'add' | 'set_url'
+        readonly name: string
+        readonly url: string
+      }
+    | { readonly type: 'remove'; readonly name: string }
 ): Promise<boolean> {
-  if (typeof window === 'undefined' || backend().transportKind === 'none') return false
+  if (typeof window === 'undefined' || backend().transportKind === 'none')
+    return false
   const result = await withRepositoryGitOperation(
     repository.path,
     'mutation',
@@ -218,13 +226,26 @@ export async function updateRemoteHEAD(
 ): Promise<void> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
     try {
-      const result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-        backend().refreshRepositoryRemoteHead(repository.path, remote.name, remote.url, isBackgroundTask), true)
+      const result = await withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        () =>
+          backend().refreshRepositoryRemoteHead(
+            repository.path,
+            remote.name,
+            remote.url,
+            isBackgroundTask
+          ),
+        true
+      )
       if (result !== 'unsupported') return
     } catch (error) {
       // A remote removed since the caller read it has no HEAD to refresh; the
       // Git path treated that as success too.
-      if (error instanceof Error && error.message === 'Configured remote no longer exists') {
+      if (
+        error instanceof Error &&
+        error.message === 'Configured remote no longer exists'
+      ) {
         return
       }
       throw error

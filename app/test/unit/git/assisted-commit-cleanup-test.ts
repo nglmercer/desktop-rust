@@ -1,5 +1,12 @@
 import assert from 'node:assert'
-import { afterEach, before, beforeEach, describe, it, TestContext } from 'node:test'
+import {
+  afterEach,
+  before,
+  beforeEach,
+  describe,
+  it,
+  TestContext,
+} from 'node:test'
 import { vi } from 'vitest'
 import { promises as FileSystem } from 'fs'
 

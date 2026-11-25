@@ -587,8 +587,8 @@ describe('Copilot commit run panel', () => {
           retry === null
             ? 'Dismiss'
             : retry === 'recovery'
-            ? 'Retry rollback'
-            : 'Retry refresh',
+              ? 'Retry rollback'
+              : 'Retry refresh',
       })
       assert.strictEqual(button.getAttribute('aria-disabled'), 'true')
       fireEvent.click(button)

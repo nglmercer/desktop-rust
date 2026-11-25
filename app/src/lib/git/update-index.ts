@@ -1,5 +1,10 @@
 import { Repository } from '../../models/repository'
-import { DiffSelectionType, DiffType, ITextDiff, ILargeTextDiff } from '../../models/diff'
+import {
+  DiffSelectionType,
+  DiffType,
+  ITextDiff,
+  ILargeTextDiff,
+} from '../../models/diff'
 import { applyPatchToIndex } from './apply'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
@@ -59,14 +64,19 @@ interface IUpdateIndexOptions {
 }
 
 /** Order partial renames before any separately selected source. */
-function orderPartialSelections(files: ReadonlyArray<WorkingDirectoryFileChange>): Array<WorkingDirectoryFileChange> {
-  const partial = files.filter(file => file.selection.getSelectionType() !== DiffSelectionType.All)
+function orderPartialSelections(
+  files: ReadonlyArray<WorkingDirectoryFileChange>
+): Array<WorkingDirectoryFileChange> {
+  const partial = files.filter(
+    file => file.selection.getSelectionType() !== DiffSelectionType.All
+  )
   const byPath = new Map(partial.map(file => [file.path, file]))
   const dependencies = new Map(partial.map(file => [file, 0]))
   for (const file of partial) {
     if (file.status.kind === AppFileStatusKind.Renamed) {
       const source = byPath.get(file.status.oldPath)
-      if (source !== undefined) dependencies.set(source, (dependencies.get(source) ?? 0) + 1)
+      if (source !== undefined)
+        dependencies.set(source, (dependencies.get(source) ?? 0) + 1)
     }
   }
   const ready = partial.filter(file => dependencies.get(file) === 0)
@@ -85,7 +95,10 @@ function orderPartialSelections(files: ReadonlyArray<WorkingDirectoryFileChange>
       }
     }
   }
-  if (ordered.length !== partial.length) throw new Error('Overlapping renamed selections must be reviewed separately')
+  if (ordered.length !== partial.length)
+    throw new Error(
+      'Overlapping renamed selections must be reviewed separately'
+    )
   return ordered
 }
 
@@ -98,9 +111,15 @@ export async function preparePartialStagingDiffs(
   orderPartialSelections(files)
   const diffs = new Map(certified)
   for (const file of files) {
-    if (file.status.kind !== AppFileStatusKind.Renamed || file.selection.getSelectionType() !== DiffSelectionType.Partial || diffs.has(file.id)) continue
+    if (
+      file.status.kind !== AppFileStatusKind.Renamed ||
+      file.selection.getSelectionType() !== DiffSelectionType.Partial ||
+      diffs.has(file.id)
+    )
+      continue
     const diff = await getWorkingDirectoryDiff(repository, file)
-    if (diff.kind !== DiffType.Text && diff.kind !== DiffType.LargeText) throw new Error('The renamed file no longer has a selectable text diff')
+    if (diff.kind !== DiffType.Text && diff.kind !== DiffType.LargeText)
+      throw new Error('The renamed file no longer has a selectable text diff')
     diffs.set(file.id, diff)
   }
   return diffs
@@ -125,11 +144,20 @@ async function updateIndex(
   }
 
   const batches = batchIndexPaths(paths)
-  await withRepositoryGitOperation(repository.path, 'mutation', async () => {
-    for (const selected of batches) {
-      await backend().repositoryUpdateIndex(repository.path, selected, options.forceRemove === true)
-    }
-  }, true)
+  await withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    async () => {
+      for (const selected of batches) {
+        await backend().repositoryUpdateIndex(
+          repository.path,
+          selected,
+          options.forceRemove === true
+        )
+      }
+    },
+    true
+  )
 }
 
 /**
@@ -147,12 +175,22 @@ export async function stageFiles(
   files: ReadonlyArray<WorkingDirectoryFileChange>,
   certifiedPartialDiffs?: ReadonlyMap<string, ITextDiff | ILargeTextDiff>
 ): Promise<void> {
-  const partialDiffs = await preparePartialStagingDiffs(repository, files, certifiedPartialDiffs)
+  const partialDiffs = await preparePartialStagingDiffs(
+    repository,
+    files,
+    certifiedPartialDiffs
+  )
   const normal = []
   const oldRenamed = []
   const partial = []
   const deletedFiles = []
-  const fullSelections = new Set(files.filter(file => file.selection.getSelectionType() === DiffSelectionType.All).map(file => file.path))
+  const fullSelections = new Set(
+    files
+      .filter(
+        file => file.selection.getSelectionType() === DiffSelectionType.All
+      )
+      .map(file => file.path)
+  )
 
   for (const file of files) {
     if (file.selection.getSelectionType() === DiffSelectionType.All) {
@@ -208,7 +246,8 @@ export async function stageFiles(
       repository,
       file,
       partialDiffs?.get(file.id),
-      file.status.kind === AppFileStatusKind.Renamed && fullSelections.has(file.status.oldPath)
+      file.status.kind === AppFileStatusKind.Renamed &&
+        fullSelections.has(file.status.oldPath)
     )
   }
 }

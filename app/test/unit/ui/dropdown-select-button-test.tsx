@@ -1,4 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '../../helpers/ui/vitest-render'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '../../helpers/ui/vitest-render'
 import assert from 'node:assert'
 import { it, vi } from 'vitest'
 import * as React from 'react'

@@ -267,7 +267,7 @@ describe('assisted push lifecycle ownership', () => {
     const requested = new Repository(source.path, repository.id, null, false)
     const retry = h.dispatcher
       .retryCopilotAssistedCommitPush(requested, state.runId)
-      .then(outcome => ({ kind: 'settled', outcome } as const))
+      .then(outcome => ({ kind: 'settled', outcome }) as const)
     let timer: NodeJS.Timeout | undefined
     try {
       const observed = await Promise.race([

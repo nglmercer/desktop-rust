@@ -6,7 +6,7 @@
 //! never leave a half-written state file — the same guarantee Dexie gave us.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 
 use serde_json::Value;
 
@@ -137,17 +137,17 @@ impl Storage {
     }
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(path: &PathBuf) -> Result<T> {
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let bytes = std::fs::read(path)?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-fn write_json<T: serde::Serialize>(path: &PathBuf, value: &T) -> Result<()> {
+fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value)?;
     atomic_write(path, &bytes)
 }
 
-pub fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<()> {
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     atomic_write_with(path, bytes, |source, destination| {
         std::fs::rename(source, destination)
     })
@@ -187,6 +187,7 @@ fn atomic_write_with(
 #[cfg(test)]
 mod guid_tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::{Arc, Barrier};
 
     struct Fixture(PathBuf);

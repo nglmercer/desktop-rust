@@ -35,7 +35,9 @@ describe('Cygwin launch', () => {
   for (const path of paths) {
     it(`passes the repository path through the environment for ${path}`, () => {
       const child = new ChildProcess()
-      const spawn = vi.mocked(childProcess.spawn).mockImplementation(() => child)
+      const spawn = vi
+        .mocked(childProcess.spawn)
+        .mockImplementation(() => child)
 
       assert.strictEqual(
         launch({ shell: Shell.Cygwin, path: shellPath }, path),
@@ -76,14 +78,15 @@ describe('Cygwin launch', () => {
       )
       await writeFile(join(bin, 'bash'), '#!/bin/sh\npwd -P\n', { mode: 0o755 })
 
-      const spawn = vi.mocked(childProcess.spawn).mockImplementation(() => new ChildProcess())
+      const spawn = vi
+        .mocked(childProcess.spawn)
+        .mockImplementation(() => new ChildProcess())
 
       for (const path of paths) {
         const directory = join(root, path)
         await mkdir(directory)
         launch({ shell: Shell.Cygwin, path: shellPath }, directory)
-        const [, args, options] =
-          spawn.mock.calls[spawn.mock.calls.length - 1]
+        const [, args, options] = spawn.mock.calls[spawn.mock.calls.length - 1]
         assert.ok(args)
         assert.ok(options?.env)
         // Stand-ins isolate the shell script from Cygwin and login profiles.
@@ -95,8 +98,7 @@ describe('Cygwin launch', () => {
       }
 
       launch({ shell: Shell.Cygwin, path: shellPath }, join(root, 'missing'))
-      const [, args, options] =
-        spawn.mock.calls[spawn.mock.calls.length - 1]
+      const [, args, options] = spawn.mock.calls[spawn.mock.calls.length - 1]
       assert.ok(args)
       assert.ok(options?.env)
       await assert.rejects(

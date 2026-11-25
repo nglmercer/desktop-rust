@@ -465,7 +465,8 @@ export async function samlReauthRequired(error: Error, dispatcher: Dispatcher) {
   const remoteMessage = getRemoteMessage(coerceToString(gitError.result.stderr))
   const match = samlReauthErrorMessageRe.exec(remoteMessage)
 
-  const organizationName = match?.[1] ??
+  const organizationName =
+    match?.[1] ??
     (isNativeFetchSamlReauthError(gitError)
       ? repository.gitHubRepository.owner.login
       : undefined)

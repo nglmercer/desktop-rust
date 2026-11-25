@@ -211,7 +211,6 @@ export class CustomIntegrationForm extends React.Component<
         showNonValidArgsError: false,
         showNoRepoPathArgError: false,
       })
-
     } catch (e) {
       log.error('Failed to parse custom integration arguments:', e)
 

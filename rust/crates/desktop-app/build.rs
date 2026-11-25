@@ -74,13 +74,15 @@ fn stale_reason(repo: &Path, dist: &Path) -> Option<String> {
     let Ok(built) = std::fs::metadata(dist.join("index.html")).and_then(|m| m.modified()) else {
         return Some(format!("{} is missing", dist.join("index.html").display()));
     };
-    INPUTS.iter().find_map(|input| match newest(&repo.join(input)) {
-        None => Some(format!("input {input} is missing")),
-        Some(time) if time > built => Some(format!(
-            "input {input} changed after the bundle was built"
-        )),
-        Some(_) => None,
-    })
+    INPUTS
+        .iter()
+        .find_map(|input| match newest(&repo.join(input)) {
+            None => Some(format!("input {input} is missing")),
+            Some(time) if time > built => {
+                Some(format!("input {input} changed after the bundle was built"))
+            }
+            Some(_) => None,
+        })
 }
 
 fn pnpm() -> &'static str {
@@ -329,7 +331,10 @@ mod tests {
         );
         let reason = stale_reason(&fixture.0, &fixture.dist()).unwrap();
         assert!(reason.contains("package.json"), "{reason}");
-        assert!(reason.contains("changed after the bundle was built"), "{reason}");
+        assert!(
+            reason.contains("changed after the bundle was built"),
+            "{reason}"
+        );
     }
 
     #[test]

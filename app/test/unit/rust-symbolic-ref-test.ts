@@ -75,5 +75,4 @@ describe('symbolic refs', () => {
     expect(mocks.read).not.toHaveBeenCalled()
     expect(mocks.git).not.toHaveBeenCalled()
   })
-
 })

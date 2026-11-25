@@ -94,9 +94,10 @@ export async function getChangeLog(
   limit?: number
 ): Promise<ReadonlyArray<ReleaseMetadata>> {
   if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
-    const channel = __RELEASE_CHANNEL__ === 'beta' || __RELEASE_CHANNEL__ === 'test'
-      ? __RELEASE_CHANNEL__
-      : null
+    const channel =
+      __RELEASE_CHANNEL__ === 'beta' || __RELEASE_CHANNEL__ === 'test'
+        ? __RELEASE_CHANNEL__
+        : null
     return backend().releaseChangelog(channel, limit)
   }
   const changelogURL = new URL(

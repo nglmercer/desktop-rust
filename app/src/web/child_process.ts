@@ -75,13 +75,16 @@ function installRouter() {
 /** Node-style error with `code`, `syscall` and `path`, as spawn reports them. */
 function spawnError(error: any, command: string, args: string[]) {
   const code = typeof error?.code === 'string' ? error.code : 'EIO'
-  return Object.assign(new Error(`spawn ${command} ${code}`, { cause: error }), {
-    errno: -2,
-    code,
-    syscall: `spawn ${command}`,
-    path: command,
-    spawnargs: args,
-  })
+  return Object.assign(
+    new Error(`spawn ${command} ${code}`, { cause: error }),
+    {
+      errno: -2,
+      code,
+      syscall: `spawn ${command}`,
+      path: command,
+      spawnargs: args,
+    }
+  )
 }
 
 class OutputStream extends EventEmitter {
@@ -109,7 +112,10 @@ class OutputStream extends EventEmitter {
       }
       return
     }
-    this.emit('data', Buffer.from(bytes).toString(this.encoding as BufferEncoding))
+    this.emit(
+      'data',
+      Buffer.from(bytes).toString(this.encoding as BufferEncoding)
+    )
   }
 
   /** Emit what the incremental decoder still holds at the end of the stream. */
@@ -122,7 +128,9 @@ class OutputStream extends EventEmitter {
     }
   }
 
-  public pipe<T extends { write(chunk: any): any; end?(): any }>(destination: T): T {
+  public pipe<T extends { write(chunk: any): any; end?(): any }>(
+    destination: T
+  ): T {
     this.on('data', chunk => destination.write(chunk))
     this.on('end', () => destination.end?.())
     return destination
@@ -165,9 +173,15 @@ class InputStream extends EventEmitter {
     this.pump()
   }
 
-  public write(chunk: unknown, encodingOrCallback?: any, callback?: any): boolean {
-    const done = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
-    const encoding = typeof encodingOrCallback === 'string' ? encodingOrCallback : undefined
+  public write(
+    chunk: unknown,
+    encodingOrCallback?: any,
+    callback?: any
+  ): boolean {
+    const done =
+      typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
+    const encoding =
+      typeof encodingOrCallback === 'string' ? encodingOrCallback : undefined
     if (this.finished || this.failure !== null) {
       const error = this.failure ?? new Error('write after end')
       queueMicrotask(() => {
@@ -180,8 +194,8 @@ class InputStream extends EventEmitter {
       typeof chunk === 'string'
         ? Buffer.from(chunk, encoding as BufferEncoding)
         : chunk instanceof Uint8Array
-        ? chunk
-        : Buffer.from(String(chunk))
+          ? chunk
+          : Buffer.from(String(chunk))
 
     if (bytes.length === 0) {
       queueMicrotask(() => done?.(null))
@@ -190,13 +204,18 @@ class InputStream extends EventEmitter {
     const block = this.limits.block
     for (let offset = 0; offset < bytes.length; offset += block) {
       const last = offset + block >= bytes.length
-      this.queue.push({ bytes: bytes.subarray(offset, offset + block), done: last ? done : undefined })
+      this.queue.push({
+        bytes: bytes.subarray(offset, offset + block),
+        done: last ? done : undefined,
+      })
     }
     this.queuedBytes += bytes.length
     if (this.queuedBytes > this.budget()) {
       this.fail(
         Object.assign(
-          new Error(`stdin backlog exceeds ${this.budget()} bytes; the writer ignored write() returning false`),
+          new Error(
+            `stdin backlog exceeds ${this.budget()} bytes; the writer ignored write() returning false`
+          ),
           { code: 'EOVERFLOW' }
         )
       )
@@ -213,7 +232,12 @@ class InputStream extends EventEmitter {
 
   /** Send the next block, or end-of-input once everything is accepted. */
   private pump() {
-    if (this.id === null || this.failure !== null || this.inFlight || this.waitingForDrain) {
+    if (
+      this.id === null ||
+      this.failure !== null ||
+      this.inFlight ||
+      this.waitingForDrain
+    ) {
       return
     }
     const id = this.id
@@ -229,7 +253,10 @@ class InputStream extends EventEmitter {
     }
     this.inFlight = true
     bridge()
-      .invoke('desktop.io.process-write', { id, data: bridge().encodeBase64(next.bytes) })
+      .invoke('desktop.io.process-write', {
+        id,
+        data: bridge().encodeBase64(next.bytes),
+      })
       .then(
         () => {
           if (this.failure !== null) {
@@ -340,14 +367,19 @@ export class ChildProcess extends EventEmitter {
 
   public constructor(stdio: StdioMode[]) {
     super()
-    this.stdin = stdio[0] === 'pipe' ? new InputStream(() => this.kill('SIGKILL')) : null
+    this.stdin =
+      stdio[0] === 'pipe' ? new InputStream(() => this.kill('SIGKILL')) : null
     this.stdout = stdio[1] === 'pipe' ? new OutputStream() : null
     this.stderr = stdio[2] === 'pipe' ? new OutputStream() : null
     this.openStreams = [this.stdout, this.stderr].filter(Boolean).length
   }
 
   /** @internal */
-  public attach(id: number, pid: number | undefined, limits: IStreamLimits = DEFAULT_LIMITS) {
+  public attach(
+    id: number,
+    pid: number | undefined,
+    limits: IStreamLimits = DEFAULT_LIMITS
+  ) {
     this.id = id
     this.pid = pid
     this.stdin?.attach(id, limits)
@@ -365,7 +397,11 @@ export class ChildProcess extends EventEmitter {
       stream?.emitData(bridge().decodeBase64(message.data))
       // Credit returns only after the block reached its consumer.
       if (typeof message.seq === 'number') {
-        bridge().send('desktop.io.process-ack', { id: this.id, stream: message.stream, seq: message.seq })
+        bridge().send('desktop.io.process-ack', {
+          id: this.id,
+          stream: message.stream,
+          seq: message.seq,
+        })
       }
     } else if (message.event === 'end') {
       const stream = message.stream === 'stderr' ? this.stderr : this.stdout
@@ -410,8 +446,13 @@ export class ChildProcess extends EventEmitter {
     }
     this.killed = true
     // Pending stdin is discarded; a producer waiting on drain gets the error.
-    this.stdin?.fail(Object.assign(new Error('the process was killed'), { code: 'EPIPE' }), false)
-    bridge().invoke('desktop.io.process-kill', { id: this.id, signal }).catch(() => {})
+    this.stdin?.fail(
+      Object.assign(new Error('the process was killed'), { code: 'EPIPE' }),
+      false
+    )
+    bridge()
+      .invoke('desktop.io.process-kill', { id: this.id, signal })
+      .catch(() => {})
     return true
   }
 }
@@ -425,7 +466,9 @@ export interface ISpawnOptions {
   detached?: boolean
 }
 
-function isArgumentList(value: ReadonlyArray<string> | ISpawnOptions | undefined): value is ReadonlyArray<string> {
+function isArgumentList(
+  value: ReadonlyArray<string> | ISpawnOptions | undefined
+): value is ReadonlyArray<string> {
   return Array.isArray(value)
 }
 
@@ -439,16 +482,23 @@ export function spawn(
     (isArgumentList(argsOrOptions) ? maybeOptions : argsOrOptions) ?? {}
 
   const modes: StdioMode[] = Array.isArray(options.stdio)
-    ? (['pipe', 'pipe', 'pipe'].map((_, i) => options.stdio![i] ?? 'pipe') as StdioMode[])
-    : [options.stdio ?? 'pipe', options.stdio ?? 'pipe', options.stdio ?? 'pipe'].map(
-        mode => (mode === 'inherit' ? 'ignore' : mode)
-      ) as StdioMode[]
+    ? (['pipe', 'pipe', 'pipe'].map(
+        (_, i) => options.stdio![i] ?? 'pipe'
+      ) as StdioMode[])
+    : ([
+        options.stdio ?? 'pipe',
+        options.stdio ?? 'pipe',
+        options.stdio ?? 'pipe',
+      ].map(mode => (mode === 'inherit' ? 'ignore' : mode)) as StdioMode[])
 
   const env =
     options.env === undefined
       ? undefined
       : Object.fromEntries(
-          Object.entries(options.env).map(([key, value]) => [key, value ?? null])
+          Object.entries(options.env).map(([key, value]) => [
+            key,
+            value ?? null,
+          ])
         )
 
   const child = new ChildProcess(modes)
@@ -463,12 +513,23 @@ export function spawn(
       stdio: modes,
     })
     .then(
-      ({ id, pid, limits }: { id: number; pid: number; limits?: IStreamLimits }) => {
+      ({
+        id,
+        pid,
+        limits,
+      }: {
+        id: number
+        pid: number
+        limits?: IStreamLimits
+      }) => {
         child.attach(id, pid, limits ?? DEFAULT_LIMITS)
         child.emit('spawn')
       },
       (error: any) => {
-        setTimeout(() => child.emit('error', spawnError(error, command, args)), 0)
+        setTimeout(
+          () => child.emit('error', spawnError(error, command, args)),
+          0
+        )
       }
     )
 
@@ -483,12 +544,17 @@ export interface IExecResult {
 /** Run a file and collect its output, as `execFile` does. */
 export function execFile(
   file: string,
-  argsOrOptions?: ReadonlyArray<string> | Record<string, any> | ((...a: any[]) => void),
+  argsOrOptions?:
+    | ReadonlyArray<string>
+    | Record<string, any>
+    | ((...a: any[]) => void),
   optionsOrCallback?: Record<string, any> | ((...a: any[]) => void),
   maybeCallback?: (...a: any[]) => void
 ): ChildProcess {
   const args = Array.isArray(argsOrOptions) ? argsOrOptions : []
-  const options = (Array.isArray(argsOrOptions) ? optionsOrCallback : argsOrOptions) as Record<string, any> | undefined
+  const options = (
+    Array.isArray(argsOrOptions) ? optionsOrCallback : argsOrOptions
+  ) as Record<string, any> | undefined
   const callback = [maybeCallback, optionsOrCallback, argsOrOptions].find(
     candidate => typeof candidate === 'function'
   ) as ((error: any, stdout: string, stderr: string) => void) | undefined
@@ -514,7 +580,14 @@ export function execFile(
     if (error) {
       callback(error, out, err)
     } else if (code !== 0 && code !== null && code !== undefined) {
-      callback(Object.assign(new Error(`Command failed: ${file} ${args.join(' ')}\n${err}`), { code, stdout: out, stderr: err }), out, err)
+      callback(
+        Object.assign(
+          new Error(`Command failed: ${file} ${args.join(' ')}\n${err}`),
+          { code, stdout: out, stderr: err }
+        ),
+        out,
+        err
+      )
     } else {
       callback(null, out, err)
     }
@@ -534,8 +607,12 @@ export function exec(
   optionsOrCallback?: Record<string, any> | ((...a: any[]) => void),
   maybeCallback?: (...a: any[]) => void
 ): ChildProcess {
-  const options = isExecCallback(optionsOrCallback) ? undefined : optionsOrCallback
-  const callback = isExecCallback(optionsOrCallback) ? optionsOrCallback : maybeCallback
+  const options = isExecCallback(optionsOrCallback)
+    ? undefined
+    : optionsOrCallback
+  const callback = isExecCallback(optionsOrCallback)
+    ? optionsOrCallback
+    : maybeCallback
   const shell = navigator.userAgent.includes('Windows') ? 'cmd.exe' : '/bin/sh'
   const flags = shell === 'cmd.exe' ? ['/d', '/s', '/c'] : ['-c']
   return execFile(shell, [...flags, command], options, callback)
@@ -545,10 +622,16 @@ export function exec(
 // callers such as `which git` rely on. A plain promisify would resolve with
 // stdout alone, so the custom promisified form is provided here.
 const promisifyCustom = Symbol.for('nodejs.util.promisify.custom')
-;(execFile as any)[promisifyCustom] = (file: string, args?: any, options?: any) =>
+;(execFile as any)[promisifyCustom] = (
+  file: string,
+  args?: any,
+  options?: any
+) =>
   new Promise((resolve, reject) => {
     const callback = (error: any, stdout: string, stderr: string) =>
-      error ? reject(Object.assign(error, { stdout, stderr })) : resolve({ stdout, stderr })
+      error
+        ? reject(Object.assign(error, { stdout, stderr }))
+        : resolve({ stdout, stderr })
     if (args === undefined) {
       execFile(file, callback)
     } else if (options === undefined) {

@@ -28,7 +28,13 @@ export async function createBranch(
   return withRepositoryGitOperation(
     repository.path,
     'mutation',
-    () => backend().createRepositoryBranch(repository.path, name, startPoint, noTrack ?? false),
+    () =>
+      backend().createRepositoryBranch(
+        repository.path,
+        name,
+        startPoint,
+        noTrack ?? false
+      ),
     true
   )
 }
@@ -47,11 +53,18 @@ export async function renameBranch(
   newName: string,
   force?: boolean
 ): Promise<void> {
-  if (branch.ref !== `refs/heads/${branch.name}`) throw new Error('Only local branches can be renamed')
+  if (branch.ref !== `refs/heads/${branch.name}`)
+    throw new Error('Only local branches can be renamed')
   return withRepositoryGitOperation(
     repository.path,
     'mutation',
-    () => backend().renameRepositoryBranch(repository.path, branch.name, newName, branch.tip.sha),
+    () =>
+      backend().renameRepositoryBranch(
+        repository.path,
+        branch.name,
+        newName,
+        branch.tip.sha
+      ),
     true
   )
 }
@@ -64,11 +77,17 @@ export async function deleteLocalBranch(
   branchName: string,
   expectedTip?: string
 ): Promise<true> {
-  if (expectedTip === undefined) throw new Error('A reviewed branch tip is required')
+  if (expectedTip === undefined)
+    throw new Error('A reviewed branch tip is required')
   await withRepositoryGitOperation(
     repository.path,
     'mutation',
-    () => backend().deleteRepositoryBranch(repository.path, branchName, expectedTip),
+    () =>
+      backend().deleteRepositoryBranch(
+        repository.path,
+        branchName,
+        expectedTip
+      ),
     true
   )
   return true
@@ -118,11 +137,11 @@ export async function getBranchesPointedAt(
   commitish: string
 ): Promise<Array<string> | null> {
   const read = () => backend().branchesPointingAt(repository.path, commitish)
-  const branches = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-    : await read()
+  const branches =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
   return branches === null ? null : Array.from(branches)
-
 }
 
 /**
@@ -137,14 +156,15 @@ export async function getMergedBranches(
   branchName: string
 ): Promise<Map<string, string>> {
   const canonicalBranchRef = formatAsLocalRef(branchName)
-  const read = () => backend().mergedRepositoryBranches(repository.path, branchName)
-  const branches = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-    : await read()
+  const read = () =>
+    backend().mergedRepositoryBranches(repository.path, branchName)
+  const branches =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
   return new Map(
     branches
       .filter(branch => branch.ref !== canonicalBranchRef)
       .map(branch => [branch.ref, branch.oid])
   )
-
 }

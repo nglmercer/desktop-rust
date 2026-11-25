@@ -110,7 +110,7 @@ export class EmojiAutocompletionProvider
     const sanitizedEmoji = sanitizeEmoji(hit.title)
     const emojiDescription = emoji?.emoji
       ? emoji.emoji
-      : emoji?.description ?? sanitizedEmoji
+      : (emoji?.description ?? sanitizedEmoji)
     return emojiDescription === sanitizedEmoji
       ? emojiDescription
       : `${emojiDescription}, ${sanitizedEmoji}`

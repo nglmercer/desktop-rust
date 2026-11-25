@@ -158,7 +158,10 @@ describe('GitStore', () => {
       await gitStore.undoCommit(firstCommit)
       assert.equal(errors.length, 1)
       await assert.rejects(readFile(file), { code: 'ENOENT' })
-      assert.equal((await exec(['rev-parse', 'HEAD'], repository.path)).stdout, before.stdout)
+      assert.equal(
+        (await exec(['rev-parse', 'HEAD'], repository.path)).stdout,
+        before.stdout
+      )
     })
 
     it('pre-fills the commit message', async t => {

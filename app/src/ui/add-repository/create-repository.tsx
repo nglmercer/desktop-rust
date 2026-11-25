@@ -329,7 +329,8 @@ export class CreateRepository extends React.Component<
       | 'licenses'
     >
   ): Promise<Repository | undefined> {
-    const rustBackend = typeof window !== 'undefined' && backend().transportKind !== 'none'
+    const rustBackend =
+      typeof window !== 'undefined' && backend().transportKind !== 'none'
     if (!rustBackend) {
       try {
         await mkdir(fullPath, { recursive: true })
@@ -432,7 +433,8 @@ export class CreateRepository extends React.Component<
 
     try {
       const gitAttributes = Path.join(fullPath, '.gitattributes')
-      const gitAttributesExists = !rustBackend && await pathExists(gitAttributes)
+      const gitAttributesExists =
+        !rustBackend && (await pathExists(gitAttributes))
       if (!gitAttributesExists) {
         await writeGitAttributes(fullPath)
       }
@@ -460,7 +462,10 @@ export class CreateRepository extends React.Component<
       if (files.length > 0) {
         if (rustBackend) {
           const selectedPaths = files
-            .filter(file => file.selection.getSelectionType() === DiffSelectionType.All)
+            .filter(
+              file =>
+                file.selection.getSelectionType() === DiffSelectionType.All
+            )
             .map(file => file.path)
           if (selectedPaths.length > 0) {
             await backend().createInitialCommit(repository.path, selectedPaths)

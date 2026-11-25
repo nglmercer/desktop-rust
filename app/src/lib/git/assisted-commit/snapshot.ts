@@ -744,12 +744,12 @@ export async function captureAssistedCommitSnapshot(
       const mode = symlink
         ? '120000'
         : !trackExecutable
-        ? base !== null && base.mode !== '120000'
-          ? base.mode
-          : '100644'
-        : (state.mode & 0o100) !== 0
-        ? '100755'
-        : '100644'
+          ? base !== null && base.mode !== '120000'
+            ? base.mode
+            : '100644'
+          : (state.mode & 0o100) !== 0
+            ? '100755'
+            : '100644'
       let full: ITreeEntry | null = deleted
         ? null
         : {

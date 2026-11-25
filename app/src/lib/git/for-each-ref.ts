@@ -1,9 +1,5 @@
 import { Repository } from '../../models/repository'
-import {
-  Branch,
-  BranchType,
-  ITrackingBranch,
-} from '../../models/branch'
+import { Branch, BranchType, ITrackingBranch } from '../../models/branch'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -16,8 +12,7 @@ export async function getBranches(
     prefixes = ['refs/heads', 'refs/remotes']
   }
 
-  const read = () =>
-    backend().repositoryBranches(repository.path, prefixes)
+  const read = () => backend().repositoryBranches(repository.path, prefixes)
   const mapBranches = (
     branches: ReadonlyArray<{
       readonly name: string

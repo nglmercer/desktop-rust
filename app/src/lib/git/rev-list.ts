@@ -57,12 +57,7 @@ export async function getAheadBehind(
 ): Promise<IAheadBehind | null> {
   const read = () => backend().repositoryAheadBehind(repository.path, range)
   return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(
-        repository.path,
-        'read',
-        read,
-        true
-      )
+    ? withRepositoryGitOperation(repository.path, 'read', read, true)
     : read()
 }
 
@@ -118,14 +113,10 @@ export async function getCommitsInRange(
   range: string
 ): Promise<ReadonlyArray<CommitOneLine> | null> {
   const read = () => backend().repositoryRevisionList(repository.path, range)
-  const stdout: string | null = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(
-        repository.path,
-        'read',
-        read,
-        true
-      )
-    : await read()
+  const stdout: string | null =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
   if (stdout === null) return null
 
   const lines = stdout.split('\n')
@@ -160,13 +151,9 @@ export async function doMergeCommitsExistAfterCommit(
   commitRef: string | null
 ): Promise<boolean> {
   const revision = commitRef === null ? 'HEAD' : revRange(commitRef, 'HEAD')
-  const read = () => backend().repositoryHasMergeCommits(repository.path, revision)
+  const read = () =>
+    backend().repositoryHasMergeCommits(repository.path, revision)
   return backend().transportKind === 'wry'
-    ? withRepositoryGitOperation(
-        repository.path,
-        'read',
-        read,
-        true
-      )
+    ? withRepositoryGitOperation(repository.path, 'read', read, true)
     : read()
 }

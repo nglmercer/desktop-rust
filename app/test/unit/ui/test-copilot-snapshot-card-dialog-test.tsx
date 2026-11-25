@@ -1,7 +1,12 @@
 import assert from 'node:assert'
 import { afterEach, beforeEach, describe, it } from 'vitest'
 import * as React from 'react'
-import { render, screen, fireEvent, within } from '../../helpers/ui/vitest-render'
+import {
+  render,
+  screen,
+  fireEvent,
+  within,
+} from '../../helpers/ui/vitest-render'
 import { TestCopilotSnapshotCardDialog } from '../../../src/ui/preferences/test-copilot-snapshot-card-dialog'
 import { Account } from '../../../src/models/account'
 

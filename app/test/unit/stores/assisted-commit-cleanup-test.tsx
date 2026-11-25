@@ -306,12 +306,12 @@ describe('AppStore owned temporary cleanup retry', () => {
               'Injected planning cancellation'
             )
           : operation === 'billing'
-          ? new CopilotError('Injected billing failure', 402, {
-              paymentRequiredErrorCode: 'quota_exceeded',
-            })
-          : operation === 'non-error'
-          ? undefined
-          : new Error('Injected planner failure')
+            ? new CopilotError('Injected billing failure', 402, {
+                paymentRequiredErrorCode: 'quota_exceeded',
+              })
+            : operation === 'non-error'
+              ? undefined
+              : new Error('Injected planner failure')
       h.propose.mock.mockImplementation(async (_account, analysis) => {
         if (operation === 'validation') {
           return { kind: 'plan', snapshotId: analysis.snapshotId, commits: [] }

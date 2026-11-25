@@ -395,7 +395,9 @@ export function showTestUI(
     const newReleases = await generateDevReleaseSummary().catch(() => null)
     if (newReleases === null || newReleases.length === 0) {
       return dispatcher.postError(
-        new Error('Release notes are unavailable. Check your connection and try again.')
+        new Error(
+          'Release notes are unavailable. Check your connection and try again.'
+        )
       )
     }
     dispatcher.showPopup({

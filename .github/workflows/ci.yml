@@ -64,16 +64,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            app/package-lock.json
-            vendor/*/package-lock.json
       - name: Prepare Rust compiler
         run: rustup default stable
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run validate-changelog
+      - run: npm install --global pnpm@11.17.0
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm lint
+      - run: pnpm validate-changelog
       - name: Ensure a clean working directory
         run: git diff --name-status --exit-code
   test:
@@ -111,14 +107,14 @@ jobs:
           npm run lint
           npm test
       - name: Prepare testing environment
-        run: npm run test:setup
+        run: pnpm test:setup
         env:
           npm_config_arch: ${{ matrix.arch }}
       - name: Run unit tests
         if: |
           (runner.os == 'Windows' && matrix.arch == 'x64') || (runner.os == 'macOS' && matrix.arch == 'arm64')
-        run: npm run test:unit
+        run: pnpm test:unit
       - name: Run script tests
-        run: npm run test:script
+        run: pnpm test:script
         env:
           npm_config_arch: ${{ matrix.arch }}

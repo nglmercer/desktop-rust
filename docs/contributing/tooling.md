@@ -1,43 +1,46 @@
-# Tooling Support for GitHub Desktop
+# Tooling support for GitHub Desktop
 
-### [Atom](https://atom.io/)
+## Editor
 
-Recommended packages:
+The repository is configured for [Visual Studio Code](https://code.visualstudio.com/):
 
-* [atom-typescript](https://atom.io/packages/atom-typescript) - syntax
-  highlighting and intellisense for TypeScript
-* [build-npm-apm](https://atom.io/packages/build-npm-apm) - invoke
-  all npm scripts straight from the editor by pressing F7 (requires
-  [build](https://atom.io/packages/build))
-* [linter](https://atom.io/packages/linter) - shows linter errors and warning in the editor
+1. Open the Extensions view.
+2. Choose **Show Workspace Recommended Extensions**.
+3. Install the Biome and oxlint extensions.
 
-You can install them all at once with:
+The workspace settings use Biome as the default formatter. TypeScript editor
+support uses the TypeScript 6 package because TypeScript 7 currently ships the
+native compiler (`tsc`) without the legacy language-service/compiler API.
 
-```shellsession
-apm i atom-typescript build-npm build busy-signal linter-tslint linter linter-ui-default intentions
-```
-If atom prompts you to install any additional dependencies for these packages, be sure to say yes.
+## Command-line tools
 
-### [Visual Studio Code](https://code.visualstudio.com/)
-
-The Desktop repository includes a list of recommended extensions:
-
-1. Select the _Extension_ view, select *Show Workspace Recommended Extensions* from the dropdown menu
-2. Install all the extensions
-
-## Debugging
-
-For the development build, the webview's developer tools can assist with
-debugging and inspecting the live application.
-
-```shellsession
-$ pnpm install --frozen-lockfile --ignore-scripts
-$ pnpm start
+```sh
+pnpm lint           # oxlint + formatting check
+pnpm check:types    # TypeScript 7 application typecheck
+pnpm compile:script # TypeScript 7 script typecheck
+pnpm test           # Vitest unit tests
+cargo test          # Rust tests
 ```
 
-At a basic level, the logs from the running app are displayed in the **Console** tab, but other features include:
+TypeScript 7 is the `tsc` binary in `node_modules/.bin`. TypeScript 6 remains
+installed side-by-side as `typescript`/`tsc6` only for code that imports the old
+compiler API (`script/ts-register.cjs`, native-module emission tests, usage-data
+introspection, and the branch-rules oracle). Do not add new compiler-API
+consumers; use the TypeScript 7 CLI for normal checking.
 
- - [React Dev Tools](https://chrome.google.com/webstore/detail/react-developer-tools/fmkadmapgofadopljbjfkapdkoienihi?hl=en) - enables you to inspect components and view rendering activity in real time
+## Debugging the desktop shell
 
-If you are looking to diagnose React performance issues in Desktop, [this post by Ben Schwarz](https://building.calibreapp.com/debugging-react-performance-with-react-16-and-chrome-devtools-c90698a522ad)
-is a great introduction to the workflow enabled by React 16 around measuring and investigating using the **Performance** tab.
+```sh
+git submodule update --init --recursive
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm start
+```
+
+The launcher builds the Rust host and watches the Vite renderer. Use the
+webview developer tools in the running app to inspect the renderer, console,
+network activity and React component tree. After a renderer rebuild, reload
+with <kbd>Ctrl/Command+Alt+R</kbd>.
+
+React Dev Tools remains useful for component and performance investigation.
+For Rust-side logging, run the shell or CLI from a terminal so stderr remains
+visible.

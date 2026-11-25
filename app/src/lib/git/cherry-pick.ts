@@ -168,17 +168,29 @@ export async function cherryPick(
   }
 
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    if (expected === undefined) throw new Error('Refresh the current branch before cherry-picking')
-    const result = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().startRepositoryCherryPick(repository.path, commits.map(commit => commit.sha), expected), true)
+    if (expected === undefined)
+      throw new Error('Refresh the current branch before cherry-picking')
+    const result = await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().startRepositoryCherryPick(
+          repository.path,
+          commits.map(commit => commit.sha),
+          expected
+        ),
+      true
+    )
     if (progressCallback !== undefined) {
       const applied =
         result === 'complete'
           ? commits.length
-          : (await getCherryPickSnapshot(repository))?.cherryPickedCount ?? 0
+          : ((await getCherryPickSnapshot(repository))?.cherryPickedCount ?? 0)
       reportCherryPickSteps(commits, progressCallback, 0, applied)
     }
-    return result === 'complete' ? CherryPickResult.CompletedWithoutError : CherryPickResult.ConflictsEncountered
+    return result === 'complete'
+      ? CherryPickResult.CompletedWithoutError
+      : CherryPickResult.ConflictsEncountered
   }
 
   let baseOptions: IGitStringExecutionOptions = {
@@ -250,17 +262,30 @@ function parseCherryPickResult(result: IGitResult): CherryPickResult {
 export async function getCherryPickSnapshot(
   repository: Repository
 ): Promise<ICherryPickSnapshot | null> {
-  const native = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  const native =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
   const state = native
-    ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryCherryPickState(repository.path), true)
+    ? await withRepositoryGitOperation(
+        repository.path,
+        'read',
+        () => backend().repositoryCherryPickState(repository.path),
+        true
+      )
     : undefined
-  if (state === null || (!native && !(await isCherryPickHeadFound(repository)))) {
+  if (
+    state === null ||
+    (!native && !(await isCherryPickHeadFound(repository)))
+  ) {
     return null
   }
-  const readSequence = async (name: 'abort-safety' | 'head' | 'todo'): Promise<string> => {
+  const readSequence = async (
+    name: 'abort-safety' | 'head' | 'todo'
+  ): Promise<string> => {
     if (state !== undefined && state !== null) {
       if (state.sequence === null) throw new Error('No cherry-pick sequencer')
-      return name === 'abort-safety' ? state.sequence.abortSafety : state.sequence[name]
+      return name === 'abort-safety'
+        ? state.sequence.abortSafety
+        : state.sequence[name]
     }
     return readFile(join(repository.resolvedGitDir, 'sequencer', name), 'utf8')
   }
@@ -328,19 +353,31 @@ export async function getCherryPickSnapshot(
     // could not parse sequencer files
 
     const current = native
-      ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryCherryPickState(repository.path), true)
+      ? await withRepositoryGitOperation(
+          repository.path,
+          'read',
+          () => backend().repositoryCherryPickState(repository.path),
+          true
+        )
       : undefined
-    if (native ? current === null || current?.head !== state?.head || current?.sequence !== null : !(await isCherryPickHeadFound(repository))) {
+    if (
+      native
+        ? current === null ||
+          current?.head !== state?.head ||
+          current?.sequence !== null
+        : !(await isCherryPickHeadFound(repository))
+    ) {
       return null
     }
 
     // If cherry-pick is in progress, then there was only one commit cherry-picked
     // thus sequencer files were not used.
     const cherryPickHeadSha = (
-      current?.head ?? await readFile(
+      current?.head ??
+      (await readFile(
         join(repository.resolvedGitDir, 'CHERRY_PICK_HEAD'),
         'utf8'
-      )
+      ))
     ).trim()
     const commit = await getCommit(repository, cherryPickHeadSha)
     if (commit === null) {
@@ -411,9 +448,15 @@ export async function continueCherryPick(
   manualResolutions: ReadonlyMap<string, ManualConflictResolution> = new Map(),
   progressCallback?: (progress: IMultiCommitOperationProgress) => void
 ): Promise<CherryPickResult> {
-  const native = typeof window !== 'undefined' && backend().transportKind !== 'none'
+  const native =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
   const expectedState = native
-    ? await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryCherryPickState(repository.path), true)
+    ? await withRepositoryGitOperation(
+        repository.path,
+        'read',
+        () => backend().repositoryCherryPickState(repository.path),
+        true
+      )
     : undefined
   if (native && expectedState === null) return CherryPickResult.UnableToStart
   // only stage files related to cherry pick
@@ -490,8 +533,17 @@ export async function continueCherryPick(
         : await getCherryPickSnapshot(repository)
     let outcome: 'complete' | 'conflict'
     try {
-      outcome = await withRepositoryGitOperation(repository.path, 'mutation', () =>
-        backend().continueRepositoryCherryPick(repository.path, expectedState.head, trackedFilesAfter.length === 0), true)
+      outcome = await withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        () =>
+          backend().continueRepositoryCherryPick(
+            repository.path,
+            expectedState.head,
+            trackedFilesAfter.length === 0
+          ),
+        true
+      )
     } catch (error) {
       // Conflicts that are not staged are a result for the caller, as with Git.
       if (
@@ -506,8 +558,8 @@ export async function continueCherryPick(
       const applied =
         outcome === 'complete'
           ? before.commits.length
-          : (await getCherryPickSnapshot(repository))?.cherryPickedCount ??
-            before.cherryPickedCount
+          : ((await getCherryPickSnapshot(repository))?.cherryPickedCount ??
+            before.cherryPickedCount)
       reportCherryPickSteps(
         before.commits,
         progressCallback,
@@ -515,7 +567,9 @@ export async function continueCherryPick(
         applied
       )
     }
-    return outcome === 'complete' ? CherryPickResult.CompletedWithoutError : CherryPickResult.ConflictsEncountered
+    return outcome === 'complete'
+      ? CherryPickResult.CompletedWithoutError
+      : CherryPickResult.ConflictsEncountered
   }
 
   if (trackedFilesAfter.length === 0) {
@@ -548,8 +602,13 @@ export async function continueCherryPick(
 /** Abandon the current cherry pick operation */
 export async function abortCherryPick(repository: Repository) {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await withRepositoryGitOperation(repository.path, 'mutation', () =>
-      backend().abortRepositoryGitOperation(repository.path, 'cherry_pick'), true)
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().abortRepositoryGitOperation(repository.path, 'cherry_pick'),
+      true
+    )
     return
   }
   await git(['cherry-pick', '--abort'], repository.path, 'abortCherryPick')
@@ -563,7 +622,12 @@ export async function isCherryPickHeadFound(
 ): Promise<boolean> {
   try {
     if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      const context = await withRepositoryGitOperation(repository.path, 'read', () => backend().repositoryStatusContext(repository.path), true)
+      const context = await withRepositoryGitOperation(
+        repository.path,
+        'read',
+        () => backend().repositoryStatusContext(repository.path),
+        true
+      )
       return context.isCherryPickingHeadFound
     }
     return await pathExists(join(repository.resolvedGitDir, 'CHERRY_PICK_HEAD'))

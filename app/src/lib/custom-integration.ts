@@ -44,15 +44,25 @@ export function parseCustomIntegrationArguments(
 export async function parseCustomIntegrationArgumentsForRuntime(
   args: string
 ): Promise<ReadonlyArray<string>> {
-  if (__WIN32__ && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+  if (
+    __WIN32__ &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
     return backend().parseWindowsIntegrationArguments(args)
   }
   return parseCustomIntegrationArguments(args)
 }
 
 /** Inspect a live input synchronously; the Windows host performs full parsing before save. */
-export function parseCustomIntegrationArgumentsForInput(args: string): ReadonlyArray<string> {
-  if (__WIN32__ && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+export function parseCustomIntegrationArgumentsForInput(
+  args: string
+): ReadonlyArray<string> {
+  if (
+    __WIN32__ &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
     if (args.includes('\0') || new TextEncoder().encode(args).length > 65536) {
       throw new Error('Invalid integration arguments')
     }
@@ -198,7 +208,9 @@ export async function isValidCustomIntegration(
     const pathResult = await validateCustomIntegrationPath(
       customIntegration.path
     )
-    const argv = await parseCustomIntegrationArgumentsForRuntime(customIntegration.arguments)
+    const argv = await parseCustomIntegrationArgumentsForRuntime(
+      customIntegration.arguments
+    )
     const targetPathPresent = checkTargetPathArgument(argv)
     return pathResult.isValid && targetPathPresent
   } catch (e) {

@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { it } from 'vitest'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
-it('runs legacy and Vitest suites together with ordinary CommonJS resolution', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'desktop-test-runner-'))
+it('runs TypeScript fixtures through Vitest with ordinary CommonJS resolution', async () => {
+  const directory = await mkdtemp(join(resolve('script'), '.tmp-test-runner-'))
   try {
     const fixture = join(directory, 'legacy-test.ts')
     await writeFile(
@@ -49,7 +48,7 @@ it('loads the actual Copilot SDK and test DOM', () => {
       await readFile(join(directory, 'passed'), 'utf8'),
       'legacy passed'
     )
-    assert.match(stdout, /Test Files\s+1 passed/)
+    assert.match(stdout, /Test Files\s+2 passed/)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

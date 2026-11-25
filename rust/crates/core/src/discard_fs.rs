@@ -335,85 +335,6 @@ pub(crate) fn copy_state(file: fs::File, backup: Option<&Path>) -> Result<FileSt
     copy_state_with_limit(file, backup, None)
 }
 
-#[cfg(test)]
-mod bounded_capture_tests {
-    use super::*;
-    use cap_std::ambient_authority;
-
-    #[test]
-    fn rejects_oversized_regular_files_before_reading() {
-        let directory =
-            std::env::temp_dir().join(format!("desktop-bounded-capture-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&directory).unwrap();
-        let path = directory.join("conflict");
-        fs::write(&path, b"12345678").unwrap();
-        let root = Dir::open_ambient_dir(&directory, ambient_authority()).unwrap();
-        assert_eq!(
-            capture_bounded(&root, Path::new("conflict"), 8)
-                .unwrap()
-                .size,
-            8
-        );
-        assert!(
-            capture_bounded(&root, Path::new("conflict"), 7)
-                .unwrap_err()
-                .is::<WorkingFileTooLarge>()
-        );
-        assert_eq!(
-            capture_bounded(&root, Path::new("missing"), 0)
-                .unwrap()
-                .kind,
-            Kind::Absent
-        );
-        drop(root);
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    async fn cancellation_stops_hashing_after_the_current_chunk() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
-        let directory =
-            std::env::temp_dir().join(format!("desktop-cancel-capture-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&directory).unwrap();
-        let file = fs::File::create(directory.join("conflict")).unwrap();
-        file.set_len(10_485_761).unwrap();
-        drop(file);
-        let root = Dir::open_ambient_dir(&directory, ambient_authority()).unwrap();
-        let token = Cancellation::default();
-        let chunks = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&chunks);
-        let result = token
-            .scope(async move {
-                crate::cancellation::blocking(move || {
-                    CAPTURE_TEST_AFTER_READ.with(|hook| {
-                        *hook.borrow_mut() = Some(Box::new(move || {
-                            observed.fetch_add(1, Ordering::SeqCst);
-                            Cancellation::current().cancel();
-                        }));
-                    });
-                    let result = capture(&root, Path::new("conflict"), None);
-                    CAPTURE_TEST_AFTER_READ.with(|hook| {
-                        hook.borrow_mut().take();
-                    });
-                    result
-                })
-                .await
-            })
-            .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Operation cancelled")
-        );
-        assert_eq!(chunks.load(Ordering::SeqCst), 1);
-        fs::remove_dir_all(directory).unwrap();
-    }
-}
-
 fn copy_state_with_limit(
     mut file: fs::File,
     backup: Option<&Path>,
@@ -509,4 +430,83 @@ pub(crate) fn set_permissions(file: &fs::File, mode: u32) -> Result<()> {
         file.set_permissions(permissions)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod bounded_capture_tests {
+    use super::*;
+    use cap_std::ambient_authority;
+
+    #[test]
+    fn rejects_oversized_regular_files_before_reading() {
+        let directory =
+            std::env::temp_dir().join(format!("desktop-bounded-capture-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("conflict");
+        fs::write(&path, b"12345678").unwrap();
+        let root = Dir::open_ambient_dir(&directory, ambient_authority()).unwrap();
+        assert_eq!(
+            capture_bounded(&root, Path::new("conflict"), 8)
+                .unwrap()
+                .size,
+            8
+        );
+        assert!(
+            capture_bounded(&root, Path::new("conflict"), 7)
+                .unwrap_err()
+                .is::<WorkingFileTooLarge>()
+        );
+        assert_eq!(
+            capture_bounded(&root, Path::new("missing"), 0)
+                .unwrap()
+                .kind,
+            Kind::Absent
+        );
+        drop(root);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_hashing_after_the_current_chunk() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let directory =
+            std::env::temp_dir().join(format!("desktop-cancel-capture-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let file = fs::File::create(directory.join("conflict")).unwrap();
+        file.set_len(10_485_761).unwrap();
+        drop(file);
+        let root = Dir::open_ambient_dir(&directory, ambient_authority()).unwrap();
+        let token = Cancellation::default();
+        let chunks = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&chunks);
+        let result = token
+            .scope(async move {
+                crate::cancellation::blocking(move || {
+                    CAPTURE_TEST_AFTER_READ.with(|hook| {
+                        *hook.borrow_mut() = Some(Box::new(move || {
+                            observed.fetch_add(1, Ordering::SeqCst);
+                            Cancellation::current().cancel();
+                        }));
+                    });
+                    let result = capture(&root, Path::new("conflict"), None);
+                    CAPTURE_TEST_AFTER_READ.with(|hook| {
+                        hook.borrow_mut().take();
+                    });
+                    result
+                })
+                .await
+            })
+            .await;
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Operation cancelled")
+        );
+        assert_eq!(chunks.load(Ordering::SeqCst), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

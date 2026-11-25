@@ -197,7 +197,7 @@ export class CopilotCommitPanel extends React.Component<
 
   private getAnimation(): CopilotAnimationKind {
     const { isThinking, reaction } = this.state
-    return isThinking ? 'thinking' : reaction ?? 'idle'
+    return isThinking ? 'thinking' : (reaction ?? 'idle')
   }
 
   private renderSparkles() {
@@ -267,10 +267,10 @@ export class CopilotCommitPanel extends React.Component<
             {state.pushed
               ? 'Your commits were pushed, but Desktop could not finish refreshing.'
               : state.retry === 'recovery'
-              ? 'Recovery needs attention before you can continue.'
-              : state.retry === 'refresh'
-              ? 'Refresh the repository before continuing.'
-              : 'Open Details for more information.'}
+                ? 'Recovery needs attention before you can continue.'
+                : state.retry === 'refresh'
+                  ? 'Refresh the repository before continuing.'
+                  : 'Open Details for more information.'}
           </div>
           {state.settling && (
             <div className="description">Finishing repository refresh…</div>
@@ -434,11 +434,11 @@ export class CopilotCommitPanel extends React.Component<
             this.props.runState?.kind === 'push-error'
               ? null
               : this.props.runState !== undefined &&
-                this.props.runState.kind !== 'idle'
-              ? getRunStatus(this.props.runState)
-              : this.props.isWorking
-              ? 'Copilot is splitting your changes into commits'
-              : null
+                  this.props.runState.kind !== 'idle'
+                ? getRunStatus(this.props.runState)
+                : this.props.isWorking
+                  ? 'Copilot is splitting your changes into commits'
+                  : null
           }
         />
       </div>

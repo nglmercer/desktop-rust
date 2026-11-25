@@ -1,4 +1,9 @@
-import type { DoubleClickAction, HostCertificate, HostOpenDialogOptions, HostSaveDialogOptions } from './host-types'
+import type {
+  DoubleClickAction,
+  HostCertificate,
+  HostOpenDialogOptions,
+  HostSaveDialogOptions,
+} from './host-types'
 import { IMenuItemState } from './menu-update'
 import { MenuIDs } from '../models/menu-ids'
 import { ISerializableMenuItem } from './menu-item'
@@ -137,12 +142,8 @@ export type RequestResponseChannels = {
   'get-current-window-state': () => Promise<WindowState | undefined>
   'get-current-window-zoom-factor': () => Promise<number | undefined>
   'resolve-proxy': (url: string) => Promise<string>
-  'show-save-dialog': (
-    options: HostSaveDialogOptions
-  ) => Promise<string | null>
-  'show-open-dialog': (
-    options: HostOpenDialogOptions
-  ) => Promise<string | null>
+  'show-save-dialog': (options: HostSaveDialogOptions) => Promise<string | null>
+  'show-open-dialog': (options: HostOpenDialogOptions) => Promise<string | null>
   'is-window-maximized': () => Promise<boolean>
   'get-apple-action-on-double-click': () => Promise<DoubleClickAction>
   'should-use-dark-colors': () => Promise<boolean>

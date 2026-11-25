@@ -5,7 +5,9 @@ import { DesktopAliveEvent } from '../../src/lib/stores/alive-store'
 
 let notificationShown = false
 const show = mock.fn(async () => notificationShown)
-vi.doMock('../../src/lib/notifications/show-notification', async () => ({ showNotification: show }))
+vi.doMock('../../src/lib/notifications/show-notification', async () => ({
+  showNotification: show,
+}))
 
 describe('NotificationsStore', async () => {
   const { NotificationsStore } = await import(
@@ -154,8 +156,8 @@ describe('NotificationsStore', async () => {
           reviewID === 'APPROVED'
             ? 'APPROVED'
             : reviewID === 'CHANGES_REQUESTED'
-            ? 'CHANGES_REQUESTED'
-            : 'COMMENTED',
+              ? 'CHANGES_REQUESTED'
+              : 'COMMENTED',
       }),
     })
     t.mock.method(API, 'fromAccount', () => api)
@@ -207,14 +209,14 @@ describe('NotificationsStore', async () => {
         state === 'APPROVED'
           ? 'pullRequestReviewApprovedNotificationCount'
           : state === 'COMMENTED'
-          ? 'pullRequestReviewCommentedNotificationCount'
-          : 'pullRequestReviewChangesRequestedNotificationCount',
+            ? 'pullRequestReviewCommentedNotificationCount'
+            : 'pullRequestReviewChangesRequestedNotificationCount',
       shown:
         state === 'APPROVED'
           ? 'pullRequestReviewApprovedNotificationShownCount'
           : state === 'COMMENTED'
-          ? 'pullRequestReviewCommentedNotificationShownCount'
-          : 'pullRequestReviewChangesRequestedNotificationShownCount',
+            ? 'pullRequestReviewCommentedNotificationShownCount'
+            : 'pullRequestReviewChangesRequestedNotificationShownCount',
     })),
   ] as const
 

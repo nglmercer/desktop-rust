@@ -27,7 +27,12 @@ export function renderBanner(
   switch (banner.type) {
     case BannerType.DiscardedSelection:
       return (
-        <SuccessBanner key="discarded-selection" timeout={15000} onDismissed={onDismissed} onUndo={banner.onUndo}>
+        <SuccessBanner
+          key="discarded-selection"
+          timeout={15000}
+          onDismissed={onDismissed}
+          onUndo={banner.onUndo}
+        >
           Selected changes discarded.
         </SuccessBanner>
       )

@@ -6,10 +6,7 @@
   },
   "invocation": {
     "program": "NATIVE_GIT_LFS",
-    "args": [
-      "track",
-      "--json"
-    ],
+    "args": ["track", "--json"],
     "cwd": "ROOT"
   },
   "environment": {
@@ -915,9 +912,7 @@
         "core.attributesfile": "ROOT/.oracle-global-attributes"
       },
       "setup": {
-        "remove_working": [
-          "ROOT/.gitattributes"
-        ]
+        "remove_working": ["ROOT/.gitattributes"]
       },
       "expected": {
         "code": 0,
@@ -955,9 +950,7 @@
         "core.attributesfile": "ROOT/.oracle-global-attributes"
       },
       "setup": {
-        "remove_working": [
-          "ROOT/nested/.gitattributes"
-        ]
+        "remove_working": ["ROOT/nested/.gitattributes"]
       },
       "expected": {
         "code": 0,
@@ -1219,9 +1212,7 @@
         "include.path": "ROOT/include.config"
       },
       "setup": {
-        "unset_config": [
-          "core.attributesfile"
-        ]
+        "unset_config": ["core.attributesfile"]
       },
       "expected": {
         "code": 0,
@@ -1406,9 +1397,7 @@
         "core.attributesfile": "ROOT/.oracle-global-attributes"
       },
       "setup": {
-        "remove_index": [
-          "ROOT/.gitattributes"
-        ]
+        "remove_index": ["ROOT/.gitattributes"]
       },
       "expected": {
         "code": 0,
@@ -1651,9 +1640,7 @@
     {
       "name": "missing",
       "config_before": [],
-      "config_after": [
-        "0"
-      ],
+      "config_after": ["0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1665,12 +1652,8 @@
     },
     {
       "name": "empty",
-      "config_before": [
-        ""
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": [""],
+      "config_after": ["0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1682,12 +1665,8 @@
     },
     {
       "name": "zero",
-      "config_before": [
-        "0"
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": ["0"],
+      "config_after": ["0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1699,12 +1678,8 @@
     },
     {
       "name": "malformed",
-      "config_before": [
-        "not-a-version"
-      ],
-      "config_after": [
-        "not-a-version"
-      ],
+      "config_before": ["not-a-version"],
+      "config_after": ["not-a-version"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: not-a-version\n",
@@ -1714,12 +1689,8 @@
     },
     {
       "name": "future_one",
-      "config_before": [
-        "1"
-      ],
-      "config_after": [
-        "1"
-      ],
+      "config_before": ["1"],
+      "config_after": ["1"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 1\n",
@@ -1729,12 +1700,8 @@
     },
     {
       "name": "future_999",
-      "config_before": [
-        "999"
-      ],
-      "config_after": [
-        "999"
-      ],
+      "config_before": ["999"],
+      "config_after": ["999"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 999\n",
@@ -1744,14 +1711,8 @@
     },
     {
       "name": "repeat_zero_future",
-      "config_before": [
-        "0",
-        "999"
-      ],
-      "config_after": [
-        "0",
-        "999"
-      ],
+      "config_before": ["0", "999"],
+      "config_after": ["0", "999"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 999\n",
@@ -1761,14 +1722,8 @@
     },
     {
       "name": "repeat_future_zero",
-      "config_before": [
-        "999",
-        "0"
-      ],
-      "config_after": [
-        "999",
-        "0"
-      ],
+      "config_before": ["999", "0"],
+      "config_after": ["999", "0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1780,13 +1735,8 @@
     },
     {
       "name": "repeat_zero_empty",
-      "config_before": [
-        "0",
-        ""
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": ["0", ""],
+      "config_after": ["0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1798,16 +1748,8 @@
     },
     {
       "name": "repeat_future_empty_zero",
-      "config_before": [
-        "999",
-        "",
-        "0"
-      ],
-      "config_after": [
-        "999",
-        "",
-        "0"
-      ],
+      "config_before": ["999", "", "0"],
+      "config_after": ["999", "", "0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1819,16 +1761,8 @@
     },
     {
       "name": "repeat_zero_empty_future",
-      "config_before": [
-        "0",
-        "",
-        "999"
-      ],
-      "config_after": [
-        "0",
-        "",
-        "999"
-      ],
+      "config_before": ["0", "", "999"],
+      "config_after": ["0", "", "999"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 999\n",
@@ -1838,14 +1772,8 @@
     },
     {
       "name": "repeat_empty_zero",
-      "config_before": [
-        "",
-        "0"
-      ],
-      "config_after": [
-        "",
-        "0"
-      ],
+      "config_before": ["", "0"],
+      "config_after": ["", "0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1857,12 +1785,8 @@
     },
     {
       "name": "space_zero",
-      "config_before": [
-        " 0 "
-      ],
-      "config_after": [
-        " 0 "
-      ],
+      "config_before": [" 0 "],
+      "config_after": [" 0 "],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1874,12 +1798,8 @@
     },
     {
       "name": "tab_zero",
-      "config_before": [
-        "\t0\t"
-      ],
-      "config_after": [
-        "\t0\t"
-      ],
+      "config_before": ["\t0\t"],
+      "config_after": ["\t0\t"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: \t0\t\n",
@@ -1889,12 +1809,8 @@
     },
     {
       "name": "spaces_only",
-      "config_before": [
-        "   "
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": ["   "],
+      "config_after": ["0"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1906,12 +1822,8 @@
     },
     {
       "name": "newline_zero",
-      "config_before": [
-        "0\n"
-      ],
-      "config_after": [
-        "0\n"
-      ],
+      "config_before": ["0\n"],
+      "config_after": ["0\n"],
       "code": 0,
       "stdout_json": {
         "patterns": []
@@ -1923,12 +1835,8 @@
     },
     {
       "name": "leading_zero",
-      "config_before": [
-        "00"
-      ],
-      "config_after": [
-        "00"
-      ],
+      "config_before": ["00"],
+      "config_after": ["00"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 00\n",
@@ -1938,12 +1846,8 @@
     },
     {
       "name": "plus_zero",
-      "config_before": [
-        "+0"
-      ],
-      "config_after": [
-        "+0"
-      ],
+      "config_before": ["+0"],
+      "config_after": ["+0"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: +0\n",
@@ -1975,9 +1879,7 @@
     {
       "name": "missing",
       "config_before": [],
-      "config_after": [
-        "0"
-      ],
+      "config_after": ["0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -1987,12 +1889,8 @@
     },
     {
       "name": "empty",
-      "config_before": [
-        ""
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": [""],
+      "config_after": ["0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2002,12 +1900,8 @@
     },
     {
       "name": "zero",
-      "config_before": [
-        "0"
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": ["0"],
+      "config_after": ["0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2017,12 +1911,8 @@
     },
     {
       "name": "malformed",
-      "config_before": [
-        "not-a-version"
-      ],
-      "config_after": [
-        "not-a-version"
-      ],
+      "config_before": ["not-a-version"],
+      "config_after": ["not-a-version"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: not-a-version\n",
@@ -2032,12 +1922,8 @@
     },
     {
       "name": "future_one",
-      "config_before": [
-        "1"
-      ],
-      "config_after": [
-        "1"
-      ],
+      "config_before": ["1"],
+      "config_after": ["1"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 1\n",
@@ -2047,12 +1933,8 @@
     },
     {
       "name": "future_999",
-      "config_before": [
-        "999"
-      ],
-      "config_after": [
-        "999"
-      ],
+      "config_before": ["999"],
+      "config_after": ["999"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 999\n",
@@ -2062,14 +1944,8 @@
     },
     {
       "name": "repeat_zero_future",
-      "config_before": [
-        "0",
-        "999"
-      ],
-      "config_after": [
-        "0",
-        "999"
-      ],
+      "config_before": ["0", "999"],
+      "config_after": ["0", "999"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 999\n",
@@ -2079,14 +1955,8 @@
     },
     {
       "name": "repeat_future_zero",
-      "config_before": [
-        "999",
-        "0"
-      ],
-      "config_after": [
-        "999",
-        "0"
-      ],
+      "config_before": ["999", "0"],
+      "config_after": ["999", "0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2096,13 +1966,8 @@
     },
     {
       "name": "repeat_zero_empty",
-      "config_before": [
-        "0",
-        ""
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": ["0", ""],
+      "config_after": ["0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2112,16 +1977,8 @@
     },
     {
       "name": "repeat_future_empty_zero",
-      "config_before": [
-        "999",
-        "",
-        "0"
-      ],
-      "config_after": [
-        "999",
-        "",
-        "0"
-      ],
+      "config_before": ["999", "", "0"],
+      "config_after": ["999", "", "0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2131,16 +1988,8 @@
     },
     {
       "name": "repeat_zero_empty_future",
-      "config_before": [
-        "0",
-        "",
-        "999"
-      ],
-      "config_after": [
-        "0",
-        "",
-        "999"
-      ],
+      "config_before": ["0", "", "999"],
+      "config_after": ["0", "", "999"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 999\n",
@@ -2150,14 +1999,8 @@
     },
     {
       "name": "repeat_empty_zero",
-      "config_before": [
-        "",
-        "0"
-      ],
-      "config_after": [
-        "",
-        "0"
-      ],
+      "config_before": ["", "0"],
+      "config_after": ["", "0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2167,12 +2010,8 @@
     },
     {
       "name": "space_zero",
-      "config_before": [
-        " 0 "
-      ],
-      "config_after": [
-        " 0 "
-      ],
+      "config_before": [" 0 "],
+      "config_after": [" 0 "],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2182,12 +2021,8 @@
     },
     {
       "name": "tab_zero",
-      "config_before": [
-        "\t0\t"
-      ],
-      "config_after": [
-        "\t0\t"
-      ],
+      "config_before": ["\t0\t"],
+      "config_after": ["\t0\t"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: \t0\t\n",
@@ -2197,12 +2032,8 @@
     },
     {
       "name": "spaces_only",
-      "config_before": [
-        "   "
-      ],
-      "config_after": [
-        "0"
-      ],
+      "config_before": ["   "],
+      "config_after": ["0"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2212,12 +2043,8 @@
     },
     {
       "name": "newline_zero",
-      "config_before": [
-        "0\n"
-      ],
-      "config_after": [
-        "0\n"
-      ],
+      "config_before": ["0\n"],
+      "config_after": ["0\n"],
       "code": 2,
       "stdout_json": null,
       "stdout_text": "",
@@ -2227,12 +2054,8 @@
     },
     {
       "name": "leading_zero",
-      "config_before": [
-        "00"
-      ],
-      "config_after": [
-        "00"
-      ],
+      "config_before": ["00"],
+      "config_after": ["00"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: 00\n",
@@ -2242,12 +2065,8 @@
     },
     {
       "name": "plus_zero",
-      "config_before": [
-        "+0"
-      ],
-      "config_after": [
-        "+0"
-      ],
+      "config_before": ["+0"],
+      "config_after": ["+0"],
       "code": 128,
       "stdout_json": null,
       "stdout_text": "Unknown repository format version: +0\n",

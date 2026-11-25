@@ -7,7 +7,10 @@ import { dragAndDropManager } from '../../../src/lib/drag-and-drop-manager'
 import { BranchListItem } from '../../../src/ui/branches/branch-list-item'
 import { IMatches } from '../../../src/lib/fuzzy-find'
 import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
-import { enableTestTimers, resetTestTimers } from '../../helpers/ui/vitest-timers'
+import {
+  enableTestTimers,
+  resetTestTimers,
+} from '../../helpers/ui/vitest-timers'
 
 const noMatches: IMatches = { title: [], subtitle: [] }
 const now = Date.parse('2026-03-26T12:00:00.000Z')

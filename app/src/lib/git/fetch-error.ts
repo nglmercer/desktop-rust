@@ -67,8 +67,8 @@ export function fetchFailureToGitError(
       gitErrorDescription:
         failure.errorKind === null
           ? null
-          : fetchDescriptions[failure.errorKind] ??
-            (gitError === null ? null : getDescriptionForError(gitError, '')),
+          : (fetchDescriptions[failure.errorKind] ??
+            (gitError === null ? null : getDescriptionForError(gitError, ''))),
     },
     [operation, '--', remote],
     ''

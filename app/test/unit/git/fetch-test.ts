@@ -137,9 +137,8 @@ describe('git/fetch', () => {
       )
       const repository = new Repository(testRepoPath, -1, null, false)
 
-      const eligibleBranches = await getBranchesDifferingFromUpstream(
-        repository
-      )
+      const eligibleBranches =
+        await getBranchesDifferingFromUpstream(repository)
 
       await fastForwardBranches(repository, eligibleBranches)
 
@@ -209,9 +208,8 @@ describe('git/fetch', () => {
       )
       const repository = new Repository(testRepoPath, -1, null, false)
 
-      const eligibleBranches = await getBranchesDifferingFromUpstream(
-        repository
-      )
+      const eligibleBranches =
+        await getBranchesDifferingFromUpstream(repository)
 
       const fetchHeadPath = Path.join(repository.path, '.git', 'FETCH_HEAD')
       const previousFetchHead = await readFile(fetchHeadPath, 'utf-8')

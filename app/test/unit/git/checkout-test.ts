@@ -60,7 +60,13 @@ describe('git/checkout', () => {
         throw new Error('Expected the pathspec-magic file to be conflicted')
       }
 
-      await rawGit(repository, ['--literal-pathspecs', 'checkout', '--ours', '--', file.path])
+      await rawGit(repository, [
+        '--literal-pathspecs',
+        'checkout',
+        '--ours',
+        '--',
+        file.path,
+      ])
 
       assert.equal(
         await readFile(

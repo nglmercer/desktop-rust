@@ -20,7 +20,7 @@ Vite also handles these steps:
  - source maps are generated to help with correlating runtime errors to the
    corresponding TypeScript source
 
-Vite does not type-check; run `npm run check:types` separately.
+Vite does not type-check; run `pnpm check:types` separately.
 
 The output is stored in `out/`, which is ignored in version control.
 

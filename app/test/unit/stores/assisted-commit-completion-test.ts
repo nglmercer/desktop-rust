@@ -266,8 +266,8 @@ describe('AppStore assisted commit completion and notification settlement', () =
           exit === 'cancel'
             ? 'cancelled'
             : exit === 'decline'
-            ? 'declined'
-            : 'error'
+              ? 'declined'
+              : 'error'
         )
         if (outcome.kind === 'error') {
           const causes = assistedCommitErrorCauses(outcome.error)

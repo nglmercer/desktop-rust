@@ -5,9 +5,7 @@ import {
 } from '../changelog/parser'
 
 import { Channel } from './channel'
-import { getNextVersionNumber } from './version'
-import { execFileSync } from 'child_process'
-
+import { getNextVersionNumber, setAppPackageVersion } from './version'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
 import { formatJson } from './format-json'
@@ -16,7 +14,6 @@ import { sh } from '../sh'
 import { readFile } from 'fs/promises'
 
 import { getLatestRelease } from './tags'
-import { getNpmCommand } from '../npm'
 
 const changelogPath = join(__dirname, '..', '..', 'changelog.json')
 
@@ -52,7 +49,7 @@ function parseChannel(arg: string): Channel {
 function printInstructions(nextVersion: string, entries: Array<string>) {
   const baseSteps = [
     'Revise the release notes according to https://github.com/desktop/desktop/blob/development/docs/process/writing-release-notes.md',
-    'Lint them with: npm run draft-release:format',
+    'Lint them with: pnpm draft-release:format',
     'Commit these changes (on a "release" branch) and push them to GitHub',
     'See the deploy repo for details on performing the release: https://github.com/desktop/deploy',
   ]
@@ -101,18 +98,7 @@ export async function run(args: ReadonlyArray<string>): Promise<void> {
 
   try {
     // this can throw
-    // sets the npm version in app/
-    const npm = getNpmCommand([
-      'version',
-      nextVersion,
-      '--allow-same-version',
-      '--no-git-tag-version',
-      '--ignore-scripts',
-    ])
-    execFileSync(npm.executable, npm.args, {
-      cwd: join(__dirname, '..', '..', 'app'),
-      encoding: 'utf8',
-    })
+    setAppPackageVersion(nextVersion)
     console.log(`Set!`)
   } catch (e) {
     console.warn(`Setting the app version failed 😿
@@ -171,10 +157,7 @@ export async function run(args: ReadonlyArray<string>): Promise<void> {
     )
     try {
       // this might throw
-      writeFileSync(
-        changelogPath,
-        formatJson(JSON.stringify(changelog))
-      )
+      writeFileSync(changelogPath, formatJson(JSON.stringify(changelog)))
       console.log('Added!')
       printInstructions(nextVersion, [])
     } catch (e) {

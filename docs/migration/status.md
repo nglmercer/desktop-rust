@@ -4,6 +4,18 @@
 > Cada fila: consumidor → backend actual → destino → contrato → estado → evidencia → pendiente.
 > Estados: **implementado** (backend definitivo) · **integrado** (conectado al consumidor) · **probado** (recorrido verificado) · **bloqueado** (entorno o credencial pendiente).
 
+
+## Toolchain actual de verificación
+
+La cadena rápida actual es TypeScript 7 para `tsc` (`pnpm check:types` y
+`pnpm compile:script`), oxlint para análisis estático (`pnpm lint:oxlint`),
+Biome para formateo (`pnpm format:check`) y Vitest como único runner de pruebas
+TypeScript (`pnpm test`). TypeScript 6 queda instalado solo para la API de
+compilación usada por `script/ts-register.cjs`, pruebas de emisión de módulos
+nativos, introspección de usage-data y el oracle de reglas de ramas. ESLint,
+Prettier y el enrutado explícito de suites mediante `vitest-suites.json` ya no
+forman parte del flujo raíz.
+
 ## Fase 0 — base verificable
 
 | Capacidad | Consumidor | Backend actual | Destino | Contrato | Estado | Evidencia | Pendiente |

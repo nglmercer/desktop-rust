@@ -24,11 +24,6 @@ runs:
       uses: actions/setup-node@v6
       with:
         node-version: ${{ inputs.node-version }}
-        cache: npm
-        cache-dependency-path: |
-          package-lock.json
-          app/package-lock.json
-          vendor/*/package-lock.json
 
     - name: Install ffmpeg
       if: ${{ runner.os == 'Windows' && inputs.install-ffmpeg == 'true' }}
@@ -50,9 +45,13 @@ runs:
         esac
         rustup target add "$target"
 
+    - name: Install pnpm
+      shell: bash
+      run: npm install --global pnpm@11.17.0
+
     - name: Install and build dependencies
       shell: bash
-      run: npm ci
+      run: pnpm install --frozen-lockfile --ignore-scripts
       env:
         npm_config_arch: ${{ inputs.arch }}
         TARGET_ARCH: ${{ inputs.arch }}

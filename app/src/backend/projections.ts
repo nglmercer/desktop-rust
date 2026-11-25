@@ -27,10 +27,16 @@ export class RevisionTracker {
   }
 
   /** Returns true when a response tagged `revision` is still current for `scope`. */
-  isCurrent(revision: number, scope?: { repositoryId?: string; accountId?: string }): boolean {
+  isCurrent(
+    revision: number,
+    scope?: { repositoryId?: string; accountId?: string }
+  ): boolean {
     if (scope) {
       const expected = scope
-      if (this.scope?.repositoryId !== expected.repositoryId || this.scope?.accountId !== expected.accountId) {
+      if (
+        this.scope?.repositoryId !== expected.repositoryId ||
+        this.scope?.accountId !== expected.accountId
+      ) {
         return false
       }
     }
@@ -59,10 +65,17 @@ export abstract class BackendProjection<T> {
   protected current: T | null = null
   protected epoch = 0
 
-  protected abstract key(scope?: { repositoryId?: string; accountId?: string }): string
+  protected abstract key(scope?: {
+    repositoryId?: string
+    accountId?: string
+  }): string
 
   /** Fetch a snapshot through the backend; resolves only if still current. */
-  async fetch<TResponse>(method: string, params: PagedParams = {}, scope?: { repositoryId?: string; accountId?: string }): Promise<TResponse | null> {
+  async fetch<TResponse>(
+    method: string,
+    params: PagedParams = {},
+    scope?: { repositoryId?: string; accountId?: string }
+  ): Promise<TResponse | null> {
     const rev = this.revision.begin(scope)
     const reqParams = { ...params } as Record<string, unknown>
     const opts: { repositoryId?: string; accountId?: string } = {}
@@ -73,7 +86,8 @@ export abstract class BackendProjection<T> {
       if (!this.revision.isCurrent(rev, scope)) return null
       return res
     } catch (error) {
-      if (error instanceof BackendError && error.code === 'cancelled') return null
+      if (error instanceof BackendError && error.code === 'cancelled')
+        return null
       throw error
     }
   }
@@ -86,13 +100,19 @@ export abstract class BackendProjection<T> {
 }
 
 /** Repository list projection (formerly `RepositoriesStore` Dexie-backed). */
-export class RepositoriesProjection extends BackendProjection<{ version: number; items: Array<{ path: string }> }> {
+export class RepositoriesProjection extends BackendProjection<{
+  version: number
+  items: Array<{ path: string }>
+}> {
   protected key(): string {
     return 'repositories'
   }
 
   async list(): Promise<Array<{ path: string }> | null> {
-    const res = await this.fetch<{ repositories: Array<{ path: string }>; version: number }>('list_repositories', {})
+    const res = await this.fetch<{
+      repositories: Array<{ path: string }>
+      version: number
+    }>('list_repositories', {})
     if (!res) return null
     this.current = { version: res.version, items: res.repositories }
     return res.repositories
@@ -100,7 +120,7 @@ export class RepositoriesProjection extends BackendProjection<{ version: number;
 }
 
 /** History/diff PR/issues projections are paged (bounded deltas). */
-export function pageHistory<T>(offset: number, limit: number): PagedParams {
+export function pageHistory(offset: number, limit: number): PagedParams {
   return { offset, limit }
 }
 
@@ -113,7 +133,8 @@ export function pageHistory<T>(offset: number, limit: number): PagedParams {
 export function assertNotBuildingGitArgs(): never {
   throw new BackendError({
     code: 'renderer_forbidden',
-    message: 'Renderer must not build Git arguments — delegate to the Rust service via `backend().request()`',
+    message:
+      'Renderer must not build Git arguments — delegate to the Rust service via `backend().request()`',
     retryable: false,
   })
 }

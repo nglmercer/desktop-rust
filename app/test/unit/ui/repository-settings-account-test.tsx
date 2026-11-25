@@ -30,18 +30,20 @@ const remote = {
 
 before(() => {
   vi.doMock('../../../src/lib/git/index.ts', async () => ({
-  ...(await vi.importActual('../../../src/lib/git/index.ts')),
-  readGitIgnoreAtRoot: async () => '' }))
+    ...(await vi.importActual('../../../src/lib/git/index.ts')),
+    readGitIgnoreAtRoot: async () => '',
+  }))
   vi.doMock('../../../src/lib/git/config.ts', async () => ({
-  ...(await vi.importActual('../../../src/lib/git/config.ts')),
-  getConfigValue: async () => null,
-      getGlobalConfigValue: async () => '',
-      setConfigValue,
-      removeConfigValue: async () => {},
-    }))
+    ...(await vi.importActual('../../../src/lib/git/config.ts')),
+    getConfigValue: async () => null,
+    getGlobalConfigValue: async () => '',
+    setConfigValue,
+    removeConfigValue: async () => {},
+  }))
   vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({
-  ...(await vi.importActual('../../../src/ui/main-process-proxy.ts')),
-  sendDialogDidOpen: () => {} }))
+    ...(await vi.importActual('../../../src/ui/main-process-proxy.ts')),
+    sendDialogDidOpen: () => {},
+  }))
 })
 
 beforeEach(() => setConfigValue.mock.resetCalls())

@@ -15,7 +15,7 @@ PR-preparation skill.
 - **Build Tools**: Vite for the renderer and highlighter; Cargo builds the Rust workspace
 - **Package Manager**: pnpm (see `packageManager` in `package.json`); existing scripts also use npm
 - **Node Version**: >= 22.12.0 (see `.nvmrc` for the recommended version)
-- **Testing**: Vitest for migrated TypeScript suites, the Node.js test runner for remaining legacy suites, and Cargo for Rust tests. `npm test -- <file>` routes registered Vitest suites via `vitest-suites.json`.
+- **Testing**: Vitest for TypeScript suites (including legacy `node:test` API imports through the compatibility alias) and Cargo for Rust tests.
 
 ## Code Style & Conventions
 
@@ -83,14 +83,13 @@ GitHub Desktop has been developed for many years through many iterations of tech
 - **Format**: Use a short title line followed by blank line before detailed description
 - **AppStore methods**: Internal methods called by Dispatcher should be prefixed with `_` and include comment: `/** This shouldn't be called directly. See 'Dispatcher'. */`
 
-### ESLint Rules
+### Lint Rules
 
-The codebase uses comprehensive ESLint rules. Key custom rules:
-- `react-proper-lifecycle-methods`: Enforces correct React lifecycle usage
-The `insecure-random`, `no-loosely-typed-webcontents-ipc`,
-`react-no-unbound-dispatcher-props` and `react-readonly-props-and-state`
-rules run as Biome TypeScript plugins
-through `npm run lint:security`.
+Oxlint performs JavaScript/TypeScript static analysis. Project-specific rules
+live in `oxlint-rules/` and cover insecure randomness, loosely typed webview IPC,
+unbound dispatcher props, readonly React props/state, and correct React lifecycle
+method usage. Run them with `pnpm lint:security` and test them with
+`pnpm test:oxlint`.
 
 ## Building & Testing
 
@@ -110,23 +109,23 @@ pnpm start
 
 ```bash
 # Run all unit tests
-npm test
+pnpm test
 
 # Run specific test file
-npm test -- <file>
+pnpm test -- <file>
 
 # Run tests in directory
-npm test -- <directory>
+pnpm test -- <directory>
 
 # Run script tests
-npm run test:script
+pnpm test:script
 
-# Run ESLint tests
-npm run test:eslint
+# Run project oxlint rule tests
+pnpm test:oxlint
 ```
 
 **Test Conventions**:
-- Use Vitest for new and migrated TypeScript unit tests; register migrated suites in `vitest-suites.json` so `npm test` routes them correctly. Existing Node.js test runner suites are being migrated.
+- Use Vitest for all TypeScript tests. Older files may still use the `node:test` API surface through the compatibility alias, but Vitest is the only runner.
 - Test files should be in `app/test/unit/` directory
 - Use `.ts` or `.tsx` extensions
 - Avoid synchronous tests; use async/await.
@@ -135,25 +134,22 @@ npm run test:eslint
 
 ```bash
 # Run all linters
-npm run lint
+pnpm lint
 
-# Fix auto-fixable issues
-npm run lint:fix
+# Fix auto-fixable issues and format
+pnpm lint:fix
 
-# Lint source code
-npm run lint:src
+# Run oxlint only
+pnpm lint:oxlint
 
-# Check files migrated to Biome
-npm run lint:biome
+# Check formatting with Biome
+pnpm format:check
 
 # Check Markdown files
-npm run markdownlint
+pnpm markdownlint
 
-# Format with Prettier
-npm run prettier
-
-# Fix Prettier issues
-npm run prettier -- --write
+# Format the repository with Biome
+pnpm format
 ```
 
 ## Security & Quality
@@ -182,7 +178,7 @@ npm run prettier -- --write
   - `docs/contributing/`: Contributor guides
   - `docs/process/`: Process documentation
   - `docs/technical/`: Technical documentation
-- **`eslint-rules/`**: Custom ESLint rules
+- **`oxlint-rules/`**: Custom oxlint rules
 - **`.github/`**: GitHub-specific files (workflows, issue templates, contributing guide)
 
 ## Development Tips
@@ -214,7 +210,7 @@ This project adheres to the Contributor Covenant [Code of Conduct](../CODE_OF_CO
 
 1. **Keep changes minimal**: Make the smallest possible changes to achieve the goal
 2. **Run tests frequently**: Test after each meaningful change
-3. **Run `npm run lint:fix` after any code change**: This runs Prettier and ESLint with auto-fix to ensure formatting and lint rules are satisfied before committing
+3. **Run `pnpm lint:fix` after any code change**: This applies oxlint fixes and Biome formatting before committing
 4. **Update documentation**: Update docs if changes affect documented behavior
 5. **Follow existing patterns**: Match the style and patterns already in the codebase
 6. **Don't remove working code**: Only modify what's necessary for the task
@@ -223,8 +219,8 @@ This project adheres to the Contributor Covenant [Code of Conduct](../CODE_OF_CO
 
 When changing stats fields, dimensions, measures, serialization, or endpoint request envelopes:
 
-1. Run `npm run generate-example-usage-data`.
-2. Run `npm test -- app/test/unit/usage-data-test.ts`.
+1. Run `pnpm generate-example-usage-data`.
+2. Run `pnpm test -- app/test/unit/usage-data-test.ts`.
 3. Commit the updated `docs/process/usage-data.json`.
 
 Never edit `docs/process/usage-data.json` manually. It must match the request body generated by `StatsStore`.

@@ -129,8 +129,14 @@ it('allows bounded fetch, push and clone mutations to extend the IPC timeout', a
     window.__desktop.invoke('desktop.backend.git_info', mutation),
     window.__desktop.invoke('desktop.backend.git_info', head),
     window.__desktop.invoke('desktop.backend.git_info', push),
-    window.__desktop.invoke('desktop.backend.git_info', { operation: { type: 'clone_selected' }, deadline_ms: 3_600_000 }),
-    window.__desktop.invoke('desktop.backend.git_info', { operation: { type: 'recover_clone' }, deadline_ms: 3_600_000 }),
+    window.__desktop.invoke('desktop.backend.git_info', {
+      operation: { type: 'clone_selected' },
+      deadline_ms: 3_600_000,
+    }),
+    window.__desktop.invoke('desktop.backend.git_info', {
+      operation: { type: 'recover_clone' },
+      deadline_ms: 3_600_000,
+    }),
     window.__desktop.invoke('desktop.backend.git_info', preview),
     window.__desktop.invoke('desktop.backend.git_info', {
       ...mutation,
@@ -169,36 +175,68 @@ it('refuses request-owned progress before attempting the HTTP fallback', async (
 })
 
 it('reports when the native cancellation transport disappears', () => {
-  const dom = new JSDOM('', { url: 'http://localhost/', runScripts: 'outside-only' })
+  const dom = new JSDOM('', {
+    url: 'http://localhost/',
+    runScripts: 'outside-only',
+  })
   const window = dom.window as any
   window.fetch = vi.fn()
-  window.XMLHttpRequest = class { open() {} send() {} }
+  window.XMLHttpRequest = class {
+    open() {}
+    send() {}
+  }
   window.ipc = { postMessage: vi.fn() }
   window.eval(bootstrap)
   delete window.ipc
-  expect(() => window.__desktop.send('desktop.backend.cancel', { request_id: 'id' })).toThrow('Cancellation transport is unavailable')
+  expect(() =>
+    window.__desktop.send('desktop.backend.cancel', { request_id: 'id' })
+  ).toThrow('Cancellation transport is unavailable')
   dom.window.close()
 })
 
 it('reports an uncertain submission when native IPC throws', async () => {
-  const dom = new JSDOM('', { url: 'http://localhost/', runScripts: 'outside-only' })
+  const dom = new JSDOM('', {
+    url: 'http://localhost/',
+    runScripts: 'outside-only',
+  })
   const window = dom.window as any
   window.fetch = vi.fn()
-  window.XMLHttpRequest = class { open() {} send() {} }
-  window.ipc = { postMessage: () => { throw new Error('transport failed') } }
+  window.XMLHttpRequest = class {
+    open() {}
+    send() {}
+  }
+  window.ipc = {
+    postMessage: () => {
+      throw new Error('transport failed')
+    },
+  }
   window.eval(bootstrap)
-  await expect(window.__desktop.invoke('desktop.backend.git_info', { operation: { type: 'clone_selected' } })).rejects.toMatchObject({ code: 'disconnected' })
+  await expect(
+    window.__desktop.invoke('desktop.backend.git_info', {
+      operation: { type: 'clone_selected' },
+    })
+  ).rejects.toMatchObject({ code: 'disconnected' })
   dom.window.close()
 })
 
 it('does not send clone recovery through the uncancellable HTTP fallback', async () => {
-  const dom = new JSDOM('', { url: 'http://localhost/', runScripts: 'outside-only' })
+  const dom = new JSDOM('', {
+    url: 'http://localhost/',
+    runScripts: 'outside-only',
+  })
   const window = dom.window as any
   const nativeFetch = vi.fn()
   window.fetch = nativeFetch
-  window.XMLHttpRequest = class { open() {} send() {} }
+  window.XMLHttpRequest = class {
+    open() {}
+    send() {}
+  }
   window.eval(bootstrap)
-  await expect(window.__desktop.invoke('desktop.backend.git_info', { operation: { type: 'recover_clone' } })).rejects.toMatchObject({ code: 'unsupported' })
+  await expect(
+    window.__desktop.invoke('desktop.backend.git_info', {
+      operation: { type: 'recover_clone' },
+    })
+  ).rejects.toMatchObject({ code: 'unsupported' })
   expect(nativeFetch).not.toHaveBeenCalled()
   dom.window.close()
 })

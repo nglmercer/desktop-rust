@@ -180,9 +180,8 @@ describe('CloneRepository path validation', () => {
   })
 
   it('does not dispatch a clone when an invalid path is submitted directly', async t => {
-    const { directory, pathInput, container, clone } = await renderCloneDialog(
-      t
-    )
+    const { directory, pathInput, container, clone } =
+      await renderCloneDialog(t)
     fireEvent.change(pathInput, {
       target: { value: Path.join(directory, 'repository.app') },
     })

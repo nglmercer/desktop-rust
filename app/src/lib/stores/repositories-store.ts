@@ -803,12 +803,12 @@ export class RepositoriesStore extends TypedBaseStore<
           assignLogin !== undefined
             ? assignLogin
             : current.gitHubRepository !== null &&
-              !caseInsensitiveEquals(
-                current.gitHubRepository.endpoint,
-                ghRepo.endpoint
-              )
-            ? null
-            : current.login
+                !caseInsensitiveEquals(
+                  current.gitHubRepository.endpoint,
+                  ghRepo.endpoint
+                )
+              ? null
+              : current.login
         const scoped = await this.getGitHubRepositoryForAccount(
           ghRepo.dbID,
           login
@@ -893,8 +893,8 @@ export class RepositoriesStore extends TypedBaseStore<
     // with the same name or the parent getting deleted, etc) we assume that the
     // value we've got is valid until we're certain its not.
     const parentID = ignoreParent
-      ? existingRepo?.parentID ?? null
-      : parent?.dbID ?? null
+      ? (existingRepo?.parentID ?? null)
+      : (parent?.dbID ?? null)
 
     const updatedGitHubRepo: IDatabaseGitHubRepository = {
       ...(existingRepo?.id !== undefined && { id: existingRepo.id }),

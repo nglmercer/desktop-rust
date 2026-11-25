@@ -432,8 +432,8 @@ function configurationInputs(
         entry.value === '~'
           ? home
           : entry.value.startsWith('~/')
-          ? rebaseNativePath(home, entry.value.slice(2))
-          : entry.value
+            ? rebaseNativePath(home, entry.value.slice(2))
+            : entry.value
       if (value.startsWith('~')) {
         throw new AssistedCommitPushError(
           'An included configuration path cannot be certified for assisted push. Use the normal Push action.'
@@ -767,7 +767,7 @@ async function readAssistedCommitPushDestinationCore(
   const remote =
     upstreamRemote === null
       ? findDefaultRemote(remotes)
-      : remotes.find(candidate => candidate.name === upstreamRemote) ?? null
+      : (remotes.find(candidate => candidate.name === upstreamRemote) ?? null)
   if (remote === null) {
     return {
       kind: 'unavailable',
@@ -1171,9 +1171,8 @@ async function readAssistedCommitPushDestinationCore(
       ...configurationInputs(repository, configuration),
     ]),
   ]
-  const verifyConfigurationVersions = await captureFileVersionFence(
-    configurationPaths
-  )
+  const verifyConfigurationVersions =
+    await captureFileVersionFence(configurationPaths)
   const inputs = await Promise.all(
     configurationPaths.map(async path => ({
       path,
@@ -1282,9 +1281,8 @@ export async function completeAssistedCommitPushPublication(
     originalPushBackingPaths(repository, destination)
   )
   const configurationFiles = await readConfigurationFiles(repository)
-  const verifyDefaultConfiguration = await capturePublicationFileVersionFence(
-    configurationFiles
-  )
+  const verifyDefaultConfiguration =
+    await capturePublicationFileVersionFence(configurationFiles)
   const verifyOriginalOwner = () => {
     try {
       if (gitEnvironment() !== environment) {

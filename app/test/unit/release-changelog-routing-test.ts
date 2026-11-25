@@ -12,7 +12,11 @@ vi.mock('../../src/backend/client', () => ({
   }),
 }))
 
-import { generateDevReleaseSummary, generateReleaseSummary, getChangeLog } from '../../src/lib/release-notes'
+import {
+  generateDevReleaseSummary,
+  generateReleaseSummary,
+  getChangeLog,
+} from '../../src/lib/release-notes'
 import { showTestUI } from '../../src/ui/lib/test-ui-components/test-ui-components'
 import type { Dispatcher } from '../../src/ui/dispatcher'
 
@@ -63,23 +67,44 @@ describe('release changelog transport', () => {
     await expect(generateReleaseSummary('3.0.0')).resolves.toEqual([])
   })
 
-  it.each(['empty', 'offline'])('reports %s release notes instead of opening an empty test popup', async failure => {
-    vi.stubGlobal('__DEV__', true)
-    if (failure === 'empty') mocks.changelog.mockResolvedValue([])
-    else mocks.changelog.mockRejectedValue(new Error('offline'))
-    const dispatcher = { postError: vi.fn(), showPopup: vi.fn() }
-    await showTestUI('test-release-notes-popup', null, dispatcher as unknown as Dispatcher, new Map())
-    expect(dispatcher.showPopup).not.toHaveBeenCalled()
-    expect(dispatcher.postError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('Release notes are unavailable') }))
-  })
+  it.each(['empty', 'offline'])(
+    'reports %s release notes instead of opening an empty test popup',
+    async failure => {
+      vi.stubGlobal('__DEV__', true)
+      if (failure === 'empty') mocks.changelog.mockResolvedValue([])
+      else mocks.changelog.mockRejectedValue(new Error('offline'))
+      const dispatcher = { postError: vi.fn(), showPopup: vi.fn() }
+      await showTestUI(
+        'test-release-notes-popup',
+        null,
+        dispatcher as unknown as Dispatcher,
+        new Map()
+      )
+      expect(dispatcher.showPopup).not.toHaveBeenCalled()
+      expect(dispatcher.postError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('Release notes are unavailable'),
+        })
+      )
+    }
+  )
 
   it('opens the test popup when release notes are available', async () => {
     vi.stubGlobal('__DEV__', true)
     vi.stubGlobal('localStorage', { getItem: () => null })
     const dispatcher = { postError: vi.fn(), showPopup: vi.fn() }
-    await showTestUI('test-release-notes-popup', null, dispatcher as unknown as Dispatcher, new Map())
+    await showTestUI(
+      'test-release-notes-popup',
+      null,
+      dispatcher as unknown as Dispatcher,
+      new Map()
+    )
     expect(dispatcher.postError).not.toHaveBeenCalled()
-    expect(dispatcher.showPopup).toHaveBeenCalledWith(expect.objectContaining({ newReleases: [expect.objectContaining({ latestVersion: '3.0.0' })] }))
+    expect(dispatcher.showPopup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newReleases: [expect.objectContaining({ latestVersion: '3.0.0' })],
+      })
+    )
   })
 
   it.each(['development', 'production'])(

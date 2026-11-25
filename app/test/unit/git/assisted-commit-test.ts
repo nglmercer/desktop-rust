@@ -28,11 +28,13 @@ vi.mock('fs/promises', async importOriginal => {
   fsSpies.rm.mockImplementation(actual.rm)
   return {
     ...actual,
-    rename: (...args: Parameters<typeof actual.rename>) => fsSpies.rename(...args),
+    rename: (...args: Parameters<typeof actual.rename>) =>
+      fsSpies.rename(...args),
     open: (...args: Parameters<typeof actual.open>) => fsSpies.open(...args),
     readFile: (...args: Parameters<typeof actual.readFile>) =>
       fsSpies.readFile(...args),
-    unlink: (...args: Parameters<typeof actual.unlink>) => fsSpies.unlink(...args),
+    unlink: (...args: Parameters<typeof actual.unlink>) =>
+      fsSpies.unlink(...args),
     rm: (...args: Parameters<typeof actual.rm>) => fsSpies.rm(...args),
   }
 })
@@ -473,38 +475,36 @@ describe('git/assisted-commit', () => {
     }
   })
 
-  it(
-    'preserves mode-only changes and symlink bytes without writing the worktree',
-    { skip: process.platform === 'win32' },
-    async t => {
-      const repository = await seed(t, {
-        executable: 'script\n',
-        target: 'target\n',
-      })
-      await chmod(join(repository.path, 'executable'), 0o755)
-      await symlink('target', join(repository.path, 'link'))
-      const input = await request(repository, ['executable', 'link'])
-      const result = await single(repository, input)
-      assert.match(
-        await rawGit(repository, [
-          'ls-tree',
-          result.commits[0],
-          '--',
-          'executable',
-        ]),
-        /^100755 blob /
-      )
-      assert.match(
-        await rawGit(repository, ['ls-tree', result.commits[0], '--', 'link']),
-        /^120000 blob /
-      )
-      assert.deepStrictEqual(
-        await commitBytes(repository, result.commits[0], 'link'),
-        Buffer.from('target')
-      )
-      assert.ok((await lstat(join(repository.path, 'link'))).isSymbolicLink())
-    }
-  )
+  it('preserves mode-only changes and symlink bytes without writing the worktree', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    const repository = await seed(t, {
+      executable: 'script\n',
+      target: 'target\n',
+    })
+    await chmod(join(repository.path, 'executable'), 0o755)
+    await symlink('target', join(repository.path, 'link'))
+    const input = await request(repository, ['executable', 'link'])
+    const result = await single(repository, input)
+    assert.match(
+      await rawGit(repository, [
+        'ls-tree',
+        result.commits[0],
+        '--',
+        'executable',
+      ]),
+      /^100755 blob /
+    )
+    assert.match(
+      await rawGit(repository, ['ls-tree', result.commits[0], '--', 'link']),
+      /^120000 blob /
+    )
+    assert.deepStrictEqual(
+      await commitBytes(repository, result.commits[0], 'link'),
+      Buffer.from('target')
+    )
+    assert.ok((await lstat(join(repository.path, 'link'))).isSymbolicLink())
+  })
 
   it('keeps Git newline and clean-filter semantics in frozen text bytes', async t => {
     const repository = await seed(t, {
@@ -1913,106 +1913,102 @@ describe('git/assisted-commit', () => {
   })
 
   for (const mutation of ['mode', 'type']) {
-    it(
-      `recovers selected ${mutation} identity mutation between commits without restoring old filesystem state`,
-      { skip: process.platform === 'win32' },
-      async t => {
-        const repository = await seed(t, {
-          a: 'a\n',
-          b: 'b\n',
-          other: 'other\n',
-        })
-        const original = await tip(repository)
-        await writeFile(join(repository.path, 'a'), 'A\n')
-        await writeFile(join(repository.path, 'b'), 'B\n')
-        const input = await request(repository)
-        await assert.rejects(
-          withAssistedCommitSnapshot(repository, input, async snapshot => {
-            const checked = await validateAssistedCommitPlan(
-              snapshot,
-              splitPlan(snapshot)
-            )
-            return executeAssistedCommitPlan(snapshot, checked, {
-              onProgress: async progress => {
-                if (progress.kind !== 'committed' || progress.index !== 0) {
-                  return
-                }
-                if (mutation === 'mode') {
-                  await chmod(join(repository.path, 'b'), 0o755)
-                } else {
-                  await unlink(join(repository.path, 'b'))
-                  await symlink('other', join(repository.path, 'b'))
-                }
-              },
-            })
-          }),
-          error =>
-            error instanceof AssistedCommitError &&
-            error.code === 'selection-changed' &&
-            error.recovery?.history === 'restored'
-        )
-        assert.strictEqual(await tip(repository), original)
-        const state = await lstat(join(repository.path, 'b'))
-        assert.ok(
-          mutation === 'mode'
-            ? (state.mode & 0o111) !== 0
-            : state.isSymbolicLink()
-        )
-      }
-    )
+    it(`recovers selected ${mutation} identity mutation between commits without restoring old filesystem state`, {
+      skip: process.platform === 'win32',
+    }, async t => {
+      const repository = await seed(t, {
+        a: 'a\n',
+        b: 'b\n',
+        other: 'other\n',
+      })
+      const original = await tip(repository)
+      await writeFile(join(repository.path, 'a'), 'A\n')
+      await writeFile(join(repository.path, 'b'), 'B\n')
+      const input = await request(repository)
+      await assert.rejects(
+        withAssistedCommitSnapshot(repository, input, async snapshot => {
+          const checked = await validateAssistedCommitPlan(
+            snapshot,
+            splitPlan(snapshot)
+          )
+          return executeAssistedCommitPlan(snapshot, checked, {
+            onProgress: async progress => {
+              if (progress.kind !== 'committed' || progress.index !== 0) {
+                return
+              }
+              if (mutation === 'mode') {
+                await chmod(join(repository.path, 'b'), 0o755)
+              } else {
+                await unlink(join(repository.path, 'b'))
+                await symlink('other', join(repository.path, 'b'))
+              }
+            },
+          })
+        }),
+        error =>
+          error instanceof AssistedCommitError &&
+          error.code === 'selection-changed' &&
+          error.recovery?.history === 'restored'
+      )
+      assert.strictEqual(await tip(repository), original)
+      const state = await lstat(join(repository.path, 'b'))
+      assert.ok(
+        mutation === 'mode'
+          ? (state.mode & 0o111) !== 0
+          : state.isSymbolicLink()
+      )
+    })
   }
 
   for (const target of ['private', 'published']) {
-    it(
-      `observes Git failing after advancing its ${target} ref and recovers only run history`,
-      { skip: process.platform === 'win32' },
-      async t => {
-        const repository = await seed(t, { file: 'old\n' })
-        const original = await tip(repository)
-        await writeFile(join(repository.path, 'file'), 'selected\n')
-        const input = await request(repository)
-        const originalIndex = await readFile(await indexPath(repository))
-        await writeHook(
-          repository,
-          'reference-transaction',
-          [
-            'if test "$1" != committed || test -f ref-failed-once; then exit 0; fi',
-            target === 'private'
-              ? 'case "${GIT_DIR-}" in *desktop-assisted-commit-*) ;; *) exit 0 ;; esac'
-              : 'case "${GIT_DIR-}" in *desktop-assisted-commit-*) exit 0 ;; esac',
-            'printf failed > ref-failed-once',
-            'kill -TERM "$PPID"',
-          ].join('\n')
-        )
-        let created = ''
-        await assert.rejects(single(repository, input), error => {
-          assert.ok(error instanceof AssistedCommitError)
-          assert.strictEqual(error.code, 'commit-failed')
-          assert.strictEqual(error.recovery?.createdCommits.length, 1)
-          assert.strictEqual(
-            error.recovery?.history,
-            target === 'private' ? 'unchanged' : 'restored'
-          )
-          created = error.recovery?.createdCommits[0] ?? ''
-          return true
-        })
-        assert.match(created, /^[0-9a-f]{40}$/)
-        assert.strictEqual(await tip(repository), original)
-        assert.strictEqual(await count(repository), 1)
+    it(`observes Git failing after advancing its ${target} ref and recovers only run history`, {
+      skip: process.platform === 'win32',
+    }, async t => {
+      const repository = await seed(t, { file: 'old\n' })
+      const original = await tip(repository)
+      await writeFile(join(repository.path, 'file'), 'selected\n')
+      const input = await request(repository)
+      const originalIndex = await readFile(await indexPath(repository))
+      await writeHook(
+        repository,
+        'reference-transaction',
+        [
+          'if test "$1" != committed || test -f ref-failed-once; then exit 0; fi',
+          target === 'private'
+            ? 'case "${GIT_DIR-}" in *desktop-assisted-commit-*) ;; *) exit 0 ;; esac'
+            : 'case "${GIT_DIR-}" in *desktop-assisted-commit-*) exit 0 ;; esac',
+          'printf failed > ref-failed-once',
+          'kill -TERM "$PPID"',
+        ].join('\n')
+      )
+      let created = ''
+      await assert.rejects(single(repository, input), error => {
+        assert.ok(error instanceof AssistedCommitError)
+        assert.strictEqual(error.code, 'commit-failed')
+        assert.strictEqual(error.recovery?.createdCommits.length, 1)
         assert.strictEqual(
-          await rawGit(repository, ['rev-parse', `${created}^`]),
-          original
+          error.recovery?.history,
+          target === 'private' ? 'unchanged' : 'restored'
         )
-        assert.deepStrictEqual(
-          await readFile(await indexPath(repository)),
-          originalIndex
-        )
-        assert.deepStrictEqual(
-          await readFile(join(repository.path, 'file')),
-          Buffer.from('selected\n')
-        )
-      }
-    )
+        created = error.recovery?.createdCommits[0] ?? ''
+        return true
+      })
+      assert.match(created, /^[0-9a-f]{40}$/)
+      assert.strictEqual(await tip(repository), original)
+      assert.strictEqual(await count(repository), 1)
+      assert.strictEqual(
+        await rawGit(repository, ['rev-parse', `${created}^`]),
+        original
+      )
+      assert.deepStrictEqual(
+        await readFile(await indexPath(repository)),
+        originalIndex
+      )
+      assert.deepStrictEqual(
+        await readFile(join(repository.path, 'file')),
+        Buffer.from('selected\n')
+      )
+    })
   }
 
   it('waits for the second in-flight commit on cancellation and removes the earlier published commit', async t => {
@@ -2289,43 +2285,41 @@ describe('git/assisted-commit', () => {
     })
   }
 
-  it(
-    'recognizes rollback ref restoration when Git fails afterwards and safely permits retry',
-    { skip: process.platform === 'win32' },
-    async t => {
-      const repository = await seed(t, { file: 'old\n', other: 'base\n' })
-      const original = await tip(repository)
-      await writeFile(join(repository.path, 'other'), 'original staging\n')
-      await rawGit(repository, ['add', '--', 'other'])
-      await writeFile(join(repository.path, 'file'), 'selected\n')
-      const input = await request(repository, ['file'])
-      const originalIndex = await readFile(await indexPath(repository))
-      const result = await single(repository, input)
-      await writeHook(
-        repository,
-        'reference-transaction',
-        [
-          'if test "$1" != committed || test -f rollback-failed-once; then exit 0; fi',
-          'printf failed > rollback-failed-once',
-          'kill -TERM "$PPID"',
-        ].join('\n')
-      )
-      await assert.rejects(
-        rollbackAssistedCommitTransaction(result),
-        error =>
-          error instanceof AssistedCommitError &&
-          error.code === 'recovery-failed' &&
-          error.recovery?.history === 'restored'
-      )
-      assert.strictEqual(await tip(repository), original)
-      await rollbackAssistedCommitTransaction(result)
-      assert.deepStrictEqual(
-        await readFile(await indexPath(repository)),
-        originalIndex
-      )
-      assert.strictEqual(await count(repository), 1)
-    }
-  )
+  it('recognizes rollback ref restoration when Git fails afterwards and safely permits retry', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    const repository = await seed(t, { file: 'old\n', other: 'base\n' })
+    const original = await tip(repository)
+    await writeFile(join(repository.path, 'other'), 'original staging\n')
+    await rawGit(repository, ['add', '--', 'other'])
+    await writeFile(join(repository.path, 'file'), 'selected\n')
+    const input = await request(repository, ['file'])
+    const originalIndex = await readFile(await indexPath(repository))
+    const result = await single(repository, input)
+    await writeHook(
+      repository,
+      'reference-transaction',
+      [
+        'if test "$1" != committed || test -f rollback-failed-once; then exit 0; fi',
+        'printf failed > rollback-failed-once',
+        'kill -TERM "$PPID"',
+      ].join('\n')
+    )
+    await assert.rejects(
+      rollbackAssistedCommitTransaction(result),
+      error =>
+        error instanceof AssistedCommitError &&
+        error.code === 'recovery-failed' &&
+        error.recovery?.history === 'restored'
+    )
+    assert.strictEqual(await tip(repository), original)
+    await rollbackAssistedCommitTransaction(result)
+    assert.deepStrictEqual(
+      await readFile(await indexPath(repository)),
+      originalIndex
+    )
+    assert.strictEqual(await count(repository), 1)
+  })
 
   it('preserves tracked symlink placeholder mode and literal target bytes with core.symlinks=false', async t => {
     const repository = await seed(t, { first: 'one\n', second: 'two\n' })
@@ -2437,41 +2431,39 @@ describe('git/assisted-commit', () => {
     })
   }
 
-  it(
-    'restores the index without creating a child-owned abort transaction',
-    { skip: process.platform === 'win32' },
-    async t => {
-      const repository = await seed(t, { file: 'old\n', other: 'base\n' })
-      const original = await tip(repository)
-      await writeFile(join(repository.path, 'other'), 'original staging\n')
-      await rawGit(repository, ['add', '--', 'other'])
-      await writeFile(join(repository.path, 'file'), 'selected\n')
-      const input = await request(repository, ['file'])
-      const originalIndex = await readFile(await indexPath(repository))
-      const result = await single(repository, input)
-      await writeHook(
-        repository,
-        'reference-transaction',
-        [
-          'if test "$1" != aborted || test -f index-guard-failed-once; then exit 0; fi',
-          'printf failed > index-guard-failed-once',
-          'kill -TERM "$PPID"',
-        ].join('\n')
-      )
-      const recovery = await rollbackAssistedCommitTransaction(result)
-      assert.strictEqual(recovery.history, 'restored')
-      assert.strictEqual(recovery.index, 'restored')
-      assert.strictEqual(
-        await optionalBytes(join(repository.path, 'index-guard-failed-once')),
-        null
-      )
-      assert.strictEqual(await tip(repository), original)
-      assert.deepStrictEqual(
-        await readFile(await indexPath(repository)),
-        originalIndex
-      )
-    }
-  )
+  it('restores the index without creating a child-owned abort transaction', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    const repository = await seed(t, { file: 'old\n', other: 'base\n' })
+    const original = await tip(repository)
+    await writeFile(join(repository.path, 'other'), 'original staging\n')
+    await rawGit(repository, ['add', '--', 'other'])
+    await writeFile(join(repository.path, 'file'), 'selected\n')
+    const input = await request(repository, ['file'])
+    const originalIndex = await readFile(await indexPath(repository))
+    const result = await single(repository, input)
+    await writeHook(
+      repository,
+      'reference-transaction',
+      [
+        'if test "$1" != aborted || test -f index-guard-failed-once; then exit 0; fi',
+        'printf failed > index-guard-failed-once',
+        'kill -TERM "$PPID"',
+      ].join('\n')
+    )
+    const recovery = await rollbackAssistedCommitTransaction(result)
+    assert.strictEqual(recovery.history, 'restored')
+    assert.strictEqual(recovery.index, 'restored')
+    assert.strictEqual(
+      await optionalBytes(join(repository.path, 'index-guard-failed-once')),
+      null
+    )
+    assert.strictEqual(await tip(repository), original)
+    assert.deepStrictEqual(
+      await readFile(await indexPath(repository)),
+      originalIndex
+    )
+  })
 
   for (const spelling of ['git-output', 'directory-alias']) {
     it(`holds the final owned HEAD across index synchronization (${spelling})`, async t => {
@@ -2568,125 +2560,121 @@ describe('git/assisted-commit', () => {
     })
   }
 
-  it(
-    'joins a guarded action when its Git process fails during asynchronous work',
-    { skip: process.platform === 'win32' },
-    async t => {
-      const repository = await seed(t, { file: 'old\n' })
-      const original = await tip(repository)
-      await writeHook(
-        repository,
-        'reference-transaction',
-        'if test "$1" = prepared; then printf "%s" "$PPID" > guarding-process; fi'
-      )
-      let resume: () => void = () => {}
-      let started: () => void = () => {}
-      const paused = new Promise<void>(resolve => {
-        resume = resolve
-      })
-      const actionStarted = new Promise<void>(resolve => {
-        started = resolve
-      })
-      let actionSettled = false
-      let returned = false
-      const operation = updateRefWithVerification(
-        repository,
-        'refs/heads/master',
-        original,
-        original,
-        'test joined verification',
-        async () => {
-          started()
-          await paused
-          actionSettled = true
-        }
-      ).then(
-        () => {
-          returned = true
-          return null
-        },
-        error => {
-          returned = true
-          return error
-        }
-      )
-      await actionStarted
-      const pid = Number(
-        await readFile(join(repository.path, 'guarding-process'), 'utf8')
-      )
-      process.kill(pid, 'SIGTERM')
-      await new Promise(resolve => setTimeout(resolve, 100))
-      const abandoned = returned
-      resume()
-      const error = await operation
-      assert.ok(error instanceof Error)
-      assert.ok(actionSettled)
-      assert.strictEqual(abandoned, false)
-    }
-  )
+  it('joins a guarded action when its Git process fails during asynchronous work', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    const repository = await seed(t, { file: 'old\n' })
+    const original = await tip(repository)
+    await writeHook(
+      repository,
+      'reference-transaction',
+      'if test "$1" = prepared; then printf "%s" "$PPID" > guarding-process; fi'
+    )
+    let resume: () => void = () => {}
+    let started: () => void = () => {}
+    const paused = new Promise<void>(resolve => {
+      resume = resolve
+    })
+    const actionStarted = new Promise<void>(resolve => {
+      started = resolve
+    })
+    let actionSettled = false
+    let returned = false
+    const operation = updateRefWithVerification(
+      repository,
+      'refs/heads/master',
+      original,
+      original,
+      'test joined verification',
+      async () => {
+        started()
+        await paused
+        actionSettled = true
+      }
+    ).then(
+      () => {
+        returned = true
+        return null
+      },
+      error => {
+        returned = true
+        return error
+      }
+    )
+    await actionStarted
+    const pid = Number(
+      await readFile(join(repository.path, 'guarding-process'), 'utf8')
+    )
+    process.kill(pid, 'SIGTERM')
+    await new Promise(resolve => setTimeout(resolve, 100))
+    const abandoned = returned
+    resume()
+    const error = await operation
+    assert.ok(error instanceof Error)
+    assert.ok(actionSettled)
+    assert.strictEqual(abandoned, false)
+  })
 
-  it(
-    'retains parent-owned HEAD protection throughout delayed recovery I/O',
-    { skip: process.platform === 'win32' },
-    async t => {
-      const repository = await seed(t, { file: 'old\n', other: 'base\n' })
-      const original = await tip(repository)
-      await writeFile(join(repository.path, 'other'), 'pre-run staging\n')
-      await rawGit(repository, ['add', '--', 'other'])
-      await writeFile(join(repository.path, 'file'), 'selected\n')
-      const input = await request(repository, ['file'])
-      const originalIndex = await readFile(await indexPath(repository))
-      const result = await single(repository, input)
-      const realLock = `${await indexPath(repository)}.lock`
-      const matchesLock = await createPathMatcher(realLock)
-      await writeHook(
-        repository,
-        'reference-transaction',
-        'if test "$1" = prepared; then printf "%s" "$PPID" > guarding-process; fi'
-      )
-      const originalOpen = realFs.open
-      let checked = false
-      let ioSettled = false
-      fsSpies.open.mockImplementation(
-        async (...args: Parameters<typeof FileSystem.open>) => {
-          const handle = await originalOpen(...args)
-          if (await matchesLock(args[0])) {
-            const originalSync = handle.sync.bind(handle)
-            t.mock.method(handle, 'sync', async () => {
-              await originalSync()
-              if (!checked) {
-                checked = true
-                await rawGit(repository, ['rev-parse', 'HEAD'])
-                const attempt = await exec(
-                  ['symbolic-ref', 'HEAD', 'refs/heads/external'],
-                  repository.path
-                )
-                assert.notStrictEqual(attempt.exitCode, 0)
-                assert.match(attempt.stderr, /HEAD\.lock/)
-                await new Promise(resolve => setTimeout(resolve, 100))
-                ioSettled = true
-              }
-            })
-          }
-          return handle
+  it('retains parent-owned HEAD protection throughout delayed recovery I/O', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    const repository = await seed(t, { file: 'old\n', other: 'base\n' })
+    const original = await tip(repository)
+    await writeFile(join(repository.path, 'other'), 'pre-run staging\n')
+    await rawGit(repository, ['add', '--', 'other'])
+    await writeFile(join(repository.path, 'file'), 'selected\n')
+    const input = await request(repository, ['file'])
+    const originalIndex = await readFile(await indexPath(repository))
+    const result = await single(repository, input)
+    const realLock = `${await indexPath(repository)}.lock`
+    const matchesLock = await createPathMatcher(realLock)
+    await writeHook(
+      repository,
+      'reference-transaction',
+      'if test "$1" = prepared; then printf "%s" "$PPID" > guarding-process; fi'
+    )
+    const originalOpen = realFs.open
+    let checked = false
+    let ioSettled = false
+    fsSpies.open.mockImplementation(
+      async (...args: Parameters<typeof FileSystem.open>) => {
+        const handle = await originalOpen(...args)
+        if (await matchesLock(args[0])) {
+          const originalSync = handle.sync.bind(handle)
+          t.mock.method(handle, 'sync', async () => {
+            await originalSync()
+            if (!checked) {
+              checked = true
+              await rawGit(repository, ['rev-parse', 'HEAD'])
+              const attempt = await exec(
+                ['symbolic-ref', 'HEAD', 'refs/heads/external'],
+                repository.path
+              )
+              assert.notStrictEqual(attempt.exitCode, 0)
+              assert.match(attempt.stderr, /HEAD\.lock/)
+              await new Promise(resolve => setTimeout(resolve, 100))
+              ioSettled = true
+            }
+          })
         }
-      )
-      const recovery = await rollbackAssistedCommitTransaction(result)
-      assert.ok(checked)
-      assert.ok(ioSettled)
-      assert.strictEqual(await tip(repository), original)
-      assert.deepStrictEqual(
-        await readFile(await indexPath(repository)),
-        originalIndex
-      )
-      assert.strictEqual(await optionalBytes(realLock), null)
-      assert.strictEqual(recovery.index, 'restored')
-      assert.deepStrictEqual(
-        await readFile(await indexPath(repository)),
-        originalIndex
-      )
-    }
-  )
+        return handle
+      }
+    )
+    const recovery = await rollbackAssistedCommitTransaction(result)
+    assert.ok(checked)
+    assert.ok(ioSettled)
+    assert.strictEqual(await tip(repository), original)
+    assert.deepStrictEqual(
+      await readFile(await indexPath(repository)),
+      originalIndex
+    )
+    assert.strictEqual(await optionalBytes(realLock), null)
+    assert.strictEqual(recovery.index, 'restored')
+    assert.deepStrictEqual(
+      await readFile(await indexPath(repository)),
+      originalIndex
+    )
+  })
 
   it('rejects a hook replacement that conceals an unselected raw commit tree', async t => {
     const repository = await seed(t, { file: 'old\n', other: 'base\n' })
@@ -2740,7 +2728,7 @@ describe('git/assisted-commit', () => {
     const originalRename = realFs.rename
     let interrupted = false
     fsSpies.rename.mockImplementation(
-        async (
+      async (
         source: Parameters<typeof FileSystem.rename>[0],
         destination: Parameters<typeof FileSystem.rename>[1]
       ) => {
@@ -2784,39 +2772,37 @@ describe('git/assisted-commit', () => {
     'group-only-full',
     'group-only-partial',
   ]) {
-    it(
-      `matches native Git executable modes for ${selection}`,
-      { skip: process.platform === 'win32' },
-      async t => {
-        const repository = await seed(t, { file: 'old\n' })
-        const path = selection === 'new-untracked-mode' ? 'new-file' : 'file'
-        if (selection === 'new-untracked-mode') {
-          await rawGit(repository, ['config', 'core.filemode', 'false'])
-        }
-        await writeFile(join(repository.path, path), 'selected\n')
-        await chmod(
-          join(repository.path, path),
-          selection === 'new-untracked-mode' ? 0o755 : 0o654
-        )
-        const input = await request(repository, [path])
-        const files =
-          selection === 'group-only-partial'
-            ? input.files.map(file =>
-                file.withSelection(
-                  DiffSelection.fromInitialSelection(
-                    DiffSelectionType.None
-                  ).withLineSelection(2, true)
-                )
-              )
-            : input.files
-        const result = await single(repository, { ...input, files })
-        assert.match(
-          await rawGit(repository, ['ls-tree', result.commits[0], '--', path]),
-          /^100644 blob /
-        )
-        finalizeAssistedCommitTransaction(result)
+    it(`matches native Git executable modes for ${selection}`, {
+      skip: process.platform === 'win32',
+    }, async t => {
+      const repository = await seed(t, { file: 'old\n' })
+      const path = selection === 'new-untracked-mode' ? 'new-file' : 'file'
+      if (selection === 'new-untracked-mode') {
+        await rawGit(repository, ['config', 'core.filemode', 'false'])
       }
-    )
+      await writeFile(join(repository.path, path), 'selected\n')
+      await chmod(
+        join(repository.path, path),
+        selection === 'new-untracked-mode' ? 0o755 : 0o654
+      )
+      const input = await request(repository, [path])
+      const files =
+        selection === 'group-only-partial'
+          ? input.files.map(file =>
+              file.withSelection(
+                DiffSelection.fromInitialSelection(
+                  DiffSelectionType.None
+                ).withLineSelection(2, true)
+              )
+            )
+          : input.files
+      const result = await single(repository, { ...input, files })
+      assert.match(
+        await rawGit(repository, ['ls-tree', result.commits[0], '--', path]),
+        /^100644 blob /
+      )
+      finalizeAssistedCommitTransaction(result)
+    })
   }
   it('preserves indexed attributes fallback when an unselected .gitattributes deletion is missing on disk', async t => {
     const base = Array.from({ length: 12 }, (_, index) => `line ${index + 1}\n`)
@@ -3305,43 +3291,41 @@ describe('git/assisted-commit', () => {
     assert.strictEqual(await rawGit(repository, ['write-tree']), result.tree)
     finalizeAssistedCommitTransaction(result)
   })
-  it(
-    'rejects symlink HEAD before any transaction can publish history',
-    { skip: process.platform === 'win32' },
-    async t => {
-      const repository = await seed(t, { file: 'old\n' })
-      const original = await tip(repository)
-      await writeFile(join(repository.path, 'file'), 'selected\n')
-      const input = await request(repository)
-      const originalIndex = await readFile(await indexPath(repository))
-      const headPath = await rawGit(repository, [
-        'rev-parse',
-        '--path-format=absolute',
-        '--git-path',
-        'HEAD',
-      ])
-      const ref = await rawGit(repository, ['symbolic-ref', 'HEAD'])
-      await unlink(headPath)
-      await symlink(ref, headPath)
-      await assert.rejects(
-        single(repository, input),
-        error =>
-          error instanceof AssistedCommitError &&
-          error.code === 'unsafe-selection'
-      )
-      assert.strictEqual(await tip(repository), original)
-      assert.strictEqual(await count(repository), 1)
-      assert.ok((await lstat(headPath)).isSymbolicLink())
-      assert.deepStrictEqual(
-        await readFile(await indexPath(repository)),
-        originalIndex
-      )
-      assert.deepStrictEqual(
-        await readFile(join(repository.path, 'file')),
-        Buffer.from('selected\n')
-      )
-    }
-  )
+  it('rejects symlink HEAD before any transaction can publish history', {
+    skip: process.platform === 'win32',
+  }, async t => {
+    const repository = await seed(t, { file: 'old\n' })
+    const original = await tip(repository)
+    await writeFile(join(repository.path, 'file'), 'selected\n')
+    const input = await request(repository)
+    const originalIndex = await readFile(await indexPath(repository))
+    const headPath = await rawGit(repository, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'HEAD',
+    ])
+    const ref = await rawGit(repository, ['symbolic-ref', 'HEAD'])
+    await unlink(headPath)
+    await symlink(ref, headPath)
+    await assert.rejects(
+      single(repository, input),
+      error =>
+        error instanceof AssistedCommitError &&
+        error.code === 'unsafe-selection'
+    )
+    assert.strictEqual(await tip(repository), original)
+    assert.strictEqual(await count(repository), 1)
+    assert.ok((await lstat(headPath)).isSymbolicLink())
+    assert.deepStrictEqual(
+      await readFile(await indexPath(repository)),
+      originalIndex
+    )
+    assert.deepStrictEqual(
+      await readFile(join(repository.path, 'file')),
+      Buffer.from('selected\n')
+    )
+  })
   it('freezes global attributes before clean filters mutate their live source', async t => {
     const repository = await seed(t, {
       'a.txt': 'original\n',
@@ -3407,7 +3391,7 @@ describe('git/assisted-commit', () => {
     const originalRead = realFs.readFile
     let reads = 0
     fsSpies.readFile.mockImplementation(
-        async (...args: Parameters<typeof FileSystem.readFile>) => {
+      async (...args: Parameters<typeof FileSystem.readFile>) => {
         if (await matchesAttributes(args[0])) {
           reads++
           return Buffer.from(
@@ -3502,7 +3486,7 @@ describe('git/assisted-commit', () => {
       }
     })
     fsSpies.open.mockImplementation(
-        async (...args: Parameters<typeof FileSystem.open>) => {
+      async (...args: Parameters<typeof FileSystem.open>) => {
         const handle = await originalOpen(...args)
         if (await matchesLock(args[0])) {
           const close = handle.close.bind(handle)
@@ -3587,7 +3571,7 @@ describe('git/assisted-commit', () => {
       if (fault === 'index-unlink') {
         const originalUnlink = realFs.unlink
         fsSpies.unlink.mockImplementation(
-        async (...args: Parameters<typeof FileSystem.unlink>) => {
+          async (...args: Parameters<typeof FileSystem.unlink>) => {
             if ((await matchesLock(args[0])) && failCleanup) {
               injected++
               throw new Error('Injected persistent owned-lock unlink EIO')
@@ -3598,7 +3582,7 @@ describe('git/assisted-commit', () => {
       } else {
         const originalOpen = realFs.open
         fsSpies.open.mockImplementation(
-        async (...args: Parameters<typeof FileSystem.open>) => {
+          async (...args: Parameters<typeof FileSystem.open>) => {
             const handle = await originalOpen(...args)
             if (await matchesLock(args[0])) {
               const close = handle.close.bind(handle)
@@ -3759,7 +3743,7 @@ describe('git/assisted-commit', () => {
       }
     })
     fsSpies.rm.mockImplementation(
-        async (...args: Parameters<typeof FileSystem.rm>) => {
+      async (...args: Parameters<typeof FileSystem.rm>) => {
         if (
           typeof args[0] === 'string' &&
           basename(args[0]).startsWith('desktop-assisted-commit-')
@@ -3826,7 +3810,7 @@ describe('git/assisted-commit', () => {
       }
     })
     fsSpies.open.mockImplementation(
-        async (...args: Parameters<typeof FileSystem.open>) => {
+      async (...args: Parameters<typeof FileSystem.open>) => {
         const handle = await originalOpen(...args)
         if (await matchesLock(args[0])) {
           const stat = handle.stat.bind(handle)
@@ -3914,7 +3898,9 @@ describe('git/assisted-commit', () => {
       Buffer.from('SELECTED\r\nUNSELECTED\r\n')
     )
   })
-  it('freezes inherited attribute source without remapping selected hunk indices', async t => {
+  it('freezes inherited attribute source without remapping selected hunk indices', {
+    timeout: 60_000,
+  }, async t => {
     const childPath = process.env.DESKTOP_ASSISTED_ATTRIBUTE_TEST_REPOSITORY
     if (childPath !== undefined) {
       const repository = new Repository(childPath, -1, null, false)

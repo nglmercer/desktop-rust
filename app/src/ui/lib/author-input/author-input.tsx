@@ -334,7 +334,7 @@ export class AuthorInput extends React.Component<
     const authors = this.authorsForUpdate
     const authorToRemove = isKnownAuthor(selectedAuthor)
       ? selectedAuthor
-      : this.pendingAuthorResolutions.get(selectedAuthor) ?? selectedAuthor
+      : (this.pendingAuthorResolutions.get(selectedAuthor) ?? selectedAuthor)
     const currentIndex = authors.indexOf(authorToRemove)
     if (currentIndex < 0) {
       return
@@ -395,7 +395,7 @@ export class AuthorInput extends React.Component<
     return authors.map(author =>
       isKnownAuthor(author)
         ? author
-        : this.pendingAuthorResolutions.get(author) ?? author
+        : (this.pendingAuthorResolutions.get(author) ?? author)
     )
   }
 

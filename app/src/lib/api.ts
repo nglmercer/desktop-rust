@@ -2119,9 +2119,8 @@ export class API {
       if (response.status === HttpStatusCode.NotModified) {
         return null
       }
-      const users = await parsedResponse<ReadonlyArray<IAPIMentionableUser>>(
-        response
-      )
+      const users =
+        await parsedResponse<ReadonlyArray<IAPIMentionableUser>>(response)
       const etag = response.headers.get('etag') || undefined
       return { users, etag }
     } catch (e) {
@@ -2160,9 +2159,8 @@ export class API {
   public async fetchFeatureFlags(): Promise<ReadonlyArray<string> | undefined> {
     try {
       const response = await this.ghRequest('GET', '/desktop_internal/features')
-      const featuresResponse = await parsedResponse<IUserFeaturesResponse>(
-        response
-      )
+      const featuresResponse =
+        await parsedResponse<IUserFeaturesResponse>(response)
       return featuresResponse.features
     } catch (e) {
       log.warn(`fetchFeatureFlags: failed with endpoint ${this.endpoint}`, e)

@@ -10,7 +10,11 @@ export async function writeGitAttributes(path: string): Promise<void> {
   const contents =
     '# Auto detect text files and perform LF normalization\n* text=auto\n'
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await backend().writeRepositoryCreationFile(path, 'git_attributes', contents)
+    await backend().writeRepositoryCreationFile(
+      path,
+      'git_attributes',
+      contents
+    )
     return
   }
   await writeFile(fullPath, contents)

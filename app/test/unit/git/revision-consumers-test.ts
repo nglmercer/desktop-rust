@@ -358,9 +358,9 @@ describe('revision consumers with leading-dash refs', () => {
     // `--grep` exist for the Node path alone.
     if (process.env.DESKTOP_TEST_RUST_BACKEND === '1') {
       assert.deepStrictEqual(
-        (await getCommits(repository, '--remote/base..--remote/main', 1, 1)).map(
-          c => c.sha
-        ),
+        (
+          await getCommits(repository, '--remote/base..--remote/main', 1, 1)
+        ).map(c => c.sha),
         [first]
       )
       return

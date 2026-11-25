@@ -148,8 +148,15 @@ export async function getCommitDiff(
         ? await withRepositoryGitOperation(repository.path, 'read', read, true)
         : await read()
     if ('kind' in encoded) {
-      if (file.status.submoduleStatus === undefined) return { kind: DiffType.Unrenderable }
-      return buildDiff(Buffer.from(encoded.prefix), repository, file, commitish, commitish)
+      if (file.status.submoduleStatus === undefined)
+        return { kind: DiffType.Unrenderable }
+      return buildDiff(
+        Buffer.from(encoded.prefix),
+        repository,
+        file,
+        commitish,
+        commitish
+      )
     }
     return buildDiff(
       Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
@@ -201,15 +208,44 @@ export async function getBranchMergeBaseDiff(
   latestCommit: string
 ): Promise<IDiff> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const oldPath = file.status.kind === AppFileStatusKind.Renamed || file.status.kind === AppFileStatusKind.Copied ? file.status.oldPath : undefined
-    const read = () => backend().repositoryRendererCompareDiff(repository.path, baseBranchName, comparisonBranchName, true, file.path, oldPath, hideWhitespaceInDiff)
-    const encoded = backend().transportKind === 'wry' ? await withRepositoryGitOperation(repository.path, 'read', read, true) : await read()
+    const oldPath =
+      file.status.kind === AppFileStatusKind.Renamed ||
+      file.status.kind === AppFileStatusKind.Copied
+        ? file.status.oldPath
+        : undefined
+    const read = () =>
+      backend().repositoryRendererCompareDiff(
+        repository.path,
+        baseBranchName,
+        comparisonBranchName,
+        true,
+        file.path,
+        oldPath,
+        hideWhitespaceInDiff
+      )
+    const encoded =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     if (encoded === null) throw new Error('Invalid comparison diff response')
     if ('kind' in encoded) {
-      if (file.status.submoduleStatus === undefined) return { kind: DiffType.Unrenderable }
-      return buildDiff(Buffer.from(encoded.prefix), repository, file, latestCommit, latestCommit)
+      if (file.status.submoduleStatus === undefined)
+        return { kind: DiffType.Unrenderable }
+      return buildDiff(
+        Buffer.from(encoded.prefix),
+        repository,
+        file,
+        latestCommit,
+        latestCommit
+      )
     }
-    return buildDiff(Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength), repository, file, latestCommit, latestCommit)
+    return buildDiff(
+      Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+      repository,
+      file,
+      latestCommit,
+      latestCommit
+    )
   }
   const args = [
     'diff',
@@ -258,18 +294,54 @@ export async function getCommitRangeDiff(
   const oldestCommitRef = useNullTreeSHA ? NullTreeSHA : `${commits[0]}^`
   const latestCommit = commits.at(-1) ?? '' // can't be undefined since commits.length > 0
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const oldPath = file.status.kind === AppFileStatusKind.Renamed || file.status.kind === AppFileStatusKind.Copied ? file.status.oldPath : undefined
-    const read = () => backend().repositoryRendererCompareDiff(repository.path, oldestCommitRef, latestCommit, false, file.path, oldPath, hideWhitespaceInDiff)
-    const encoded = backend().transportKind === 'wry' ? await withRepositoryGitOperation(repository.path, 'read', read, true) : await read()
+    const oldPath =
+      file.status.kind === AppFileStatusKind.Renamed ||
+      file.status.kind === AppFileStatusKind.Copied
+        ? file.status.oldPath
+        : undefined
+    const read = () =>
+      backend().repositoryRendererCompareDiff(
+        repository.path,
+        oldestCommitRef,
+        latestCommit,
+        false,
+        file.path,
+        oldPath,
+        hideWhitespaceInDiff
+      )
+    const encoded =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     if (encoded === null) {
-      if (!useNullTreeSHA) return getCommitRangeDiff(repository, file, commits, hideWhitespaceInDiff, true)
+      if (!useNullTreeSHA)
+        return getCommitRangeDiff(
+          repository,
+          file,
+          commits,
+          hideWhitespaceInDiff,
+          true
+        )
       throw new Error('Unable to compare the selected commits')
     }
     if ('kind' in encoded) {
-      if (file.status.submoduleStatus === undefined) return { kind: DiffType.Unrenderable }
-      return buildDiff(Buffer.from(encoded.prefix), repository, file, latestCommit, oldestCommit)
+      if (file.status.submoduleStatus === undefined)
+        return { kind: DiffType.Unrenderable }
+      return buildDiff(
+        Buffer.from(encoded.prefix),
+        repository,
+        file,
+        latestCommit,
+        oldestCommit
+      )
     }
-    return buildDiff(Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength), repository, file, latestCommit, oldestCommit)
+    return buildDiff(
+      Buffer.from(encoded.buffer, encoded.byteOffset, encoded.byteLength),
+      repository,
+      file,
+      latestCommit,
+      oldestCommit
+    )
   }
   const args = [
     'diff',
@@ -346,16 +418,30 @@ export async function getBranchMergeBaseChangedFiles(
     return null
   }
 
-  const stdout = typeof window !== 'undefined' && backend().transportKind !== 'none'
-    ? await (async () => {
-        const read = () => backend().repositoryRendererCompareChanges(repository.path, baseBranchName, comparisonBranchName, true)
-        const bytes = backend().transportKind === 'wry'
-          ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-          : await read()
-        if (bytes === null) throw new Error('Invalid merge-base comparison')
-        return Buffer.from(bytes).toString('utf8')
-      })()
-    : (await git(baseArgs, repository.path, 'getBranchMergeBaseChangedFiles')).stdout
+  const stdout =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
+      ? await (async () => {
+          const read = () =>
+            backend().repositoryRendererCompareChanges(
+              repository.path,
+              baseBranchName,
+              comparisonBranchName,
+              true
+            )
+          const bytes =
+            backend().transportKind === 'wry'
+              ? await withRepositoryGitOperation(
+                  repository.path,
+                  'read',
+                  read,
+                  true
+                )
+              : await read()
+          if (bytes === null) throw new Error('Invalid merge-base comparison')
+          return Buffer.from(bytes).toString('utf8')
+        })()
+      : (await git(baseArgs, repository.path, 'getBranchMergeBaseChangedFiles'))
+          .stdout
 
   return parseRawLogWithNumstat(
     stdout,
@@ -388,15 +474,27 @@ export async function getCommitRangeChangedFiles(
   ]
 
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryRendererCompareChanges(repository.path, oldestCommitRef, latestCommitRef, false)
-    const bytes = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+    const read = () =>
+      backend().repositoryRendererCompareChanges(
+        repository.path,
+        oldestCommitRef,
+        latestCommitRef,
+        false
+      )
+    const bytes =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     if (bytes === null) {
-      if (!useNullTreeSHA) return getCommitRangeChangedFiles(repository, shas, true)
+      if (!useNullTreeSHA)
+        return getCommitRangeChangedFiles(repository, shas, true)
       throw new Error('Invalid commit range comparison')
     }
-    return parseRawLogWithNumstat(Buffer.from(bytes).toString('utf8'), latestCommitRef, oldestCommitRef)
+    return parseRawLogWithNumstat(
+      Buffer.from(bytes).toString('utf8'),
+      latestCommitRef,
+      oldestCommitRef
+    )
   }
 
   const { stdout, gitError } = await git(
@@ -568,11 +666,22 @@ export async function getResolutionDiff(
   hideWhitespaceInDiff: boolean = false
 ): Promise<IResolutionDiff> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryResolutionDiff(repository.path, filePath, options, hideWhitespaceInDiff)
-    const result = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
-    return buildResolutionDiff(Buffer.from(result.raw), result.oldContents, result.newContents)
+    const read = () =>
+      backend().repositoryResolutionDiff(
+        repository.path,
+        filePath,
+        options,
+        hideWhitespaceInDiff
+      )
+    const result =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
+    return buildResolutionDiff(
+      Buffer.from(result.raw),
+      result.oldContents,
+      result.newContents
+    )
   }
   const gitStage =
     'stage' in options ? (options.stage === 'ours' ? ':2' : ':3') : undefined
@@ -641,8 +750,13 @@ export async function getResolutionDiff(
   }
 }
 
-function buildResolutionDiff(stdout: Buffer, oldContents: string, newContents: string): IResolutionDiff {
-  if (!isValidBuffer(stdout)) return { diff: { kind: DiffType.Unrenderable }, oldContents, newContents }
+function buildResolutionDiff(
+  stdout: Buffer,
+  oldContents: string,
+  newContents: string
+): IResolutionDiff {
+  if (!isValidBuffer(stdout))
+    return { diff: { kind: DiffType.Unrenderable }, oldContents, newContents }
   const diff = diffFromRawDiffOutput(stdout)
   return {
     diff: {
@@ -688,14 +802,21 @@ export async function getFilesDiffText(
   if (
     typeof window !== 'undefined' &&
     backend().transportKind !== 'none' &&
-    (commitish === undefined || /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\^$/.test(commitish))
+    (commitish === undefined ||
+      /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\^$/.test(commitish))
   ) {
-    const read = () => backend().repositoryReadSnapshot(repository.path, 'renderer_staged_diff', {
-      amend_head: commitish === undefined ? null : commitish.slice(0, -1),
-    })
-    const bytes = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+    const read = () =>
+      backend().repositoryReadSnapshot(
+        repository.path,
+        'renderer_staged_diff',
+        {
+          amend_head: commitish === undefined ? null : commitish.slice(0, -1),
+        }
+      )
+    const bytes =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     await unstageAll(repository)
     if (bytes === null) throw new Error('Unable to read staged diff')
     return Buffer.from(bytes).toString('utf8')
@@ -926,9 +1047,10 @@ async function buildSubmoduleDiff(
 ): Promise<IDiff> {
   const path = file.path
   const fullPath = Path.join(repository.path, path)
-  const url = typeof window !== 'undefined' && backend().transportKind !== 'none'
-    ? await backend().repositorySubmoduleDisplayUrl(repository.path, path)
-    : await getConfigValue(repository, `submodule.${path}.url`, true)
+  const url =
+    typeof window !== 'undefined' && backend().transportKind !== 'none'
+      ? await backend().repositorySubmoduleDisplayUrl(repository.path, path)
+      : await getConfigValue(repository, `submodule.${path}.url`, true)
 
   let oldSHA = null
   let newSHA = null
@@ -1044,13 +1166,22 @@ export async function getWorkingDirectoryImage(
   let contents: Buffer
   let rawContents: ArrayBufferLike
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    const read = () => backend().repositoryReadSnapshot(repository.path, 'renderer_working_file', { path: file.path })
-    const bytes = backend().transportKind === 'wry'
-      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-      : await read()
+    const read = () =>
+      backend().repositoryReadSnapshot(
+        repository.path,
+        'renderer_working_file',
+        { path: file.path }
+      )
+    const bytes =
+      backend().transportKind === 'wry'
+        ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+        : await read()
     if (bytes === null) throw new Error('Working image is unavailable')
     contents = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    rawContents = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.slice().buffer
+    rawContents =
+      bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+        ? bytes.buffer
+        : bytes.slice().buffer
   } else {
     contents = await readFile(Path.join(repository.path, file.path))
     rawContents = Uint8Array.from(contents).buffer

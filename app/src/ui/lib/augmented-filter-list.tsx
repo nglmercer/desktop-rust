@@ -240,7 +240,7 @@ interface IAugmentedSectionFilterListState<T extends IFilterListItem> {
 
 /** A List which includes the ability to filter based on its contents. */
 export class AugmentedSectionFilterList<
-  T extends IFilterListItem
+  T extends IFilterListItem,
 > extends React.Component<
   IAugmentedSectionFilterListProps<T>,
   IAugmentedSectionFilterListState<T>

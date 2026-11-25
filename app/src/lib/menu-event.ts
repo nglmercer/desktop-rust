@@ -94,7 +94,7 @@ const TestMenuEvents = [
   'test-cli-action',
 ] as const
 
-export type TestMenuEvent = typeof TestMenuEvents[number]
+export type TestMenuEvent = (typeof TestMenuEvents)[number]
 
 export function isTestMenuEvent(value: unknown): value is TestMenuEvent {
   return TestMenuEvents.some(event => event === value)

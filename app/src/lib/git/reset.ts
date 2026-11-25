@@ -45,11 +45,29 @@ export async function reset(
   repository: Repository,
   mode: GitResetMode,
   ref: string,
-  expected?: { readonly head: string; readonly branch: string | null; readonly undo: boolean }
+  expected?: {
+    readonly head: string
+    readonly branch: string | null
+    readonly undo: boolean
+  }
 ): Promise<true> {
-  if (mode === GitResetMode.Mixed && typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    if (expected === undefined) throw new Error('Refresh the current branch before resetting')
-    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().mixedResetRepository(repository.path, { target: ref, ...expected }), true)
+  if (
+    mode === GitResetMode.Mixed &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
+    if (expected === undefined)
+      throw new Error('Refresh the current branch before resetting')
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().mixedResetRepository(repository.path, {
+          target: ref,
+          ...expected,
+        }),
+      true
+    )
     return true
   }
   const args = resetModeToArgs(mode, ref)
@@ -82,13 +100,23 @@ export async function resetPaths(
     return
   }
 
-  if (mode === GitResetMode.Mixed && ref === 'HEAD' && typeof window !== 'undefined' && backend().transportKind !== 'none') {
+  if (
+    mode === GitResetMode.Mixed &&
+    ref === 'HEAD' &&
+    typeof window !== 'undefined' &&
+    backend().transportKind !== 'none'
+  ) {
     const batches = batchIndexPaths(paths)
-    await withRepositoryGitOperation(repository.path, 'mutation', async () => {
-      for (const selected of batches) {
-        await backend().repositoryResetIndex(repository.path, selected)
-      }
-    }, true)
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      async () => {
+        for (const selected of batches) {
+          await backend().repositoryResetIndex(repository.path, selected)
+        }
+      },
+      true
+    )
     return
   }
 
@@ -116,7 +144,12 @@ export async function resetPaths(
 /** Unstage all paths. */
 export async function unstageAll(repository: Repository): Promise<true> {
   if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-    await withRepositoryGitOperation(repository.path, 'mutation', () => backend().repositoryUnstageAll(repository.path), true)
+    await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () => backend().repositoryUnstageAll(repository.path),
+      true
+    )
     return true
   }
   await git(['reset', '--', '.'], repository.path, 'unstageAll')

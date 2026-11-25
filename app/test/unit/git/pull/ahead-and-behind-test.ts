@@ -1,9 +1,6 @@
 import { describe, it, type TestContext } from 'vitest'
 import assert from 'node:assert'
-import {
-  getAheadBehind,
-  revSymmetricDifference,
-} from '../../../../src/lib/git'
+import { getAheadBehind, revSymmetricDifference } from '../../../../src/lib/git'
 import { createRepository } from '../../../helpers/repository-builder-pull-test'
 import {
   cloneRepository,

@@ -49,10 +49,10 @@ export async function createPathMatcher(
       typeof candidate === 'string'
         ? candidate
         : Buffer.isBuffer(candidate)
-        ? candidate.toString()
-        : candidate instanceof URL
-        ? fileURLToPath(candidate)
-        : undefined
+          ? candidate.toString()
+          : candidate instanceof URL
+            ? fileURLToPath(candidate)
+            : undefined
     return path !== undefined && (await physicalPath(path)) === expected
   }
 }

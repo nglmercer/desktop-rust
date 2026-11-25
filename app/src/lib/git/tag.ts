@@ -15,15 +15,15 @@ export async function createTag(
   targetCommitSha: string
 ): Promise<void> {
   return withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () =>
-        backend().mutateRepositoryTag(repository.path, {
-          method: 'tag_create_annotated',
-          name,
-          target: targetCommitSha,
-        }),
-      true
+    repository.path,
+    'mutation',
+    () =>
+      backend().mutateRepositoryTag(repository.path, {
+        method: 'tag_create_annotated',
+        name,
+        target: targetCommitSha,
+      }),
+    true
   )
 }
 
@@ -38,14 +38,14 @@ export async function deleteTag(
   name: string
 ): Promise<void> {
   return withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () =>
-        backend().mutateRepositoryTag(repository.path, {
-          method: 'tag_delete',
-          name,
-        }),
-      true
+    repository.path,
+    'mutation',
+    () =>
+      backend().mutateRepositoryTag(repository.path, {
+        method: 'tag_delete',
+        name,
+      }),
+    true
   )
 }
 
@@ -58,9 +58,10 @@ export async function getAllTags(
   repository: Repository
 ): Promise<Map<string, string>> {
   const read = () => backend().repositoryRendererTagRefs(repository.path)
-  const stdout: string = backend().transportKind === 'wry'
-    ? await withRepositoryGitOperation(repository.path, 'read', read, true)
-    : await read()
+  const stdout: string =
+    backend().transportKind === 'wry'
+      ? await withRepositoryGitOperation(repository.path, 'read', read, true)
+      : await read()
 
   const tagsArray: Array<[string, string]> = stdout
     .split('\n')

@@ -16,28 +16,12 @@
     "**/node_modules": true,
     "**/dist": true,
     "**/out": true,
-    ".awcache": true,
-    ".eslintcache": true
+    ".awcache": true
   },
   "files.insertFinalNewline": true,
   "editor.tabSize": 2,
-  "prettier.semi": false,
-  "prettier.singleQuote": true,
-  "prettier.trailingComma": "es5",
   "editor.formatOnSave": true,
-  "prettier.prettierPath": "./node_modules/prettier",
-  "prettier.ignorePath": ".prettierignore",
-  "eslint.options": {
-    "overrideConfigFile": ".eslintrc.yml",
-    "rulePaths": ["eslint-rules"]
-  },
-  "eslint.validate": [
-    "javascript",
-    "javascriptreact",
-    "typescript",
-    "typescriptreact"
-  ],
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.defaultFormatter": "biomejs.biome",
   "[typescript][javascript][typescriptreact]": {
     "editor.codeActionsOnSave": {
       "source.removeUnusedImports": "explicit"

@@ -62,7 +62,10 @@ const shimmed = new Map(
     ['keytar', '../src/web/keytar.ts'],
     // The vendored packages ship TypeScript sources; their `dist` is only
     // produced by native install scripts that are not run here.
-    ['desktop-notifications', '../../vendor/desktop-notifications/lib/index.ts'],
+    [
+      'desktop-notifications',
+      '../../vendor/desktop-notifications/lib/index.ts',
+    ],
     ['windows-argv-parser', '../../vendor/windows-argv-parser/index.ts'],
   ].map(([name, file]) => [name, path.resolve(__dirname, file)])
 )
@@ -123,5 +126,7 @@ Module.registerHooks({
 // jsdom does no layout, so focus-trap's tabbable check (which treats elements
 // without client rects as hidden) finds no tabbable nodes. Report one rect.
 window.Element.prototype.getClientRects = function () {
-  return [{ x: 0, y: 0, width: 1, height: 1, top: 0, left: 0, right: 1, bottom: 1 }]
+  return [
+    { x: 0, y: 0, width: 1, height: 1, top: 0, left: 0, right: 1, bottom: 1 },
+  ]
 }

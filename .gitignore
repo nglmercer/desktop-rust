@@ -12,11 +12,9 @@ vendor/desktop-trampoline/build/
 .idea/
 .vs/
 .vscode/*.log
-.eslintcache
 *.iml
 .envrc
 junit*.xml
 *.swp
-tslint-rules/
 playwright-videos/
 rust/target/

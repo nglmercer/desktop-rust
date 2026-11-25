@@ -6,42 +6,90 @@ function clientWithResponse(value: unknown) {
   Object.defineProperty(client, 'transport', { value: 'ws' })
   const request = vi.fn().mockResolvedValue(value)
   const close = vi.fn()
-  Object.defineProperty(client, 'changelogRequests', { value: 0, writable: true })
-  Object.defineProperty(client, 'wsChangelog', { value: { request, close }, writable: true })
+  Object.defineProperty(client, 'changelogRequests', {
+    value: 0,
+    writable: true,
+  })
+  Object.defineProperty(client, 'wsChangelog', {
+    value: { request, close },
+    writable: true,
+  })
   return { client, request, close }
 }
 
 describe('Rust release changelog client', () => {
   it('passes only the channel and count to the typed backend operation', async () => {
-    const release = { name: 'Release', notes: ['[Fixed] Example'], pub_date: '2025-01-01', version: '3.0.0' }
+    const release = {
+      name: 'Release',
+      notes: ['[Fixed] Example'],
+      pub_date: '2025-01-01',
+      version: '3.0.0',
+    }
     const { client, request, close } = clientWithResponse([release])
-    await expect(client.releaseChangelog('beta', 250)).resolves.toEqual([release])
-    expect(request).toHaveBeenCalledWith('release_changelog', { channel: 'beta', limit: 250 }, { deadlineMs: 40_000 })
+    await expect(client.releaseChangelog('beta', 250)).resolves.toEqual([
+      release,
+    ])
+    expect(request).toHaveBeenCalledWith(
+      'release_changelog',
+      { channel: 'beta', limit: 250 },
+      { deadlineMs: 40_000 }
+    )
     expect(close).toHaveBeenCalledOnce()
   })
 
   it.each([
     null,
     {},
-    [{ name: 'Release', notes: 'not-an-array', pub_date: '2025-01-01', version: '3.0.0' }],
-    [{ name: 'Release', notes: [null], pub_date: '2025-01-01', version: '3.0.0' }],
+    [
+      {
+        name: 'Release',
+        notes: 'not-an-array',
+        pub_date: '2025-01-01',
+        version: '3.0.0',
+      },
+    ],
+    [
+      {
+        name: 'Release',
+        notes: [null],
+        pub_date: '2025-01-01',
+        version: '3.0.0',
+      },
+    ],
   ])('rejects an invalid response', async value => {
     const { client } = clientWithResponse(value)
-    await expect(client.releaseChangelog(null)).rejects.toMatchObject({ code: 'invalid_response' })
+    await expect(client.releaseChangelog(null)).rejects.toMatchObject({
+      code: 'invalid_response',
+    })
   })
 
-  it.each([-1, 1.5, NaN, 251])('rejects an invalid limit without making a bridge request', async limit => {
-    const { client, request } = clientWithResponse([])
-    await expect(client.releaseChangelog(null, limit)).rejects.toMatchObject({ code: 'invalid_request' })
-    expect(request).not.toHaveBeenCalled()
-  })
+  it.each([-1, 1.5, NaN, 251])(
+    'rejects an invalid limit without making a bridge request',
+    async limit => {
+      const { client, request } = clientWithResponse([])
+      await expect(client.releaseChangelog(null, limit)).rejects.toMatchObject({
+        code: 'invalid_request',
+      })
+      expect(request).not.toHaveBeenCalled()
+    }
+  )
 
   it('keeps the shared auxiliary connection until all concurrent requests settle', async () => {
     const { client, request, close } = clientWithResponse([])
     let finishFirst!: (value: unknown) => void
     let finishSecond!: (value: unknown) => void
-    request.mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve }))
-    request.mockImplementationOnce(() => new Promise(resolve => { finishSecond = resolve }))
+    request.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          finishFirst = resolve
+        })
+    )
+    request.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          finishSecond = resolve
+        })
+    )
     const first = client.releaseChangelog(null)
     const second = client.releaseChangelog('beta')
     finishFirst([])

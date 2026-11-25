@@ -88,14 +88,32 @@ describe('WebSocket backend transport', () => {
     const pendingSecond = value.request('second', {}, { onCommitEvent: second })
     const firstId = socket.sent.at(-2)!.id
     const secondId = socket.sent.at(-1)!.id
-    socket.message({ event: 'commit_output', request_id: firstId, checkpoint_id: 'same', stream: 'stderr', data: 'aGk=' })
-    socket.message({ event: 'commit_hook_progress', request_id: secondId, checkpoint_id: 'same', hook_name: 'pre-commit', status: 'started' })
+    socket.message({
+      event: 'commit_output',
+      request_id: firstId,
+      checkpoint_id: 'same',
+      stream: 'stderr',
+      data: 'aGk=',
+    })
+    socket.message({
+      event: 'commit_hook_progress',
+      request_id: secondId,
+      checkpoint_id: 'same',
+      hook_name: 'pre-commit',
+      status: 'started',
+    })
     expect(first).toHaveBeenCalledTimes(1)
     expect(second).toHaveBeenCalledTimes(1)
     expect(global).not.toHaveBeenCalled()
     socket.message({ id: firstId, result: {} })
     await pendingFirst
-    socket.message({ event: 'commit_output', request_id: firstId, checkpoint_id: 'same', stream: 'stderr', data: 'aGk=' })
+    socket.message({
+      event: 'commit_output',
+      request_id: firstId,
+      checkpoint_id: 'same',
+      stream: 'stderr',
+      data: 'aGk=',
+    })
     expect(first).toHaveBeenCalledTimes(1)
     socket.message({ id: secondId, result: {} })
     await pendingSecond
@@ -154,18 +172,57 @@ describe('WebSocket backend transport', () => {
     const second = vi.fn()
     const broadcast = vi.fn()
     value.subscribe('fetch_output', broadcast)
-    const firstResult = value.request('renderer_fetch', {}, { onProgress: first })
-    const secondResult = value.request('renderer_fetch', {}, { onProgress: second })
-    socket.message({ event: 'fetch_output', request_id: 1, stream: 'stderr', data: 'aGk=' })
-    socket.message({ event: 'fetch_output', request_id: 2, stream: 'lfs', data: 'eA==' })
-    socket.message({ event: 'fetch_output', request_id: 2, stream: 'invalid', data: 'eA==' })
-    socket.message({ event: 'fetch_output', request_id: 999, stream: 'stderr', data: 'eA==' })
-    expect(first).toHaveBeenCalledExactlyOnceWith({ stream: 'stderr', data: 'aGk=' })
-    expect(second).toHaveBeenCalledExactlyOnceWith({ stream: 'lfs', data: 'eA==' })
+    const firstResult = value.request(
+      'renderer_fetch',
+      {},
+      { onProgress: first }
+    )
+    const secondResult = value.request(
+      'renderer_fetch',
+      {},
+      { onProgress: second }
+    )
+    socket.message({
+      event: 'fetch_output',
+      request_id: 1,
+      stream: 'stderr',
+      data: 'aGk=',
+    })
+    socket.message({
+      event: 'fetch_output',
+      request_id: 2,
+      stream: 'lfs',
+      data: 'eA==',
+    })
+    socket.message({
+      event: 'fetch_output',
+      request_id: 2,
+      stream: 'invalid',
+      data: 'eA==',
+    })
+    socket.message({
+      event: 'fetch_output',
+      request_id: 999,
+      stream: 'stderr',
+      data: 'eA==',
+    })
+    expect(first).toHaveBeenCalledExactlyOnceWith({
+      stream: 'stderr',
+      data: 'aGk=',
+    })
+    expect(second).toHaveBeenCalledExactlyOnceWith({
+      stream: 'lfs',
+      data: 'eA==',
+    })
     expect(broadcast).not.toHaveBeenCalled()
     socket.message({ id: 1, result: { code: 0 } })
     await firstResult
-    socket.message({ event: 'fetch_output', request_id: 1, stream: 'stderr', data: 'bGF0ZQ==' })
+    socket.message({
+      event: 'fetch_output',
+      request_id: 1,
+      stream: 'stderr',
+      data: 'bGF0ZQ==',
+    })
     expect(first).toHaveBeenCalledOnce()
     socket.message({ id: 2, result: { code: 0 } })
     await secondResult
@@ -173,46 +230,112 @@ describe('WebSocket backend transport', () => {
 
   it('allows a fetch mutation to run beyond the ordinary request timeout', async () => {
     const { client: value, socket } = await connected()
-    const pending = value.fetchRepositoryRemote('/repo', 'origin', '/source', false)
-    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_fetch_preview'))
-    socket.message({ id: 1, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
-    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch'))
+    const pending = value.fetchRepositoryRemote(
+      '/repo',
+      'origin',
+      '/source',
+      false
+    )
+    await vi.waitFor(() =>
+      expect(socket.sent[1]?.method).toBe('renderer_fetch_preview')
+    )
+    socket.message({
+      id: 1,
+      result: {
+        remote: 'origin',
+        recurse_submodules: false,
+        basis: 'a'.repeat(64),
+      },
+    })
+    await vi.waitFor(() =>
+      expect(socket.sent[2]?.method).toBe('renderer_fetch')
+    )
     await vi.advanceTimersByTimeAsync(170_001)
     expect(socket.sent.some(message => message.method === 'cancel')).toBe(false)
     socket.message({ id: 2, result: { code: 0, error_kind: null } })
     await expect(pending).resolves.toBeUndefined()
   })
 
-  it.each([0, 1, 128])('accepts remote HEAD refresh exit code %s', async code => {
-    const { client: value, socket } = await connected()
-    const pending = value.refreshRepositoryRemoteHead('/repo', 'origin', '/source', false)
-    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_remote_head_preview'))
-    socket.message({ id: 1, result: { remote: 'origin', basis: 'a'.repeat(64) } })
-    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_remote_head'))
-    socket.message({ id: 2, result: { code } })
-    await expect(pending).resolves.toBeUndefined()
-  })
+  it.each([0, 1, 128])(
+    'accepts remote HEAD refresh exit code %s',
+    async code => {
+      const { client: value, socket } = await connected()
+      const pending = value.refreshRepositoryRemoteHead(
+        '/repo',
+        'origin',
+        '/source',
+        false
+      )
+      await vi.waitFor(() =>
+        expect(socket.sent[1]?.method).toBe('renderer_remote_head_preview')
+      )
+      socket.message({
+        id: 1,
+        result: { remote: 'origin', basis: 'a'.repeat(64) },
+      })
+      await vi.waitFor(() =>
+        expect(socket.sent[2]?.method).toBe('renderer_remote_head')
+      )
+      socket.message({ id: 2, result: { code } })
+      await expect(pending).resolves.toBeUndefined()
+    }
+  )
 
   it('does not retry unsupported remote HEAD refresh over the browser bridge', async () => {
     const { client: value, socket } = await connected()
-    const pending = value.refreshRepositoryRemoteHead('/repo', 'origin', '/source', false)
-    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_remote_head_preview'))
+    const pending = value.refreshRepositoryRemoteHead(
+      '/repo',
+      'origin',
+      '/source',
+      false
+    )
+    await vi.waitFor(() =>
+      expect(socket.sent[1]?.method).toBe('renderer_remote_head_preview')
+    )
     socket.message({ id: 1, result: { kind: 'unsupported' } })
-    await expect(pending).rejects.toMatchObject({ code: 'unsupported', retryable: false })
-    expect(socket.sent.some(message => message.method === 'renderer_remote_head')).toBe(false)
+    await expect(pending).rejects.toMatchObject({
+      code: 'unsupported',
+      retryable: false,
+    })
+    expect(
+      socket.sent.some(message => message.method === 'renderer_remote_head')
+    ).toBe(false)
   })
 
   it('cancels a fetch mutation at the bounded deadline without retrying', async () => {
     const { client: value, socket } = await connected()
-    const pending = value.fetchRepositoryRemote('/repo', 'origin', '/source', false)
-    const result = expect(pending).rejects.toMatchObject({ code: 'timeout', retryable: false })
-    await vi.waitFor(() => expect(socket.sent[1]?.method).toBe('renderer_fetch_preview'))
-    socket.message({ id: 1, result: { remote: 'origin', recurse_submodules: false, basis: 'a'.repeat(64) } })
-    await vi.waitFor(() => expect(socket.sent[2]?.method).toBe('renderer_fetch'))
+    const pending = value.fetchRepositoryRemote(
+      '/repo',
+      'origin',
+      '/source',
+      false
+    )
+    const result = expect(pending).rejects.toMatchObject({
+      code: 'timeout',
+      retryable: false,
+    })
+    await vi.waitFor(() =>
+      expect(socket.sent[1]?.method).toBe('renderer_fetch_preview')
+    )
+    socket.message({
+      id: 1,
+      result: {
+        remote: 'origin',
+        recurse_submodules: false,
+        basis: 'a'.repeat(64),
+      },
+    })
+    await vi.waitFor(() =>
+      expect(socket.sent[2]?.method).toBe('renderer_fetch')
+    )
     await vi.advanceTimersByTimeAsync(3_600_001)
     await result
-    expect(socket.sent.filter(message => message.method === 'renderer_fetch')).toHaveLength(1)
-    expect(socket.sent).toContainEqual(expect.objectContaining({ method: 'cancel', request_id: 2 }))
+    expect(
+      socket.sent.filter(message => message.method === 'renderer_fetch')
+    ).toHaveLength(1)
+    expect(socket.sent).toContainEqual(
+      expect.objectContaining({ method: 'cancel', request_id: 2 })
+    )
   })
 
   it('allows a long Copilot turn to finish before the transport deadline', async () => {
@@ -247,7 +370,9 @@ describe('WebSocket backend transport', () => {
     for (let i = 0; i < 10 && socket.sent.length < 2; i++) {
       await Promise.resolve()
     }
-    expect(socket.sent.some(message => message.method === 'repository_binding')).toBe(false)
+    expect(
+      socket.sent.some(message => message.method === 'repository_binding')
+    ).toBe(false)
     expect(socket.sent[1]).toEqual({
       id: 1,
       method: 'copilot_generate_commit_message',
@@ -320,73 +445,133 @@ describe('WebSocket backend transport', () => {
   it('keeps a cancelled clone pending until the bridge confirms settlement', async () => {
     const { client: value, socket } = await connected()
     const controller = new AbortController()
-    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { signal: controller.signal })
+    const pending = value.request(
+      'clone_repository',
+      { account: { host: 'github.com', login: 'alice', id: 1 } },
+      { signal: controller.signal }
+    )
     const settled = vi.fn()
     void pending.catch(settled)
     controller.abort()
     await Promise.resolve()
     expect(socket.sent[2]).toEqual({ id: 2, method: 'cancel', request_id: 1 })
     expect(settled).not.toHaveBeenCalled()
-    socket.message({ id: 1, error: 'cancelled after cleanup', error_code: 'cancelled' })
-    await expect(pending).rejects.toMatchObject({ code: 'cancelled', retryable: false })
+    socket.message({
+      id: 1,
+      error: 'cancelled after cleanup',
+      error_code: 'cancelled',
+    })
+    await expect(pending).rejects.toMatchObject({
+      code: 'cancelled',
+      retryable: false,
+    })
   })
 
   it('reports a disconnected cancelled clone as unconfirmed', async () => {
     const { client: value, socket } = await connected()
     const controller = new AbortController()
-    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { signal: controller.signal })
+    const pending = value.request(
+      'clone_repository',
+      { account: { host: 'github.com', login: 'alice', id: 1 } },
+      { signal: controller.signal }
+    )
     controller.abort()
     socket.disconnect()
-    await expect(pending).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+    await expect(pending).rejects.toMatchObject({
+      code: 'disconnected',
+      retryable: false,
+    })
   })
 
   it('reports an unconfirmed clone if the WebSocket cancel send fails', async () => {
     const { client: value, socket } = await connected()
     const controller = new AbortController()
-    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { signal: controller.signal })
-    vi.spyOn(socket, 'send').mockImplementation(() => { throw new Error('socket failed') })
+    const pending = value.request(
+      'clone_repository',
+      { account: { host: 'github.com', login: 'alice', id: 1 } },
+      { signal: controller.signal }
+    )
+    vi.spyOn(socket, 'send').mockImplementation(() => {
+      throw new Error('socket failed')
+    })
     controller.abort()
-    await expect(pending).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+    await expect(pending).rejects.toMatchObject({
+      code: 'disconnected',
+      retryable: false,
+    })
   })
 
   it('reports an unconfirmed clone if WebSocket submission throws', async () => {
     const { client: value, socket } = await connected()
-    vi.spyOn(socket, 'send').mockImplementation(() => { throw new Error('socket failed') })
-    await expect(value.request('clone_repository', {}, {})).rejects.toMatchObject({ code: 'disconnected', retryable: false })
+    vi.spyOn(socket, 'send').mockImplementation(() => {
+      throw new Error('socket failed')
+    })
+    await expect(
+      value.request('clone_repository', {}, {})
+    ).rejects.toMatchObject({ code: 'disconnected', retryable: false })
   })
 
   it('waits for the bridge after a clone deadline expires', async () => {
     const { client: value, socket } = await connected()
-    const pending = value.request('clone_repository', { account: { host: 'github.com', login: 'alice', id: 1 } }, { deadlineMs: 20 })
+    const pending = value.request(
+      'clone_repository',
+      { account: { host: 'github.com', login: 'alice', id: 1 } },
+      { deadlineMs: 20 }
+    )
     const settled = vi.fn()
     void pending.catch(settled)
     await vi.advanceTimersByTimeAsync(20)
     expect(settled).not.toHaveBeenCalled()
     expect(socket.sent[2]).toEqual({ id: 2, method: 'cancel', request_id: 1 })
-    socket.message({ id: 1, error: 'cancelled after cleanup', error_code: 'cancelled' })
-    await expect(pending).rejects.toMatchObject({ code: 'timeout', retryable: false })
+    socket.message({
+      id: 1,
+      error: 'cancelled after cleanup',
+      error_code: 'cancelled',
+    })
+    await expect(pending).rejects.toMatchObject({
+      code: 'timeout',
+      retryable: false,
+    })
   })
 
-  it.each([true, false])('reports an unconfirmed clone when cancel capability is %s and the host does not settle', async cancel => {
-    const value = client()
-    const connecting = value.waitReady()
-    const socket = FakeSocket.instances.at(-1)!
-    socket.open()
-    socket.message({ ...ready, capabilities: { ...ready.capabilities, cancel } })
-    await connecting
-    const controller = new AbortController()
-    const pending = value.request('clone_repository', {}, { signal: controller.signal })
-    const settled = vi.fn()
-    void pending.catch(settled)
-    controller.abort()
-    await vi.advanceTimersByTimeAsync(4_999)
-    expect(settled).not.toHaveBeenCalled()
-    if (cancel) expect(socket.sent[2]).toEqual({ id: 2, method: 'cancel', request_id: 1 })
-    else expect(socket.sent).toHaveLength(2)
-    await vi.advanceTimersByTimeAsync(1)
-    await expect(pending).rejects.toMatchObject({ code: 'disconnected', retryable: false })
-    socket.message({ id: 1, result: { late: true } })
-  })
+  it.each([true, false])(
+    'reports an unconfirmed clone when cancel capability is %s and the host does not settle',
+    async cancel => {
+      const value = client()
+      const connecting = value.waitReady()
+      const socket = FakeSocket.instances.at(-1)!
+      socket.open()
+      socket.message({
+        ...ready,
+        capabilities: { ...ready.capabilities, cancel },
+      })
+      await connecting
+      const controller = new AbortController()
+      const pending = value.request(
+        'clone_repository',
+        {},
+        { signal: controller.signal }
+      )
+      const settled = vi.fn()
+      void pending.catch(settled)
+      controller.abort()
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(settled).not.toHaveBeenCalled()
+      if (cancel)
+        expect(socket.sent[2]).toEqual({
+          id: 2,
+          method: 'cancel',
+          request_id: 1,
+        })
+      else expect(socket.sent).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(pending).rejects.toMatchObject({
+        code: 'disconnected',
+        retryable: false,
+      })
+      socket.message({ id: 1, result: { late: true } })
+    }
+  )
 
   it('does not start a request aborted or timed out during the handshake', async () => {
     const value = client()

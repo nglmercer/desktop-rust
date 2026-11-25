@@ -71,14 +71,13 @@ describe('Update remote url', () => {
 
   afterEach(async () => {
     db?.close()
-    if (repoPath !== undefined) await rm(repoPath, { recursive: true, force: true })
+    if (repoPath !== undefined)
+      await rm(repoPath, { recursive: true, force: true })
     repoPath = undefined
   })
 
   it("updates the repository's remote url when the github url changes", async () => {
-    const { gitHubRepository, gitStore } = await createRepository(
-      apiRepository
-    )
+    const { gitHubRepository, gitStore } = await createRepository(apiRepository)
     assert(gitStore.currentRemote !== null)
 
     const originalUrl = gitStore.currentRemote.url
@@ -87,13 +86,18 @@ describe('Update remote url', () => {
     await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
     assert.notEqual(originalUrl, updatedUrl)
     assert.equal(gitStore.currentRemote.url, updatedUrl)
-    assert.equal(execFileSync('git', ['-C', repoPath!, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8' }).trim(), updatedUrl)
+    assert.equal(
+      execFileSync(
+        'git',
+        ['-C', repoPath!, 'config', '--get', 'remote.origin.url'],
+        { encoding: 'utf8' }
+      ).trim(),
+      updatedUrl
+    )
   })
 
   it("doesn't update the repository's remote url when the github url is the same", async () => {
-    const { gitHubRepository, gitStore } = await createRepository(
-      apiRepository
-    )
+    const { gitHubRepository, gitStore } = await createRepository(apiRepository)
     assert(gitStore.currentRemote !== null)
     const originalUrl = gitStore.currentRemote.url
     assert.notEqual(originalUrl.length, 0, 'Expected originalUrl to be empty')
@@ -108,9 +112,8 @@ describe('Update remote url', () => {
       ...apiRepository,
       clone_url: originalUrl,
     }
-    const { gitHubRepository, gitStore } = await createRepository(
-      sshApiRepository
-    )
+    const { gitHubRepository, gitStore } =
+      await createRepository(sshApiRepository)
     const updatedUrl = 'https://github.com/my-user/my-updated-repo'
     const updatedApiRepository = { ...apiRepository, clone_url: updatedUrl }
 
@@ -147,7 +150,14 @@ describe('Update remote url', () => {
 
     await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
     assert.equal(gitStore.currentRemote?.url, originalUrl)
-    assert.equal(execFileSync('git', ['-C', repoPath!, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8' }).trim(), originalUrl)
+    assert.equal(
+      execFileSync(
+        'git',
+        ['-C', repoPath!, 'config', '--get', 'remote.origin.url'],
+        { encoding: 'utf8' }
+      ).trim(),
+      originalUrl
+    )
   })
 
   for (const suffix of ['?access=secret', '#custom']) {
@@ -164,7 +174,14 @@ describe('Update remote url', () => {
 
       await updateRemoteUrl(gitStore, gitHubRepository, updatedApiRepository)
       assert.equal(gitStore.currentRemote?.url, originalUrl)
-      assert.equal(execFileSync('git', ['-C', repoPath!, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8' }).trim(), originalUrl)
+      assert.equal(
+        execFileSync(
+          'git',
+          ['-C', repoPath!, 'config', '--get', 'remote.origin.url'],
+          { encoding: 'utf8' }
+        ).trim(),
+        originalUrl
+      )
     })
   }
 })

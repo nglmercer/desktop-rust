@@ -108,7 +108,14 @@ export async function parseTrailers(
       ? await withRepositoryGitOperation(
           repository.path,
           'mutation',
-          () => backend().repositoryInterpretTrailers(repository.path, commitMessage, [], true, false),
+          () =>
+            backend().repositoryInterpretTrailers(
+              repository.path,
+              commitMessage,
+              [],
+              true,
+              false
+            ),
           true
         )
       : (
@@ -172,7 +179,14 @@ export async function mergeTrailers(
     return withRepositoryGitOperation(
       repository.path,
       'mutation',
-      () => backend().repositoryInterpretTrailers(repository.path, commitMessage, trailers, false, unfold),
+      () =>
+        backend().repositoryInterpretTrailers(
+          repository.path,
+          commitMessage,
+          trailers,
+          false,
+          unfold
+        ),
       true
     )
   }

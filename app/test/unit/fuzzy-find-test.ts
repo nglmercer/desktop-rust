@@ -4,7 +4,9 @@ import { match } from '../../src/lib/fuzzy-find'
 import { getText } from '../../src/ui/lib/filter-list'
 
 // List rendering telemetry is not involved in extracting or matching text.
-vi.mock('../../src/lib/helpers/non-fatal-exception', () => ({ sendNonFatalException: vi.fn() }))
+vi.mock('../../src/lib/helpers/non-fatal-exception', () => ({
+  sendNonFatalException: vi.fn(),
+}))
 describe('fuzzy find', () => {
   const items = [
     {
