@@ -1,4 +1,4 @@
-import { exec as git } from 'dugite'
+import { exec as git } from '../../web/dugite'
 
 export const parseCredential = (value: string) => {
   const cred = new Map<string, string>()

@@ -27,6 +27,13 @@ export default defineConfig({
           new URL('./app/test/helpers/node-test-compat.ts', import.meta.url)
         ),
       },
+      {
+        find: /^desktop-dugite\/(.+)$/,
+        replacement:
+          fileURLToPath(
+            new URL('./app/node_modules/dugite/build/lib', import.meta.url)
+          ) + '/$1.js',
+      },
       // Native Node addons are not installed; use the renderer's web shims.
       ...['keytar', 'registry-js'].map(name => ({
         find: new RegExp(`^${name}$`),

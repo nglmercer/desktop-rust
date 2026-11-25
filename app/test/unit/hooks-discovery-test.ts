@@ -10,36 +10,53 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('dugite', () => ({
-  exec: async (args: string[], path: string) => {
-    try {
-      return {
-        exitCode: 0,
-        stdout: execFileSync('git', args, { cwd: path, encoding: 'utf8' }),
-        stderr: '',
+function installGitBridge() {
+  vi.stubGlobal('__desktop', {
+    invoke: (
+      channel: string,
+      options: { args: string[]; cwd: string }
+    ): Promise<unknown> => {
+      if (channel !== 'desktop.io.git-exec') {
+        return Promise.reject(new Error(`unexpected ${channel}`))
       }
-    } catch (error) {
-      const result = error as {
-        status?: number
-        stdout?: string
-        stderr?: string
+      try {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: execFileSync('git', options.args, {
+            cwd: options.cwd,
+            encoding: 'utf8',
+          }),
+          stderr: '',
+        })
+      } catch (error) {
+        const result = error as {
+          status?: number
+          stdout?: string
+          stderr?: string
+        }
+        return Promise.resolve({
+          exitCode: result.status ?? 1,
+          stdout: result.stdout ?? '',
+          stderr: result.stderr ?? '',
+        })
       }
-      return {
-        exitCode: result.status ?? 1,
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
-      }
-    }
-  },
-}))
+    },
+    encodeBase64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
+    decodeBase64: (text: string) => new Uint8Array(Buffer.from(text, 'base64')),
+  })
+}
 
 import { getRepoHooks } from '../../src/lib/hooks/get-repo-hooks'
 
 describe.skipIf(process.platform === 'win32')('Git hook discovery', () => {
   let root: string | undefined
+  beforeEach(() => {
+    installGitBridge()
+  })
   afterEach(() => {
+    vi.unstubAllGlobals()
     if (root !== undefined) rmSync(root, { recursive: true, force: true })
     root = undefined
   })

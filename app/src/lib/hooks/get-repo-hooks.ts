@@ -1,4 +1,4 @@
-import { exec } from 'dugite'
+import { exec } from '../../web/dugite'
 import { access, constants, readdir, stat } from 'fs/promises'
 import { basename, join, resolve } from 'path'
 
