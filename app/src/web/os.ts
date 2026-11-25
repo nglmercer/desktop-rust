@@ -12,8 +12,21 @@ interface IDesktopEnv {
 const env = (): IDesktopEnv => (globalThis as any).__desktopEnv ?? {}
 
 export const EOL = __WIN32__ ? '\r\n' : '\n'
-// Browser code cannot receive operating-system process signals.
-export const constants = { signals: {} }
+// Browser code cannot receive operating-system process signals, but child
+// processes can still report them. These values are stable across the Unix
+// platforms Desktop supports for the signals the host process bridge reports.
+export const constants = {
+  signals: {
+    SIGHUP: 1,
+    SIGINT: 2,
+    SIGQUIT: 3,
+    SIGABRT: 6,
+    SIGKILL: 9,
+    SIGSEGV: 11,
+    SIGPIPE: 13,
+    SIGTERM: 15,
+  },
+}
 
 export function platform() {
   return (

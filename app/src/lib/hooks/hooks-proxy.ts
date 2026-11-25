@@ -1,8 +1,7 @@
 import { execFile, spawn } from 'child_process'
-import { basename, join, resolve } from 'path'
+import { basename, join } from 'path'
 import type { ProcessProxyConnection as Connection } from 'process-proxy'
 import type { HookCallbackOptions } from '../git'
-import { resolveGitBinary } from 'dugite'
 import type { ShellEnvResult } from './get-shell-env'
 import { shellFriendlyNames } from './config'
 import type { Writable } from 'stream'
@@ -206,7 +205,7 @@ export const createHooksProxy = (
     ]
 
     const terminalOutput: Buffer[] = []
-    const gitPath = resolveGitBinary(resolve(__dirname, 'git'))
+    const gitPath = 'git'
     const shellEnv = await ensureGitExecPathEnv(await getShellEnv(proxyCwd))
 
     if (shellEnv.kind === 'failure') {
