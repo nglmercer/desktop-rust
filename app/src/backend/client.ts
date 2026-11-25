@@ -4121,6 +4121,7 @@ export class BackendClient {
       | 'renderer_working_diff'
       | 'renderer_working_file'
       | 'renderer_working_file_metadata'
+      | 'renderer_write_working_file'
       | 'diff_detail'
       | 'select_diff'
       | 'select_renamed_diff'
@@ -4177,6 +4178,76 @@ export class BackendClient {
       })
     }
     return value.versions as ReadonlyArray<string | null>
+  }
+
+  async repositoryWriteWorkingFile(
+    repositoryPath: string,
+    path: string,
+    contents: string
+  ): Promise<void> {
+    const content = new TextEncoder().encode(contents)
+    if (content.length > 70_000_000)
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Working file contents exceed the supported size',
+        retryable: false,
+      })
+    const upload = await this.repositoryRendererRequest(
+      repositoryPath,
+      'renderer_resolution_begin',
+      {}
+    )
+    if (
+      !isRecord(upload) ||
+      upload.kind !== 'snapshot' ||
+      upload.size !== 0 ||
+      typeof upload.id !== 'string' ||
+      !/^[0-9a-f-]{36}$/.test(upload.id)
+    )
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid working file upload',
+        retryable: false,
+      })
+    const uploadId = upload.id
+    try {
+      for (let offset = 0; offset < content.length; ) {
+        const chunk = content.subarray(offset, offset + 24 * 1024)
+        const data = btoa(String.fromCharCode(...chunk))
+        const result = await this.repositoryRendererRequest(
+          repositoryPath,
+          'renderer_resolution_append',
+          { snapshot_id: uploadId, offset, data }
+        )
+        offset += chunk.length
+        if (!isRecord(result) || result.size !== offset)
+          throw new BackendError({
+            code: 'invalid_response',
+            message: 'Invalid working file upload progress',
+            retryable: false,
+          })
+      }
+      const value = await this.repositoryRendererRequest(
+        repositoryPath,
+        'renderer_write_working_file',
+        { path, snapshot_id: uploadId, size: content.length }
+      )
+      if (!isRecord(value) || value.written !== true)
+        throw new BackendError({
+          code: 'invalid_response',
+          message: 'Working file write outcome is uncertain',
+          retryable: false,
+        })
+    } catch (error) {
+      try {
+        await this.repositoryRendererRequest(
+          repositoryPath,
+          'renderer_compare_diff_release',
+          { snapshot_id: uploadId }
+        )
+      } catch {}
+      throw error
+    }
   }
 
   /**

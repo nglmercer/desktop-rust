@@ -88,6 +88,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | fallback proxy/inherited-proxy de pull nativo | proxies explícitos pasan por contrato tipado al igual que fetch/push; el helper fetch sin proxy quedó retirado porque todas las operaciones usan la forma explícita | `app/test/unit/rust-pull-routing-test.ts`, `app/test/unit/rust-pull-progress-ownership-test.ts` |
 | fallbacks shell de descubrimiento/alta/borrado/URL/HEAD de remotes | descubrimiento seguro y mutaciones revisadas Rust obligatorias; URLs ambiguas o con credenciales se rechazan explícitamente | `app/test/unit/rust-remote-presence-test.ts`, `app/test/unit/git/remote-discovery-test.ts`, `app/test/unit/git/remote-management-test.ts` |
 | imports renderer directos de `crypto` y `keytar` | boundary web explícita ya respaldada por Rust (`web/crypto`, `web/keytar`) | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
+| escritura directa de resoluciones Copilot mediante `writeFile` del renderer | contenido subido en chunks acotados de sesión y escrito bajo lease por operación confinada Rust `renderer_write_working_file`; staging posterior sigue bajo lease | `cargo test -p desktop-core write_working_file`, `cargo test -p desktop-app wry_resolution_preview_upload_and_read`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/stores/app-store-add-accounts-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -116,7 +117,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 16 imports `dugite`, 16 imports `fs`,
+`transportKind`, 18 llamadas legacy Git, 16 imports `dugite`, 15 imports `fs`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

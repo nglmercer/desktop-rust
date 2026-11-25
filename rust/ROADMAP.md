@@ -12,11 +12,11 @@ if it regresses.
 | Fallback checks (`transportKind`) in the renderer | 3 in 2 files | 0 |
 | Legacy Git runner calls (`await git(`) in `lib/git` | 18 in 8 files | 0 |
 | Renderer files importing `dugite` | 16 | 0 |
-| Renderer files importing `fs` | 16 | 0 (host operations only) |
+| Renderer files importing `fs` | 15 | 0 (host operations only) |
 | Renderer files importing `child_process` | 7 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 406 | 0 |
-| Rust code (crates, non-test) | 90,739 lines | — |
+| Rust code (crates, non-test) | 91,114 lines | — |
 
 Completed foundations: Electron, Webpack and esbuild are out of the active build;
 the Tao/Wry shell starts under Linux/Xvfb; the renderer builds with Vite; all
@@ -110,7 +110,7 @@ Known contract decisions still open:
 Follows R2. Each grep must reach zero or be explicitly host-only:
 
 - [ ] `dugite` (currently 16 files)
-- [ ] `fs` (currently 16 files)
+- [ ] `fs` (currently 15 files)
 - [ ] `child_process` (7), `os` (0), `crypto` (0), `keytar` (0)
 - [ ] Delete the matching `app/src/web/*` shims only after their imports are gone.
 - [ ] Remove `app/test/globals.cjs` once the import-cycle test no longer needs

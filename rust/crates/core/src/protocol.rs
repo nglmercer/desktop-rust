@@ -535,6 +535,11 @@ pub enum Operation {
     RendererWorkingFileMetadata {
         paths: Vec<GitPath>,
     },
+    RendererWriteWorkingFile {
+        path: GitPath,
+        snapshot_id: String,
+        size: u64,
+    },
     RendererBlobPrefix {
         revision: String,
         path: GitPath,

@@ -741,6 +741,7 @@ impl Backend {
                     | Operation::ConflictDetail { .. }
                     | Operation::StageConflict { .. }
                     | Operation::ResolveConflict { .. }
+                    | Operation::RendererWriteWorkingFile { .. }
             )
         {
             return Err(AppError::BadArgs(
@@ -1895,7 +1896,8 @@ impl Backend {
                     | Operation::UndoDiscard { .. }
                     | Operation::ForgetDiscard { .. }
                     | Operation::StageConflict { .. }
-                    | Operation::ResolveConflict { .. },
+                    | Operation::ResolveConflict { .. }
+                    | Operation::RendererWriteWorkingFile { .. },
                 ..
             })
         );
@@ -2836,6 +2838,12 @@ mod tests {
             assert!(!chunk["data"].as_str().unwrap().is_empty());
             let release = backend.admit_git_info(vec![json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":result_id}})]).unwrap();
             assert_eq!(backend.read(release).unwrap()["released"], true);
+            let write_upload = backend.read(route(json!({"method":"renderer_resolution_begin"}))).unwrap();
+            let write_id = write_upload["id"].as_str().unwrap();
+            assert_eq!(backend.read(route(json!({"method":"renderer_resolution_append","snapshot_id":write_id,"offset":0,"data":"d3JpdHRlbgo="}))).unwrap()["size"], 8);
+            let written = backend.read(route(json!({"method":"renderer_write_working_file","path":"[a].txt","snapshot_id":write_id,"size":8}))).unwrap();
+            assert_eq!(written["written"], true);
+            assert_eq!(fs::read(root.join("[a].txt")).unwrap(), b"written\n");
             fs::remove_dir_all(root).unwrap();
         }).unwrap().join().unwrap();
     }

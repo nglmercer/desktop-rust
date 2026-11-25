@@ -716,6 +716,15 @@ impl Repository {
             Operation::RendererWorkingFileMetadata { paths } => {
                 return self.renderer_working_file_metadata(paths).await;
             }
+            Operation::RendererWriteWorkingFile {
+                path,
+                snapshot_id,
+                size,
+            } => {
+                return self
+                    .renderer_write_working_file(path, snapshot_id, size)
+                    .await;
+            }
             Operation::RendererWorkingDiff {
                 path,
                 base,
@@ -1434,6 +1443,7 @@ impl Repository {
             | RendererWorkingDiff { .. }
             | RendererWorkingFile { .. }
             | RendererWorkingFileMetadata { .. }
+            | RendererWriteWorkingFile { .. }
             | RendererBlobPrefix { .. }
             | RendererBlobSnapshot { .. }
             | RendererBlobChunk { .. }

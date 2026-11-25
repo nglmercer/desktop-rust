@@ -279,6 +279,41 @@ impl WorkingFile {
         Ok(bytes)
     }
 
+    pub fn write_regular(&self, bytes: &[u8]) -> Result<()> {
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .follow(FollowSymlinks::No);
+        let mut file = self.parent.open_with(&self.name, &options)?.into_std();
+        let metadata = file.metadata()?;
+        anyhow::ensure!(
+            metadata.is_file(),
+            "Working file is not a supported regular file"
+        );
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        let current = self.parent.symlink_metadata(&self.name)?;
+        anyhow::ensure!(current.is_file(), "Working file changed while writing");
+        #[cfg(unix)]
+        {
+            use cap_std::fs::MetadataExt as CapMetadataExt;
+            use std::os::unix::fs::MetadataExt as StdMetadataExt;
+            let after = file.metadata()?;
+            anyhow::ensure!(
+                CapMetadataExt::dev(&current) == StdMetadataExt::dev(&metadata)
+                    && CapMetadataExt::ino(&current) == StdMetadataExt::ino(&metadata),
+                "Working file changed while writing"
+            );
+            anyhow::ensure!(
+                after.len() == bytes.len() as u64,
+                "Working file changed while writing"
+            );
+        }
+        Ok(())
+    }
+
     pub fn stage(&self, source: &Path, expected: &FileState) -> Result<StagedFile> {
         if expected.kind == Kind::Absent {
             return Ok(StagedFile {

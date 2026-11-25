@@ -5,6 +5,28 @@ use cap_std::{ambient_authority, fs::Dir};
 use std::path::Path;
 
 impl Repository {
+    pub(crate) async fn renderer_write_working_file(
+        &self,
+        path: GitPath,
+        snapshot_id: String,
+        size: u64,
+    ) -> Result<serde_json::Value> {
+        let snapshot_id = uuid::Uuid::parse_str(&snapshot_id)?;
+        let (contents, _permit) =
+            crate::comparison_snapshots::take_upload(&self.id(), snapshot_id, size)?;
+        let path = crate::discard_fs::checked_path(path)?;
+        let root = self.path.clone();
+        crate::cancellation::blocking(move || {
+            let root = Dir::open_ambient_dir(&root, ambient_authority())?;
+            let file = crate::discard_fs::WorkingFile::open(&root, Path::new(&path), false)?
+                .context("Working file does not exist")?;
+            file.write_regular(&contents)
+        })
+        .await?;
+        crate::cancellation::Cancellation::current().check()?;
+        Ok(serde_json::json!({"written":true}))
+    }
+
     pub(crate) async fn renderer_working_file_metadata(
         &self,
         paths: Vec<GitPath>,
@@ -187,6 +209,91 @@ mod tests {
                 .await
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn write_working_file_uses_bounded_upload_and_confined_path() {
+        let root = std::env::temp_dir().join(format!("desktop-write-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        assert!(
+            Command::new("git")
+                .current_dir(&root)
+                .args(["init", "-q"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(root.join("file.txt"), b"old").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("file.txt", root.join("link.txt")).unwrap();
+        let repo = Repository::open(&root).await.unwrap();
+        let owner = crate::comparison_snapshots::Owner::new();
+        crate::comparison_snapshots::scope(owner.clone(), async {
+            let upload = async |contents: &[u8]| {
+                let permit = crate::comparison_snapshots::reserve().await.unwrap();
+                let upload =
+                    crate::comparison_snapshots::insert_upload(&repo.id(), permit).unwrap();
+                let id = upload["id"].as_str().unwrap().to_owned();
+                let chunk_size = 24 * 1024;
+                for (offset, chunk) in contents.chunks(chunk_size).enumerate() {
+                    let result = crate::comparison_snapshots::append_upload(
+                        &repo.id(),
+                        uuid::Uuid::parse_str(&id).unwrap(),
+                        (offset * chunk_size) as u64,
+                        &STANDARD.encode(chunk),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        result["size"].as_u64().unwrap(),
+                        ((offset + 1) * chunk_size).min(contents.len()) as u64
+                    );
+                }
+                id
+            };
+            let contents = "resolved ütf-8\ncontent".as_bytes();
+            let id = upload(contents).await;
+            let result = repo
+                .renderer_write_working_file(
+                    GitPath::Text("file.txt".into()),
+                    id,
+                    contents.len() as u64,
+                )
+                .await
+                .unwrap();
+            assert_eq!(result["written"], true);
+            assert_eq!(fs::read(root.join("file.txt")).unwrap(), contents);
+            for path in ["../outside.txt", ".git/config"] {
+                let id = upload(b"no").await;
+                assert!(
+                    repo.renderer_write_working_file(GitPath::Text(path.into()), id, 2)
+                        .await
+                        .is_err()
+                );
+            }
+            let id = upload(b"new").await;
+            repo.renderer_write_working_file(GitPath::Text("missing.txt".into()), id, 3)
+                .await
+                .unwrap();
+            assert_eq!(fs::read(root.join("missing.txt")).unwrap(), b"new");
+            let id = upload(b"").await;
+            repo.renderer_write_working_file(GitPath::Text("empty.txt".into()), id, 0)
+                .await
+                .unwrap();
+            assert_eq!(fs::read(root.join("empty.txt")).unwrap(), b"");
+            #[cfg(unix)]
+            {
+                let id = upload(b"no").await;
+                assert!(
+                    repo.renderer_write_working_file(GitPath::Text("link.txt".into()), id, 2)
+                        .await
+                        .is_err()
+                );
+                assert_eq!(fs::read(root.join("file.txt")).unwrap(), contents);
+            }
+        })
+        .await;
+        owner.close();
         fs::remove_dir_all(root).unwrap();
     }
 

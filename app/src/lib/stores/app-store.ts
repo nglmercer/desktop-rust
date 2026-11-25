@@ -9,7 +9,6 @@ import {
 } from '../git/repository-operation'
 import { AssistedCommitCoordinator } from '../assisted-commit/coordinator'
 import * as Path from 'path'
-import { writeFile } from 'fs/promises'
 import {
   AccountsStore,
   CloningRepositoriesStore,
@@ -9032,7 +9031,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
 
     // A native certificate is captured from the conflict used for generation.
-    // Recheck every automatic suggestion before starting the legacy write path;
+    // Recheck every automatic suggestion before starting the native write path;
     // this does not replace an atomic native publication.
     await verifyCopilotConflictBases(
       copilotResolutions,
@@ -9112,7 +9111,17 @@ export class AppStore extends TypedBaseStore<IAppState> {
         continue
       }
 
-      await writeFile(absolutePath, resolution.resolvedContent, 'utf8')
+      await withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        () =>
+          backend().repositoryWriteWorkingFile(
+            repository.path,
+            resolution.path,
+            resolution.resolvedContent
+          ),
+        true
+      )
       pathsToStage.push(resolution.path)
     }
 

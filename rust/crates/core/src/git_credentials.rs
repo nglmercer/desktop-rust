@@ -365,6 +365,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::RendererCheckoutHeadPaths { .. }
             | Operation::RendererResetIndex { .. }
             | Operation::RendererUpdateIndex { .. }
+            | Operation::RendererWriteWorkingFile { .. }
             | Operation::RendererUnstageAll
             | Operation::RendererRemoveIndexAll
             | Operation::RendererDeleteInitialHead { .. }

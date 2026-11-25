@@ -508,6 +508,53 @@ describe('WebSocket backend transport', () => {
     )
   })
 
+  it('uploads working-file contents in chunks before writing them', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.repositoryWriteWorkingFile(
+      '/repo',
+      'file.txt',
+      'resolved'
+    )
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'renderer_resolution_begin',
+      repository_path: '/repo',
+    })
+    socket.message({
+      id: 1,
+      result: {
+        kind: 'snapshot',
+        id: '11111111-1111-4111-8111-111111111111',
+        size: 0,
+      },
+    })
+    for (let i = 0; i < 10 && socket.sent.length < 3; i++) {
+      await Promise.resolve()
+    }
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'renderer_resolution_append',
+      repository_path: '/repo',
+      snapshot_id: '11111111-1111-4111-8111-111111111111',
+      offset: 0,
+      data: 'cmVzb2x2ZWQ=',
+    })
+    socket.message({ id: 2, result: { size: 8 } })
+    for (let i = 0; i < 10 && socket.sent.length < 4; i++) {
+      await Promise.resolve()
+    }
+    expect(socket.sent[3]).toEqual({
+      id: 3,
+      method: 'renderer_write_working_file',
+      repository_path: '/repo',
+      path: 'file.txt',
+      snapshot_id: '11111111-1111-4111-8111-111111111111',
+      size: 8,
+    })
+    socket.message({ id: 3, result: { written: true } })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
   it('allows a long Copilot turn to finish before the transport deadline', async () => {
     const { client: value, socket } = await connected()
     let finished = false
