@@ -2,31 +2,11 @@ import { Repository } from '../../models/repository'
 import { IFetchProgress } from '../../models/progress'
 import { IRemote } from '../../models/remote'
 import { ITrackingBranch } from '../../models/branch'
-import { envForProxy } from './environment'
+import { backendRemoteProxy, envForProxy } from './environment'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 import { FetchStreamProgressParser } from '../progress/fetch-stream'
 import { fetchFailureToGitError } from './fetch-error'
-
-/** Convert the proxy environment shape into the typed backend contract. */
-function backendFetchProxy(
-  environment: Record<string, string | undefined> | undefined
-): { readonly http?: string; readonly https?: string } | undefined {
-  if (environment === undefined) {
-    return undefined
-  }
-  const proxy = {
-    ...(typeof environment.http_proxy === 'string'
-      ? { http: environment.http_proxy }
-      : {}),
-    ...(typeof environment.https_proxy === 'string'
-      ? { https: environment.https_proxy }
-      : {}),
-  }
-  return proxy.http === undefined && proxy.https === undefined
-    ? undefined
-    : proxy
-}
 
 /**
  * Fetch from the given remote using the reviewed Rust backend.
@@ -65,7 +45,7 @@ export async function fetch(
           })
         })
   progressCallback?.({ kind: 'fetch', title, value: 0, remote: remote.name })
-  const proxy = backendFetchProxy(await envForProxy(remote.url))
+  const proxy = backendRemoteProxy(await envForProxy(remote.url))
   try {
     const failure = await withRepositoryGitOperation(
       repository.path,
@@ -98,7 +78,7 @@ export async function fetchRefspec(
   remote: IRemote,
   refspec: string
 ): Promise<void> {
-  const proxy = backendFetchProxy(await envForProxy(remote.url))
+  const proxy = backendRemoteProxy(await envForProxy(remote.url))
   const failure = await withRepositoryGitOperation(
     repository.path,
     'mutation',

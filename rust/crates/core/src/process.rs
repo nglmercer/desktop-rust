@@ -587,6 +587,7 @@ pub(crate) async fn run_bound_remote_push(
     report_progress: bool,
     observe_hooks: bool,
     hook_proxy: Option<crate::hook_proxy::HookProxy>,
+    proxy: Option<&crate::RendererProxy>,
 ) -> Result<(RawOutput, bool)> {
     run_bound_remote_operation(
         path,
@@ -595,7 +596,7 @@ pub(crate) async fn run_bound_remote_push(
         report_progress,
         observe_hooks,
         hook_proxy,
-        None,
+        proxy,
     )
     .await
 }

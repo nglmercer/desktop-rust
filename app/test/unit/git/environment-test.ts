@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
-import { envForProxy } from '../../../src/lib/git/environment'
+import {
+  backendRemoteProxy,
+  envForProxy,
+} from '../../../src/lib/git/environment'
 import {
   inheritHostProxy,
   resolveGitProxy,
@@ -28,7 +31,7 @@ describe('git/environmnent', () => {
   }
 
   describe('envForProxy', () => {
-    it('leaves a host-configured proxy in the child environment while signalling fallback', async () => {
+    it('leaves a host-configured proxy in the child environment without forwarding it', async () => {
       assert.equal(
         await resolveGitProxy('https://github.com/'),
         inheritHostProxy
@@ -131,6 +134,21 @@ describe('git/environmnent', () => {
           defaultResolver
         ),
         undefined
+      )
+    })
+  })
+
+  describe('backendRemoteProxy', () => {
+    it('converts only explicitly resolved protocol proxies', () => {
+      assert.equal(backendRemoteProxy(undefined), undefined)
+      assert.equal(backendRemoteProxy({}), undefined)
+      assert.deepStrictEqual(
+        backendRemoteProxy({
+          http_proxy: httpProxyUrl,
+          https_proxy: httpsProxyUrl,
+          unrelated: 'ignored',
+        }),
+        { http: httpProxyUrl, https: httpsProxyUrl }
       )
     })
   })

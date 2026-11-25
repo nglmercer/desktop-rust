@@ -57,9 +57,34 @@ export type AssistedCommitHeadResult =
   | { readonly kind: 'invalid'; readonly message: string }
 
 /** Proxy settings explicitly resolved for one remote operation. */
-export type FetchProxy = {
+export type RemoteProxy = {
   readonly http?: string
   readonly https?: string
+}
+
+function validateRemoteProxy(
+  proxy: RemoteProxy | undefined,
+  operation: 'fetch' | 'push'
+): void {
+  if (
+    proxy !== undefined &&
+    [proxy.http, proxy.https].some(
+      value =>
+        value !== undefined &&
+        (value.length === 0 ||
+          value.length > 4096 ||
+          [...value].some(
+            character =>
+              character.charCodeAt(0) < 0x20 || character === '\u007f'
+          ))
+    )
+  ) {
+    throw new BackendError({
+      code: 'invalid_request',
+      message: `Invalid ${operation} proxy`,
+      retryable: false,
+    })
+  }
 }
 
 /** Account binding explicitly selected for one native clone. */
@@ -7976,7 +8001,7 @@ export class BackendClient {
     expectedSamlOwner?: string,
     onProgress?: (chunk: FetchProgressChunk) => void,
     refspec?: string,
-    proxy?: FetchProxy
+    proxy?: RemoteProxy
   ): Promise<FetchFailure | undefined> {
     if (
       onProgress &&
@@ -7989,25 +8014,7 @@ export class BackendClient {
         retryable: false,
       })
     }
-    if (
-      proxy !== undefined &&
-      [proxy.http, proxy.https].some(
-        value =>
-          value !== undefined &&
-          (value.length === 0 ||
-            value.length > 4096 ||
-            [...value].some(
-              character =>
-                character.charCodeAt(0) < 0x20 || character === '\u007f'
-            ))
-      )
-    ) {
-      throw new BackendError({
-        code: 'invalid_request',
-        message: 'Invalid fetch proxy',
-        retryable: false,
-      })
-    }
+    validateRemoteProxy(proxy, 'fetch')
     const request = {
       remote,
       expected_url: expectedUrl,
@@ -8117,6 +8124,7 @@ export class BackendClient {
       readonly report_progress: boolean
       readonly require_hook_callbacks: boolean
       readonly interactive_hook_decision?: boolean
+      readonly proxy?: RemoteProxy
     },
     onProgress?: (chunk: FetchProgressChunk) => void,
     checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>,
@@ -8135,6 +8143,7 @@ export class BackendClient {
         retryable: false,
       })
     }
+    validateRemoteProxy(request.proxy, 'push')
     const call = (
       method: 'renderer_push_preview' | 'renderer_push',
       extra: Record<string, unknown> = {}
@@ -8247,12 +8256,25 @@ export class BackendClient {
       })
     }
     const reviewedRequest = preview.request
+    const proxyFields = (value: unknown) => ({
+      http:
+        isRecord(value) && typeof value.http === 'string' ? value.http : null,
+      https:
+        isRecord(value) && typeof value.https === 'string' ? value.https : null,
+    })
+    const sameProxy = (left: unknown, right: unknown) => {
+      const a = proxyFields(left)
+      const b = proxyFields(right)
+      return a.http === b.http && a.https === b.https
+    }
     if (
       Object.entries(request).some(([key, value]) =>
         key === 'tags'
           ? !Array.isArray(reviewedRequest.tags) ||
             JSON.stringify(reviewedRequest.tags) !== JSON.stringify(value)
-          : reviewedRequest[key] !== value
+          : key === 'proxy'
+            ? !sameProxy(reviewedRequest.proxy, value)
+            : reviewedRequest[key] !== value
       )
     ) {
       throw new BackendError({

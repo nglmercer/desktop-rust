@@ -198,6 +198,9 @@ impl Repository {
         &self,
         request: &RendererPushRequest,
     ) -> Result<(String, Vec<String>)> {
+        if let Some(proxy) = &request.proxy {
+            proxy.validate()?;
+        }
         for variable in [
             "GIT_DIR",
             "GIT_WORK_TREE",
@@ -407,6 +410,7 @@ impl Repository {
             request.report_progress,
             trace_hooks,
             proxy,
+            request.proxy.as_ref(),
         )
         .await?;
         Ok(
@@ -466,6 +470,7 @@ mod tests {
                 report_progress: false,
                 require_hook_callbacks: false,
                 interactive_hook_decision: false,
+                proxy: None,
             };
             (Self(root), request)
         }

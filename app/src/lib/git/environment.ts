@@ -138,9 +138,29 @@ export async function envForProxy(
   })
 
   // Wry's Git child inherits the host environment. Return a non-undefined
-  // value so callers that require proxy parity select their legacy Git route.
+  // value so callers know no explicit proxy needs to cross the IPC boundary.
   if (proxyUrl === inheritHostProxy) {
     return {}
   }
   return proxyUrl === undefined ? undefined : { [envKey]: proxyUrl }
+}
+
+/** Convert proxy environment variables into the typed backend contract. */
+export function backendRemoteProxy(
+  environment: Record<string, string | undefined> | undefined
+): { readonly http?: string; readonly https?: string } | undefined {
+  if (environment === undefined) {
+    return undefined
+  }
+  const proxy = {
+    ...(typeof environment.http_proxy === 'string'
+      ? { http: environment.http_proxy }
+      : {}),
+    ...(typeof environment.https_proxy === 'string'
+      ? { https: environment.https_proxy }
+      : {}),
+  }
+  return proxy.http === undefined && proxy.https === undefined
+    ? undefined
+    : proxy
 }

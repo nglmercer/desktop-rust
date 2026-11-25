@@ -1211,6 +1211,8 @@ pub struct RendererPushRequest {
     pub require_hook_callbacks: bool,
     #[serde(default)]
     pub interactive_hook_decision: bool,
+    #[serde(default)]
+    pub proxy: Option<RendererProxy>,
 }
 
 impl std::fmt::Debug for RendererPushRequest {
@@ -1227,6 +1229,7 @@ impl std::fmt::Debug for RendererPushRequest {
             .field("report_progress", &self.report_progress)
             .field("require_hook_callbacks", &self.require_hook_callbacks)
             .field("interactive_hook_decision", &self.interactive_hook_decision)
+            .field("proxy", &self.proxy)
             .finish()
     }
 }
@@ -1338,6 +1341,24 @@ mod compatibility_tests {
                 .is_err()
             );
         }
+
+        let mut push: RendererPushRequest = serde_json::from_value(json!({
+            "remote":"origin",
+            "expected_url":"https://example.invalid/owner/repo",
+            "local_branch":"main",
+            "remote_branch":null,
+            "tags":[],
+            "force_with_lease":false,
+            "no_verify":false,
+            "report_progress":false,
+            "require_hook_callbacks":false
+        }))
+        .unwrap();
+        assert!(push.proxy.is_none());
+        push.proxy = Some(valid);
+        let debug = format!("{push:?}");
+        assert!(!debug.contains("proxy-secret"));
+        assert!(!debug.contains("proxy.invalid"));
     }
 
     #[test]

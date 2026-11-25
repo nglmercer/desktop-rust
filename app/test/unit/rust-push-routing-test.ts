@@ -59,6 +59,19 @@ vi.mock('../../src/lib/git/core', () => ({
 vi.mock('../../src/lib/git/environment', () => ({
   envForRemoteOperation: mocks.environment,
   envForProxy: mocks.proxy,
+  backendRemoteProxy: (
+    environment: Record<string, string | undefined> | undefined
+  ) =>
+    environment === undefined
+      ? undefined
+      : {
+          ...(typeof environment.http_proxy === 'string'
+            ? { http: environment.http_proxy }
+            : {}),
+          ...(typeof environment.https_proxy === 'string'
+            ? { https: environment.https_proxy }
+            : {}),
+        },
 }))
 vi.mock('../../src/lib/git/fetch-error', () => ({
   fetchFailureToGitError: mocks.convert,
@@ -185,18 +198,22 @@ describe('Rust push routing', () => {
     }
   )
 
-  it('falls back before mutation if a Wry destination needs a proxy', async () => {
+  it('forwards an explicitly resolved proxy through the native push contract', async () => {
     mocks.transport = 'wry'
     mocks.proxy.mockResolvedValue({ https_proxy: 'http://proxy.invalid' })
-    mocks.push.mockImplementation(
-      async (_path, _request, _onProgress, checkDestinations) => {
-        await checkDestinations(['https://example.invalid/alternate'])
-      }
-    )
     await push(repository, remote, 'main', null, [])
-    expect(mocks.git).toHaveBeenCalledTimes(1)
-    expect(mocks.proxy).toHaveBeenCalledWith(
-      'https://example.invalid/alternate'
+    expect(mocks.git).not.toHaveBeenCalled()
+    expect(mocks.proxy).toHaveBeenCalledWith(remote.url)
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/repo',
+      expect.objectContaining({
+        proxy: { https: 'http://proxy.invalid' },
+      }),
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+      undefined,
+      undefined
     )
   })
 

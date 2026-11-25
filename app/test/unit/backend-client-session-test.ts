@@ -2882,6 +2882,7 @@ describe('backend Copilot session cleanup', () => {
       no_verify: false,
       report_progress: false,
       require_hook_callbacks: true,
+      proxy: { http: 'http://user:proxy-synthetic-secret@proxy.invalid:8080' },
     }
     const preview = {
       request,

@@ -9,7 +9,11 @@ import { Repository } from '../../models/repository'
 import { IPushProgress } from '../../models/progress'
 import { PushProgressParser, executionOptionsWithProgress } from '../progress'
 import { IRemote } from '../../models/remote'
-import { envForProxy, envForRemoteOperation } from './environment'
+import {
+  backendRemoteProxy,
+  envForProxy,
+  envForRemoteOperation,
+} from './environment'
 import { Branch } from '../../models/branch'
 import {
   backend,
@@ -164,14 +168,7 @@ export async function push(
     const needsStreaming =
       progressCallback !== undefined ||
       options?.onTerminalOutputAvailable !== undefined
-    const inheritedProxy = [
-      'http_proxy',
-      'https_proxy',
-      'HTTPS_PROXY',
-      'all_proxy',
-      'ALL_PROXY',
-    ].some(key => key in process.env)
-    if (!wry || ((!needsStreaming || hasProgress) && !inheritedProxy)) {
+    if (!wry || !needsStreaming || hasProgress) {
       const controller = new AbortController()
       let failedHook = false
       const listeners = new Set<(chunk: TerminalOutput) => void>()
@@ -214,6 +211,7 @@ export async function push(
         remote: remote.name,
         branch: localBranch,
       })
+      const proxy = backendRemoteProxy(await envForProxy(remote.url))
       try {
         const failure = await withRepositoryGitOperation(
           repository.path,
@@ -235,6 +233,7 @@ export async function push(
                   options?.onHookFailure !== undefined ||
                   options?.onTerminalOutputAvailable !== undefined,
                 interactive_hook_decision: options?.onHookFailure !== undefined,
+                ...(proxy === undefined ? {} : { proxy }),
               },
               !needsStreaming
                 ? undefined
@@ -254,15 +253,7 @@ export async function push(
                     notifyTerminal(text)
                   },
               wry || options?.onTerminalOutputAvailable !== undefined
-                ? async destinations => {
-                    if (wry) {
-                      for (const destination of destinations) {
-                        if ((await envForProxy(destination)) !== undefined)
-                          throw new FetchPreviewUnsupported(
-                            'Push destination requires a proxy'
-                          )
-                      }
-                    }
+                ? async _destinations => {
                     try {
                       withoutRepositoryGitAccess(() =>
                         options?.onTerminalOutputAvailable?.(listener => {
