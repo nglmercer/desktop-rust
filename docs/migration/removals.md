@@ -96,6 +96,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | resolución dugite del binario Git para hooks y tabla vacía de señales del shim `os` | ejecución mediante `git` resuelto por el host/PATH, como ya ocurría en el bundle web; códigos de salida por señal POSIX conservados | `app/test/unit/traditional-hook-test.ts` |
 | imports directos `dugite` en hooks/credenciales | frontera explícita host-backed `app/src/web/dugite.ts`; los tests inyectan un bridge Node solo para ejercitar la superficie web | `app/test/unit/hooks-discovery-test.ts`, `app/test/unit/git/credential-test.ts` |
 | `fs.createWriteStream` ausente en el shim host usado para stdin de hooks | stream Writable real con creación/truncado inicial y appends chunked por el host; conserva destinos vacíos | `app/test/unit/web-fs-write-stream-test.ts` |
+| import directo `fs/promises` en descubrimiento de hooks | frontera explícita `web/fs-promises` con `readdir` tipado para Dirent | `app/test/unit/hooks-discovery-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -124,7 +125,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 2 imports `dugite`, 13 imports `fs`, 5 imports `child_process`,
+`transportKind`, 18 llamadas legacy Git, 2 imports `dugite`, 12 imports `fs`, 5 imports `child_process`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

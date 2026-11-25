@@ -1,5 +1,5 @@
 import { exec } from '../../web/dugite'
-import { access, constants, readdir, stat } from 'fs/promises'
+import { access, constants, readdir, stat } from '../../web/fs-promises'
 import { basename, join, resolve } from 'path'
 
 const isExecutable = (path: string) =>

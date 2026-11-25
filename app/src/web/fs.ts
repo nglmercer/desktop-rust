@@ -459,6 +459,21 @@ async function open(path: PathLike, flags?: string | number, mode?: number) {
   return new FileHandle(target, how)
 }
 
+function readdirPromises(
+  path: PathLike,
+  options: { withFileTypes: true }
+): Promise<Dirent[]>
+function readdirPromises(path: PathLike, options?: any): Promise<string[]>
+async function readdirPromises(path: PathLike, options?: any): Promise<any> {
+  return direntResult(
+    path,
+    options,
+    isBundled(path)
+      ? bundledListing(await bundleEntry(toPath(path)), toPath(path))
+      : await call('readdir', { path: toPath(path) })
+  )
+}
+
 export const promises = {
   constants,
   open,
@@ -495,14 +510,7 @@ export const promises = {
     }
     await call('access', { path: toPath(path), mode: mode ?? 0 })
   },
-  readdir: async (path: PathLike, options?: any) =>
-    direntResult(
-      path,
-      options,
-      isBundled(path)
-        ? bundledListing(await bundleEntry(toPath(path)), toPath(path))
-        : await call('readdir', { path: toPath(path) })
-    ),
+  readdir: readdirPromises,
   mkdir: async (path: PathLike, options?: any) => {
     await call('mkdir', mkdirArgs(path, options))
   },
