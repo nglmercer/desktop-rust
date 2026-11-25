@@ -1,14 +1,6 @@
 import type { HostMenuItemOptions } from './host-types'
 import { showBrowserContextMenu } from '../ui/lib/browser-context-menu'
 
-/**
- * A menu item data structure that can be serialized and sent via IPC.
- * Retained for the host IPC schema even though renderer menus are DOM-owned.
- */
-export interface ISerializableMenuItem extends IMenuItem {
-  readonly action: undefined
-}
-
 export interface IMenuItem {
   /** The user-facing label. */
   readonly label?: string

@@ -53,11 +53,6 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             json!(platform::show_item_in_folder(&msg.string(0)?))
         }
         ch::WRITE_CLIPBOARD_TEXT => win(app, WindowAction::WriteClipboardText(msg.string(0)?))?,
-        ch::SHOW_CONTEXTUAL_MENU => {
-            let items: Vec<SerializableMenuItem> =
-                serde_json::from_value(msg.arg(0)?.clone()).unwrap_or_default();
-            win(app, WindowAction::ShowContextMenu(items))?
-        }
         ch::IS_WINDOW_FOCUSED => win(app, WindowAction::Query(WindowQuery::IsFocused))?,
         ch::OPEN_EXTERNAL => {
             let target = msg.string(0)?;

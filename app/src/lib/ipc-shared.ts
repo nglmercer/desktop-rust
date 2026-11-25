@@ -6,7 +6,6 @@ import type {
 } from './host-types'
 import { IMenuItemState } from './menu-update'
 import { MenuIDs } from '../models/menu-ids'
-import { ISerializableMenuItem } from './menu-item'
 import { MenuLabelsEvent } from '../models/menu-labels'
 import { MenuEvent } from './menu-event'
 import { LogLevel } from './logging/log-level'
@@ -125,10 +124,6 @@ export type RequestResponseChannels = {
   'move-to-trash': (path: string) => Promise<void>
   'show-item-in-folder': (path: string) => Promise<void>
   'write-clipboard-text': (text: string) => Promise<void>
-  'show-contextual-menu': (
-    items: ReadonlyArray<ISerializableMenuItem>,
-    addSpellCheckMenu: boolean
-  ) => Promise<ReadonlyArray<number> | null>
   'is-window-focused': () => Promise<boolean>
   'open-external': (path: string) => Promise<boolean>
   'desktop.io.open-path': (request: {

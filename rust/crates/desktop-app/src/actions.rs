@@ -15,8 +15,7 @@ use wry::WebView;
 use desktop_core::app::DesktopApp;
 use desktop_core::error::{AppError, Result};
 use desktop_core::ipc::protocol::{
-    MessageOptions, OpenDialogOptions, SaveDialogOptions, SerializableMenuItem, WindowAction,
-    WindowQuery,
+    MessageOptions, OpenDialogOptions, SaveDialogOptions, WindowAction, WindowQuery,
 };
 use desktop_core::models::ThemeSource;
 use desktop_core::platform;
@@ -147,7 +146,6 @@ fn apply_inner(
         WindowAction::ShowOpenDialog(options) => show_open_dialog(&options),
         WindowAction::ShowSaveDialog(options) => show_save_dialog(&options),
         WindowAction::ShowMessageBox(options) => show_message_box(&options),
-        WindowAction::ShowContextMenu(items) => show_context_menu(&items, app),
         WindowAction::InstallCli(install) => {
             platform::install_cli(install, &app.paths.user_data, &app.paths.exec_path)?;
             Value::Null
@@ -311,16 +309,6 @@ fn show_message_box(options: &MessageOptions) -> Value {
             .unwrap_or(options.cancel_id as i64),
     };
     json!(index)
-}
-
-/// Context menus are rendered by the web layer (`only frontend in web`).
-/// Rust supplies the serialized menu model; the DOM owns the presentation.
-fn show_context_menu(items: &[SerializableMenuItem], app: &Arc<DesktopApp>) -> Value {
-    app.emit(
-        "context-menu",
-        vec![json!({ "items": items, "x": 0, "y": 0 })],
-    );
-    Value::Null
 }
 
 /// Accept `#rgb`, `#rrggbb`, `#rrggbbaa` and the `rgb(r,g,b)` form used by

@@ -15,7 +15,6 @@ pub mod invoke {
     pub const MOVE_TO_TRASH: &str = "move-to-trash";
     pub const SHOW_ITEM_IN_FOLDER: &str = "show-item-in-folder";
     pub const WRITE_CLIPBOARD_TEXT: &str = "write-clipboard-text";
-    pub const SHOW_CONTEXTUAL_MENU: &str = "show-contextual-menu";
     pub const IS_WINDOW_FOCUSED: &str = "is-window-focused";
     pub const OPEN_EXTERNAL: &str = "open-external";
     pub const IS_IN_APPLICATION_FOLDER: &str = "is-in-application-folder";
@@ -44,7 +43,6 @@ pub mod invoke {
         MOVE_TO_TRASH,
         SHOW_ITEM_IN_FOLDER,
         WRITE_CLIPBOARD_TEXT,
-        SHOW_CONTEXTUAL_MENU,
         IS_WINDOW_FOCUSED,
         OPEN_EXTERNAL,
         IS_IN_APPLICATION_FOLDER,

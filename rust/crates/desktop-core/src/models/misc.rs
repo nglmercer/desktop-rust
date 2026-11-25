@@ -174,7 +174,7 @@ pub struct Banner {
     pub message: String,
 }
 
-/// Serialized application menu (`IMenu` / `ISerializableMenuItem`).
+/// Serialized application menu (`IMenu` and its host menu item payload).
 /// GitHub Desktop renders its own title-bar menu from this payload, which is
 /// why the Rust shell can push it to the webview instead of building a native
 /// menu on Windows. A native `muda` menu is built from the same model.

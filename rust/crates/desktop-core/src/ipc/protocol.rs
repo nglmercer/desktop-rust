@@ -268,7 +268,6 @@ pub enum WindowAction {
     ShowOpenDialog(OpenDialogOptions),
     ShowSaveDialog(SaveDialogOptions),
     ShowMessageBox(MessageOptions),
-    ShowContextMenu(Vec<SerializableMenuItem>),
     InstallCli(bool),
     /// Queries, answered synchronously by the host.
     Query(WindowQuery),
@@ -316,7 +315,6 @@ impl Host for NullHost {
             WindowAction::Query(q) => q.default_value(),
             WindowAction::ShowOpenDialog(_) | WindowAction::ShowSaveDialog(_) => Value::Null,
             WindowAction::ShowMessageBox(_) => Value::from(0),
-            WindowAction::ShowContextMenu(_) => Value::Null,
             _ => Value::Null,
         })
     }

@@ -16,7 +16,7 @@ if it regresses.
 | Renderer files importing `child_process` | 8 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 8 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 409 | 0 |
-| Rust code (crates, non-test) | 90,329 lines | — |
+| Rust code (crates, non-test) | 90,332 lines | — |
 
 Completed foundations: Electron, Webpack and esbuild are out of the active build;
 the Tao/Wry shell starts under Linux/Xvfb; the renderer builds with Vite; all

@@ -265,36 +265,6 @@ it('buffers events until the renderer subscribes and becomes ready', () => {
   dom.window.close()
 })
 
-it('returns the selected nested context-menu index path', async () => {
-  const dom = new JSDOM('<html><head></head><body></body></html>', {
-    url: 'http://localhost/',
-    runScripts: 'outside-only',
-  })
-  const window = dom.window as any
-  window.fetch = vi.fn()
-  window.XMLHttpRequest = class {
-    open() {}
-    send() {}
-  }
-  window.eval(bootstrap)
-  const choice = window.__desktop.invoke('show-contextual-menu', [
-    {
-      label: 'Group',
-      submenu: [{ label: 'Disabled', enabled: false }, { label: 'Choose' }],
-    },
-  ])
-  const rows = Array.from(
-    window.document.querySelectorAll('.gd-row')
-  ) as HTMLElement[]
-  const disabled = rows.find(row => row.textContent === 'Disabled')
-  const selected = rows.find(row => row.textContent === 'Choose')
-  expect(disabled?.classList.contains('disabled')).toBe(true)
-  selected?.click()
-  expect(await choice).toEqual([0, 1])
-  expect(window.document.querySelector('.gd-ctx')).toBeNull()
-  dom.window.close()
-})
-
 it('proxies cross-origin fetch through native IPC with response bytes intact', async () => {
   const dom = new JSDOM('', {
     url: 'http://localhost/',

@@ -228,7 +228,7 @@ impl Host for TaoHost {
         }
 
         // Modal dialogs and context menus must run on the UI thread and must
-        // return a value. Block only for these four actions. All callers reach
+        // return a value. Block only for these three actions. All callers reach
         // this from a worker thread (see `Bridge::ipc_handler`), so the event
         // loop is free to answer.
         let needs_reply = matches!(
@@ -236,7 +236,6 @@ impl Host for TaoHost {
             WindowAction::ShowOpenDialog(_)
                 | WindowAction::ShowSaveDialog(_)
                 | WindowAction::ShowMessageBox(_)
-                | WindowAction::ShowContextMenu(_)
         );
 
         if needs_reply {
