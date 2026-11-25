@@ -31,9 +31,6 @@ vi.mock('../../src/lib/git/stage', () => ({
 vi.mock('../../src/lib/git', () => ({ getCommit: vi.fn() }))
 vi.mock('../../src/lib/merge', () => ({ merge: vi.fn() }))
 vi.mock('../../src/lib/rebase', () => ({ formatRebaseValue: vi.fn() }))
-vi.mock('../../src/lib/git/multi-operation-terminal-output', () => ({
-  createMultiOperationTerminalOutputCallback: vi.fn(),
-}))
 
 import { abortCherryPick } from '../../src/lib/git/cherry-pick'
 import { abortRebase } from '../../src/lib/git/rebase'
