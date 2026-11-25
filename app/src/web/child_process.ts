@@ -480,6 +480,8 @@ export interface ISpawnOptions {
   windowsHide?: boolean
   detached?: boolean
   signal?: AbortSignal
+  argv0?: string
+  windowsVerbatimArguments?: boolean
 }
 
 function isArgumentList(
@@ -544,6 +546,8 @@ export function spawn(
       stdio: modes,
       detached: options.detached === true,
       shell: options.shell,
+      argv0: options.argv0,
+      windowsVerbatimArguments: options.windowsVerbatimArguments,
     })
     .then(
       ({

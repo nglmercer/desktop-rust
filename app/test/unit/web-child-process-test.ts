@@ -179,6 +179,21 @@ describe('child_process stdin flow control', () => {
     )
   })
 
+  it('forwards argv0, Windows argument mode, and shell selection to the host', async () => {
+    spawn('bash.exe', ['-ilc', 'printenvz'], {
+      argv0: 'bash.exe',
+      windowsVerbatimArguments: true,
+      shell: '/bin/sh',
+    })
+    await settle()
+    const request = fake.calls.find(
+      call => call.channel === 'desktop.io.process-spawn'
+    )
+    assert.deepStrictEqual(request?.options.argv0, 'bash.exe')
+    assert.deepStrictEqual(request?.options.windowsVerbatimArguments, true)
+    assert.deepStrictEqual(request?.options.shell, '/bin/sh')
+  })
+
   it('reports AbortError and kills the child when its AbortSignal fires', async () => {
     const controller = new AbortController()
     const child = spawn('cat', [], {

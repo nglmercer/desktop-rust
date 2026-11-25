@@ -430,8 +430,46 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
             command
         }
     } else {
+        let argv0 = o.get("argv0").and_then(Value::as_str);
+        let _verbatim = o
+            .get("windowsVerbatimArguments")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let mut command = Command::new(&command);
-        command.args(&args);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            if let Some(argv0) = argv0 {
+                command.arg0(argv0);
+            }
+            command.args(&args);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            if argv0.is_some() {
+                return Err(AppError::NotImplemented(
+                    "replacing argv0 independently is unavailable for Windows host processes"
+                        .into(),
+                ));
+            }
+            if _verbatim {
+                for arg in &args {
+                    command.raw_arg(arg);
+                }
+            } else {
+                command.args(&args);
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            if argv0.is_some() {
+                return Err(AppError::NotImplemented(
+                    "replacing argv0 is unavailable on this host".into(),
+                ));
+            }
+            command.args(&args);
+        }
         command
     };
     if let Some(cwd) = o
@@ -1083,6 +1121,30 @@ mod tests {
             "shell printf",
         );
         assert_eq!(output_of(&recorder, id, "stdout"), b"shelltest");
+    }
+
+    #[test]
+    fn unix_argv0_reaches_the_child_process() {
+        let recorder = Arc::new(Recorder::default());
+        let app = app(&recorder);
+        let spawned = spawn(
+            &app,
+            &json!({
+                "command": "/bin/sh",
+                "args": ["-c", "printf %s \"$0\""],
+                "argv0": "custom-shell",
+                "stdio": ["pipe", "pipe", "pipe"]
+            }),
+        )
+        .unwrap();
+        let id = spawned["id"].as_u64().unwrap();
+        wait_for(
+            &recorder,
+            id,
+            Instant::now() + Duration::from_secs(10),
+            "argv0 probe",
+        );
+        assert_eq!(output_of(&recorder, id, "stdout"), b"custom-shell");
     }
 
     #[test]
