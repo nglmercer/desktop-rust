@@ -1,5 +1,5 @@
 //! Discover fetch remotes without returning credential-bearing URLs.
-use crate::{Repository, args, process, validate_remote};
+use crate::{Repository, args, process};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -40,13 +40,20 @@ pub enum ManagedRemoteAction {
     SetUrl { name: String, url: String },
 }
 
+/// Remote mutation commands pass the name after `--`, so valid Git names such
+/// as `--remote` do not need the stricter transport/refschema validation used
+/// by fetch and push.
+fn validate_managed_remote_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 4096 && !name.contains('\0')
+}
+
 impl ManagedRemoteAction {
     pub(crate) fn is_supported(&self) -> bool {
         let (name, url) = match self {
             Self::Add { name, url } | Self::SetUrl { name, url } => (name, Some(url)),
             Self::Remove { name } => (name, None),
         };
-        validate_remote(name).is_ok() && url.is_none_or(|value| safe_url(value))
+        validate_managed_remote_name(name) && url.is_none_or(|value| safe_url(value))
     }
 }
 
@@ -291,14 +298,18 @@ fn remote_names(data: &[u8]) -> Result<Option<RemoteNames>> {
 /// Preserve the exact URL for editable settings. Ambiguous URL forms stay on
 /// the old path rather than exposing a secret or silently changing the URL.
 pub(crate) fn safe_url(value: &str) -> bool {
-    if value.is_empty() || value.len() > 16384 || value.chars().any(char::is_control) {
+    if value.is_empty() || value.len() > 16384 {
         return false;
     }
     // Without a colon Git interprets the value as a local filesystem path,
-    // including names containing @, ? or #. These are not URL userinfo,
-    // queries or fragments; retain them exactly as for ./ and absolute paths.
+    // including names containing @, ?, # or whitespace/control characters.
+    // These are not URL userinfo, queries or fragments; retain them exactly
+    // as for ./ and absolute paths.
     if !value.contains(':') {
         return true;
+    }
+    if value.chars().any(char::is_control) {
+        return false;
     }
     // Git accepts an IPv6 literal in brackets in SCP-style remote syntax.
     // Permit only the credential-free or conventional `git@` forms, and parse
@@ -368,7 +379,7 @@ pub(crate) fn safe_url(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ManagedRemoteAction, remote_names, safe_url};
+    use super::{ManagedRemoteAction, remote_names, safe_url, validate_managed_remote_name};
 
     #[test]
     fn debug_output_does_not_include_remote_credentials() {
@@ -379,6 +390,16 @@ mod tests {
         let debug = format!("{action:?}");
         assert!(!debug.contains("synthetic-secret"));
         assert!(debug.contains("<redacted>"));
+    }
+
+    #[test]
+    fn managed_remote_validation_preserves_dash_and_dot_names() {
+        for name in ["--remote", ".hidden", "origin", "remote with spaces"] {
+            assert!(validate_managed_remote_name(name));
+        }
+        for name in ["", &"x".repeat(4097)] {
+            assert!(!validate_managed_remote_name(name));
+        }
     }
 
     #[tokio::test]
@@ -716,6 +737,8 @@ mod tests {
             "git@local-repo",
             "local?repo",
             "local#repo",
+            "local\tpath with spaces",
+            " /path/with spaces\t \r\n",
         ] {
             assert!(safe_url(value), "{value}");
         }

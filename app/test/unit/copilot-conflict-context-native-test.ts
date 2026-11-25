@@ -72,9 +72,7 @@ describe('native Copilot conflict context', () => {
         certificate.sha256
       )
       expect(native.repositoryCopilotConflictBasis).toHaveBeenCalledTimes(4)
-      expect(native.readLease).toHaveBeenCalledTimes(
-        transport === 'wry' ? 2 : 0
-      )
+      expect(native.readLease).toHaveBeenCalledTimes(2)
       expect(result.files[0].rawContent).toBe(content)
       expect(result.files[0].conflictBasis).toBe(certificate.basis)
       expect(result.files[0].hunks[0].oursContent).toBe('ours')

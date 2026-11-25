@@ -761,9 +761,7 @@ async function readAssistedCommitPushDestinationCore(
   }
   const upstreamRemote = remoteValues[0] ?? null
   const upstreamRef = mergeValues[0] ?? null
-  const remotes = await getRemotes(repository, {
-    env: nativeConfigurationEnvironment,
-  })
+  const remotes = await getRemotes(repository)
   const remote =
     upstreamRemote === null
       ? findDefaultRemote(remotes)
@@ -1330,9 +1328,9 @@ export async function completeAssistedCommitPushPublication(
       { cause: error, publicationStale: true }
     )
   })
-  const remote = (
-    await getRemotes(repository, { env: nativeConfigurationEnvironment })
-  ).find(remote => remote.name === destination.remote.name)
+  const remote = (await getRemotes(repository)).find(
+    remote => remote.name === destination.remote.name
+  )
   if (remote === undefined) {
     throw new AssistedCommitPushError(
       'Commits were pushed, but the original remote was removed before upstream setup. Review repository settings.',

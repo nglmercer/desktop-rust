@@ -9,7 +9,7 @@ import {
   deleteMostRecentSSHCredential,
   removeMostRecentSSHCredential,
 } from '../ssh/ssh-credential-storage'
-import { GitError as DugiteError, exec } from 'dugite'
+import { GitError as DugiteError } from 'dugite'
 import memoizeOne from 'memoize-one'
 import { GitError, getDescriptionForError } from '../git/core'
 import { getDesktopAskpassTrampolineFilename } from 'desktop-trampoline'
@@ -94,13 +94,10 @@ export const getCredentialUrl = (cred: Map<string, string>) => {
 }
 
 export const GitUserAgent = memoizeOne(() =>
-  // Can't use git() as that will call withTrampolineEnv which calls this method
-  (typeof window !== 'undefined' && backend().transportKind !== 'none'
-    ? backend().gitVersion()
-    : exec(['--version'], process.cwd()).then(
-        r => /git version (.*)/.exec(r.stdout)?.at(1) ?? 'unknown'
-      )
-  )
+  // Can't use git() as that will call withTrampolineEnv which calls this method.
+  // The host reports the exact Git executable its native operations use.
+  backend()
+    .gitVersion()
     .catch(e => {
       log.warn(`Could not get git version information`, e)
       return 'unknown'

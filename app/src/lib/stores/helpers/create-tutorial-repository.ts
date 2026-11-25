@@ -1,7 +1,4 @@
-import * as Path from 'path'
-
 import { Account } from '../../../models/account'
-import { mkdir, writeFile } from 'fs/promises'
 import { API } from '../../api'
 import { APIError } from '../../http'
 import {
@@ -13,6 +10,7 @@ import { IRemote } from '../../../models/remote'
 import { getDefaultBranch } from '../../helpers/default-branch'
 import { envForRemoteOperation } from '../../git/environment'
 import { pathExists } from '../../path-exists'
+import { backend } from '../../../backend/client'
 
 const nl = __WIN32__ ? '\r\n' : '\n'
 const InitialReadmeContents =
@@ -118,25 +116,20 @@ export async function createTutorialRepository(
   const branch = repo.default_branch ?? (await getDefaultBranch())
   progressCb('Initializing local repository', 0.2)
 
-  await mkdir(path, { recursive: true })
-
-  await git(
-    ['-c', `init.defaultBranch=${branch}`, 'init'],
+  await backend().initializeDesktopRepository(path, branch)
+  await backend().writeRepositoryCreationFile(
     path,
-    'tutorial:init'
+    'readme',
+    InitialReadmeContents
   )
-
-  await writeFile(Path.join(path, 'README.md'), InitialReadmeContents)
-
-  await git(['add', '--', 'README.md'], path, 'tutorial:add')
-  await git(['commit', '-m', 'Initial commit'], path, 'tutorial:commit')
+  await backend().createInitialCommit(path, ['README.md'])
 
   const remote: IRemote = { name: 'origin', url: repo.clone_url }
-  await git(
-    ['remote', 'add', remote.name, remote.url],
-    path,
-    'tutorial:add-remote'
-  )
+  await backend().manageRepositoryRemote(path, {
+    type: 'add',
+    name: remote.name,
+    url: remote.url,
+  })
 
   await pushRepo(path, account, remote, branch, (title, value, description) => {
     progressCb(title, 0.3 + value * 0.6, description)

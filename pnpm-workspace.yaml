@@ -21,3 +21,6 @@ overrides:
 
 # Optional peers (esbuild, tsx, terser...) must not be installed implicitly.
 autoInstallPeers: false
+
+allowBuilds:
+  desktop-trampoline@file:vendor/desktop-trampoline: set this to true or false

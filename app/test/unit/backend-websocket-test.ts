@@ -120,6 +120,67 @@ describe('WebSocket backend transport', () => {
     unsubscribe()
   })
 
+  it('sends typed ref-lock context reads and validates their response', async () => {
+    const { client: value, socket } = await connected()
+    const expected = 'a'.repeat(40)
+    const pending = value.repositoryRefLockContext(
+      '/repo',
+      'refs/heads/main',
+      expected
+    )
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'ref_lock_context',
+      reference: 'refs/heads/main',
+      expected_value: expected,
+      repository_path: '/repo',
+    })
+    socket.message({
+      id: 1,
+      result: {
+        paths: ['/repo/.git/HEAD', '/repo/.git/refs/heads/main'],
+        matches: true,
+      },
+    })
+    await expect(pending).resolves.toEqual({
+      paths: ['/repo/.git/HEAD', '/repo/.git/refs/heads/main'],
+      matches: true,
+    })
+
+    const invalid = value.repositoryRefLockContext('/repo', 'HEAD', expected)
+    socket.message({ id: 2, result: { paths: 'not-an-array', matches: true } })
+    await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
+  it('sends typed assisted-commit HEAD reads and validates their response', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.repositoryAssistedCommitHead('/repo')
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'assisted_commit_head',
+      repository_path: '/repo',
+    })
+    socket.message({
+      id: 1,
+      result: {
+        kind: 'ok',
+        git_dir: '/repo/.git',
+        ref: 'refs/heads/main',
+        sha: 'a'.repeat(40),
+      },
+    })
+    await expect(pending).resolves.toEqual({
+      kind: 'ok',
+      gitDir: '/repo/.git',
+      ref: 'refs/heads/main',
+      sha: 'a'.repeat(40),
+    })
+
+    const invalid = value.repositoryAssistedCommitHead('/repo')
+    socket.message({ id: 2, result: { kind: 'ok', git_dir: '' } })
+    await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('retains the token for a reload while removing it from the URL', () => {
     const first = client()
     expect(first.transportKind).toBe('ws')

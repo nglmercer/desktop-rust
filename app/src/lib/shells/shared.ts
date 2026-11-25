@@ -54,11 +54,7 @@ export function parse(label: string): Shell {
 export async function getAvailableShells(): Promise<
   ReadonlyArray<AnyFoundShell>
 > {
-  if (
-    __LINUX__ &&
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none'
-  ) {
+  if (__LINUX__) {
     const terminals = await backend().availableRustTerminals()
     return terminals.flatMap(terminal => {
       const shell = Object.values(Linux.Shell).find(
@@ -76,9 +72,6 @@ export async function getAvailableShells(): Promise<
     return shellCache
   } else if (__WIN32__) {
     shellCache = await Win32.getAvailableShells()
-    return shellCache
-  } else if (__LINUX__) {
-    shellCache = await Linux.getAvailableShells()
     return shellCache
   }
 
@@ -127,8 +120,6 @@ export async function launchShell(
     cp = Darwin.launch(shell as FoundShell<Darwin.Shell>, path)
   } else if (__WIN32__) {
     cp = Win32.launch(shell as FoundShell<Win32.Shell>, path)
-  } else if (__LINUX__) {
-    cp = Linux.launch(shell as FoundShell<Linux.Shell>, path)
   }
 
   if (cp != null) {
@@ -164,8 +155,6 @@ export async function launchCustomShell(
     cp = Darwin.launchCustomShell(customShell, path)
   } else if (__WIN32__) {
     cp = Win32.launchCustomShell(customShell, path)
-  } else if (__LINUX__) {
-    cp = Linux.launchCustomShell(customShell, path)
   }
 
   if (cp != null) {

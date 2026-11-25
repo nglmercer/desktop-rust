@@ -217,7 +217,7 @@ describe('backend Copilot session cleanup', () => {
     })
   })
 
-  it('uses typed Wry operations for custom editor configuration and launches', async () => {
+  it('uses typed Wry operations for host integrations and launches', async () => {
     const invoke = vi
       .fn()
       .mockResolvedValueOnce({ is_valid: true, bundle_id: null })

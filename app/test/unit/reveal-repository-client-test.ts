@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from 'vitest'
 import { BackendClient, BackendError } from '../../src/backend/client'
 
 describe('repository reveal cancellation', () => {
+  it('routes Tao/Wry reveals through the typed git_info operation', async () => {
+    const client: BackendClient = Object.create(BackendClient.prototype)
+    Object.defineProperty(client, 'transport', { value: 'wry' })
+    const request = vi
+      .spyOn(client, 'request')
+      .mockResolvedValue({ launched: true })
+    await expect(
+      client.revealRegisteredRepository('/saved/repo')
+    ).resolves.toBeUndefined()
+    expect(request).toHaveBeenCalledWith(
+      'git_info',
+      {
+        operation: {
+          type: 'reveal_repository',
+          repository_path: '/saved/repo',
+        },
+      },
+      {}
+    )
+  })
+
   it('does not treat an invalid response as a successful launch', async () => {
     const client: BackendClient = Object.create(BackendClient.prototype)
     Object.defineProperty(client, 'transport', { value: 'ws' })

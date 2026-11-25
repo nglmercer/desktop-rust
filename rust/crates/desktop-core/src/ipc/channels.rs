@@ -1,7 +1,7 @@
 //! The complete the legacy shell IPC channel contract, transcribed from
 //! `app/src/lib/ipc-shared.ts` and `app/src/main-process/main.ts`.
 //!
-//! 28 duplex (`invoke`/`handle`) channels, 51 simplex (`send`/`on`) channels.
+//! 27 duplex (`invoke`/`handle`) channels, 50 simplex (`send`/`on`) channels.
 //! 20 of the simplex channels are main-process -> renderer pushes and have no
 //! inbound handler; they live in [`event`] and are emitted by Rust.
 
@@ -15,7 +15,6 @@ pub mod invoke {
     pub const MOVE_TO_TRASH: &str = "move-to-trash";
     pub const SHOW_ITEM_IN_FOLDER: &str = "show-item-in-folder";
     pub const WRITE_CLIPBOARD_TEXT: &str = "write-clipboard-text";
-    pub const CONFIRM_REVEAL_DIRECTORY: &str = "confirm-reveal-directory";
     pub const SHOW_CONTEXTUAL_MENU: &str = "show-contextual-menu";
     pub const IS_WINDOW_FOCUSED: &str = "is-window-focused";
     pub const OPEN_EXTERNAL: &str = "open-external";
@@ -45,7 +44,6 @@ pub mod invoke {
         MOVE_TO_TRASH,
         SHOW_ITEM_IN_FOLDER,
         WRITE_CLIPBOARD_TEXT,
-        CONFIRM_REVEAL_DIRECTORY,
         SHOW_CONTEXTUAL_MENU,
         IS_WINDOW_FOCUSED,
         OPEN_EXTERNAL,
@@ -81,7 +79,6 @@ pub mod send {
     pub const UPDATE_PREFERRED_APP_MENU_ITEM_LABELS: &str = "update-preferred-app-menu-item-labels";
     pub const UNCAUGHT_EXCEPTION: &str = "uncaught-exception";
     pub const SEND_ERROR_REPORT: &str = "send-error-report";
-    pub const UNSAFE_OPEN_DIRECTORY: &str = "unsafe-open-directory";
     pub const LOG: &str = "log";
     pub const WILL_QUIT: &str = "will-quit";
     pub const WILL_QUIT_EVEN_IF_UPDATING: &str = "will-quit-even-if-updating";
@@ -116,7 +113,6 @@ pub mod send {
         UPDATE_PREFERRED_APP_MENU_ITEM_LABELS,
         UNCAUGHT_EXCEPTION,
         SEND_ERROR_REPORT,
-        UNSAFE_OPEN_DIRECTORY,
         LOG,
         WILL_QUIT,
         WILL_QUIT_EVEN_IF_UPDATING,

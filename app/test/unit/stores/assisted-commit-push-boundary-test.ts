@@ -431,6 +431,8 @@ function nodeBackend(t: TestContext) {
         pathExists: (path: string) => rustClient.pathExists(path),
         directoryExists: (path: string) => rustClient.directoryExists(path),
         repositoryType: (path: string) => rustClient.repositoryType(path),
+        canonicalMutationPath: (path: string) =>
+          rustClient.canonicalMutationPath(path),
         repositoryRendererCommit: async (path: string, ref: string) => {
           await afterHistoryRead?.()
           const { formatArgs } = createLogParser({

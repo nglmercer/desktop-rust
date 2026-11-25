@@ -807,7 +807,7 @@ pub(crate) async fn live_output_secrets(final_chunk: bool) -> Option<Vec<Vec<u8>
     secrets.push(lease.capability.as_bytes().to_vec());
     Some(secrets)
 }
-fn redact_literal(bytes: Vec<u8>, secret: &[u8]) -> Vec<u8> {
+pub(crate) fn redact_literal(bytes: Vec<u8>, secret: &[u8]) -> Vec<u8> {
     if secret.is_empty() {
         return bytes;
     }

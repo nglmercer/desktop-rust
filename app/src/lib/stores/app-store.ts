@@ -46,6 +46,7 @@ import {
   type IRemoteBranchDeletionResult,
 } from '../../backend/client'
 import { RepositorySelectionQueue } from '../../backend/repository-selection'
+import { batchIndexPaths } from '../git/checkout-index'
 import {
   discardBatchWithoutDialog,
   discardReviewedSelection,
@@ -283,7 +284,6 @@ import {
   getBranchMergeBaseDiff,
   checkoutCommit,
   getFilesDiffText,
-  git,
 } from '../git'
 import {
   installGlobalLFSFilters,
@@ -4026,11 +4026,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
       | Awaited<ReturnType<typeof reviewSelectedCommit>>
       | undefined
     if (
-      typeof window !== 'undefined' &&
-      backend().transportKind !== 'none' &&
-      (selectedFiles.length > 0 ||
-        context.amend === true ||
-        state.allowEmptyCommit)
+      selectedFiles.length > 0 ||
+      context.amend === true ||
+      state.allowEmptyCommit
     ) {
       const reviewed = await gitStore.performFailableOperation(
         async () => {
@@ -5223,14 +5221,11 @@ export class AppStore extends TypedBaseStore<IAppState> {
       return this._switchWorktree(repository, wt)
     }
 
-    const review =
-      typeof window !== 'undefined' && backend().transportKind !== 'none'
-        ? await backend().reviewBranchCheckout(
-            repository.path,
-            branch.ref,
-            branch.tip.sha
-          )
-        : null
+    const review = await backend().reviewBranchCheckout(
+      repository.path,
+      branch.ref,
+      branch.tip.sha
+    )
     if (review !== null) {
       if (
         tip.kind === TipState.Valid &&
@@ -8024,7 +8019,6 @@ export class AppStore extends TypedBaseStore<IAppState> {
         const useNative =
           sdkEnabled &&
           selection !== null &&
-          backend().transportKind !== 'none' &&
           partialFiles.every(
             (file, index) =>
               file.status.kind !== AppFileStatusKind.Conflicted &&
@@ -9049,21 +9043,19 @@ export class AppStore extends TypedBaseStore<IAppState> {
     // A native certificate is captured from the conflict used for generation.
     // Recheck every automatic suggestion before starting the legacy write path;
     // this does not replace an atomic native publication.
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      await verifyCopilotConflictBases(
-        copilotResolutions,
-        new Set(manualResolutions.keys()),
-        async resolution =>
-          (
-            await backend().repositoryCopilotConflictBasis(
-              repository.path,
-              resolution.path,
-              resolution.deleteConflictAction === undefined ? 10_485_760 : null,
-              resolution.deleteConflictAction !== undefined
-            )
-          ).basis
-      )
-    }
+    await verifyCopilotConflictBases(
+      copilotResolutions,
+      new Set(manualResolutions.keys()),
+      async resolution =>
+        (
+          await backend().repositoryCopilotConflictBasis(
+            repository.path,
+            resolution.path,
+            resolution.deleteConflictAction === undefined ? 10_485_760 : null,
+            resolution.deleteConflictAction !== undefined
+          )
+        ).basis
+    )
 
     const pathsToStage: string[] = []
 
@@ -9134,10 +9126,20 @@ export class AppStore extends TypedBaseStore<IAppState> {
     }
 
     if (pathsToStage.length > 0) {
-      await git(
-        ['--literal-pathspecs', 'add', '--', ...pathsToStage],
+      const batches = batchIndexPaths(pathsToStage)
+      await withRepositoryGitOperation(
         repository.path,
-        'copilotConflictResolution'
+        'mutation',
+        async () => {
+          for (const selected of batches) {
+            await backend().repositoryUpdateIndex(
+              repository.path,
+              selected,
+              false
+            )
+          }
+        },
+        true
       )
     }
   }
@@ -9432,55 +9434,21 @@ export class AppStore extends TypedBaseStore<IAppState> {
   private async abortSquashMergeCore(repository: Repository): Promise<void> {
     const gitStore = this.gitStoreCache.get(repository)
     const {
-      branchesState,
-      changesState: { workingDirectory },
+      branchesState: { tip },
     } = this.repositoryStateCache.get(repository)
 
-    if (typeof window !== 'undefined' && backend().transportKind !== 'none') {
-      const { tip } = branchesState
-      if (tip.kind !== TipState.Valid) {
-        log.error(
-          'Could not abort squash merge: the current branch is unavailable'
-        )
-        return
-      }
-      await gitStore.performFailableOperation(() =>
-        backend().abortRepositorySquashMerge(
-          repository.path,
-          tip.branch.tip.sha,
-          tip.branch.ref
-        )
-      )
-      return
-    }
-
-    const commitResult = await this._finishConflictedMerge(
-      repository,
-      workingDirectory,
-      new Map<string, ManualConflictResolution>()
-    )
-
-    // By committing, we clear out the SQUASH_MSG (and anything else git would
-    // choose to store for the --squash merge operation)
-    if (commitResult === undefined) {
-      log.error(
-        `[_abortSquashMerge] - Could not abort squash merge - commiting squash msg failed`
-      )
-      return
-    }
-
-    // Since we have not reloaded the status, this tip is the tip before the
-    // squash commit above.
-    const { tip } = branchesState
     if (tip.kind !== TipState.Valid) {
       log.error(
-        `[_abortSquashMerge] - Could not abort squash merge - tip was invalid`
+        'Could not abort squash merge: the current branch is unavailable'
       )
       return
     }
-
     await gitStore.performFailableOperation(() =>
-      reset(repository, GitResetMode.Hard, tip.branch.tip.sha)
+      backend().abortRepositorySquashMerge(
+        repository.path,
+        tip.branch.tip.sha,
+        tip.branch.ref
+      )
     )
   }
 
@@ -9568,9 +9536,9 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     try {
       if (useCustomShell && customShell) {
-        if (__LINUX__ && backend().transportKind !== 'none') {
+        if (__LINUX__) {
           throw new Error(
-            'Custom terminals are not yet supported by the native backend. Select an available terminal in Options.'
+            'Custom terminals are not supported by the native backend. Select an available terminal in Options.'
           )
         }
         await launchCustomShell(customShell, path, error =>
@@ -9578,7 +9546,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
         )
       } else {
         const match = await findShellOrDefault(this.selectedShell)
-        if (__LINUX__ && backend().transportKind !== 'none') {
+        if (__LINUX__) {
           if (
             !(repository instanceof Repository) ||
             !Path.isAbsolute(path) ||

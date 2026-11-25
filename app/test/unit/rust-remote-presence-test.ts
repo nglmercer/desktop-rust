@@ -31,7 +31,6 @@ vi.mock('../../src/lib/git/environment', () => ({
 
 import {
   addRemote,
-  getRemoteURL,
   getRemotes,
   removeRemote,
   setRemoteURL,
@@ -68,23 +67,13 @@ describe('Rust remote discovery', () => {
     }
   )
 
-  it('uses legacy Git only after a Wry preview reports unsupported', async () => {
+  it('rejects unsupported remote HEAD reviews without legacy Git', async () => {
     mocks.transport = 'wry'
     mocks.refreshHead.mockResolvedValueOnce('unsupported')
-    await updateRemoteHEAD(
-      repository,
-      { name: 'origin', url: '/remote' },
-      false
-    )
-    expect(mocks.git).toHaveBeenCalledTimes(1)
-    expect(mocks.git.mock.calls[0][0]).toEqual([
-      'remote',
-      'set-head',
-      '-a',
-      '--',
-      'origin',
-    ])
-    mocks.git.mockClear()
+    await expect(
+      updateRemoteHEAD(repository, { name: 'origin', url: '/remote' }, false)
+    ).rejects.toThrow('Remote HEAD cannot be reviewed')
+    expect(mocks.git).not.toHaveBeenCalled()
     mocks.refreshHead.mockRejectedValueOnce(new Error('review changed'))
     await expect(
       updateRemoteHEAD(repository, { name: 'origin', url: '/remote' }, false)
@@ -125,22 +114,12 @@ describe('Rust remote discovery', () => {
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('preserves the existing remote URL when Rust cannot safely return it', async () => {
+  it('rejects remote configuration that Rust cannot safely return', async () => {
     mocks.hasRemotes.mockResolvedValueOnce(null)
-    mocks.git
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '.git\n' })
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        stdout: 'remote.origin.url\nhttps://user:secret@example.test/repo\0',
-      })
-      .mockResolvedValueOnce({
-        exitCode: 0,
-        stdout: 'https://user:secret@example.test/repo\n',
-      })
-    await expect(getRemotes(repository)).resolves.toEqual([
-      { name: 'origin', url: 'https://user:secret@example.test/repo' },
-    ])
-    expect(mocks.git).toHaveBeenCalledTimes(3)
+    await expect(getRemotes(repository)).rejects.toThrow(
+      'cannot be safely represented'
+    )
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('propagates Rust errors rather than assuming the repository has no remotes', async () => {
@@ -150,64 +129,6 @@ describe('Rust remote discovery', () => {
     await expect(getRemotes(repository)).rejects.toThrow(
       'configuration unavailable'
     )
-    expect(mocks.git).not.toHaveBeenCalled()
-  })
-
-  it('does not use the shortcut for explicit Git environment overrides', async () => {
-    mocks.git
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '.git\n' })
-      .mockResolvedValueOnce({ exitCode: 1, stdout: '' })
-    await expect(
-      getRemotes(repository, { env: { GIT_CONFIG_GLOBAL: '/custom' } })
-    ).resolves.toEqual([])
-    expect(mocks.hasRemotes).not.toHaveBeenCalled()
-  })
-
-  it.each(['ws', 'wry'])(
-    'reads a named remote on %s and preserves missing results',
-    async transport => {
-      mocks.transport = transport
-      mocks.remoteUrl
-        .mockResolvedValueOnce({
-          kind: 'resolved',
-          url: 'https://example.test/repo',
-        })
-        .mockResolvedValueOnce({ kind: 'missing' })
-      await expect(getRemoteURL(repository, 'origin')).resolves.toBe(
-        'https://example.test/repo'
-      )
-      await expect(getRemoteURL(repository, 'missing')).resolves.toBeNull()
-      expect(mocks.git).not.toHaveBeenCalled()
-    }
-  )
-
-  it('retains credential-bearing remote URL behavior', async () => {
-    mocks.remoteUrl.mockResolvedValueOnce({ kind: 'unsupported' })
-    mocks.git.mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: 'https://user:secret@example.test/repo\n',
-    })
-    await expect(getRemoteURL(repository, 'origin')).resolves.toBe(
-      'https://user:secret@example.test/repo'
-    )
-    expect(mocks.git).toHaveBeenCalledTimes(1)
-  })
-
-  it('propagates named-remote backend failures', async () => {
-    mocks.remoteUrl.mockRejectedValueOnce(new Error('Git config unavailable'))
-    await expect(getRemoteURL(repository, 'origin')).rejects.toThrow(
-      'Git config unavailable'
-    )
-    expect(mocks.git).not.toHaveBeenCalled()
-  })
-
-  it('honors the native repository operation fence for remote reads', async () => {
-    mocks.transport = 'wry'
-    mocks.scope.mockRejectedValueOnce(new Error('repository locked'))
-    await expect(getRemoteURL(repository, 'origin')).rejects.toThrow(
-      'repository locked'
-    )
-    expect(mocks.remoteUrl).not.toHaveBeenCalled()
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
@@ -239,25 +160,16 @@ describe('Rust remote discovery', () => {
     }
   )
 
-  it('retains the existing path for unsupported remote URLs', async () => {
+  it('rejects unsupported remote URLs instead of bypassing review', async () => {
     mocks.manage.mockResolvedValueOnce('unsupported')
-    mocks.git.mockResolvedValueOnce({ exitCode: 0 })
-    await setRemoteURL(
-      repository,
-      'origin',
-      'https://user:secret@example.test/repo'
-    )
-    expect(mocks.git).toHaveBeenCalledWith(
-      [
-        'remote',
-        'set-url',
-        '--',
+    await expect(
+      setRemoteURL(
+        repository,
         'origin',
-        'https://user:secret@example.test/repo',
-      ],
-      '/repo',
-      'setRemoteURL'
-    )
+        'https://user:secret@example.test/repo'
+      )
+    ).rejects.toThrow('unsupported by the reviewed native backend')
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('does not retry a failed or fenced remote mutation', async () => {

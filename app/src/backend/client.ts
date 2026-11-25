@@ -46,6 +46,22 @@ export interface FetchProgressChunk {
   readonly data: string
 }
 
+/** Typed assisted-commit HEAD state read by the Rust host. */
+export type AssistedCommitHeadResult =
+  | {
+      readonly kind: 'ok'
+      readonly gitDir: string
+      readonly ref: string | null
+      readonly sha: string | null
+    }
+  | { readonly kind: 'invalid'; readonly message: string }
+
+/** Proxy settings explicitly resolved for one remote operation. */
+export type FetchProxy = {
+  readonly http?: string
+  readonly https?: string
+}
+
 /** Keep destination reservations until the host replies or settlement becomes uncertain. */
 const cloneCancellationGraceMs = 5_000
 
@@ -1789,19 +1805,24 @@ export class BackendClient {
     repositoryPath: string,
     options: BackendRequestOptions = {}
   ): Promise<void> {
-    if (this.transport !== 'ws') {
-      throw new BackendError({
-        code: 'unsupported',
-        message: 'Repository reveal requires the browser bridge',
-        retryable: false,
-      })
-    }
     try {
-      const value = await this.request(
-        'reveal_repository',
-        { repository_path: repositoryPath },
-        options
-      )
+      const value =
+        this.transport === 'wry'
+          ? await this.request(
+              'git_info',
+              {
+                operation: {
+                  type: 'reveal_repository',
+                  repository_path: repositoryPath,
+                },
+              },
+              options
+            )
+          : await this.request(
+              'reveal_repository',
+              { repository_path: repositoryPath },
+              options
+            )
       if (!isRecord(value) || value.launched !== true) {
         throw new BackendError({
           code: 'invalid_response',
@@ -2878,6 +2899,88 @@ export class BackendClient {
       })
     }
     return value.kind
+  }
+
+  /** Read the assisted-commit HEAD identity and Git directory through Rust. */
+  async repositoryAssistedCommitHead(
+    repositoryPath: string
+  ): Promise<AssistedCommitHeadResult> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_head',
+      {}
+    )
+    if (!isRecord(value) || typeof value.kind !== 'string') {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid assisted-commit HEAD response',
+        retryable: false,
+      })
+    }
+    if (
+      value.kind === 'invalid' &&
+      typeof value.message === 'string' &&
+      value.message.length <= 4096
+    ) {
+      return { kind: 'invalid', message: value.message }
+    }
+    if (
+      value.kind === 'ok' &&
+      typeof value.git_dir === 'string' &&
+      value.git_dir.length > 0 &&
+      value.git_dir.length <= 65536 &&
+      (value.ref === null || typeof value.ref === 'string') &&
+      (value.sha === null || typeof value.sha === 'string')
+    ) {
+      return {
+        kind: 'ok',
+        gitDir: value.git_dir,
+        ref: value.ref,
+        sha: value.sha,
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted-commit HEAD response',
+      retryable: false,
+    })
+  }
+
+  /** Read the validated paths and expected value for a parent-owned ref lock. */
+  async repositoryRefLockContext(
+    repositoryPath: string,
+    reference: string,
+    expectedValue: string
+  ): Promise<{
+    readonly paths: ReadonlyArray<string>
+    readonly matches: boolean
+  }> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'ref_lock_context',
+      {
+        reference,
+        expected_value: expectedValue,
+      }
+    )
+    if (
+      !isRecord(value) ||
+      !Array.isArray(value.paths) ||
+      value.paths.length < 1 ||
+      value.paths.length > 2 ||
+      !value.paths.every(
+        path =>
+          typeof path === 'string' && path.length > 0 && path.length <= 65536
+      ) ||
+      typeof value.matches !== 'boolean'
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid ref lock context response',
+        retryable: false,
+      })
+    }
+    return { paths: value.paths, matches: value.matches }
   }
 
   /** Read a symbolic ref in the requested repository. */
@@ -7724,7 +7827,8 @@ export class BackendClient {
     isBackgroundTask = false,
     expectedSamlOwner?: string,
     onProgress?: (chunk: FetchProgressChunk) => void,
-    refspec?: string
+    refspec?: string,
+    proxy?: FetchProxy
   ): Promise<FetchFailure | undefined> {
     if (
       onProgress &&
@@ -7734,6 +7838,25 @@ export class BackendClient {
       throw new BackendError({
         code: 'unsupported',
         message: 'Native fetch progress is unavailable',
+        retryable: false,
+      })
+    }
+    if (
+      proxy !== undefined &&
+      [proxy.http, proxy.https].some(
+        value =>
+          value !== undefined &&
+          (value.length === 0 ||
+            value.length > 4096 ||
+            [...value].some(
+              character =>
+                character.charCodeAt(0) < 0x20 || character === '\u007f'
+            ))
+      )
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid fetch proxy',
         retryable: false,
       })
     }
@@ -7747,6 +7870,7 @@ export class BackendClient {
         ? {}
         : { expected_saml_owner: expectedSamlOwner }),
       ...(refspec === undefined ? {} : { refspec }),
+      ...(proxy === undefined ? {} : { proxy }),
     }
     const call = (
       method: 'renderer_fetch_preview' | 'renderer_fetch',

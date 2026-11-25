@@ -17,7 +17,6 @@ import { backend } from '../../src/backend/client'
 import {
   addRemote,
   getRemoteHEAD,
-  getRemoteURL,
   getRemotes,
   removeRemote,
   setRemoteURL,
@@ -113,15 +112,6 @@ describe.skipIf(
     await expect(getRemotes({ path: nested } as Repository)).resolves.toEqual([
       { name: 'origin', url: 'https://example.invalid/owner/repo' },
     ])
-    await expect(
-      getRemoteURL({ path: nested } as Repository, 'origin')
-    ).resolves.toBe('https://example.invalid/owner/repo')
-    await expect(
-      getRemoteURL({ path: nested } as Repository, 'missing')
-    ).resolves.toBeNull()
-    await expect(
-      getRemoteURL({ path: nested } as Repository, '--upload-pack=invalid')
-    ).resolves.toBeNull()
     execFileSync('git', [
       '-C',
       repository,
@@ -139,9 +129,6 @@ describe.skipIf(
       '[remote "global"]\n\turl = https://example.invalid/global\n'
     )
     await expect(getRemotes({ path: plain } as Repository)).resolves.toEqual([])
-    await expect(
-      getRemoteURL({ path: plain } as Repository, 'global')
-    ).resolves.toBeNull()
     await rm(path.join(directory, 'gitconfig'))
     const bare = path.join(directory, 'bare.git')
     execFileSync('git', ['init', '--bare', '-q', bare])
@@ -156,18 +143,12 @@ describe.skipIf(
       { name: 'origin', url: 'https://example.invalid/bare' },
     ])
     await expect(
-      getRemoteURL({ path: bare } as Repository, 'origin')
-    ).resolves.toBe('https://example.invalid/bare')
-    await expect(
       getRemotes({ path: path.join(directory, 'missing') } as Repository)
     ).rejects.toThrow()
     const broken = path.join(directory, 'broken')
     execFileSync('git', ['init', '-q', broken])
     await writeFile(path.join(broken, '.git', 'config'), '[broken\n')
     await expect(getRemotes({ path: broken } as Repository)).rejects.toThrow()
-    await expect(
-      getRemoteURL({ path: broken } as Repository, 'origin')
-    ).rejects.toThrow()
     await expect(
       removeRemote({ path: broken } as Repository, 'origin')
     ).rejects.toThrow()

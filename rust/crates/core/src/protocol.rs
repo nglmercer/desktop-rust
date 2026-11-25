@@ -440,6 +440,11 @@ pub enum Operation {
     RendererLargeFiles {
         paths: Vec<GitPath>,
     },
+    RefLockContext {
+        reference: String,
+        expected_value: String,
+    },
+    AssistedCommitHead,
     MergeBase {
         first: String,
         second: String,
@@ -1144,6 +1149,39 @@ pub struct RendererFastForwardRequest {
     pub recurse_submodules: bool,
 }
 
+/// Proxy settings explicitly resolved for one remote operation. Values may
+/// contain credentials and must never appear in diagnostics.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererProxy {
+    #[serde(default)]
+    pub http: Option<String>,
+    #[serde(default)]
+    pub https: Option<String>,
+}
+
+impl RendererProxy {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        for value in [&self.http, &self.https].into_iter().flatten() {
+            anyhow::ensure!(
+                !value.is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control),
+                "Invalid proxy URL"
+            );
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for RendererProxy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RendererProxy")
+            .field("http", &self.http.as_ref().map(|_| "<redacted>"))
+            .field("https", &self.https.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RendererFetchRequest {
@@ -1158,6 +1196,8 @@ pub struct RendererFetchRequest {
     pub expected_saml_owner: Option<String>,
     #[serde(default)]
     pub refspec: Option<String>,
+    #[serde(default)]
+    pub proxy: Option<RendererProxy>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -1205,6 +1245,7 @@ impl std::fmt::Debug for RendererFetchRequest {
             .field("report_progress", &self.report_progress)
             .field("expected_saml_owner", &self.expected_saml_owner)
             .field("refspec", &self.refspec.as_ref().map(|_| "<redacted>"))
+            .field("proxy", &self.proxy)
             .finish()
     }
 }
@@ -1279,6 +1320,28 @@ pub enum ChangesStrategy {
 mod compatibility_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn renderer_proxy_validation_and_debug_protect_credentials() {
+        let valid = RendererProxy {
+            http: Some("http://user:proxy-secret@proxy.invalid:8080".into()),
+            https: None,
+        };
+        valid.validate().unwrap();
+        let debug = format!("{valid:?}");
+        assert!(!debug.contains("proxy-secret"));
+        assert!(!debug.contains("proxy.invalid"));
+        for invalid in ["", "http://proxy.invalid/\nforge", &"x".repeat(4097)] {
+            assert!(
+                RendererProxy {
+                    http: Some(invalid.into()),
+                    https: None,
+                }
+                .validate()
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn old_conflict_and_working_file_requests_keep_their_defaults() {

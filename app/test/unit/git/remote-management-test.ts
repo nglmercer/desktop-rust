@@ -3,7 +3,6 @@ import { beforeEach, describe, it } from 'vitest'
 import { git } from '../../../src/lib/git/core'
 import {
   addRemote,
-  getRemoteURL,
   removeRemote,
   setRemoteURL,
   updateRemoteHEAD,
@@ -77,32 +76,6 @@ describe('git/remote management', () => {
         await assert.doesNotReject(
           updateRemoteHEAD(repository, { name, url: repository.path }, false)
         )
-      })
-    }
-  })
-
-  describe('getRemoteURL', () => {
-    for (const name of ['origin', '--remote']) {
-      it(`reads the fetch URL for ${name}`, async t => {
-        const repository = await setupEmptyRepository(t)
-        const url = '/path/with spaces/repository'
-        await git(
-          ['remote', 'add', '--', name, url],
-          repository.path,
-          'set up remote to read'
-        )
-        await git(
-          ['config', `remote.${name}.pushurl`, '/push-only'],
-          repository.path,
-          'set up distinct push URL'
-        )
-
-        assert.strictEqual(await getRemoteURL(repository, name), url)
-      })
-
-      it(`returns null for missing remote ${name}`, async t => {
-        const repository = await setupEmptyRepository(t)
-        assert.strictEqual(await getRemoteURL(repository, name), null)
       })
     }
   })

@@ -3,7 +3,6 @@ import * as Path from 'path'
 import { Repository } from '../models/repository'
 import {
   showItemInFolder,
-  showFolderContents,
   openExternal,
   moveItemToTrash,
 } from '../ui/main-process-proxy'
@@ -37,7 +36,6 @@ export interface IAppShell {
    *
    * @param path - The path of the folder to open
    */
-  readonly showFolderContents: (path: string) => void
 }
 
 export const shell: IAppShell = {
@@ -46,7 +44,6 @@ export const shell: IAppShell = {
   moveItemToTrash,
   openExternal,
   showItemInFolder,
-  showFolderContents,
   openPath,
 }
 
@@ -56,11 +53,7 @@ export async function showRepositoryInFileManager(
   onError: (error: Error) => void | Promise<void>
 ): Promise<void> {
   try {
-    if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
-      await backend().revealRegisteredRepository(path)
-      return
-    }
-    await showFolderContents(path)
+    await backend().revealRegisteredRepository(path)
   } catch (error) {
     try {
       await onError(error instanceof Error ? error : new Error(String(error)))

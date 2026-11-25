@@ -1,4 +1,4 @@
-import * as crypto from 'crypto'
+import { createHash } from '../web/crypto'
 import { GitHubRepository } from '../models/github-repository'
 
 /** Method to create the url for viewing a commit on dotcom */
@@ -17,7 +17,7 @@ export function createCommitURL(
     return `${baseURL}/commit/${SHA}`
   }
 
-  const fileHash = crypto.createHash('sha256').update(filePath).digest('hex')
+  const fileHash = createHash('sha256').update(filePath).digest('hex')
   const fileSuffix = '#diff-' + fileHash
 
   return `${baseURL}/commit/${SHA}${fileSuffix}`

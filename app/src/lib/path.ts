@@ -1,5 +1,5 @@
 import * as Path from 'path'
-import { realpath } from 'fs/promises'
+import { backend } from '../backend/client'
 import { pathToFileURL } from 'url'
 
 /**
@@ -87,8 +87,8 @@ async function _resolveWithin(
   // any directory traversal segments.
   const resolved = resolve(normalizedRoot, normalizedRelative)
 
-  const realRoot = await realpath(normalizedRoot)
-  const realResolved = await realpath(resolved)
+  const realRoot = await backend().canonicalMutationPath(normalizedRoot)
+  const realResolved = await backend().canonicalMutationPath(resolved)
 
   // This verifies the observed paths; later symlink replacement can race use.
   return isPathWithin(realRoot, realResolved, options) ? resolved : null

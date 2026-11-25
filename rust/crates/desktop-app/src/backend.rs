@@ -58,6 +58,8 @@ struct ReadRequest {
     #[serde(default)]
     reference: Option<String>,
     #[serde(default)]
+    expected_value: Option<String>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -101,6 +103,9 @@ enum GitInfoOperation {
         repository_path: String,
         name: String,
         directory: String,
+    },
+    RevealRepository {
+        repository_path: String,
     },
     OpenGlobalGitConfigEditor {
         name: String,
@@ -369,6 +374,8 @@ enum ReadMethod {
     RendererTagRefs,
     RendererCommitChanges,
     RendererLargeFiles,
+    RefLockContext,
+    AssistedCommitHead,
     Worktrees,
     WorktreesFromGitDir,
     ProtectedResources,
@@ -622,6 +629,9 @@ impl Backend {
             repository_path, ..
         }
         | GitInfoOperation::OpenTerminal {
+            repository_path, ..
+        }
+        | GitInfoOperation::RevealRepository {
             repository_path, ..
         }
         | GitInfoOperation::FetchRemote {
@@ -1083,6 +1093,13 @@ impl Backend {
         {
             return Err(AppError::BadArgs("Clone registry is unavailable".into()));
         }
+        if matches!(request.operation, GitInfoOperation::RevealRepository { .. })
+            && self.registry.is_none()
+        {
+            return Err(AppError::BadArgs(
+                "Repository registry is unavailable".into(),
+            ));
+        }
         if let GitInfoOperation::RecoverClone { recovery_id } = &request.operation {
             if !uuid::Uuid::parse_str(recovery_id)
                 .is_ok_and(|value| value.to_string() == *recovery_id)
@@ -1264,9 +1281,20 @@ impl Backend {
                 "remote_name only applies to remote URL reads".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::SymbolicRef) && request.reference.is_some() {
+        if !matches!(
+            &request.method,
+            ReadMethod::SymbolicRef | ReadMethod::RefLockContext
+        ) && request.reference.is_some()
+        {
             return Err(AppError::BadArgs(
-                "reference only applies to symbolic ref reads".into(),
+                "reference only applies to symbolic or locked ref reads".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::RefLockContext)
+            && request.expected_value.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "expected_value only applies to locked ref reads".into(),
             ));
         }
         let operation = if matches!(
@@ -1490,6 +1518,33 @@ impl Backend {
                             .paths
                             .ok_or_else(|| AppError::BadArgs("paths are required".into()))?,
                     }
+                }
+                ReadMethod::RefLockContext
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.paths.is_none() =>
+                {
+                    Operation::RefLockContext {
+                        reference: request
+                            .reference
+                            .ok_or_else(|| AppError::BadArgs("reference is required".into()))?,
+                        expected_value: request.expected_value.ok_or_else(|| {
+                            AppError::BadArgs("expected value is required".into())
+                        })?,
+                    }
+                }
+                ReadMethod::AssistedCommitHead
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.paths.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitHead
                 }
                 ReadMethod::RendererCommit
                     if request.include_untracked.is_none()
@@ -1925,6 +1980,10 @@ impl Backend {
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
                                 repo.open_terminal(name, directory.into()).await
                             }
+                            GitInfoOperation::RevealRepository { repository_path } => {
+                                let registry = self.registry.clone().ok_or_else(|| AppError::msg("Repository registry is unavailable"))?;
+                                desktop_backend::reveal_registered_repository(registry, PathBuf::from(repository_path)).await
+                            }
                             GitInfoOperation::OpenGlobalGitConfigEditor { name } => desktop_backend::open_global_git_config_editor(name).await,
                             GitInfoOperation::OpenCustomGlobalGitConfigEditor { editor } => desktop_backend::open_global_git_config_custom_editor(editor).await,
                             GitInfoOperation::OpenNamedEditor { repository_path, path, name } => {
@@ -2317,6 +2376,130 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn wry_reveal_repository_requires_a_registered_repository() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                use std::{fs, process::Command};
+                let root = std::env::temp_dir()
+                    .join(format!("desktop-wry-reveal-{}", uuid::Uuid::new_v4()));
+                fs::create_dir(&root).unwrap();
+                assert!(
+                    Command::new("git")
+                        .arg("-C")
+                        .arg(&root)
+                        .args(["init", "-q"])
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+                let request =
+                    json!({"operation":{"type":"reveal_repository","repository_path":root}});
+                assert!(
+                    Backend::new(4)
+                        .unwrap()
+                        .admit_git_info(vec![request.clone()])
+                        .is_err()
+                );
+                let registry = desktop_backend::Registry::new(root.join("registry.json"));
+                let backend = Backend::new(4).unwrap().with_registry(registry);
+                let job = backend.admit_git_info(vec![request]).unwrap();
+                let error = backend.read(job).unwrap_err().to_string();
+                assert!(error.contains("not saved"), "{error}");
+                fs::remove_dir_all(root).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn wry_ref_lock_context_is_typed_and_repository_scoped() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            use std::{fs, process::Command};
+            let root = std::env::temp_dir().join(format!("desktop-wry-ref-lock-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            let git = |args: &[&str]| {
+                let output = Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                String::from_utf8(output.stdout).unwrap().trim().to_owned()
+            };
+            git(&["init", "-q", "-b", "main"]);
+            git(&["config", "user.name", "Test"]);
+            git(&["config", "user.email", "test@example.invalid"]);
+            git(&["config", "commit.gpgsign", "false"]);
+            fs::write(root.join("file"), "content\n").unwrap();
+            git(&["add", "file"]);
+            git(&["commit", "-qm", "commit"]);
+            let head = git(&["rev-parse", "HEAD"]);
+            let backend = Backend::new(8).unwrap();
+            let context = backend.read_args(vec![json!({"repository_path":root,"method":"ref_lock_context","reference":"refs/heads/main","expected_value":head})]).unwrap();
+            assert_eq!(context["matches"], true);
+            assert_eq!(context["paths"].as_array().unwrap().len(), 2);
+            assert!(backend.read_args(vec![json!({"repository_path":root,"method":"ref_lock_context","reference":"refs/heads/main"})]).is_err());
+            assert!(backend.admit(vec![json!({"repository_path":root,"method":"status","expected_value":head})]).is_err());
+            fs::remove_dir_all(root).unwrap();
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn wry_assisted_commit_head_is_typed_and_repository_scoped() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                use std::{fs, process::Command};
+                let root = std::env::temp_dir().join(format!(
+                    "desktop-wry-assisted-head-{}",
+                    uuid::Uuid::new_v4()
+                ));
+                fs::create_dir(&root).unwrap();
+                let git = |args: &[&str]| {
+                    let output = Command::new("git")
+                        .arg("-C")
+                        .arg(&root)
+                        .args(args)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+                };
+                git(&["init", "-q", "-b", "main"]);
+                git(&["config", "user.name", "Test"]);
+                git(&["config", "user.email", "test@example.invalid"]);
+                git(&["config", "commit.gpgsign", "false"]);
+                fs::write(root.join("file"), "content\n").unwrap();
+                git(&["add", "file"]);
+                git(&["commit", "-qm", "commit"]);
+                let head = git(&["rev-parse", "HEAD"]);
+                let backend = Backend::new(8).unwrap();
+                let value = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_head"}),
+                    ])
+                    .unwrap();
+                assert_eq!(value["kind"], "ok");
+                assert_eq!(value["ref"], "refs/heads/main");
+                assert_eq!(value["sha"], head);
+                assert!(value["git_dir"].as_str().unwrap().ends_with(".git"));
+                assert!(
+                    backend
+                        .admit(vec![
+                            json!({"repository_path":root,"method":"status","branch":"main"})
+                        ])
+                        .is_err()
+                );
+                fs::remove_dir_all(root).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     #[test]
     fn wry_editor_rejects_unknown_names_and_repository_escape() {

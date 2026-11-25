@@ -148,6 +148,7 @@ impl Repository {
             report_progress: request.report_progress,
             expected_saml_owner: request.expected_saml_owner.clone(),
             refspec: None,
+            proxy: None,
         };
         let fetch_basis = self.renderer_fetch_review(&fetch).await?;
         let head = self

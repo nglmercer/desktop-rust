@@ -45,14 +45,10 @@ import {
   RepositoriesDatabase,
   PullRequestDatabase,
 } from '../lib/databases'
-import { shellNeedsPatching, updateEnvironmentForProcess } from '../lib/shell'
 import { installDevGlobals } from './install-globals'
 import { reportUncaughtException, sendErrorReport } from './main-process-proxy'
 import { getOS } from '../lib/get-os'
-import {
-  enableSourceMaps,
-  withSourceMappedStack,
-} from '../lib/source-map-support'
+import { normalizeError } from '../lib/normalize-error'
 import { UiActivityMonitor } from './lib/ui-activity-monitor'
 import { RepositoryStateCache } from '../lib/stores/repository-state-cache'
 import { ApiRepositoriesStore } from '../lib/stores/api-repositories-store'
@@ -85,12 +81,6 @@ if (__DEV__) {
 
 migrateRendererGUID()
 
-if (shellNeedsPatching(process)) {
-  updateEnvironmentForProcess()
-}
-
-enableSourceMaps()
-
 // Tell dugite where to find the git environment,
 // see https://github.com/desktop/dugite/pull/85
 process.env['LOCAL_GIT_DIRECTORY'] = Path.resolve(__dirname, 'git')
@@ -119,7 +109,7 @@ const sendErrorWithContext = (
   context: Record<string, string> = {},
   nonFatal?: boolean
 ) => {
-  const error = withSourceMappedStack(e)
+  const error = normalizeError(e)
 
   console.error('Uncaught exception', error)
 
@@ -198,15 +188,12 @@ const onUncaughtException = (error: unknown) => {
       'message' in error &&
       error.message === resizeLoopCompletedMessage)
   ) {
-    sendNonFatalException(
-      'resizeObserverLoopCompleted',
-      withSourceMappedStack(error)
-    )
+    sendNonFatalException('resizeObserverLoopCompleted', normalizeError(error))
     return
   }
 
   sendErrorWithContext(error)
-  reportUncaughtException(withSourceMappedStack(error))
+  reportUncaughtException(normalizeError(error))
 
   // We used to subscribe to uncaughtException using process.once but we want
   // to be able to ignore the resize observer error above so we need to

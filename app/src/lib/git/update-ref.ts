@@ -59,20 +59,17 @@ export async function withRefLock(
   action: (lock: IRefLock) => Promise<void>,
   onLockAcquired?: (lease: IOwnedFileLease) => void
 ): Promise<void> {
-  const format = await git(
-    ['rev-parse', '--show-ref-format'],
-    repository.path,
-    'withRefLock'
-  )
-  if (format.stdout.replace(/\r?\n$/, '') !== 'files') {
-    throw new Error('Parent-owned ref locks require file-backed Git refs')
-  }
   if (ref !== 'HEAD' && !ref.startsWith('refs/heads/')) {
     throw new Error(
       'Parent-owned ref locks require HEAD or a fully qualified branch'
     )
   }
-  const paths = ref === 'HEAD' ? ['HEAD'] : ['HEAD', ref]
+  const context = await backend().repositoryRefLockContext(
+    repository.path,
+    ref,
+    value
+  )
+  const paths = context.paths
   const locks = []
   let active = true
   const controller = new AbortController()
@@ -90,33 +87,17 @@ export async function withRefLock(
   let failed = false
   try {
     for (const name of paths) {
-      const result = await git(
-        ['rev-parse', '--path-format=absolute', '--git-path', name],
-        repository.path,
-        'withRefLockPath'
-      )
-      const path = `${result.stdout.replace(/\r?\n$/, '')}.lock`
+      const path = `${name}.lock`
       await mkdir(dirname(path), { recursive: true })
       const owned = await acquireOwnedFileLock(path, undefined, onLockAcquired)
       locks.push(owned)
     }
-    const current = await git(
-      [
-        'rev-parse',
-        '--verify',
-        '--quiet',
-        '--end-of-options',
-        `${ref}^{commit}`,
-      ],
+    const lockedContext = await backend().repositoryRefLockContext(
       repository.path,
-      'withRefLockValue',
-      { successExitCodes: new Set([0, 1]) }
+      ref,
+      value
     )
-    const actual =
-      current.exitCode === 0
-        ? current.stdout.replace(/\r?\n$/, '')
-        : '0'.repeat(value.length)
-    if (actual !== value) {
+    if (!lockedContext.matches) {
       throw new Error(`Ref changed before guarded index work: ${ref}`)
     }
     await action(guard)
@@ -284,16 +265,5 @@ export async function deleteRef(
     )
     return
   }
-  const args = [
-    'update-ref',
-    '-d',
-    ref,
-    ...(expectedOid === undefined ? [] : [expectedOid]),
-  ]
-
-  if (reason !== undefined) {
-    args.push('-m', reason)
-  }
-
-  await git(args, repository.path, 'deleteRef')
+  throw new Error('Only reviewed initial HEAD deletion is supported')
 }

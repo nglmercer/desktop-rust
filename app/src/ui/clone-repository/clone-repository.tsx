@@ -285,9 +285,7 @@ export class CloneRepository extends React.Component<
 
   public componentDidMount() {
     this.mounted = true
-    if (backend().transportKind !== 'none') {
-      void this.refreshNativeRecoveries()
-    }
+    void this.refreshNativeRecoveries()
     const initialURL = this.props.initialURL
     if (initialURL) {
       this.updateUrl(initialURL)
@@ -336,8 +334,7 @@ export class CloneRepository extends React.Component<
 
         {error ? <DialogError>{error.message}</DialogError> : null}
 
-        {backend().transportKind !== 'none' &&
-        this.props.selectedTab === CloneRepositoryTab.GitHub ? (
+        {this.props.selectedTab === CloneRepositoryTab.GitHub ? (
           <label>
             <input
               type="checkbox"
@@ -355,8 +352,7 @@ export class CloneRepository extends React.Component<
         {this.state.nativeMessage !== null ? (
           <p role="status">{this.state.nativeMessage}</p>
         ) : null}
-        {backend().transportKind !== 'none' &&
-        this.state.nativeRecoveries.length > 0 ? (
+        {this.state.nativeRecoveries.length > 0 ? (
           <div>
             <p>Interrupted clones</p>
             {this.state.nativeRecoveries.map(recovery => (
@@ -872,8 +868,7 @@ export class CloneRepository extends React.Component<
   /** Validate the destination before cloning can create files in it. */
   private async validateClonePath(
     path: string | null,
-    requireAbsent = backend().transportKind !== 'none' &&
-      this.props.selectedTab === CloneRepositoryTab.GitHub &&
+    requireAbsent = this.props.selectedTab === CloneRepositoryTab.GitHub &&
       this.state.nativeSelectedClone
   ): Promise<null | Error> {
     if (path === null) {
@@ -1012,7 +1007,6 @@ export class CloneRepository extends React.Component<
     const request = this.getCloneRequest()
     const { path } = request
     const nativeOperation =
-      backend().transportKind !== 'none' &&
       request.tab === CloneRepositoryTab.GitHub &&
       this.state.nativeSelectedClone
     this.setState({ loading: true, nativeOperation })

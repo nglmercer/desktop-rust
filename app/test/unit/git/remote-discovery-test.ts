@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises'
 import * as Path from 'node:path'
 
 import { git } from '../../../src/lib/git/core'
-import { getRemotes, getRemoteURL } from '../../../src/lib/git/remote'
+import { getRemotes } from '../../../src/lib/git/remote'
 import { isolateGitConfig } from '../../helpers/git-config'
 import {
   setupEmptyDirectory,
@@ -58,7 +58,6 @@ describe('git/remote discovery', () => {
     assert.deepStrictEqual(await getRemotes(repository), [
       { name: 'origin', url },
     ])
-    assert.strictEqual(await getRemoteURL(repository, 'origin'), url)
   })
 
   it('returns each configured remote once in alphabetical order', async t => {
@@ -134,7 +133,7 @@ describe('git/remote discovery', () => {
   })
 
   for (const rewritten of [false, true]) {
-    it(`lists unused remotes without changing credential policy (rewritten=${rewritten})`, async t => {
+    it(`rejects credential-bearing remotes without changing transfer policy (rewritten=${rewritten})`, async t => {
       const repository = await setupEmptyRepository(t)
       const originURL = 'https://example.invalid/healthy.git'
       const unusedURL =
@@ -156,10 +155,10 @@ describe('git/remote discovery', () => {
       // Keep the test offline even if credential validation stops rejecting.
       await setConfigValue(repository, 'protocol.allow', 'never')
 
-      assert.deepStrictEqual(await getRemotes(repository), [
-        { name: 'origin', url: originURL },
-        { name: 'unused', url: unusedURL },
-      ])
+      await assert.rejects(
+        getRemotes(repository),
+        /cannot be safely represented by the native backend/
+      )
       assert.strictEqual(
         (
           await git(
@@ -301,7 +300,6 @@ describe('git/remote discovery', () => {
 
     const rejection = /bad config|Unable to inspect Git repository/
     await assert.rejects(getRemotes(repository), rejection)
-    await assert.rejects(getRemoteURL(repository, 'origin'), rejection)
   })
 
   it('reports a remote URL without a configured value', async t => {

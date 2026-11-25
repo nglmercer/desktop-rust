@@ -1,6 +1,6 @@
 import {
   fetch as fetchFromRemote,
-  getRemoteURL,
+  getRemotes,
   pull as pullFromRemote,
 } from '../../src/lib/git'
 import { Repository } from '../../src/models/repository'
@@ -18,7 +18,9 @@ export async function pull(
   remote: IRemote,
   options?: PullOptions
 ): Promise<void> {
-  const url = await getRemoteURL(repository, remote.name)
+  const url =
+    (await getRemotes(repository)).find(r => r.name === remote.name)?.url ??
+    null
   return pullFromRemote(
     repository,
     url === null ? remote : { ...remote, url },
@@ -31,6 +33,8 @@ export async function fetch(
   repository: Repository,
   remote: IRemote
 ): Promise<void> {
-  const url = await getRemoteURL(repository, remote.name)
+  const url =
+    (await getRemotes(repository)).find(r => r.name === remote.name)?.url ??
+    null
   return fetchFromRemote(repository, url === null ? remote : { ...remote, url })
 }

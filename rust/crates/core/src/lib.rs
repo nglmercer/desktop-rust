@@ -22,6 +22,7 @@ pub use repo_rules::{NameRuleFailure, NameRulesActor, NameRulesPolicy};
 mod branch_policy;
 mod terminals;
 pub use terminals::{available_terminals, open_registered_terminal};
+mod assisted_head;
 mod file_manager;
 pub use file_manager::reveal_registered_repository;
 pub mod cancellation;
@@ -71,6 +72,7 @@ pub use lfs_operations::{LfsTransferRequest, lfs_install, lfs_tool_status};
 mod paths;
 mod remote_discovery;
 pub use remote_discovery::{ManagedRemoteAction, safe_fetch_remotes, safe_remote_url};
+mod ref_lock;
 mod refs;
 mod renderer_cherry_pick;
 mod renderer_fast_forward;
@@ -577,6 +579,15 @@ impl Repository {
             }
             Operation::RendererLargeFiles { paths } => {
                 return self.renderer_large_files(paths).await;
+            }
+            Operation::RefLockContext {
+                reference,
+                expected_value,
+            } => {
+                return self.ref_lock_context(&reference, &expected_value).await;
+            }
+            Operation::AssistedCommitHead => {
+                return self.assisted_commit_head().await;
             }
             Operation::RendererCommitDiff {
                 revision,
@@ -1389,6 +1400,8 @@ impl Repository {
             | RendererTagRefs
             | RendererCommitChanges { .. }
             | RendererLargeFiles { .. }
+            | RefLockContext { .. }
+            | AssistedCommitHead
             | MergeBase { .. }
             | MergeTreePreview { .. }
             | InterpretTrailers { .. }

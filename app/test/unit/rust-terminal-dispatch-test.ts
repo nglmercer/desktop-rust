@@ -6,7 +6,6 @@ vi.mock('keytar', () => ({ default: {} }))
 
 const mocks = vi.hoisted(() => ({
   gitVersion: vi.fn(),
-  isGitOnPath: vi.fn(),
   terminals: vi.fn(),
   launch: vi.fn(),
   transport: 'ws' as 'ws' | 'wry',
@@ -20,10 +19,6 @@ vi.mock('../../src/backend/client', async importOriginal => ({
     openRepositoryTerminal: mocks.launch,
   }),
 }))
-vi.mock('../../src/lib/is-git-on-path', () => ({
-  isGitOnPath: mocks.isGitOnPath,
-}))
-
 import { Dispatcher } from '../../src/ui/dispatcher/dispatcher'
 import { AppStore } from '../../src/lib/stores/app-store'
 
@@ -32,7 +27,6 @@ describe('Rust terminal dispatch', () => {
     vi.stubGlobal('__LINUX__', true)
     mocks.gitVersion.mockReset()
     mocks.transport = 'ws'
-    mocks.isGitOnPath.mockReset()
     mocks.terminals.mockReset()
     mocks.launch.mockReset().mockResolvedValue(undefined)
   })
@@ -47,7 +41,6 @@ describe('Rust terminal dispatch', () => {
     mocks.gitVersion.mockResolvedValue('git version 2')
     await dispatcher.openShell('/repo-b', false, repository)
     expect(mocks.gitVersion).toHaveBeenCalledOnce()
-    expect(mocks.isGitOnPath).not.toHaveBeenCalled()
     expect(store._openShell).toHaveBeenCalledWith('/repo-b', repository)
     expect(store._showPopup).not.toHaveBeenCalled()
   })
@@ -67,19 +60,17 @@ describe('Rust terminal dispatch', () => {
     })
     await dispatcher.openShell('/repo-b', true, repository)
     expect(store._openShell).toHaveBeenCalledWith('/repo-b', repository)
-    expect(mocks.isGitOnPath).not.toHaveBeenCalled()
   })
 
-  it('retains the previous Git check on other platforms', async () => {
+  it('uses the host Git check on every platform', async () => {
     vi.stubGlobal('__LINUX__', false)
     const store = { _openShell: vi.fn(), _showPopup: vi.fn() }
     const dispatcher = Object.assign(Object.create(Dispatcher.prototype), {
       appStore: store,
     }) as Dispatcher
-    mocks.isGitOnPath.mockResolvedValue(true)
+    mocks.gitVersion.mockResolvedValue('git version 2')
     await dispatcher.openShell('/repo')
-    expect(mocks.isGitOnPath).toHaveBeenCalledOnce()
-    expect(mocks.gitVersion).not.toHaveBeenCalled()
+    expect(mocks.gitVersion).toHaveBeenCalledOnce()
     expect(store._openShell).toHaveBeenCalledWith('/repo', undefined)
   })
 

@@ -233,11 +233,12 @@ impl Repository {
             "Remote HEAD context changed; refresh before continuing"
         );
         self.validate_remote_head_path(&request.remote).await?;
-        let output = process::run_bound_remote_fetch(
+        let output = process::run_bound_remote_fetch_with_proxy(
             &self.path,
             &args(&["remote", "set-head", "-a", "--", &request.remote]),
             request.is_background_task,
             false,
+            request.proxy.as_ref(),
         )
         .await?;
         Ok(json!({"code":output.code}))
@@ -247,6 +248,9 @@ impl Repository {
         &self,
         request: &RendererFetchRequest,
     ) -> Result<String> {
+        if let Some(proxy) = &request.proxy {
+            proxy.validate()?;
+        }
         for variable in [
             "GIT_DIR",
             "GIT_WORK_TREE",
@@ -369,11 +373,12 @@ impl Repository {
         if let Some(refspec) = &request.refspec {
             command.push(refspec.into());
         }
-        let output = process::run_bound_remote_fetch(
+        let output = process::run_bound_remote_fetch_with_proxy(
             &self.path,
             &command,
             request.is_background_task,
             request.report_progress,
+            request.proxy.as_ref(),
         )
         .await?;
         Ok(json!({
@@ -485,6 +490,7 @@ mod tests {
                 report_progress: false,
                 expected_saml_owner: None,
                 refspec: None,
+                proxy: None,
             }
         }
     }
@@ -811,8 +817,15 @@ mod tests {
             report_progress: false,
             expected_saml_owner: None,
             refspec: None,
+            proxy: Some(crate::RendererProxy {
+                http: Some("http://user:proxy-synthetic-secret@proxy.invalid".into()),
+                https: None,
+            }),
         };
-        assert!(!format!("{request:?}").contains("synthetic-secret"));
+        let debug = format!("{request:?}");
+        assert!(!debug.contains("synthetic-secret"));
+        assert!(!debug.contains("proxy-synthetic-secret"));
+        assert!(!debug.contains("proxy.invalid"));
         assert!(!crate::remote_discovery::safe_url(&request.expected_url));
     }
 }

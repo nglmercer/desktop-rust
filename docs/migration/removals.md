@@ -52,6 +52,27 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | wrappers TypeScript sin consumidores para `checkoutIndex`, `resetPaths` y `resetSubmodulePaths` | operaciones Rust internas de descarte/checkout/staging ya revisadas; batching compartido conservado | `app/test/unit/git/reset-test.ts`, `app/test/unit/git/submodule-test.ts`, `app/test/unit/rust-submodule-routing-test.ts` |
 | `getGlobalConfigPath` sin consumidores de producción | edición de configuración global abierta directamente por el host Rust | `app/test/unit/rust-global-git-identity-test.ts`, `app/test/unit/git/config-test.ts` |
 | `DiscardChangesError` y handler legacy de fallos al mover a papelera | descarte revisado/recuperable Rust obligatorio | `pnpm check:types`, `pnpm lint` |
+| `getRemoteURL` sin consumidores de producción y su fallback shell para URLs sensibles | lectura de remotes segura Rust; tests de fixtures usan `getRemotes` | `app/test/unit/git/remote-management-test.ts`, `app/test/unit/rust-remote-presence-test.ts` |
+| fallback shell general de `deleteRef` sin consumidores de producción | única operación viva acotada a eliminación revisada de HEAD inicial | `app/test/unit/rust-submodule-routing-test.ts`, `app/test/unit/rust-first-undo-routing-test.ts` |
+| inicialización, README, commit inicial y remote de tutorial mediante filesystem/shell directos | operaciones Rust de creación de repositorio ya usadas por el diálogo de nuevo repositorio | `app/test/unit/tutorial-repository-accounts-test.ts` |
+| lectura filesystem backend-less de conflictos para contexto Copilot | captura certificada/acotada Rust obligatoria bajo lease uniforme | `app/test/unit/copilot-conflict-context-native-test.ts`, `app/test/unit/copilot-conflict-context-test.ts` |
+| staging de resoluciones Copilot mediante `git add` directo | `update-index` Rust literal por lotes bajo lease | `app/test/unit/copilot-conflict-resolution-test.ts`, `app/test/unit/stores/copilot-store-test.ts` |
+| fallbacks backend-less de revisión de commit, revisión de checkout, abort squash y certificados Copilot en `AppStore` | operaciones revisadas Rust obligatorias | `app/test/unit/git/commit-test.ts`, `app/test/unit/ui/stash-and-switch-branch-dialog-test.tsx`, `app/test/unit/git/checkout-test.ts` |
+| selección nativa condicional de generación de mensajes Copilot | selección tipada Rust siempre disponible cuando el SDK está habilitado | `app/test/unit/ui/commit-message-test.tsx`, `app/test/unit/copilot-commit-message-prompt-test.ts` |
+| puertas `transportKind` de UI de clone nativo y recuperaciones | UI nativa disponible siempre; la selección explícita del usuario sigue controlando la operación | `app/test/unit/ui/clone-repository-test.tsx`, `app/test/unit/clone-destination-websocket-test.tsx` |
+| detección Linux de Git/terminales con fallback de proceso renderer | consulta obligatoria al host Rust en Linux | `app/test/unit/rust-terminal-dispatch-test.ts` |
+| descubrimiento/lanzamiento Linux de terminales duplicado en renderer | lista fija y lanzamiento confinado del host Rust (`available_terminals`/`open_terminal`) | `app/test/unit/rust-terminal-discovery-test.ts`, `app/test/unit/rust-terminal-dispatch-test.ts` |
+| loader síncrono `source-map-support` acoplado a nombres webpack/Electron y filesystem renderer | normalización explícita de errores con stack original; mapas Vite quedan fuera del bundle y la dependencia fue retirada | `app/test/unit/normalize-error-test.ts`, `pnpm vite:build` |
+| lecturas `rev-parse` del contexto de locks padre HEAD/ref (`format`, rutas Git y valor esperado) | operación tipada Rust `ref_lock_context`; el valor se vuelve a validar después de adquirir los locks | `cargo test -p desktop-core ref_lock`, `cargo test -p desktop-app wry_ref_lock_context`, `app/test/unit/backend-websocket-test.ts` |
+| fallback genérico de apertura de carpetas para repositorios guardados | operación confinada `reveal_repository`/`reveal_registered_repository` en WebSocket y Tao/Wry, sin IPC genérico ni apertura de paquetes ejecutables | `app/test/unit/reveal-repository-client-test.ts`, `app/test/unit/reveal-repository-routing-test.ts`, `cargo test -p desktop-app wry_reveal_repository` |
+| parche renderer de entorno de shell en macOS (`shell.ts`) | eliminado: mutar el shim `process.env` del webview no afecta al host Rust ni a procesos Git reales | `pnpm check:types`, `pnpm vite:build` |
+| lecturas renderer de HEAD, rama, tip y Git dir para assisted-commit | operación tipada Rust `assisted_commit_head`, con estados inseguros devueltos como datos validados | `cargo test -p desktop-core assisted_head`, `cargo test -p desktop-app wry_assisted_commit_head`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/git/assisted-commit-test.ts` |
+| comprobación renderer `which`/`where.exe` de Git al abrir terminal | `git_version` revisado del host Rust en todas las plataformas | `app/test/unit/rust-terminal-dispatch-test.ts` |
+| canonicalización filesystem directa en `resolveWithin` | canonicalización host Rust tipada | `app/test/unit/path-test.ts` |
+| apertura genérica de carpetas sin consumidores (`showFolderContents`, `is-application-bundle` y canales `unsafe-open-directory`/`confirm-reveal-directory`) | apertura confinada de repositorios registrados; el host usa reveal seguro sin clasificar metadata en el renderer | `app/test/unit/reveal-repository-routing-test.ts`, `app/test/unit/ipc-contract-test.ts`, `cargo check --workspace --locked` |
+| fallback legacy de `fetch`/`fetchRefspec` y resolución proxy incompatible con IPC | fetch revisado Rust obligatorio; proxies explícitos pasan por contrato tipado y se redactan en diagnósticos | `app/test/unit/rust-fetch-routing-test.ts`, `app/test/unit/git/fetch-test.ts`, tests Rust `renderer_fetch`/`process` |
+| fallbacks shell de descubrimiento/alta/borrado/URL/HEAD de remotes | descubrimiento seguro y mutaciones revisadas Rust obligatorias; URLs ambiguas o con credenciales se rechazan explícitamente | `app/test/unit/rust-remote-presence-test.ts`, `app/test/unit/git/remote-discovery-test.ts`, `app/test/unit/git/remote-management-test.ts` |
+| imports renderer directos de `crypto` y `keytar` | boundary web explícita ya respaldada por Rust (`web/crypto`, `web/keytar`) | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -79,8 +100,8 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | scripts npm residuales de release | publicación/versionado verificados con pnpm/Rust sin npm CLI |
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
-La línea base numérica viva está en `pnpm migration:status` (33 comprobaciones
-`transportKind`, 47 llamadas legacy Git, 18 imports `dugite`, 22 imports `fs`,
+La línea base numérica viva está en `pnpm migration:status` (12 comprobaciones
+`transportKind`, 28 llamadas legacy Git, 17 imports `dugite`, 17 imports `fs`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

@@ -1,11 +1,11 @@
-import { withSourceMappedStack } from '../source-map-support'
+import { normalizeError } from '../normalize-error'
 
 /**
  * Formats an error for log file output. Use this instead of
  * multiple calls to log.error.
  */
 export function formatError(error: Error, title?: string) {
-  error = withSourceMappedStack(error)
+  error = normalizeError(error)
 
   if (error.stack) {
     return title ? `${title}\n${error.stack}` : error.stack.trim()

@@ -8,8 +8,8 @@ use crate::app::DesktopApp;
 use crate::error::{AppError, Result};
 use crate::ipc::channels::{event, invoke as ch, send as tx};
 use crate::ipc::protocol::{
-    IpcMessage, MenuStateUpdate, MessageOptions, OpenDialogOptions, SaveDialogOptions,
-    SerializableMenuItem, WindowAction, WindowQuery,
+    IpcMessage, MenuStateUpdate, OpenDialogOptions, SaveDialogOptions, SerializableMenuItem,
+    WindowAction, WindowQuery,
 };
 use crate::models::app_state::AppState;
 use crate::models::misc::{
@@ -53,21 +53,6 @@ pub fn invoke(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Resul
             json!(platform::show_item_in_folder(&msg.string(0)?))
         }
         ch::WRITE_CLIPBOARD_TEXT => win(app, WindowAction::WriteClipboardText(msg.string(0)?))?,
-        ch::CONFIRM_REVEAL_DIRECTORY => {
-            let response = win(
-                app,
-                WindowAction::ShowMessageBox(MessageOptions {
-                    message: "Reveal Repository in Finder?".into(),
-                    detail: Some(
-                        "This will open the repository folder in your file manager.".into(),
-                    ),
-                    buttons: vec!["Reveal".into(), "Cancel".into()],
-                    default_id: 0,
-                    cancel_id: 1,
-                }),
-            )?;
-            json!(response.as_i64().unwrap_or(1) == 0)
-        }
         ch::SHOW_CONTEXTUAL_MENU => {
             let items: Vec<SerializableMenuItem> =
                 serde_json::from_value(msg.arg(0)?.clone()).unwrap_or_default();
@@ -202,9 +187,6 @@ pub fn send(app: &DesktopApp, state: &mut AppState, msg: &IpcMessage) -> Result<
         }
         tx::UNINSTALL_WINDOWS_CLI => {
             win(app, WindowAction::InstallCli(false))?;
-        }
-        tx::UNSAFE_OPEN_DIRECTORY => {
-            win(app, WindowAction::UnsafeOpenDirectory(msg.string(0)?))?;
         }
         tx::RENDERER_READY => {
             let now = msg.arg(0).ok().and_then(|v| v.as_f64()).unwrap_or(0.0);

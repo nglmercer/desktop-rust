@@ -1,11 +1,9 @@
-import { readFile, stat } from 'fs/promises'
 import { extname } from 'path'
 
 import { Repository } from '../models/repository'
 import { Commit } from '../models/commit'
 import { getMergeBase } from './git/merge'
 import { getCommits } from './git/log'
-import { resolveWithin } from './path'
 import { backend, BackendError } from '../backend/client'
 import { withRepositoryGitOperation } from './git/repository-operation'
 
@@ -386,84 +384,76 @@ export async function buildConflictContext(
       files
         .slice(offset, offset + 4)
         .map(async (file): Promise<IFileConflictContext> => {
-          const native =
-            typeof window !== 'undefined' && backend().transportKind !== 'none'
           let conflictBasis: string | undefined
           let nativeContent: string | undefined
-          if (native) {
-            try {
-              const capture = async () => {
-                const limit =
-                  file.deletedSide === undefined
-                    ? MAX_CONFLICT_FILE_READ_SIZE
-                    : null
-                const before = await backend().repositoryCopilotConflictBasis(
-                  workingDirectory,
-                  file.path,
-                  limit,
-                  file.deletedSide !== undefined
-                )
-                if (file.deletedSide === undefined) {
-                  if (!before.ours || !before.theirs)
-                    throw new Error('Conflict sides changed')
-                } else if (
-                  before.ours !== (file.deletedSide !== 'ours') ||
-                  before.theirs !== (file.deletedSide !== 'theirs')
-                ) {
+          try {
+            const capture = async () => {
+              const limit =
+                file.deletedSide === undefined
+                  ? MAX_CONFLICT_FILE_READ_SIZE
+                  : null
+              const before = await backend().repositoryCopilotConflictBasis(
+                workingDirectory,
+                file.path,
+                limit,
+                file.deletedSide !== undefined
+              )
+              if (file.deletedSide === undefined) {
+                if (!before.ours || !before.theirs)
                   throw new Error('Conflict sides changed')
-                }
-                let bytes: Uint8Array | null = null
-                if (file.deletedSide === undefined) {
-                  if (before.sha256 === null)
-                    throw new Error('Conflict file changed')
-                  bytes = await backend().repositoryReadSnapshot(
-                    workingDirectory,
-                    'renderer_working_file',
-                    { path: file.path, max_bytes: MAX_CONFLICT_FILE_READ_SIZE },
-                    before.sha256
-                  )
-                  if (
-                    bytes === null ||
-                    bytes.byteLength > MAX_CONFLICT_FILE_READ_SIZE ||
-                    before.size !== bytes.byteLength
-                  )
-                    throw new Error('Conflict file changed')
-                }
-                const after = await backend().repositoryCopilotConflictBasis(
+              } else if (
+                before.ours !== (file.deletedSide !== 'ours') ||
+                before.theirs !== (file.deletedSide !== 'theirs')
+              ) {
+                throw new Error('Conflict sides changed')
+              }
+              let bytes: Uint8Array | null = null
+              if (file.deletedSide === undefined) {
+                if (before.sha256 === null)
+                  throw new Error('Conflict file changed')
+                bytes = await backend().repositoryReadSnapshot(
                   workingDirectory,
-                  file.path,
-                  limit,
-                  file.deletedSide !== undefined
+                  'renderer_working_file',
+                  { path: file.path, max_bytes: MAX_CONFLICT_FILE_READ_SIZE },
+                  before.sha256
                 )
-                if (before.basis !== after.basis)
-                  throw new Error('Conflict changed while reading')
-                return { basis: before.basis, bytes }
+                if (
+                  bytes === null ||
+                  bytes.byteLength > MAX_CONFLICT_FILE_READ_SIZE ||
+                  before.size !== bytes.byteLength
+                )
+                  throw new Error('Conflict file changed')
               }
-              const captured =
-                backend().transportKind === 'wry'
-                  ? await withRepositoryGitOperation(
-                      workingDirectory,
-                      'read',
-                      capture,
-                      true
-                    )
-                  : await capture()
-              conflictBasis = captured.basis
-              if (captured.bytes !== null)
-                nativeContent = new TextDecoder('utf-8', {
-                  ignoreBOM: true,
-                  fatal: true,
-                }).decode(captured.bytes)
-            } catch (error) {
-              return {
-                path: file.path,
-                hunks: [],
-                skippedReason:
-                  error instanceof BackendError &&
-                  error.code === 'file_too_large'
-                    ? 'File too large to resolve automatically'
-                    : 'Conflict changed or could not be read',
-              }
+              const after = await backend().repositoryCopilotConflictBasis(
+                workingDirectory,
+                file.path,
+                limit,
+                file.deletedSide !== undefined
+              )
+              if (before.basis !== after.basis)
+                throw new Error('Conflict changed while reading')
+              return { basis: before.basis, bytes }
+            }
+            const captured = await withRepositoryGitOperation(
+              workingDirectory,
+              'read',
+              capture,
+              true
+            )
+            conflictBasis = captured.basis
+            if (captured.bytes !== null)
+              nativeContent = new TextDecoder('utf-8', {
+                ignoreBOM: true,
+                fatal: true,
+              }).decode(captured.bytes)
+          } catch (error) {
+            return {
+              path: file.path,
+              hunks: [],
+              skippedReason:
+                error instanceof BackendError && error.code === 'file_too_large'
+                  ? 'File too large to resolve automatically'
+                  : 'Conflict changed or could not be read',
             }
           }
           // Delete-vs-modify conflicts have no text markers on disk. Include
@@ -478,59 +468,14 @@ export async function buildConflictContext(
             }
           }
 
-          let content: string
-          if (nativeContent !== undefined) {
-            content = nativeContent
-          } else {
-            // Guard against path traversal and symlink escapes (cross-platform)
-            let absolutePath: string | null
-            try {
-              absolutePath = await resolveWithin(workingDirectory, file.path)
-            } catch {
-              return {
-                path: file.path,
-                hunks: [],
-                skippedReason: 'File path could not be resolved safely',
-              }
-            }
-            if (absolutePath === null) {
-              return {
-                path: file.path,
-                hunks: [],
-                skippedReason: 'File path is outside the repository',
-              }
-            }
-
-            // Guard against reading pathologically large files into memory. This is
-            // a memory-safety bound only — resolvability is decided from the conflict
-            // hunks below, not the whole-file size.
-            try {
-              const fileStat = await stat(absolutePath)
-              if (fileStat.size > MAX_CONFLICT_FILE_READ_SIZE) {
-                return {
-                  path: file.path,
-                  hunks: [],
-                  skippedReason: 'File too large to resolve automatically',
-                }
-              }
-            } catch {
-              return {
-                path: file.path,
-                hunks: [],
-                skippedReason: 'File could not be read',
-              }
-            }
-
-            try {
-              content = await readFile(absolutePath, 'utf8')
-            } catch {
-              return {
-                path: file.path,
-                hunks: [],
-                skippedReason: 'File could not be read',
-              }
+          if (nativeContent === undefined) {
+            return {
+              path: file.path,
+              hunks: [],
+              skippedReason: 'Conflict changed or could not be read',
             }
           }
+          const content = nativeContent
 
           const hunks = extractConflictHunks(content)
           if (hunks.length === 0) {

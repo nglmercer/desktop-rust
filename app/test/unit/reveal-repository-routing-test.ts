@@ -3,16 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   transport: 'ws',
   reveal: vi.fn(),
-  showFolder: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
-    transportKind: mocks.transport,
     revealRegisteredRepository: mocks.reveal,
   }),
 }))
 vi.mock('../../src/ui/main-process-proxy', () => ({
-  showFolderContents: mocks.showFolder,
   showItemInFolder: vi.fn(),
   openExternal: vi.fn(),
   moveItemToTrash: vi.fn(),
@@ -28,7 +25,6 @@ import { RevealInFileManagerLabel } from '../../src/ui/lib/context-menu'
 describe('repository file manager routing', () => {
   afterEach(() => {
     vi.clearAllMocks()
-    mocks.transport = 'ws'
   })
 
   it('opens the requested repository without changing it during an async selection', async () => {
@@ -44,10 +40,8 @@ describe('repository file manager routing', () => {
       onError
     )
     expect(mocks.reveal).toHaveBeenCalledWith('/saved/other repository')
-    mocks.transport = 'wry'
     finish()
     await operation
-    expect(mocks.showFolder).not.toHaveBeenCalled()
     expect(onError).not.toHaveBeenCalled()
   })
 
@@ -109,16 +103,11 @@ describe('repository file manager routing', () => {
     expect(mocks.reveal).toHaveBeenCalledWith('/saved/context target')
   })
 
-  it.each(['wry', 'none'])(
-    'keeps the existing %s file manager route',
-    async transport => {
-      mocks.transport = transport
-      mocks.showFolder.mockResolvedValue(undefined)
-      const onError = vi.fn()
-      await showRepositoryInFileManager('/saved/repo', onError)
-      expect(mocks.showFolder).toHaveBeenCalledWith('/saved/repo')
-      expect(mocks.reveal).not.toHaveBeenCalled()
-      expect(onError).not.toHaveBeenCalled()
-    }
-  )
+  it('never falls back to generic folder opening', async () => {
+    mocks.reveal.mockResolvedValue(undefined)
+    const onError = vi.fn()
+    await showRepositoryInFileManager('/saved/repo', onError)
+    expect(mocks.reveal).toHaveBeenCalledWith('/saved/repo')
+    expect(onError).not.toHaveBeenCalled()
+  })
 })

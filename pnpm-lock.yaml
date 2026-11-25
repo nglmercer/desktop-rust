@@ -169,9 +169,6 @@ importers:
       '@types/semver':
         specifier: ^5.5.0
         version: 5.5.0
-      '@types/source-map-support':
-        specifier: ^0.5.2
-        version: 0.5.10
       '@types/split2':
         specifier: ^4.2.3
         version: 4.2.3
@@ -349,9 +346,6 @@ importers:
       react-virtualized:
         specifier: ^9.22.6
         version: 9.22.6(react-dom@16.14.0(react@16.14.0))(react@16.14.0)
-      source-map-support:
-        specifier: ^0.4.15
-        version: 0.4.18
       split2:
         specifier: ^4.2.0
         version: 4.2.0
@@ -1342,9 +1336,6 @@ packages:
 
   '@types/serve-static@1.15.10':
     resolution: {integrity: sha512-tRs1dB+g8Itk72rlSI2ZrW6vZg0YrLI81iQSTkMmOqnqCaNr/8Ek4VwWcN5vZgCYWbg/JJSGBlUaYGAOP73qBw==}
-
-  '@types/source-map-support@0.5.10':
-    resolution: {integrity: sha512-tgVP2H469x9zq34Z0m/fgPewGhg/MLClalNOiPIzQlXrSS2YrKu/xCdSCKnEDwkFha51VKEKB6A9wW26/ZNwzA==}
 
   '@types/split2@4.2.3':
     resolution: {integrity: sha512-59OXIlfUsi2k++H6CHgUQKEb2HKRokUA39HY1i1dS8/AIcqVjtAAFdf8u+HxTWK/4FUHMJQlKSZ4I6irCBJ1Zw==}
@@ -3187,13 +3178,6 @@ packages:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
 
-  source-map-support@0.4.18:
-    resolution: {integrity: sha512-try0/JqxPLF9nOjvSta7tVondkP5dwgyLDjVoyMDlmjugT2lRZ1OfsrYTkCd2hkDnJTKRbO/Rl3orm8vlsUzbA==}
-
-  source-map@0.5.7:
-    resolution: {integrity: sha512-LbrmJOMUSdEVxIKvdcJzQC+nQhe8FUZQTXQy6+I75skNgn3OoQ0DZA8YnFa7gp8tqtL3KPf1kmo0R5DoApeSGQ==}
-    engines: {node: '>=0.10.0'}
-
   source-map@0.6.1:
     resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
     engines: {node: '>=0.10.0'}
@@ -4367,10 +4351,6 @@ snapshots:
       '@types/http-errors': 2.0.5
       '@types/node': 22.10.9
       '@types/send': 0.17.6
-
-  '@types/source-map-support@0.5.10':
-    dependencies:
-      source-map: 0.6.1
 
   '@types/split2@4.2.3':
     dependencies:
@@ -6379,12 +6359,6 @@ snapshots:
   smol-toml@1.7.2: {}
 
   source-map-js@1.2.2: {}
-
-  source-map-support@0.4.18:
-    dependencies:
-      source-map: 0.5.7
-
-  source-map@0.5.7: {}
 
   source-map@0.6.1: {}
 

@@ -56,7 +56,6 @@ import { hasWritePermission } from '../../models/github-repository'
 import { hasConflictedFiles } from '../../lib/status'
 import { createObservableRef } from '../lib/observable-ref'
 import { Popup, PopupType } from '../../models/popup'
-import { EOL } from 'os'
 import { RepoRulesInfo } from '../../models/repo-rules'
 import { IAheadBehind } from '../../models/branch'
 import { StashDiffViewerId } from '../stashing'
@@ -627,7 +626,7 @@ export class FilterChangesList extends React.Component<
         const fullPaths = files.map(file =>
           Path.join(this.props.repository.path, file.path)
         )
-        writeClipboardText(fullPaths.join(EOL))
+        writeClipboardText(fullPaths.join(__WIN32__ ? '\r\n' : '\n'))
       },
     }
   }
@@ -639,7 +638,7 @@ export class FilterChangesList extends React.Component<
       label: CopySelectedRelativePathsLabel,
       action: () => {
         const paths = files.map(file => Path.normalize(file.path))
-        writeClipboardText(paths.join(EOL))
+        writeClipboardText(paths.join(__WIN32__ ? '\r\n' : '\n'))
       },
     }
   }

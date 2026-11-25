@@ -165,6 +165,7 @@ async fn run_clone_inner(
         checkpoint: None,
         clone_progress: true,
         emit_clone_progress,
+        extra_redactions: Vec::new(),
     });
     run_command_inner(
         path,
@@ -395,6 +396,7 @@ pub(crate) async fn run_commit_with_index(
                 checkpoint: Some(checkpoint.to_owned()),
                 clone_progress: false,
                 emit_clone_progress: false,
+                extra_redactions: Vec::new(),
             });
     let result = Box::pin(run_command_inner(
         path,
@@ -499,6 +501,52 @@ pub(crate) async fn run_bound_checkout(path: &Path, args: &[OsString]) -> Result
     run_command(path, bound_git_command(), args, None, 2 * 1024 * 1024, None).await
 }
 
+/// Values whose appearance in live or final diagnostics would expose proxy credentials.
+fn proxy_redactions(proxy: Option<&crate::RendererProxy>) -> Vec<Vec<u8>> {
+    let mut secrets = Vec::new();
+    for value in proxy
+        .into_iter()
+        .flat_map(|proxy| [&proxy.http, &proxy.https])
+        .flatten()
+    {
+        secrets.push(value.as_bytes().to_vec());
+        // cURL accepts credentials in the proxy authority. Redact both the exact
+        // userinfo and password forms because connection failures often quote only
+        // one of them rather than the complete proxy URL.
+        let without_scheme = value
+            .split_once("://")
+            .map_or(value.as_str(), |(_, rest)| rest);
+        let authority = without_scheme
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or_default();
+        if let Some((userinfo, _)) = authority.rsplit_once('@') {
+            secrets.push(userinfo.as_bytes().to_vec());
+            if let Some((_, password)) = userinfo.split_once(':') {
+                secrets.push(password.as_bytes().to_vec());
+            }
+        }
+    }
+    secrets.retain(|secret| !secret.is_empty());
+    secrets.sort();
+    secrets.dedup();
+    secrets
+}
+
+fn secrets_with_proxy(
+    secrets: Option<Vec<Vec<u8>>>,
+    extra_redactions: &[Vec<u8>],
+) -> Option<Vec<Vec<u8>>> {
+    secrets.map(|mut secrets| {
+        secrets.extend(extra_redactions.iter().cloned());
+        secrets
+    })
+}
+
+fn live_extra_redactions(live: Option<&LiveOutput>) -> &[Vec<u8>] {
+    live.map_or(&[], |live| live.extra_redactions.as_slice())
+}
+
 /// Keep credential-manager prompts suppressed for background fetches while
 /// allowing the normal interactive flow for user-initiated operations.
 pub(crate) async fn run_bound_remote_fetch(
@@ -507,9 +555,28 @@ pub(crate) async fn run_bound_remote_fetch(
     is_background_task: bool,
     report_progress: bool,
 ) -> Result<RawOutput> {
-    run_bound_remote_operation(path, args, is_background_task, report_progress, false, None)
-        .await
-        .map(|(output, _)| output)
+    run_bound_remote_fetch_with_proxy(path, args, is_background_task, report_progress, None).await
+}
+
+/// Run a remote fetch with proxy settings explicitly resolved by the host.
+pub(crate) async fn run_bound_remote_fetch_with_proxy(
+    path: &Path,
+    args: &[OsString],
+    is_background_task: bool,
+    report_progress: bool,
+    proxy: Option<&crate::RendererProxy>,
+) -> Result<RawOutput> {
+    run_bound_remote_operation(
+        path,
+        args,
+        is_background_task,
+        report_progress,
+        false,
+        None,
+        proxy,
+    )
+    .await
+    .map(|(output, _)| output)
 }
 
 /// Push uses the same bounded output and credential policy as fetch, but may
@@ -528,6 +595,7 @@ pub(crate) async fn run_bound_remote_push(
         report_progress,
         observe_hooks,
         hook_proxy,
+        None,
     )
     .await
 }
@@ -539,8 +607,18 @@ async fn run_bound_remote_operation(
     report_progress: bool,
     observe_hooks: bool,
     mut hook_proxy: Option<crate::hook_proxy::HookProxy>,
+    proxy: Option<&crate::RendererProxy>,
 ) -> Result<(RawOutput, bool)> {
+    let proxy_redactions = proxy_redactions(proxy);
     let mut command = bound_git_command();
+    if let Some(proxy) = proxy {
+        if let Some(value) = &proxy.http {
+            command.env("http_proxy", value);
+        }
+        if let Some(value) = &proxy.https {
+            command.env("https_proxy", value);
+        }
+    }
     #[cfg(unix)]
     let trace = if observe_hooks {
         let (sender, request_id) = crate::hook_progress::sender()
@@ -569,6 +647,7 @@ async fn run_bound_remote_operation(
             checkpoint: None,
             clone_progress: false,
             emit_clone_progress: false,
+            extra_redactions: proxy_redactions.clone(),
         })
     } else {
         None
@@ -624,7 +703,11 @@ async fn run_bound_remote_operation(
             _ = tick.tick(), if lfs.is_some() => {
                 if let Some(file) = &mut lfs {
                     let bytes = file.read_new().unwrap_or_default();
-                    emit(redactor.push(&bytes, crate::git_credentials::live_output_secrets(false).await));
+                    let secrets = secrets_with_proxy(
+                        crate::git_credentials::live_output_secrets(false).await,
+                        live_extra_redactions(live.as_ref()),
+                    );
+                    emit(redactor.push(&bytes, secrets));
                 }
             }
         }
@@ -635,18 +718,17 @@ async fn run_bound_remote_operation(
             if bytes.is_empty() {
                 break;
             }
-            emit(redactor.push(
-                &bytes,
+            let secrets = secrets_with_proxy(
                 crate::git_credentials::live_output_secrets(false).await,
-            ));
+                live_extra_redactions(live.as_ref()),
+            );
+            emit(redactor.push(&bytes, secrets));
         }
-        emit(
-            redactor.finish(
-                crate::git_credentials::live_output_secrets(true)
-                    .await
-                    .unwrap_or_default(),
-            ),
-        );
+        let mut secrets = crate::git_credentials::live_output_secrets(true)
+            .await
+            .unwrap_or_default();
+        secrets.extend(live_extra_redactions(live.as_ref()).iter().cloned());
+        emit(redactor.finish(secrets));
     }
     #[cfg(unix)]
     let hook_failed = if let Some(trace) = trace {
@@ -656,7 +738,13 @@ async fn run_bound_remote_operation(
     };
     #[cfg(not(unix))]
     let hook_failed = false;
-    result.map(|output| (output, hook_failed))
+    result.map(|mut output| {
+        for secret in &proxy_redactions {
+            output.stdout = crate::git_credentials::redact_literal(output.stdout, secret);
+            output.stderr = crate::git_credentials::redact_literal(output.stderr, secret);
+        }
+        (output, hook_failed)
+    })
 }
 
 /// Run a local tracking-branch fetch with bounded output and explicit stdin.
@@ -956,6 +1044,7 @@ struct LiveOutput {
     checkpoint: Option<String>,
     clone_progress: bool,
     emit_clone_progress: bool,
+    extra_redactions: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Copy)]
@@ -1242,14 +1331,25 @@ async fn read_output(
                     return Err(std::io::Error::other(format!("command output exceeds {limit} bytes; inspect state using the CLI")));
                 }
                 raw.extend_from_slice(&buffer[..count]);
-                emit(redactor.push(&buffer[..count], crate::git_credentials::live_output_secrets(false).await), &mut sent);
+                let secrets = secrets_with_proxy(
+                    crate::git_credentials::live_output_secrets(false).await,
+                    &live.extra_redactions,
+                );
+                emit(redactor.push(&buffer[..count], secrets), &mut sent);
             }
-            _ = tick.tick() => emit(redactor.push(&[], crate::git_credentials::live_output_secrets(false).await), &mut sent),
+            _ = tick.tick() => {
+                let secrets = secrets_with_proxy(
+                    crate::git_credentials::live_output_secrets(false).await,
+                    &live.extra_redactions,
+                );
+                emit(redactor.push(&[], secrets), &mut sent)
+            },
         }
     }
-    let secrets = crate::git_credentials::live_output_secrets(true)
+    let mut secrets = crate::git_credentials::live_output_secrets(true)
         .await
         .unwrap_or_default();
+    secrets.extend(live.extra_redactions.iter().cloned());
     emit(redactor.finish(secrets), &mut sent);
     Ok(raw)
 }
@@ -1478,6 +1578,7 @@ mod tests {
             checkpoint: None,
             clone_progress: true,
             emit_clone_progress: true,
+            extra_redactions: Vec::new(),
         };
         let (mut writer, reader) = tokio::io::duplex(8);
         let producer = tokio::spawn(async move {
@@ -1520,6 +1621,7 @@ mod tests {
             checkpoint: None,
             clone_progress: true,
             emit_clone_progress: true,
+            extra_redactions: Vec::new(),
         };
         let mut raw =
             b"fatal: https://user:SECRET@example.invalid/\nremote: Receiving objects: 25% SECRET\r"
@@ -1925,6 +2027,26 @@ mod tests {
             std::fs::read(&path).unwrap() == configuration.as_bytes(),
             "read-only token lookup rewrote the isolated gh configuration"
         );
+    }
+
+    #[test]
+    fn proxy_redactions_cover_full_userinfo_and_password_forms() {
+        let proxy = crate::RendererProxy {
+            http: Some("http://user:pass%40word@proxy.invalid:8080".into()),
+            https: Some("proxy-user:proxy-pass@proxy.invalid:8081".into()),
+        };
+        let secrets = proxy_redactions(Some(&proxy));
+        for expected in [
+            "http://user:pass%40word@proxy.invalid:8080",
+            "user:pass%40word",
+            "pass%40word",
+            "proxy-user:proxy-pass@proxy.invalid:8081",
+            "proxy-user:proxy-pass",
+            "proxy-pass",
+        ] {
+            assert!(secrets.iter().any(|secret| secret == expected.as_bytes()));
+        }
+        assert!(secrets.iter().all(|secret| !secret.is_empty()));
     }
 
     #[tokio::test]

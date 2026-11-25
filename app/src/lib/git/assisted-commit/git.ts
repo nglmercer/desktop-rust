@@ -36,6 +36,7 @@ import {
   IIndexState,
   ITreeEntry,
 } from './state'
+import { backend } from '../../../backend/client'
 
 export function removeGitLineEnding(output: string): string {
   return output.replace(/\r?\n$/, '')
@@ -63,70 +64,26 @@ async function optionalStat(path: string): Promise<Stats | null> {
   }
 }
 
+async function readHeadContext(repository: Repository): Promise<{
+  readonly ref: string | null
+  readonly sha: string | null
+  readonly gitDir: string
+}> {
+  const context = await backend().repositoryAssistedCommitHead(repository.path)
+  if (context.kind === 'invalid') {
+    throw new AssistedCommitError('unsafe-selection', context.message)
+  }
+  return {
+    ref: context.ref,
+    sha: context.sha,
+    gitDir: context.gitDir,
+  }
+}
+
 export async function readHead(
   repository: Repository
 ): Promise<IAssistedCommitHead> {
-  const directory = await git(
-    ['rev-parse', '--absolute-git-dir'],
-    repository.path,
-    'assistedCommitHeadDirectory'
-  )
-  const headState = await optionalStat(
-    join(removeGitLineEnding(directory.stdout), 'HEAD')
-  )
-  if (headState !== null && !headState.isFile()) {
-    throw new AssistedCommitError(
-      'unsafe-selection',
-      'Assisted commits require a regular HEAD file; symlink HEAD is not supported'
-    )
-  }
-  const symbolic = await git(
-    ['symbolic-ref', '--quiet', '--no-recurse', 'HEAD'],
-    repository.path,
-    'assistedCommitReadHead',
-    { successExitCodes: new Set([0, 1]) }
-  )
-  const ref =
-    symbolic.exitCode === 0 ? removeGitLineEnding(symbolic.stdout) : null
-  if (ref !== null) {
-    if (!ref.startsWith('refs/heads/')) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        'Assisted commits require a branch or a detached commit'
-      )
-    }
-    const alias = await git(
-      ['symbolic-ref', '--quiet', '--no-recurse', ref],
-      repository.path,
-      'assistedCommitReadBranch',
-      { successExitCodes: new Set([0, 1]) }
-    )
-    if (alias.exitCode === 0) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        'Assisted commits do not support symbolic branch aliases'
-      )
-    }
-  }
-  const tip = await git(
-    ['rev-parse', '--verify', '--quiet', '--end-of-options', 'HEAD^{commit}'],
-    repository.path,
-    'assistedCommitReadTip',
-    { successExitCodes: new Set([0, 1]) }
-  )
-  const sha = tip.exitCode === 0 ? removeGitLineEnding(tip.stdout) : null
-  if (sha !== null && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
-    throw new AssistedCommitError(
-      'unsafe-selection',
-      'HEAD is not a full object ID'
-    )
-  }
-  if (ref === null && sha === null) {
-    throw new AssistedCommitError(
-      'unsafe-selection',
-      'An unborn detached HEAD cannot be committed'
-    )
-  }
+  const { ref, sha } = await readHeadContext(repository)
   return Object.freeze({ ref, sha })
 }
 
@@ -173,17 +130,11 @@ export async function verifyHead(
   data: IAssistedCommitData,
   expectedTip: string | null
 ): Promise<void> {
-  const head = await readHead(data.repository)
+  const head = await readHeadContext(data.repository)
   const root = await realpath(data.repository.path)
-  const directory = await git(
-    ['rev-parse', '--absolute-git-dir'],
-    data.repository.path,
-    'assistedCommitVerifyRepository'
-  )
   if (
     root !== data.snapshot.repositoryPath ||
-    (await realpath(removeGitLineEnding(directory.stdout))) !==
-      data.gitDirectory ||
+    (await realpath(head.gitDir)) !== data.gitDirectory ||
     head.ref !== data.snapshot.originalHead.ref ||
     head.sha !== expectedTip
   ) {

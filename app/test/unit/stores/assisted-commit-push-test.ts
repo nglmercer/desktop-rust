@@ -57,7 +57,6 @@ import { DiffSelectionType } from '../../../src/models/diff'
 import { PopupType } from '../../../src/models/popup'
 import { assistedCommitErrorCauses } from '../../../src/lib/assisted-commit-run'
 import { Repository } from '../../../src/models/repository'
-import { getConfigValue } from '../../../src/lib/git/config'
 import { createTempDirectory } from '../../helpers/temp'
 import { AccountsStore } from '../../../src/lib/stores/accounts-store'
 import { promises as FileSystem } from 'fs'
@@ -1573,11 +1572,11 @@ describe('AppStore assisted push with real local remotes', () => {
     assert.ok(outcome.refreshError)
     assert.strictEqual(await remote.tip(), await tip(repository))
     assert.strictEqual(
-      await getConfigValue(repository, 'branch.master.remote'),
+      await rawGit(repository, ['config', '--get', 'branch.master.remote']),
       'origin'
     )
     assert.strictEqual(
-      await getConfigValue(repository, 'branch.master.merge'),
+      await rawGit(repository, ['config', '--get', 'branch.master.merge']),
       remote.remoteRef
     )
     const state = h.state(repository).changesState.assistedCommit

@@ -12,7 +12,6 @@ export const shell: IAppShell = {
     return unlink(path)
   },
   showItemInFolder: (path: string) => {},
-  showFolderContents: (path: string) => {},
   openExternal: (path: string) => {
     return Promise.resolve(true)
   },

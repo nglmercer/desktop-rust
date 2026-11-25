@@ -44,7 +44,6 @@ import {
   listWorktrees,
   IAddWorktreeOptions,
 } from '../../lib/git'
-import { isGitOnPath } from '../../lib/is-git-on-path'
 import {
   IOpenRepositoryFromURLAction,
   IUnknownAction,
@@ -1802,15 +1801,13 @@ export class Dispatcher {
     repository?: Repository
   ): Promise<void> {
     let gitFound = ignoreWarning
-    if (!gitFound && __LINUX__ && backend().transportKind !== 'none') {
+    if (!gitFound) {
       try {
         await backend().gitVersion()
         gitFound = true
       } catch {
         gitFound = false
       }
-    } else if (!gitFound) {
-      gitFound = await isGitOnPath()
     }
     if (gitFound || ignoreWarning) {
       await this.appStore._openShell(path, repository)
