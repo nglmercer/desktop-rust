@@ -1,5 +1,5 @@
 import type { IChildProcess } from '../process/child-process'
-import * as Fs from 'fs'
+import * as Fs from '../../web/fs'
 import * as Path from 'path'
 import byline from 'byline'
 
@@ -76,7 +76,7 @@ function createProgressProcessCallback(
         //  - rmdir can only be done when the directory is empty
         //  - we don't want to surface errors to the user if something goes
         //    wrong (these files can stay in TEMP and be cleaned up eventually)
-        Fs.unlink(lfsProgressPath, err => {
+        Fs.unlink(lfsProgressPath, (err: Error | null) => {
           if (err == null) {
             const directory = Path.dirname(lfsProgressPath)
             Fs.rmdir(directory, () => {})
