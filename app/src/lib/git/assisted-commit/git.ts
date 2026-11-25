@@ -438,21 +438,11 @@ export async function initializePrivateRepository(
     repository.path,
     'assistedCommitCaptureRefs'
   )
-  const objects = await git(
-    ['rev-parse', '--path-format=absolute', '--git-path', 'objects'],
-    repository.path,
-    'assistedCommitObjectDirectory'
-  )
-  const attributesPath = await git(
-    ['rev-parse', '--path-format=absolute', '--git-path', 'info/attributes'],
-    repository.path,
-    'assistedCommitAttributes'
-  )
+  const objects = await gitPath(repository, 'objects')
+  const attributesPath = await gitPath(repository, 'info/attributes')
   const hooksPath = await gitPath(repository, 'hooks')
   text += `[core]\n\thooksPath = "${quoteConfig(hooksPath)}"\n`
-  const attributes = await readOptionalFile(
-    removeGitLineEnding(attributesPath.stdout)
-  )
+  const attributes = await readOptionalFile(attributesPath)
   const shallow = await readOptionalFile(
     process.env.GIT_SHALLOW_FILE ?? (await gitPath(repository, 'shallow'))
   )
@@ -503,7 +493,7 @@ export async function initializePrivateRepository(
     GIT_COMMON_DIR: directory,
     GIT_WORK_TREE: root,
     GIT_INDEX_FILE: indexPath,
-    GIT_OBJECT_DIRECTORY: removeGitLineEnding(objects.stdout),
+    GIT_OBJECT_DIRECTORY: objects,
     GIT_CONFIG_GLOBAL: join(directory, 'empty-config'),
     GIT_CONFIG_SYSTEM: join(directory, 'empty-config'),
     GIT_CONFIG_NOSYSTEM: '1',
