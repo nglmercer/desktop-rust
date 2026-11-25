@@ -57,7 +57,7 @@ Measured on 2026-11-25 with `pnpm migration:status`:
 | Legacy Git runner calls (`await git(`) in `lib/git` | 18 in 8 files | 0 |
 | Renderer files importing `dugite` | 16 | 0 |
 | Renderer files importing `fs` | 15 | 0 (host operations only) |
-| Renderer files importing `child_process` | 7 | 0 |
+| Renderer files importing `child_process` | 6 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 406 | 0 |
 | Rust code (crates, non-test) | 91,114 lines | — |

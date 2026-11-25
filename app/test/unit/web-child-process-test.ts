@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'vitest'
 import assert from 'node:assert'
 import { once } from 'node:events'
-import { spawn } from '../../src/web/child_process'
+import { execFile, spawn } from '../../src/web/child_process'
 
 // The webview adapter, driven against a fake of the Rust side. The fake holds
 // one stdin block at a time and refuses the next with EBUSY until the test
@@ -179,6 +179,21 @@ describe('child_process stdin flow control', () => {
     )
   })
 
+  it('forwards a kill requested before Rust assigns the process id', async () => {
+    const child = spawn('cat', [], { stdio: ['pipe', 'pipe', 'pipe'] })
+    assert.strictEqual(child.kill('SIGKILL'), true)
+    await once(child, 'spawn')
+    await settle()
+    assert.ok(
+      fake.calls.some(
+        call =>
+          call.channel === 'desktop.io.process-kill' &&
+          call.options.signal === 'SIGKILL'
+      ),
+      'the pending kill is forwarded after spawn'
+    )
+  })
+
   it('ends input only after every accepted write, and reports finish', async () => {
     const child = spawn('cat', [], { stdio: ['pipe', 'pipe', 'pipe'] })
     await once(child, 'spawn')
@@ -273,5 +288,51 @@ describe('child_process output', () => {
     })
 
     assert.strictEqual(text.join(''), 'é')
+  })
+})
+
+describe('child_process execFile limits', () => {
+  beforeEach(() => {
+    fake.reset()
+  })
+
+  it('kills a child with the requested signal when the timeout expires', async () => {
+    const child = execFile(
+      'cat',
+      [],
+      { timeout: 1, killSignal: 'SIGKILL' },
+      () => {}
+    )
+    await once(child, 'spawn')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.ok(
+      fake.calls.some(
+        call =>
+          call.channel === 'desktop.io.process-kill' &&
+          call.options.signal === 'SIGKILL'
+      ),
+      'the timed-out child is killed'
+    )
+  })
+
+  it('fails and kills a child when output exceeds maxBuffer', async () => {
+    let failure: any
+    const child = execFile('cat', [], { maxBuffer: 3 }, error => {
+      failure = error
+    })
+    await once(child, 'spawn')
+    fake.emit({
+      id: 1,
+      event: 'data',
+      stream: 'stdout',
+      seq: 1,
+      data: Buffer.from('abcd').toString('base64'),
+    })
+    await settle()
+    assert.strictEqual(failure?.code, 'ENOBUFS')
+    assert.ok(
+      fake.calls.some(call => call.channel === 'desktop.io.process-kill'),
+      'the oversized-output child is killed'
+    )
   })
 })

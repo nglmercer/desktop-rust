@@ -89,6 +89,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | fallbacks shell de descubrimiento/alta/borrado/URL/HEAD de remotes | descubrimiento seguro y mutaciones revisadas Rust obligatorias; URLs ambiguas o con credenciales se rechazan explícitamente | `app/test/unit/rust-remote-presence-test.ts`, `app/test/unit/git/remote-discovery-test.ts`, `app/test/unit/git/remote-management-test.ts` |
 | imports renderer directos de `crypto` y `keytar` | boundary web explícita ya respaldada por Rust (`web/crypto`, `web/keytar`) | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
 | escritura directa de resoluciones Copilot mediante `writeFile` del renderer | contenido subido en chunks acotados de sesión y escrito bajo lease por operación confinada Rust `renderer_write_working_file`; staging posterior sigue bajo lease | `cargo test -p desktop-core write_working_file`, `cargo test -p desktop-app wry_resolution_preview_upload_and_read`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/stores/app-store-add-accounts-test.ts` |
+| wrapper compartido `exec-file` ejecutado directamente con `child_process` | ejecución a través del shim host `web/child_process`, con `timeout`, `maxBuffer`, señal de terminación y kills pendientes antes de asignar id | `app/test/unit/web-child-process-test.ts`, `app/test/unit/copilot-app-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

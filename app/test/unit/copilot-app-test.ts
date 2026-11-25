@@ -1,4 +1,5 @@
 import assert from 'node:assert'
+import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import { describe, it } from 'vitest'
 import { isAbsolute } from 'path'
 import {
@@ -17,6 +18,91 @@ import {
   getWindowsCopilotAppCandidates,
   ICopilotAppRegistry,
 } from '../../src/lib/copilot-app/win32'
+
+function installNodeBackedProcessBridge() {
+  const listeners = new Map<
+    string,
+    (event: unknown, message: Record<string, unknown>) => void
+  >()
+  const processes = new Map<number, ChildProcess>()
+  let nextId = 1
+  const emit = (message: Record<string, unknown>) => {
+    queueMicrotask(() => listeners.get('desktop-process')?.(null, message))
+  }
+  const bridge = {
+    invoke(channel: string, options: any): Promise<any> {
+      if (channel === 'desktop.io.process-spawn') {
+        const child = nodeSpawn(options.command, options.args ?? [], {
+          cwd: options.cwd,
+          env: Object.fromEntries(
+            Object.entries(options.env ?? process.env).map(([key, value]) => [
+              key,
+              value === null ? undefined : value,
+            ])
+          ) as NodeJS.ProcessEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }) as ChildProcess
+        const id = nextId++
+        processes.set(id, child)
+        for (const stream of ['stdout', 'stderr'] as const) {
+          let sequence = 0
+          child[stream]?.on('data', bytes => {
+            sequence += 1
+            emit({
+              id,
+              event: 'data',
+              stream,
+              seq: sequence,
+              data: bytes.toString('base64'),
+            })
+          })
+          child[stream]?.on('end', () => {
+            emit({ id, event: 'end', stream })
+          })
+        }
+        child.on('exit', (code, signal) => {
+          processes.delete(id)
+          emit({ id, event: 'exit', code, signal })
+        })
+        return new Promise((resolve, reject) => {
+          child.once('spawn', () =>
+            resolve({
+              id,
+              pid: child.pid,
+              limits: {
+                block: 64 * 1024,
+                inputBudget: 1024 * 1024 - 64 * 1024,
+                outputWindow: 256 * 1024,
+              },
+            })
+          )
+          child.once('error', reject)
+        })
+      }
+      if (channel === 'desktop.io.process-kill') {
+        const child = processes.get(options.id)
+        if (child !== undefined && !child.kill(options.signal)) {
+          return Promise.reject(new Error('process could not be killed'))
+        }
+        return Promise.resolve(null)
+      }
+      return Promise.resolve(null)
+    },
+    send(_channel: string, _options: unknown) {},
+    on(
+      channel: string,
+      listener: (event: unknown, message: Record<string, unknown>) => void
+    ) {
+      listeners.set(channel, listener)
+      return bridge
+    },
+    encodeBase64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
+    decodeBase64: (text: string) => new Uint8Array(Buffer.from(text, 'base64')),
+  }
+  ;(globalThis as any).__desktop = bridge
+}
+
+installNodeBackedProcessBridge()
 
 const macApp = '/Applications/GitHub Copilot.app'
 const macBinary = `${macApp}/Contents/MacOS/github`

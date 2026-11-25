@@ -364,6 +364,7 @@ export class ChildProcess extends EventEmitter {
   private id = -1
   private exited = false
   private openStreams = 0
+  private pendingKillSignal: string | null = null
 
   public constructor(stdio: StdioMode[]) {
     super()
@@ -384,6 +385,13 @@ export class ChildProcess extends EventEmitter {
     this.pid = pid
     this.stdin?.attach(id, limits)
     children.set(id, this)
+    if (this.pendingKillSignal !== null && !this.exited) {
+      const signal = this.pendingKillSignal
+      this.pendingKillSignal = null
+      bridge()
+        .invoke('desktop.io.process-kill', { id, signal })
+        .catch(() => {})
+    }
     for (const message of early.get(id) ?? []) {
       this.receive(message)
     }
@@ -441,10 +449,14 @@ export class ChildProcess extends EventEmitter {
   }
 
   public kill(signal: string = 'SIGTERM') {
-    if (this.exited || this.id < 0) {
+    if (this.exited) {
       return false
     }
     this.killed = true
+    if (this.id < 0) {
+      this.pendingKillSignal = signal
+      return true
+    }
     // Pending stdin is discarded; a producer waiting on drain gets the error.
     this.stdin?.fail(
       Object.assign(new Error('the process was killed'), { code: 'EPIPE' }),
@@ -566,14 +578,23 @@ export function execFile(
   })
   const stdout: string[] = []
   const stderr: string[] = []
-  child.stdout?.setEncoding('utf8')
-  child.stderr?.setEncoding('utf8')
-  child.stdout?.on('data', (chunk: string) => stdout.push(chunk))
-  child.stderr?.on('data', (chunk: string) => stderr.push(chunk))
+  let stdoutLength = 0
+  let stderrLength = 0
   let reported = false
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const maxBuffer =
+    typeof options?.maxBuffer === 'number' && options.maxBuffer >= 0
+      ? options.maxBuffer
+      : 1024 * 1024
+  const killSignal =
+    typeof options?.killSignal === 'string' ? options.killSignal : 'SIGTERM'
   const report = (error: any, code?: number | null) => {
     if (reported) return
     reported = true
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+      timeout = undefined
+    }
     const out = stdout.join('')
     const err = stderr.join('')
     if (callback === undefined) return
@@ -591,6 +612,42 @@ export function execFile(
     } else {
       callback(null, out, err)
     }
+  }
+  const exceedOutput = (stream: 'stdout' | 'stderr') => {
+    const error = Object.assign(new Error(`${stream} maxBuffer exceeded`), {
+      code: 'ENOBUFS',
+    })
+    report(error)
+    child.kill(killSignal)
+  }
+  child.stdout?.on('data', (chunk: string) => {
+    stdout.push(chunk)
+    stdoutLength += Buffer.byteLength(chunk, 'utf8')
+    if (stdoutLength > maxBuffer) {
+      exceedOutput('stdout')
+    }
+  })
+  child.stderr?.on('data', (chunk: string) => {
+    stderr.push(chunk)
+    stderrLength += Buffer.byteLength(chunk, 'utf8')
+    if (stderrLength > maxBuffer) {
+      exceedOutput('stderr')
+    }
+  })
+  if (
+    typeof options?.timeout === 'number' &&
+    Number.isFinite(options.timeout) &&
+    options.timeout > 0
+  ) {
+    timeout = setTimeout(() => {
+      const error = Object.assign(new Error('Command timed out'), {
+        code: 'ETIMEDOUT',
+        killed: true,
+        signal: killSignal,
+      })
+      report(error)
+      child.kill(killSignal)
+    }, options.timeout)
   }
   child.on('error', error => report(error))
   child.on('close', code => report(null, code))

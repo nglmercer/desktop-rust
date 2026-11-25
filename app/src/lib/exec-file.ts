@@ -1,4 +1,8 @@
-import { execFile as execFileOrig, type ExecFileOptions } from 'child_process'
+import { execFile as execFileOrig } from '../web/child_process'
+
+type ExecFileOptions = Record<string, unknown> & {
+  readonly encoding?: BufferEncoding
+}
 
 /**
  * A version of execFile which returns a Promise rather than the traditional
