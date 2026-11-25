@@ -99,6 +99,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | import directo `fs/promises` en descubrimiento de hooks | frontera explícita `web/fs-promises` con `readdir` tipado para Dirent | `app/test/unit/hooks-discovery-test.ts` |
 | `stream/promises.pipeline` como rechazo permanente en el shim web | promesas sobre el pipeline/finished Node-compatible usado por el bundle; necesario para stdin de hooks | `app/test/unit/web-stream-promises-test.ts` |
 | constructores vacíos `ReadStream`/`WriteStream` en el shim `stream` | eliminados por no tener consumidores; los streams de archivo viven en `web/fs` | `pnpm check:types`, `pnpm vite:build` |
+| shim `app/src/web/web-utils.ts` sin consumidores | eliminado junto a su alias Vite; archivos soltados usan `hostFiles.getPathForFile` del host bridge | `pnpm check:types`, `pnpm vite:build` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

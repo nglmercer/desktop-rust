@@ -622,10 +622,6 @@ export default defineConfig({
         replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts'),
       },
       {
-        find: /^web-utils$/,
-        replacement: path.resolve(__dirname, 'app/src/web/web-utils.ts'),
-      },
-      {
         find: /^child_process$/,
         replacement: path.resolve(__dirname, 'app/src/web/child_process.ts'),
       },
