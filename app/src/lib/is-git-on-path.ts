@@ -24,10 +24,3 @@ export const findGitOnPath = () =>
       log.warn(`Failed trying to find Git on PATH`, err)
       return undefined
     })
-
-/** Returns a value indicating whether Git was found in the system's PATH */
-export const isGitOnPath = async () =>
-  // Modern versions of macOS ship with a Git shim that guides you through
-  // the process of setting everything up. We trust this is available, so
-  // don't worry about looking for it here.
-  __DARWIN__ || (await findGitOnPath()) !== undefined
