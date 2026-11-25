@@ -5,7 +5,38 @@ const route = vi.hoisted(() => ({ kind: 'ws' }))
 const reservations = vi.hoisted(() => ({ active: [] as string[] }))
 const protections = vi.hoisted(() => vi.fn())
 vi.mock('../../src/backend/client', () => ({
-  backend: () => ({ request, transportKind: route.kind }),
+  backend: () => ({
+    request,
+    transportKind: route.kind,
+    listNativeCloneRecoveries: () =>
+      request(
+        route.kind === 'wry' ? 'git_info' : 'list_clone_recoveries',
+        route.kind === 'wry'
+          ? { operation: { type: 'list_clone_recoveries' } }
+          : { report_recovery_status: true }
+      ),
+    cloneSelectedRepository: (input: object, options: object) =>
+      request(
+        route.kind === 'wry' ? 'git_info' : 'clone_repository',
+        route.kind === 'wry'
+          ? { operation: { type: 'clone_selected', ...input } }
+          : {
+              ...input,
+              recursive: false,
+              report_progress: true,
+              report_retained_staging: true,
+            },
+        options
+      ),
+    recoverNativeClone: (id: string, options: object) =>
+      request(
+        route.kind === 'wry' ? 'git_info' : 'recover_clone',
+        route.kind === 'wry'
+          ? { operation: { type: 'recover_clone', recovery_id: id } }
+          : { recovery_id: id, report_retained_staging: true },
+        options
+      ),
+  }),
   BackendError: class BackendError extends Error {
     readonly code: string
     constructor(error: { code: string; message: string }) {

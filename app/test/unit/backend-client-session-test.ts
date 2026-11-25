@@ -302,6 +302,71 @@ describe('backend Copilot session cleanup', () => {
     })
   })
 
+  it('routes typed native clone operations through Wry and validates responses', async () => {
+    const id = '11111111-1111-1111-1111-111111111111'
+    const input = {
+      url: 'https://github.com/a/b',
+      path: '/repo',
+      account: { host: 'github.com', login: 'alice', id: 1 },
+      default_branch: 'main',
+    }
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({
+        kind: 'clone_completed_unselected',
+        record: { path: '/repo', ignored: true },
+        retained_staging: '/stage',
+      })
+      .mockResolvedValueOnce([
+        { id, destination: '/repo', stage: '/stage', recoverable: true },
+      ])
+      .mockResolvedValueOnce({ path: '/repo', retained_staging: '/stage' })
+      .mockResolvedValueOnce({})
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, send: vi.fn(), on: vi.fn() },
+    })
+    const client = new BackendClient()
+    await expect(client.cloneSelectedRepository(input)).resolves.toEqual({
+      kind: 'clone_completed_unselected',
+      record: { path: '/repo' },
+      retained_staging: '/stage',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(
+      1,
+      'desktop.backend.git_info',
+      expect.objectContaining({
+        operation: { type: 'clone_selected', ...input },
+        deadline_ms: 3_600_000,
+      })
+    )
+    await expect(client.listNativeCloneRecoveries()).resolves.toEqual([
+      { id, destination: '/repo', stage: '/stage', recoverable: true },
+    ])
+    expect(invoke).toHaveBeenNthCalledWith(
+      2,
+      'desktop.backend.git_info',
+      expect.objectContaining({
+        operation: { type: 'list_clone_recoveries' },
+      })
+    )
+    await expect(client.recoverNativeClone(id)).resolves.toEqual({
+      path: '/repo',
+      retained_staging: '/stage',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(
+      3,
+      'desktop.backend.git_info',
+      expect.objectContaining({
+        operation: { type: 'recover_clone', recovery_id: id },
+        deadline_ms: 3_600_000,
+      })
+    )
+    await expect(client.cloneSelectedRepository(input)).rejects.toMatchObject({
+      code: 'invalid_response',
+    })
+  })
+
   it('treats interrupted Wry clone and recovery mutations as non-retryable', async () => {
     const invoke = vi.fn().mockRejectedValue({
       code: 'cancelled',

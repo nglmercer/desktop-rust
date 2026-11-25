@@ -62,6 +62,42 @@ export type FetchProxy = {
   readonly https?: string
 }
 
+/** Account binding explicitly selected for one native clone. */
+export interface INativeCloneAccount {
+  readonly host: string
+  readonly login: string
+  readonly id: number
+}
+
+/** Parameters of an explicitly selected nonrecursive clone. */
+export interface INativeCloneRequest {
+  readonly url: string
+  readonly path: string
+  readonly account: INativeCloneAccount
+  readonly default_branch?: string
+}
+
+/** Recovery metadata safe for the clone recovery UI. */
+export interface INativeCloneRecoveryRecord {
+  readonly id: string
+  readonly destination: BackendGitPath
+  readonly stage: BackendGitPath
+  readonly recoverable: boolean
+}
+
+/** A finished selected clone whose repository remains deliberately unselected. */
+export interface INativeCloneCompletion {
+  readonly kind: 'clone_completed_unselected'
+  readonly record: { readonly path: BackendGitPath }
+  readonly retained_staging: BackendGitPath
+}
+
+/** A finished clone recovery whose staging directory is retained for cleanup. */
+export interface INativeCloneRecoveryResult {
+  readonly path: BackendGitPath
+  readonly retained_staging: BackendGitPath
+}
+
 /** Keep destination reservations until the host replies or settlement becomes uncertain. */
 const cloneCancellationGraceMs = 5_000
 
@@ -3171,6 +3207,122 @@ export class BackendClient {
       })
     }
     return value
+  }
+
+  /** List pending selected-clone recoveries without exposing credentials. */
+  async listNativeCloneRecoveries(): Promise<
+    ReadonlyArray<INativeCloneRecoveryRecord>
+  > {
+    const value =
+      this.transport === 'wry'
+        ? await this.request('git_info', {
+            operation: { type: 'list_clone_recoveries' },
+          })
+        : await this.request('list_clone_recoveries', {
+            report_recovery_status: true,
+          })
+    if (!Array.isArray(value) || value.length > 1024) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid clone recovery response',
+        retryable: false,
+      })
+    }
+    return value.map(record => {
+      if (
+        !isRecord(record) ||
+        typeof record.id !== 'string' ||
+        !/^[a-f0-9-]{36}$/.test(record.id) ||
+        !isBackendGitPath(record.destination) ||
+        !isBackendGitPath(record.stage) ||
+        typeof record.recoverable !== 'boolean'
+      ) {
+        throw new BackendError({
+          code: 'invalid_response',
+          message: 'Invalid clone recovery response',
+          retryable: false,
+        })
+      }
+      return {
+        id: record.id,
+        destination: record.destination,
+        stage: record.stage,
+        recoverable: record.recoverable,
+      }
+    })
+  }
+
+  /** Clone into an unselected destination with the explicitly selected account. */
+  async cloneSelectedRepository(
+    input: INativeCloneRequest,
+    options: BackendRequestOptions = {}
+  ): Promise<INativeCloneCompletion> {
+    const value =
+      this.transport === 'wry'
+        ? await this.request(
+            'git_info',
+            { operation: { type: 'clone_selected', ...input } },
+            options
+          )
+        : await this.request(
+            'clone_repository',
+            {
+              ...input,
+              recursive: false,
+              report_progress: true,
+              report_retained_staging: true,
+            },
+            options
+          )
+    if (
+      !isRecord(value) ||
+      value.kind !== 'clone_completed_unselected' ||
+      !isRecord(value.record) ||
+      !isBackendGitPath(value.record.path) ||
+      !isBackendGitPath(value.retained_staging)
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid clone completion response',
+        retryable: false,
+      })
+    }
+    return {
+      kind: 'clone_completed_unselected',
+      record: { path: value.record.path },
+      retained_staging: value.retained_staging,
+    }
+  }
+
+  /** Recover a ready selected clone while retaining its staging path. */
+  async recoverNativeClone(
+    recoveryId: string,
+    options: BackendRequestOptions = {}
+  ): Promise<INativeCloneRecoveryResult> {
+    const value =
+      this.transport === 'wry'
+        ? await this.request(
+            'git_info',
+            { operation: { type: 'recover_clone', recovery_id: recoveryId } },
+            options
+          )
+        : await this.request(
+            'recover_clone',
+            { recovery_id: recoveryId, report_retained_staging: true },
+            options
+          )
+    if (
+      !isRecord(value) ||
+      !isBackendGitPath(value.path) ||
+      !isBackendGitPath(value.retained_staging)
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid clone recovery completion response',
+        retryable: false,
+      })
+    }
+    return { path: value.path, retained_staging: value.retained_staging }
   }
 
   /** Resolve an existing path or a prospective destination through Rust. */

@@ -52,27 +52,16 @@ export interface INativeCloneRecovery {
 export async function listNativeCloneRecoveries(): Promise<
   ReadonlyArray<INativeCloneRecovery>
 > {
-  const client = backend()
-  const result =
-    client.transportKind === 'wry'
-      ? await client.request('git_info', {
-          operation: { type: 'list_clone_recoveries' },
-        })
-      : await client.request('list_clone_recoveries', {
-          report_recovery_status: true,
-        })
-  if (!Array.isArray(result)) {
-    throw new Error('Unable to read clone recovery history.')
-  }
-  return result.map(record => {
-    if (
-      !isRecord(record) ||
-      typeof record.id !== 'string' ||
-      !/^[a-f0-9-]{36}$/.test(record.id) ||
-      typeof record.recoverable !== 'boolean'
-    ) {
+  let result
+  try {
+    result = await backend().listNativeCloneRecoveries()
+  } catch (error) {
+    if (error instanceof BackendError && error.code === 'invalid_response') {
       throw new Error('Unable to read clone recovery history.')
     }
+    throw error
+  }
+  return result.map(record => {
     const destination = displayPath(record.destination)
     if (destination === null) {
       throw new Error('Unable to read clone recovery history.')
@@ -178,17 +167,9 @@ async function nativeCloneReserved(
     account,
     default_branch: defaultBranch,
   }
-  const result = await client.request(
-    client.transportKind === 'wry' ? 'git_info' : 'clone_repository',
-    client.transportKind === 'wry'
-      ? { operation: { type: 'clone_selected', ...options } }
-      : {
-          ...options,
-          recursive: false,
-          report_progress: true,
-          report_retained_staging: true,
-        },
-    {
+  let result
+  try {
+    result = await client.cloneSelectedRepository(options, {
       deadlineMs: 3_600_000,
       onProgress: chunk => {
         const text = nativeCloneProgress(chunk)
@@ -196,16 +177,14 @@ async function nativeCloneReserved(
           onProgress(text)
         }
       },
+    })
+  } catch (error) {
+    if (error instanceof BackendError && error.code === 'invalid_response') {
+      throw new Error(
+        'Clone may have completed; inspect the destination before retrying.'
+      )
     }
-  )
-  if (
-    !isRecord(result) ||
-    result.kind !== 'clone_completed_unselected' ||
-    !isRecord(result.record)
-  ) {
-    throw new Error(
-      'Clone may have completed; inspect the destination before retrying.'
-    )
+    throw error
   }
   const savedPath = displayPath(result.record.path)
   const staging = displayPath(result.retained_staging)
@@ -243,17 +222,16 @@ async function recoverNativeCloneReserved(
   id: string
 ): Promise<{ readonly path: string; readonly staging: string }> {
   const client = backend()
-  const result = await client.request(
-    client.transportKind === 'wry' ? 'git_info' : 'recover_clone',
-    client.transportKind === 'wry'
-      ? { operation: { type: 'recover_clone', recovery_id: id } }
-      : { recovery_id: id, report_retained_staging: true },
-    { deadlineMs: 3_600_000 }
-  )
-  if (!isRecord(result)) {
-    throw new Error(
-      'Recovery may have completed; inspect the destination before retrying.'
-    )
+  let result
+  try {
+    result = await client.recoverNativeClone(id, { deadlineMs: 3_600_000 })
+  } catch (error) {
+    if (error instanceof BackendError && error.code === 'invalid_response') {
+      throw new Error(
+        'Recovery may have completed; inspect the destination before retrying.'
+      )
+    }
+    throw error
   }
   const path = displayPath(result.path)
   const staging = displayPath(result.retained_staging)
