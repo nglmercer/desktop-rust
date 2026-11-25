@@ -1,7 +1,8 @@
 import { parseCommandLineArgv } from 'windows-argv-parser'
 import stringArgv from 'string-argv'
-import { spawn, SpawnOptions } from 'child_process'
+import { spawn, type ISpawnOptions } from '../web/child_process'
 import { backend } from '../backend/client'
+import type { IChildProcess } from './process/child-process'
 
 /**
  * File extensions that can be invoked directly by `spawn` on Windows. Other
@@ -189,5 +190,10 @@ export function migratedCustomIntegration(
 export const spawnCustomIntegration = (
   cmd: string,
   args: readonly string[],
-  opts?: SpawnOptions
-) => spawn(cmd, args, { stdio: 'ignore', detached: true, ...opts })
+  opts?: Pick<ISpawnOptions, 'cwd' | 'env'>
+): IChildProcess =>
+  spawn(cmd, args, {
+    stdio: 'ignore',
+    detached: true,
+    ...opts,
+  }) as unknown as IChildProcess

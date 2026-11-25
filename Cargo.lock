@@ -782,6 +782,7 @@ name = "desktop-shell-core-legacy"
 version = "0.1.0"
 dependencies = [
  "http",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",

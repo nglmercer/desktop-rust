@@ -10,6 +10,7 @@ vi.mock('../../src/backend/client', () => ({ backend: () => client }))
 import {
   parseCustomIntegrationArgumentsForInput,
   parseCustomIntegrationArgumentsForRuntime,
+  spawnCustomIntegration,
   validateCustomIntegrationPath,
 } from '../../src/lib/custom-integration'
 
@@ -53,5 +54,43 @@ describe('native custom integration settings', () => {
     expect(client.validateCustomIntegrationPath).toHaveBeenCalledWith(
       '/path/app'
     )
+  })
+
+  it('launches custom integrations through the host process bridge', () => {
+    const calls: Array<{ channel: string; options: any }> = []
+    vi.stubGlobal('__desktop', {
+      invoke: vi.fn((channel: string, options: any) => {
+        calls.push({ channel, options })
+        return Promise.resolve({ id: 1, pid: 1001 })
+      }),
+      send: vi.fn(),
+      on: vi.fn(),
+      encodeBase64: (bytes: Uint8Array) =>
+        Buffer.from(bytes).toString('base64'),
+      decodeBase64: (text: string) =>
+        new Uint8Array(Buffer.from(text, 'base64')),
+    })
+
+    const child = spawnCustomIntegration(
+      '/opt/custom/editor',
+      ['/repository'],
+      { cwd: '/repository' }
+    )
+
+    expect(child.stdout).toBeNull()
+    expect(child.stderr).toBeNull()
+    expect(calls).toEqual([
+      {
+        channel: 'desktop.io.process-spawn',
+        options: {
+          command: '/opt/custom/editor',
+          args: ['/repository'],
+          cwd: '/repository',
+          env: undefined,
+          stdio: ['ignore', 'ignore', 'ignore'],
+          detached: true,
+        },
+      },
+    ])
   })
 })

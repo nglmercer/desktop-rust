@@ -3,6 +3,7 @@ import { assertNever } from '../fatal-error'
 import appPath from 'app-path'
 import { parseEnumValue } from '../enum'
 import type { FoundShell } from './shared'
+import type { IChildProcess } from '../process/child-process'
 import {
   expandTargetPathArgument,
   type ICustomIntegration,
@@ -209,7 +210,7 @@ export function launch(
 export function launchCustomShell(
   customShell: ICustomIntegration,
   path: string
-): ChildProcess {
+): IChildProcess {
   const argv = parseCustomIntegrationArguments(customShell.arguments)
   const args = expandTargetPathArgument(argv, path)
 

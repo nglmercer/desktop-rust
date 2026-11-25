@@ -523,6 +523,7 @@ export function spawn(
       cwd: options.cwd,
       env,
       stdio: modes,
+      detached: options.detached === true,
     })
     .then(
       ({

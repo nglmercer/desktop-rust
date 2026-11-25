@@ -90,6 +90,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | imports renderer directos de `crypto` y `keytar` | boundary web explícita ya respaldada por Rust (`web/crypto`, `web/keytar`) | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
 | escritura directa de resoluciones Copilot mediante `writeFile` del renderer | contenido subido en chunks acotados de sesión y escrito bajo lease por operación confinada Rust `renderer_write_working_file`; staging posterior sigue bajo lease | `cargo test -p desktop-core write_working_file`, `cargo test -p desktop-app wry_resolution_preview_upload_and_read`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/stores/app-store-add-accounts-test.ts` |
 | wrapper compartido `exec-file` ejecutado directamente con `child_process` | ejecución a través del shim host `web/child_process`, con `timeout`, `maxBuffer`, señal de terminación y kills pendientes antes de asignar id | `app/test/unit/web-child-process-test.ts`, `app/test/unit/copilot-app-test.ts` |
+| lanzamiento de integraciones personalizadas importando directamente `child_process` | spawn host-backed `web/child_process` con stdio ignorado; el host preserva procesos detached en sesión propia y fuera del apagado del renderer, y la interfaz de shells consume la abstracción estructural `IChildProcess` | `app/test/unit/native-custom-integration-test.ts`, `cargo test -p desktop-shell-core-legacy io::process::tests` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -118,7 +119,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 16 imports `dugite`, 15 imports `fs`,
+`transportKind`, 18 llamadas legacy Git, 16 imports `dugite`, 15 imports `fs`, 5 imports `child_process`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

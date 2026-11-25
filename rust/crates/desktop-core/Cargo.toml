@@ -26,5 +26,8 @@ uuid.workspace = true
 sha1 = "0.10.7"
 sha2 = "0.10.9"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 serde_json.workspace = true

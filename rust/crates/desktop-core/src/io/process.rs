@@ -297,6 +297,8 @@ struct Entry {
     input: Arc<InputGate>,
     child: Arc<Mutex<Child>>,
     outputs: [Arc<OutputGate>; 2],
+    /// Detached integration processes are not stopped when the renderer shuts down.
+    detached: bool,
     /// The process-slot budget of the application that spawned the child.
     owner: Arc<ByteBudget>,
 }
@@ -372,6 +374,7 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
         .ok_or_else(|| busy("too many persistent processes are running"))?;
 
     let command = resolve_command(app, &string(o, "command")?)?;
+    let detached = o.get("detached").and_then(Value::as_bool).unwrap_or(false);
     let args: Vec<String> = o
         .get("args")
         .and_then(Value::as_array)
@@ -427,11 +430,29 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
             Stdio::null()
         });
 
+    #[cfg(unix)]
+    if detached {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            child_command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        child_command.creation_flags(CREATE_NO_WINDOW);
+        child_command.creation_flags(if detached {
+            DETACHED_PROCESS
+        } else {
+            CREATE_NO_WINDOW
+        });
     }
 
     let mut child = child_command.spawn().map_err(|error| {
@@ -521,6 +542,7 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
             input: input.clone(),
             child: child.clone(),
             outputs,
+            detached,
             owner: app.resources.process_slots.clone(),
         },
     );
@@ -702,8 +724,8 @@ pub fn kill(app: &DesktopApp, o: &Value) -> Result<Value> {
     Ok(json!(child.kill().is_ok()))
 }
 
-/// Renderer shutdown: stop every child and unblock every stream waiting for
-/// credit, so no reader or writer outlives the window that owned it.
+/// Renderer shutdown: stop every non-detached child and unblock every stream
+/// waiting for credit, so no renderer-owned reader or writer outlives its window.
 pub fn shutdown(app: &DesktopApp) {
     // Only this application's children: the registry is shared by every
     // application in the process (tests included).
@@ -711,7 +733,9 @@ pub fn shutdown(app: &DesktopApp) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
-        .filter(|(_, entry)| Arc::ptr_eq(&entry.owner, &app.resources.process_slots))
+        .filter(|(_, entry)| {
+            Arc::ptr_eq(&entry.owner, &app.resources.process_slots) && !entry.detached
+        })
         .map(|(id, entry)| {
             (
                 *id,
@@ -1052,6 +1076,41 @@ mod tests {
             id,
             Instant::now() + Duration::from_secs(10),
             "shutdown",
+        );
+    }
+
+    #[test]
+    fn detached_children_enter_a_new_session_and_survive_shutdown() {
+        let recorder = Arc::new(Recorder::default());
+        let app = app(&recorder);
+        let spawned = spawn(
+            &app,
+            &json!({
+                "command": "sleep",
+                "args": ["30"],
+                "stdio": ["ignore", "ignore", "ignore"],
+                "detached": true,
+            }),
+        )
+        .unwrap();
+        let id = spawned["id"].as_u64().unwrap();
+        let pid = spawned["pid"].as_u64().unwrap() as libc::pid_t;
+
+        assert_eq!(unsafe { libc::getsid(pid) }, pid);
+        shutdown(&app);
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(
+            !exit_seen(&recorder, id),
+            "renderer shutdown must not stop a detached integration"
+        );
+        assert_eq!(unsafe { libc::kill(pid, 0) }, 0);
+
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0);
+        wait_for(
+            &recorder,
+            id,
+            Instant::now() + Duration::from_secs(10),
+            "detached child cleanup",
         );
     }
 
