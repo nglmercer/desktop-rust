@@ -3719,37 +3719,6 @@ export class BackendClient {
     return value
   }
 
-  async repositoryLargeFiles(
-    repositoryPath: string,
-    paths: ReadonlyArray<string>
-  ): Promise<ReadonlyArray<boolean>> {
-    if (
-      paths.length > 1000 ||
-      new TextEncoder().encode(JSON.stringify({ paths })).length > 60_000
-    )
-      throw new BackendError({
-        code: 'invalid_request',
-        message: 'File-size review exceeds the request limit',
-        retryable: false,
-      })
-    const value = await this.repositoryRead(
-      repositoryPath,
-      'renderer_large_files',
-      { paths }
-    )
-    if (
-      !Array.isArray(value) ||
-      value.length !== paths.length ||
-      !value.every(entry => typeof entry === 'boolean')
-    )
-      throw new BackendError({
-        code: 'invalid_response',
-        message: 'Invalid file-size review response',
-        retryable: false,
-      })
-    return value
-  }
-
   async repositoryRendererCommitChanges(
     repositoryPath: string,
     revision: string

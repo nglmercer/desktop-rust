@@ -3704,33 +3704,6 @@ describe('backend Copilot session cleanup', () => {
     expect(legacyGit).not.toHaveBeenCalled()
   })
 
-  it('validates selected-file size review responses', async () => {
-    const invoke = vi.fn(async (): Promise<unknown> => [false, true])
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
-    const client = new BackendClient()
-    await expect(
-      client.repositoryLargeFiles('/repo', ['small', 'large'])
-    ).resolves.toEqual([false, true])
-    expect(invoke).toHaveBeenCalledWith(
-      'desktop.backend.read',
-      expect.objectContaining({
-        method: 'renderer_large_files',
-        paths: ['small', 'large'],
-      })
-    )
-    invoke.mockResolvedValueOnce([true])
-    await expect(
-      client.repositoryLargeFiles('/repo', ['small', 'large'])
-    ).rejects.toMatchObject({ code: 'invalid_response' })
-    invoke.mockResolvedValueOnce([false, 'true'])
-    await expect(
-      client.repositoryLargeFiles('/repo', ['small', 'large'])
-    ).rejects.toMatchObject({ code: 'invalid_response' })
-  })
-
   it('routes trailer requests and rejects malformed output', async () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => 'Summary\n\nReviewed-by: Test\n'

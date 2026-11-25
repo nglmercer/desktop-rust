@@ -377,7 +377,6 @@ enum ReadMethod {
     RendererStashLog,
     RendererTagRefs,
     RendererCommitChanges,
-    RendererLargeFiles,
     RefLockContext,
     AssistedCommitHead,
     Worktrees,
@@ -1264,13 +1263,9 @@ impl Backend {
                 "boolean parsing only applies to Git setting reads".into(),
             ));
         }
-        if !matches!(
-            &request.method,
-            ReadMethod::LfsFileTracking | ReadMethod::RendererLargeFiles
-        ) && request.paths.is_some()
-        {
+        if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
             return Err(AppError::BadArgs(
-                "paths only apply to file-tracking or size reads".into(),
+                "paths only apply to file-tracking reads".into(),
             ));
         }
         if !matches!(&request.method, ReadMethod::SubmoduleDisplayUrl)
@@ -1509,18 +1504,6 @@ impl Backend {
                         revision: request
                             .commitish
                             .ok_or_else(|| AppError::BadArgs("commitish is required".into()))?,
-                    }
-                }
-                ReadMethod::RendererLargeFiles
-                    if request.include_untracked.is_none()
-                        && request.prefixes.is_none()
-                        && request.branch.is_none()
-                        && request.commitish.is_none() =>
-                {
-                    Operation::RendererLargeFiles {
-                        paths: request
-                            .paths
-                            .ok_or_else(|| AppError::BadArgs("paths are required".into()))?,
                     }
                 }
                 ReadMethod::RefLockContext
@@ -4863,12 +4846,6 @@ esac
         assert!(changes.as_str().is_some_and(|value| value.contains("file")));
         let diff = backend.read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_commit_diff","revision":"HEAD","path":"file","old_path":null,"hide_whitespace":false}}})]).unwrap()).unwrap();
         assert!(diff.as_str().is_some_and(|value| !value.is_empty()));
-        fs::File::create(root.join("large"))
-            .unwrap()
-            .set_len(100 * 1024 * 1024 + 1)
-            .unwrap();
-        assert_eq!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_large_files","paths":["file","large","missing"]})]).unwrap(), json!([false,true,false]));
-        assert!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_large_files","paths":["../outside"]})]).is_err());
         assert!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_commit_changes","commitish":"missing"})]).is_err());
         assert_eq!(backend.read_args(vec![json!({"repository_path":root,"method":"renderer_history","commitish":"missing"})]).unwrap(), Value::Null);
         assert!(

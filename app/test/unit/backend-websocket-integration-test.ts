@@ -2861,41 +2861,6 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         client.repositoryCherryPickState(firstRepository)
       ).resolves.toEqual({ head: 'a'.repeat(40), sequence: null })
       await unlink(path.join(firstRepository, '.git', 'CHERRY_PICK_HEAD'))
-      const largeFixture = await open(
-        path.join(firstRepository, 'oversized'),
-        'w'
-      )
-      await largeFixture.truncate(100 * 1024 * 1024 + 1)
-      await largeFixture.close()
-      const boundaryFixture = await open(
-        path.join(firstRepository, 'boundary'),
-        'w'
-      )
-      await boundaryFixture.truncate(100 * 1024 * 1024)
-      await boundaryFixture.close()
-      await symlink('oversized', path.join(firstRepository, 'large-link'))
-      await expect(
-        client.repositoryLargeFiles(firstRepository, [
-          'oversized',
-          'boundary',
-          'large-link',
-          'missing',
-        ])
-      ).resolves.toEqual([true, false, false, false])
-      await expect(
-        client.repositoryLargeFiles(firstRepository, ['../outside'])
-      ).rejects.toThrow()
-      const outsideSize = path.join(directory, 'outside-size')
-      await mkdir(outsideSize)
-      await writeFile(path.join(outsideSize, 'file'), 'private')
-      await symlink(outsideSize, path.join(firstRepository, 'size-escape'))
-      await expect(
-        client.repositoryLargeFiles(firstRepository, ['size-escape/file'])
-      ).rejects.toThrow()
-      await unlink(path.join(firstRepository, 'size-escape'))
-      await unlink(path.join(firstRepository, 'oversized'))
-      await unlink(path.join(firstRepository, 'boundary'))
-      await unlink(path.join(firstRepository, 'large-link'))
       await expect(
         client.repositoryRendererTagRefs(firstRepository)
       ).resolves.toBe('')

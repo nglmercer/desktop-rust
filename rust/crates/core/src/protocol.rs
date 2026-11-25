@@ -437,9 +437,6 @@ pub enum Operation {
     RendererCommitChanges {
         revision: String,
     },
-    RendererLargeFiles {
-        paths: Vec<GitPath>,
-    },
     RefLockContext {
         reference: String,
         expected_value: String,

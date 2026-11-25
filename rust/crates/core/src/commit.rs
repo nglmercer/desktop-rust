@@ -745,41 +745,6 @@ impl Repository {
         )?;
         Ok(json!(String::from_utf8_lossy(&output.stdout)))
     }
-    /// Inspect selected worktree entries without following a file symlink out
-    /// of the repository. Git stores the link itself, not its target.
-    pub(crate) async fn renderer_large_files(&self, paths: Vec<GitPath>) -> Result<Value> {
-        anyhow::ensure!(paths.len() <= 1000, "too many paths for file-size review");
-        let paths = paths
-            .into_iter()
-            .map(validate_path)
-            .collect::<Result<Vec<_>>>()?;
-        anyhow::ensure!(
-            paths
-                .iter()
-                .map(|path| path.as_encoded_bytes().len())
-                .sum::<usize>()
-                <= 60_000,
-            "file-size review paths exceed the request limit"
-        );
-        let root = self.path.clone();
-        let large = cancellation::blocking(move || {
-            let directory = cap_std::fs::Dir::open_ambient_dir(root, cap_std::ambient_authority())?;
-            let mut large = Vec::with_capacity(paths.len());
-            for path in paths {
-                cancellation::Cancellation::current().check()?;
-                match directory.symlink_metadata(path) {
-                    Ok(metadata) => {
-                        large.push(metadata.is_file() && metadata.len() > LARGE_BLOB_LIMIT)
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => large.push(false),
-                    Err(error) => return Err(error.into()),
-                }
-            }
-            Ok(large)
-        })
-        .await?;
-        Ok(json!(large))
-    }
 }
 #[derive(Serialize)]
 pub(crate) struct LargeFile {

@@ -579,9 +579,6 @@ impl Repository {
             Operation::RendererCommitChanges { revision } => {
                 return self.renderer_commit_changes(&revision).await;
             }
-            Operation::RendererLargeFiles { paths } => {
-                return self.renderer_large_files(paths).await;
-            }
             Operation::RefLockContext {
                 reference,
                 expected_value,
@@ -1401,7 +1398,6 @@ impl Repository {
             | RendererStashLog
             | RendererTagRefs
             | RendererCommitChanges { .. }
-            | RendererLargeFiles { .. }
             | RefLockContext { .. }
             | AssistedCommitHead
             | MergeBase { .. }
