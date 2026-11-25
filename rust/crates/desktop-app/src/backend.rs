@@ -382,6 +382,7 @@ enum ReadMethod {
     RefLockContext,
     AssistedCommitHead,
     AssistedCommitSafety,
+    AssistedCommitConfig,
     AssistedCommitRefs,
     AssistedCommitIndexEntries,
     AssistedCommitGitPath,
@@ -1562,6 +1563,17 @@ impl Backend {
                 {
                     Operation::AssistedCommitSafety
                 }
+                ReadMethod::AssistedCommitConfig
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.paths.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitConfig
+                }
                 ReadMethod::AssistedCommitRefs
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()
@@ -2584,6 +2596,14 @@ mod tests {
                     .unwrap();
                 assert!(refs["refs"].as_array().unwrap().iter().any(|reference| {
                     reference["object_id"] == head && reference["name"] == "refs/heads/main"
+                }));
+                let config = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_config"}),
+                    ])
+                    .unwrap();
+                assert!(config["entries"].as_array().unwrap().iter().any(|entry| {
+                    entry["section"] == "user" && entry["name"] == "email"
                 }));
                 let index = backend
                     .read_args(vec![

@@ -73,7 +73,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | lecturas `rev-parse` del contexto de locks padre HEAD/ref (`format`, rutas Git y valor esperado) | operación tipada Rust `ref_lock_context`; el valor se vuelve a validar después de adquirir los locks | `cargo test -p desktop-core ref_lock`, `cargo test -p desktop-app wry_ref_lock_context`, `app/test/unit/backend-websocket-test.ts` |
 | fallback genérico de apertura de carpetas para repositorios guardados | operación confinada `reveal_repository`/`reveal_registered_repository` en WebSocket y Tao/Wry, sin IPC genérico ni apertura de paquetes ejecutables | `app/test/unit/reveal-repository-client-test.ts`, `app/test/unit/reveal-repository-routing-test.ts`, `cargo test -p desktop-app wry_reveal_repository` |
 | parche renderer de entorno de shell en macOS (`shell.ts`) | eliminado: mutar el shim `process.env` del webview no afecta al host Rust ni a procesos Git reales | `pnpm check:types`, `pnpm vite:build` |
-| lecturas renderer de HEAD, rama, tip, Git dir, raíz de worktree, formato de refs, resolución confinada de rutas Git, captura de entradas del índice, captura estructurada de refs y comprobación de operaciones/conflictos para assisted-commit | operaciones tipadas Rust `assisted_commit_head`/`assisted_commit_safety`/`assisted_commit_git_path`/`assisted_commit_index_entries`/`assisted_commit_refs`, con estados inseguros o bytes del índice devueltos como datos validados | `cargo test -p desktop-core assisted_head`, `cargo test -p desktop-app wry_assisted_commit_head`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/git/assisted-commit-test.ts` |
+| lecturas renderer de HEAD, rama, tip, Git dir, raíz de worktree, formato de refs, resolución confinada de rutas Git, captura de entradas del índice, captura estructurada de configuración/refs y comprobación de operaciones/conflictos para assisted-commit | operaciones tipadas Rust `assisted_commit_head`/`assisted_commit_safety`/`assisted_commit_git_path`/`assisted_commit_index_entries`/`assisted_commit_refs`/`assisted_commit_config`, con estados inseguros o bytes del índice devueltos como datos validados | `cargo test -p desktop-core assisted_head`, `cargo test -p desktop-app wry_assisted_commit_head`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/git/assisted-commit-test.ts` |
 | comprobación renderer `which`/`where.exe` de Git al abrir terminal | `git_version` revisado del host Rust en todas las plataformas | `app/test/unit/rust-terminal-dispatch-test.ts` |
 | canonicalización filesystem directa en `resolveWithin` | canonicalización host Rust tipada | `app/test/unit/path-test.ts` |
 | `isGitOnPath` sin consumidores tras la detección obligatoria de Git por host | `findGitOnPath` conservado solo para el alias Git de CMD en Windows | `pnpm check:types`, `pnpm lint` |
@@ -116,7 +116,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 17 imports `dugite`, 16 imports `fs`,
+`transportKind`, 18 llamadas legacy Git, 16 imports `dugite`, 16 imports `fs`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

@@ -11,7 +11,7 @@ if it regresses.
 | --- | --- | --- |
 | Fallback checks (`transportKind`) in the renderer | 3 in 2 files | 0 |
 | Legacy Git runner calls (`await git(`) in `lib/git` | 18 in 8 files | 0 |
-| Renderer files importing `dugite` | 17 | 0 |
+| Renderer files importing `dugite` | 16 | 0 |
 | Renderer files importing `fs` | 16 | 0 (host operations only) |
 | Renderer files importing `child_process` | 7 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
@@ -109,8 +109,8 @@ Known contract decisions still open:
 
 Follows R2. Each grep must reach zero or be explicitly host-only:
 
-- [ ] `dugite` (currently 17 files)
-- [ ] `fs` (currently 17 files)
+- [ ] `dugite` (currently 16 files)
+- [ ] `fs` (currently 16 files)
 - [ ] `child_process` (7), `os` (0), `crypto` (0), `keytar` (0)
 - [ ] Delete the matching `app/src/web/*` shims only after their imports are gone.
 - [ ] Remove `app/test/globals.cjs` once the import-cycle test no longer needs

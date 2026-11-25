@@ -201,6 +201,20 @@ pub async fn run_git(
     run_command(path, command, args, input, 2 * 1024 * 1024, None).await
 }
 
+pub(crate) async fn run_without_git_config(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    let mut command = git_base_without_color(None);
+    command.env_remove("GIT_CONFIG");
+    crate::git_credentials::native_configuration(run_command(
+        path,
+        command,
+        args,
+        None,
+        16 * 1024 * 1024,
+        None,
+    ))
+    .await
+}
+
 /// Status lists can be much larger than ordinary command responses. Keep a
 /// separate bound so a large worktree does not weaken limits for other Git
 /// operations or trigger the legacy status fallback.
@@ -843,9 +857,20 @@ fn git_command(index: Option<&Path>) -> Command {
 }
 
 fn git_base(index: Option<&Path>) -> Command {
+    git_base_with_color(index, true)
+}
+
+fn git_base_without_color(index: Option<&Path>) -> Command {
+    git_base_with_color(index, false)
+}
+
+fn git_base_with_color(index: Option<&Path>, color: bool) -> Command {
     let mut command = Command::new("git");
+    command.arg("--no-pager");
+    if color {
+        command.args(["-c", "color.ui=false"]);
+    }
     command
-        .args(["--no-pager", "-c", "color.ui=false"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_EDITOR", "true")
         .env("GIT_SEQUENCE_EDITOR", "true")

@@ -1,5 +1,4 @@
 import { Stats, lstatSync } from 'fs'
-import { exec } from 'dugite'
 import {
   lstat,
   mkdir,
@@ -382,45 +381,11 @@ export async function initializePrivateRepository(
   headBytes: Buffer,
   indexPath: string
 ): Promise<Record<string, string | undefined>> {
-  const config = await exec(
-    ['config', '--null', '--list', '--includes'],
-    repository.path,
-    { env: { GIT_CONFIG: undefined } }
+  const entries = await backend().repositoryAssistedCommitConfig(
+    repository.path
   )
-  if (config.exitCode !== 0) {
-    throw new Error(
-      `Could not capture underlying Git configuration: ${config.stderr}`
-    )
-  }
   let text = ''
-  for (const item of config.stdout.split('\0')) {
-    if (item.length === 0) {
-      continue
-    }
-    const delimiter = item.indexOf('\n')
-    const key = delimiter === -1 ? item : item.slice(0, delimiter)
-    const value = delimiter === -1 ? null : item.slice(delimiter + 1)
-    const firstDot = key.indexOf('.')
-    const lastDot = key.lastIndexOf('.')
-    const section = key.slice(0, firstDot)
-    if (
-      section.toLowerCase() === 'include' ||
-      section.toLowerCase() === 'includeif'
-    ) {
-      continue
-    }
-    const subsection =
-      firstDot === lastDot ? null : key.slice(firstDot + 1, lastDot)
-    const name = key.slice(lastDot + 1)
-    if (
-      !/^[a-z][a-z0-9-]*$/i.test(section) ||
-      !/^[a-z][a-z0-9-]*$/i.test(name)
-    ) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        `Cannot snapshot Git configuration key: ${JSON.stringify(key)}`
-      )
-    }
+  for (const { section, subsection, name, value } of entries) {
     text += `[${section}${
       subsection === null ? '' : ` "${quoteConfig(subsection)}"`
     }]\n`

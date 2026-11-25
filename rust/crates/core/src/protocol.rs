@@ -443,6 +443,7 @@ pub enum Operation {
     },
     AssistedCommitHead,
     AssistedCommitSafety,
+    AssistedCommitConfig,
     AssistedCommitRefs,
     AssistedCommitIndexEntries,
     AssistedCommitGitPath {

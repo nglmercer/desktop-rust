@@ -591,6 +591,9 @@ impl Repository {
             Operation::AssistedCommitSafety => {
                 return self.assisted_commit_safety().await;
             }
+            Operation::AssistedCommitConfig => {
+                return self.assisted_commit_config().await;
+            }
             Operation::AssistedCommitRefs => {
                 return self.assisted_commit_refs().await;
             }
@@ -1416,6 +1419,7 @@ impl Repository {
             | RefLockContext { .. }
             | AssistedCommitHead
             | AssistedCommitSafety
+            | AssistedCommitConfig
             | AssistedCommitRefs
             | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }

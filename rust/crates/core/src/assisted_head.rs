@@ -67,6 +67,57 @@ fn validate_snapshot_refs(output: &[u8]) -> Result<Vec<Value>> {
     Ok(references)
 }
 
+fn config_name_part(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn validate_snapshot_config(output: &[u8]) -> Result<Vec<Value>> {
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    anyhow::ensure!(
+        output.ends_with(b"\0"),
+        "configuration snapshot is not terminated"
+    );
+    let text = std::str::from_utf8(&output[..output.len() - 1])?;
+    let mut entries = Vec::new();
+    for item in text.split('\0') {
+        if item.is_empty() {
+            continue;
+        }
+        let delimiter = item.find('\n');
+        let key = delimiter.map_or(item, |index| &item[..index]);
+        let value = delimiter.map(|index| &item[index + 1..]);
+        let first_dot = key.find('.');
+        let last_dot = key.rfind('.');
+        anyhow::ensure!(
+            first_dot.is_some() && last_dot.is_some(),
+            "configuration key has no section"
+        );
+        let first_dot = first_dot.unwrap();
+        let last_dot = last_dot.unwrap();
+        let section = &key[..first_dot];
+        if section.eq_ignore_ascii_case("include") || section.eq_ignore_ascii_case("includeif") {
+            continue;
+        }
+        let subsection = (first_dot != last_dot).then(|| &key[first_dot + 1..last_dot]);
+        let name = &key[last_dot + 1..];
+        anyhow::ensure!(
+            config_name_part(section) && config_name_part(name),
+            "configuration key is invalid"
+        );
+        entries.push(json!({
+            "section": section,
+            "subsection": subsection.map_or(Value::Null, |value| json!(value)),
+            "name": name,
+            "value": value.map_or(Value::Null, |value| json!(value)),
+        }));
+    }
+    Ok(entries)
+}
+
 fn validate_index_entries(entries: &[u8]) -> Result<()> {
     if entries.is_empty() {
         return Ok(());
@@ -99,6 +150,16 @@ fn validate_index_entries(entries: &[u8]) -> Result<()> {
 }
 
 impl Repository {
+    pub(crate) async fn assisted_commit_config(&self) -> Result<Value> {
+        let output = crate::process::run_without_git_config(
+            &self.path,
+            &args(&["config", "--null", "--list", "--includes"]),
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot capture Git configuration");
+        Ok(json!({"entries":validate_snapshot_config(&output.stdout)?}))
+    }
+
     /// Capture validated refs for assisted-commit's private reference view.
     pub(crate) async fn assisted_commit_refs(&self) -> Result<Value> {
         let output = self
@@ -369,6 +430,14 @@ mod tests {
             reference["object_id"] == head
                 && reference["name"] == "refs/heads/main"
                 && reference["target"].is_null()
+        }));
+        fixture.git(&["config", "branch.main.remote", "origin"]);
+        let config = repository.assisted_commit_config().await.unwrap();
+        assert!(config["entries"].as_array().unwrap().iter().any(|entry| {
+            entry["section"] == "branch"
+                && entry["subsection"] == "main"
+                && entry["name"] == "remote"
+                && entry["value"] == "origin"
         }));
         let index = repository.assisted_commit_git_path("index").await.unwrap();
         assert!(index["path"].as_str().unwrap().ends_with(".git/index"));

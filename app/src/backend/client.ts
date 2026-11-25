@@ -58,6 +58,14 @@ export type AssistedCommitHeadResult =
     }
   | { readonly kind: 'invalid'; readonly message: string }
 
+/** A validated configuration entry captured for an assisted-commit private view. */
+export type AssistedCommitConfigEntry = {
+  readonly section: string
+  readonly subsection: string | null
+  readonly name: string
+  readonly value: string | null
+}
+
 /** A validated reference captured for an assisted-commit private view. */
 export type AssistedCommitRef = {
   readonly objectId: string
@@ -2996,6 +3004,46 @@ export class BackendClient {
       })
     }
     return value.kind
+  }
+
+  async repositoryAssistedCommitConfig(
+    repositoryPath: string
+  ): Promise<ReadonlyArray<AssistedCommitConfigEntry>> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_config',
+      {}
+    )
+    if (
+      isRecord(value) &&
+      Array.isArray(value.entries) &&
+      value.entries.every(
+        entry =>
+          isRecord(entry) &&
+          typeof entry.section === 'string' &&
+          entry.section.length <= 1024 &&
+          (entry.subsection === null ||
+            (typeof entry.subsection === 'string' &&
+              entry.subsection.length <= 16 * 1024 * 1024)) &&
+          typeof entry.name === 'string' &&
+          entry.name.length <= 1024 &&
+          (entry.value === null ||
+            (typeof entry.value === 'string' &&
+              entry.value.length <= 16 * 1024 * 1024))
+      )
+    ) {
+      return value.entries.map(entry => ({
+        section: entry.section as string,
+        subsection: entry.subsection as string | null,
+        name: entry.name as string,
+        value: entry.value as string | null,
+      }))
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted-commit configuration response',
+      retryable: false,
+    })
   }
 
   async repositoryAssistedCommitRefs(
