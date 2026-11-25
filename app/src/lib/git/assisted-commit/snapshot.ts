@@ -45,7 +45,7 @@ import {
   initializePrivateRepository,
   privateGit,
   readBlob,
-  readHead,
+  readHeadContext,
   readIndexState,
   readSelectedFileState,
   readTreeEntry,
@@ -466,41 +466,22 @@ export async function captureAssistedCommitSnapshot(
   await options.onProgress?.({ kind: 'capturing' })
   checkAssistedCommitCancellation(options.signal)
   const root = await realpath(repository.path)
-  const top = await git(
-    ['rev-parse', '--show-toplevel'],
-    repository.path,
-    'assistedCommitRoot'
-  )
-  if ((await realpath(removeGitLineEnding(top.stdout))) !== root) {
+  const context = await readHeadContext(repository)
+  if ((await realpath(context.worktreeRoot)) !== root) {
     throw new AssistedCommitError(
       'unsafe-selection',
       'Assisted commits require the repository root'
     )
   }
   await ensureNoRepositoryOperation(repository)
-  const format = await git(
-    ['rev-parse', '--show-ref-format'],
-    repository.path,
-    'assistedCommitRefFormat'
-  )
-  if (removeGitLineEnding(format.stdout) !== 'files') {
+  if (context.refFormat !== 'files') {
     throw new AssistedCommitError(
       'unsafe-selection',
       'Assisted commits currently require file-backed Git refs'
     )
   }
-  const head = await readHead(repository)
-  const gitDirectory = await realpath(
-    removeGitLineEnding(
-      (
-        await git(
-          ['rev-parse', '--absolute-git-dir'],
-          repository.path,
-          'assistedCommitDirectory'
-        )
-      ).stdout
-    )
-  )
+  const head = Object.freeze({ ref: context.ref, sha: context.sha })
+  const gitDirectory = await realpath(context.gitDir)
   const headBytes = await readFile(join(gitDirectory, 'HEAD'))
   const indexPath = await gitPath(repository, 'index')
   const originalIndex = await readIndexState(indexPath)

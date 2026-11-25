@@ -51,6 +51,8 @@ export type AssistedCommitHeadResult =
   | {
       readonly kind: 'ok'
       readonly gitDir: string
+      readonly worktreeRoot: string
+      readonly refFormat: string
       readonly ref: string | null
       readonly sha: string | null
     }
@@ -3017,12 +3019,20 @@ export class BackendClient {
       typeof value.git_dir === 'string' &&
       value.git_dir.length > 0 &&
       value.git_dir.length <= 65536 &&
+      typeof value.worktree_root === 'string' &&
+      value.worktree_root.length > 0 &&
+      value.worktree_root.length <= 65536 &&
+      typeof value.ref_format === 'string' &&
+      value.ref_format.length > 0 &&
+      value.ref_format.length <= 128 &&
       (value.ref === null || typeof value.ref === 'string') &&
       (value.sha === null || typeof value.sha === 'string')
     ) {
       return {
         kind: 'ok',
         gitDir: value.git_dir,
+        worktreeRoot: value.worktree_root,
+        refFormat: value.ref_format,
         ref: value.ref,
         sha: value.sha,
       }

@@ -64,10 +64,12 @@ async function optionalStat(path: string): Promise<Stats | null> {
   }
 }
 
-async function readHeadContext(repository: Repository): Promise<{
+export async function readHeadContext(repository: Repository): Promise<{
   readonly ref: string | null
   readonly sha: string | null
   readonly gitDir: string
+  readonly worktreeRoot: string
+  readonly refFormat: string
 }> {
   const context = await backend().repositoryAssistedCommitHead(repository.path)
   if (context.kind === 'invalid') {
@@ -77,6 +79,8 @@ async function readHeadContext(repository: Repository): Promise<{
     ref: context.ref,
     sha: context.sha,
     gitDir: context.gitDir,
+    worktreeRoot: context.worktreeRoot,
+    refFormat: context.refFormat,
   }
 }
 

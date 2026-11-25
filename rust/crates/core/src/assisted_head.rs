@@ -32,6 +32,12 @@ impl Repository {
             std::path::Path::new(&git_dir).is_absolute(),
             "Git directory must be absolute"
         );
+        let top = self.run(&args(&["rev-parse", "--show-toplevel"])).await?;
+        anyhow::ensure!(top.code == 0, "Cannot read the worktree root");
+        let worktree_root = output_line(&top.stdout, "worktree root", true)?;
+        let format = self.run(&args(&["rev-parse", "--show-ref-format"])).await?;
+        anyhow::ensure!(format.code == 0, "Cannot read the ref format");
+        let ref_format = output_line(&format.stdout, "ref format", false)?;
         match std::fs::symlink_metadata(std::path::Path::new(&git_dir).join("HEAD")) {
             Ok(metadata) if !metadata.is_file() => {
                 return Ok(invalid(
@@ -106,6 +112,8 @@ impl Repository {
         Ok(json!({
             "kind":"ok",
             "git_dir":git_dir,
+            "worktree_root":worktree_root,
+            "ref_format":ref_format,
             "ref":reference,
             "sha":sha,
         }))
@@ -171,6 +179,11 @@ mod tests {
         assert_eq!(attached["ref"], "refs/heads/main");
         assert_eq!(attached["sha"], head);
         assert!(attached["git_dir"].as_str().unwrap().ends_with(".git"));
+        assert_eq!(
+            attached["worktree_root"],
+            fixture.0.to_string_lossy().as_ref()
+        );
+        assert_eq!(attached["ref_format"], "files");
 
         fixture.git(&["switch", "-q", "--detach", "HEAD"]);
         let detached = repository.assisted_commit_head().await.unwrap();

@@ -165,6 +165,8 @@ describe('WebSocket backend transport', () => {
       result: {
         kind: 'ok',
         git_dir: '/repo/.git',
+        worktree_root: '/repo',
+        ref_format: 'files',
         ref: 'refs/heads/main',
         sha: 'a'.repeat(40),
       },
@@ -172,6 +174,8 @@ describe('WebSocket backend transport', () => {
     await expect(pending).resolves.toEqual({
       kind: 'ok',
       gitDir: '/repo/.git',
+      worktreeRoot: '/repo',
+      refFormat: 'files',
       ref: 'refs/heads/main',
       sha: 'a'.repeat(40),
     })

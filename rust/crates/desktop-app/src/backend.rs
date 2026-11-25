@@ -2501,6 +2501,8 @@ mod tests {
                 assert_eq!(value["ref"], "refs/heads/main");
                 assert_eq!(value["sha"], head);
                 assert!(value["git_dir"].as_str().unwrap().ends_with(".git"));
+                assert_eq!(value["worktree_root"], root.to_string_lossy().as_ref());
+                assert_eq!(value["ref_format"], "files");
                 assert!(
                     backend
                         .admit(vec![
