@@ -20,6 +20,7 @@ import {
   BackendError,
   FetchErrorKind,
   FetchPreviewUnsupported,
+  NativePushHooksUnsupported,
   PushErrorKind,
 } from '../../backend/client'
 import {
@@ -157,18 +158,11 @@ export async function push(
     )
   }
 
-  if (
-    assisted === undefined &&
-    typeof window !== 'undefined' &&
-    backend().transportKind !== 'none'
-  ) {
-    const wry = backend().transportKind === 'wry'
-    const hasProgress =
-      typeof (window as any).__desktop?.invokeWithProgress === 'function'
+  if (assisted === undefined && typeof window !== 'undefined') {
     const needsStreaming =
       progressCallback !== undefined ||
       options?.onTerminalOutputAvailable !== undefined
-    if (!wry || !needsStreaming || hasProgress) {
+    {
       const controller = new AbortController()
       let failedHook = false
       const listeners = new Set<(chunk: TerminalOutput) => void>()
@@ -252,8 +246,8 @@ export async function push(
                     })
                     notifyTerminal(text)
                   },
-              wry || options?.onTerminalOutputAvailable !== undefined
-                ? async _destinations => {
+              options?.onTerminalOutputAvailable !== undefined
+                ? async () => {
                     try {
                       withoutRepositoryGitAccess(() =>
                         options?.onTerminalOutputAvailable?.(listener => {
@@ -351,7 +345,12 @@ export async function push(
           error.code === 'push_outcome_uncertain'
         )
           uncertainPushes.add(error)
-        if (!wry || !(error instanceof FetchPreviewUnsupported)) throw error
+        const unsupportedBeforeMutation =
+          error instanceof FetchPreviewUnsupported ||
+          error instanceof NativePushHooksUnsupported ||
+          (error instanceof BackendError &&
+            (error.code === 'unsupported' || error.code === 'no_transport'))
+        if (!unsupportedBeforeMutation) throw error
       } finally {
         try {
           parser?.finish()

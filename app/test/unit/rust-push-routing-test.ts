@@ -50,6 +50,7 @@ vi.mock('../../src/backend/client', () => ({
     pushRepositoryRemote: mocks.push,
   }),
   FetchPreviewUnsupported: mocks.PreviewUnsupported,
+  NativePushHooksUnsupported: class extends Error {},
   BackendError: mocks.BackendError,
 }))
 vi.mock('../../src/lib/git/core', () => ({
@@ -166,7 +167,7 @@ describe('Rust push routing', () => {
           interactive_hook_decision: false,
         },
         expect.any(Function),
-        transport === 'wry' ? expect.any(Function) : undefined,
+        undefined,
         expect.any(Function),
         undefined,
         undefined
@@ -210,7 +211,7 @@ describe('Rust push routing', () => {
         proxy: { https: 'http://proxy.invalid' },
       }),
       undefined,
-      expect.any(Function),
+      undefined,
       expect.any(Function),
       undefined,
       undefined
