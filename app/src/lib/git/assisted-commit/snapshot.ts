@@ -30,7 +30,7 @@ import {
   IRawDiff,
 } from '../../../models/diff'
 import { DiffParser } from '../../diff-parser'
-import { git } from '../core'
+import { backend } from '../../../backend/client'
 import {
   AssistedCommitError,
   checkAssistedCommitCancellation,
@@ -512,11 +512,8 @@ export async function captureAssistedCommitSnapshot(
       privateIndex
     )
     const context = { repository, environment, temporaryDirectory }
-    const originalEntries = await git(
-      ['ls-files', '--stage', '-z'],
-      repository.path,
-      'assistedCommitCaptureAttributesIndex'
-    )
+    const originalEntries =
+      await backend().repositoryAssistedCommitIndexEntries(repository.path)
     const noIndexHooks = [
       '-c',
       `core.hooksPath=${join(temporaryDirectory, 'no-hooks')}`,
@@ -526,12 +523,12 @@ export async function captureAssistedCommitSnapshot(
       [...noIndexHooks, 'read-tree', '--empty'],
       'assistedCommitInitializeAttributesIndex'
     )
-    if (originalEntries.stdout.length > 0) {
+    if (originalEntries.length > 0) {
       await privateGit(
         context,
         [...noIndexHooks, 'update-index', '-z', '--index-info'],
         'assistedCommitPopulateAttributesIndex',
-        { stdin: originalEntries.stdout }
+        { stdin: originalEntries }
       )
     }
     const indexedAttributesTree = removeGitLineEnding(

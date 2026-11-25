@@ -1,6 +1,7 @@
 //! Read the HEAD identity needed by assisted-commit snapshot guards.
 use crate::{Repository, args};
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 
 fn output_line(output: &[u8], what: &str, path: bool) -> Result<String> {
@@ -19,7 +20,47 @@ fn invalid(message: impl Into<String>) -> Value {
     json!({"kind":"invalid", "message":message.into()})
 }
 
+fn validate_index_entries(entries: &[u8]) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    anyhow::ensure!(entries.ends_with(b"\0"), "index entries are not terminated");
+    for entry in entries[..entries.len() - 1].split(|byte| *byte == 0) {
+        let Some(tab) = entry.iter().position(|byte| *byte == b'\t') else {
+            anyhow::bail!("index entry is missing its path separator");
+        };
+        let metadata = &entry[..tab];
+        let path = &entry[tab + 1..];
+        anyhow::ensure!(!path.is_empty(), "index entry has an empty path");
+        let fields = metadata.split(|byte| *byte == b' ').collect::<Vec<_>>();
+        anyhow::ensure!(fields.len() == 3, "index entry metadata is invalid");
+        anyhow::ensure!(
+            fields[0].len() == 6 && fields[0].iter().all(|byte| matches!(byte, b'0'..=b'7')),
+            "index entry mode is invalid"
+        );
+        anyhow::ensure!(
+            matches!(fields[1].len(), 40 | 64)
+                && fields[1].iter().all(|byte| byte.is_ascii_hexdigit()),
+            "index entry object ID is invalid"
+        );
+        anyhow::ensure!(
+            fields[2].len() == 1 && matches!(fields[2][0], b'0'..=b'3'),
+            "index entry stage is invalid"
+        );
+    }
+    Ok(())
+}
+
 impl Repository {
+    /// Capture the exact stage entries needed to reproduce the real index in
+    /// assisted-commit's temporary attributes index.
+    pub(crate) async fn assisted_commit_index_entries(&self) -> Result<Value> {
+        let output = self.run(&args(&["ls-files", "--stage", "-z"])).await?;
+        anyhow::ensure!(output.code == 0, "Cannot capture index entries");
+        validate_index_entries(&output.stdout)?;
+        Ok(json!({"entries_base64":STANDARD.encode(&output.stdout)}))
+    }
+
     pub(crate) async fn assisted_commit_git_path(&self, git_path: &str) -> Result<Value> {
         anyhow::ensure!(
             !git_path.is_empty()
@@ -202,6 +243,7 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use crate::Repository;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
     use std::{fs, process::Command};
 
     struct Fixture(std::path::PathBuf);
@@ -257,6 +299,12 @@ mod tests {
             repository.assisted_commit_safety().await.unwrap()["kind"],
             "ok"
         );
+        let entries = repository.assisted_commit_index_entries().await.unwrap();
+        let entries = STANDARD
+            .decode(entries["entries_base64"].as_str().unwrap())
+            .unwrap();
+        assert!(entries.ends_with(b"\tfile\0"));
+        assert!(entries.starts_with(b"100644 "));
         let index = repository.assisted_commit_git_path("index").await.unwrap();
         assert!(index["path"].as_str().unwrap().ends_with(".git/index"));
         assert!(

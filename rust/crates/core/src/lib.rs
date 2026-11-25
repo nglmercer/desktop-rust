@@ -591,6 +591,9 @@ impl Repository {
             Operation::AssistedCommitSafety => {
                 return self.assisted_commit_safety().await;
             }
+            Operation::AssistedCommitIndexEntries => {
+                return self.assisted_commit_index_entries().await;
+            }
             Operation::AssistedCommitGitPath { git_path } => {
                 return self.assisted_commit_git_path(&git_path).await;
             }
@@ -1410,6 +1413,7 @@ impl Repository {
             | RefLockContext { .. }
             | AssistedCommitHead
             | AssistedCommitSafety
+            | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }
             | MergeBase { .. }
             | MergeTreePreview { .. }

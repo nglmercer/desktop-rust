@@ -167,6 +167,28 @@ describe('WebSocket backend transport', () => {
     await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('sends typed assisted-commit index-entry reads and validates their response', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.repositoryAssistedCommitIndexEntries('/repo')
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'assisted_commit_index_entries',
+      repository_path: '/repo',
+    })
+    const entry = `100644 ${'a'.repeat(40)} 0\tfile\0`
+    socket.message({
+      id: 1,
+      result: { entries_base64: Buffer.from(entry, 'utf8').toString('base64') },
+    })
+    await expect(
+      pending.then(entries => entries.toString('utf8'))
+    ).resolves.toBe(entry)
+
+    const invalid = value.repositoryAssistedCommitIndexEntries('/repo')
+    socket.message({ id: 2, result: { entries_base64: 1 } })
+    await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('sends typed assisted-commit HEAD reads and validates their response', async () => {
     const { client: value, socket } = await connected()
     const pending = value.repositoryAssistedCommitHead('/repo')

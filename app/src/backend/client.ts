@@ -2991,6 +2991,28 @@ export class BackendClient {
     return value.kind
   }
 
+  async repositoryAssistedCommitIndexEntries(
+    repositoryPath: string
+  ): Promise<Buffer> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_index_entries',
+      {}
+    )
+    if (
+      isRecord(value) &&
+      typeof value.entries_base64 === 'string' &&
+      value.entries_base64.length <= 512 * 1024 * 1024
+    ) {
+      return Buffer.from(value.entries_base64, 'base64')
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted-commit index entries response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string
