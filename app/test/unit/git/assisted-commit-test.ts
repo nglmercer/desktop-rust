@@ -92,6 +92,10 @@ import {
   writeHook,
 } from '../../helpers/assisted-commit'
 import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
+import {
   updateRefWithVerification,
   withRefLock,
 } from '../../../src/lib/git/update-ref'
@@ -112,6 +116,7 @@ describe('git/assisted-commit', () => {
   })
 
   beforeEach(() => {
+    installNodeHostBridge()
     setHooksEnvEnabled(false)
     fsSpies.rename.mockReset().mockImplementation(realFs.rename)
     fsSpies.open.mockReset().mockImplementation(realFs.open)
@@ -119,7 +124,10 @@ describe('git/assisted-commit', () => {
     fsSpies.unlink.mockReset().mockImplementation(realFs.unlink)
     fsSpies.rm.mockReset().mockImplementation(realFs.rm)
   })
-  afterEach(() => localStorage.removeItem('git-hooks-env-enabled'))
+  afterEach(() => {
+    uninstallNodeHostBridge()
+    localStorage.removeItem('git-hooks-env-enabled')
+  })
 
   it('matches only the exact physical fault target across aliases and missing suffixes', async t => {
     const directory = await createTempDirectory(t)

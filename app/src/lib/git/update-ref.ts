@@ -1,7 +1,7 @@
 import { git } from './core'
 import { Repository } from '../../models/repository'
 import type { IChildProcess } from '../process/child-process'
-import { mkdir } from 'fs/promises'
+import { mkdir } from '../../web/fs-promises'
 import { dirname } from 'path'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
