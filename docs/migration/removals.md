@@ -99,6 +99,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | import directo `fs/promises` en descubrimiento de hooks | frontera explícita `web/fs-promises` con `readdir` tipado para Dirent | `app/test/unit/hooks-discovery-test.ts` |
 | streams de archivo escritos como builtin `fs` en el proxy de hooks | frontera explícita `web/fs`; stdin buffered usa WriteStream host-backed y lectura por rangos | `app/test/unit/traditional-hook-test.ts` |
 | escritura/borrado temporal de reorder/squash como builtin `fs/promises` | frontera explícita `web/fs-promises`; las pruebas comparten un bridge Node mínimo de filesystem | `app/test/unit/git/reorder-test.ts`, `app/test/unit/git/squash-test.ts` |
+| ejecución directa del proxy de hooks y hooks tradicionales mediante `child_process` | frontera host-backed `web/child_process`; AbortSignal produce AbortError y kill host, pipe conserva `end: false`, y la lectura de stdin buffered respeta backpressure | `app/test/unit/traditional-hook-test.ts`, `app/test/unit/web-child-process-test.ts` |
 | `stream/promises.pipeline` como rechazo permanente en el shim web | promesas sobre el pipeline/finished Node-compatible usado por el bundle; necesario para stdin de hooks | `app/test/unit/web-stream-promises-test.ts` |
 | constructores vacíos `ReadStream`/`WriteStream` en el shim `stream` | eliminados por no tener consumidores; los streams de archivo viven en `web/fs` | `pnpm check:types`, `pnpm vite:build` |
 | shim `app/src/web/web-utils.ts` sin consumidores | eliminado junto a su alias Vite; archivos soltados usan `hostFiles.getPathForFile` del host bridge | `pnpm check:types`, `pnpm vite:build` |
@@ -131,7 +132,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 2 imports `dugite`, 8 imports `fs`, 5 imports `child_process`,
+`transportKind`, 18 llamadas legacy Git, 2 imports `dugite`, 8 imports `fs`, 3 imports `child_process`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

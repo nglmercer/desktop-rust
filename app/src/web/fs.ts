@@ -1001,6 +1001,8 @@ export function watch(path: PathLike, ...args: unknown[]): FSWatcher {
 export class ReadStream {
   private readonly listeners = new Map<string, Listener[]>()
   private destroyed = false
+  private paused = false
+  private resumeWaiters: Array<() => void> = []
 
   public constructor(path: PathLike, options?: any) {
     const encoding = encodingOf(options)
@@ -1040,6 +1042,10 @@ export class ReadStream {
         end,
         () => this.destroyed
       )) {
+        if (this.destroyed) {
+          return
+        }
+        await this.waitWhilePaused()
         if (this.destroyed) {
           return
         }
@@ -1113,16 +1119,51 @@ export class ReadStream {
   public pipe<T extends { write(chunk: any): any; end(): any }>(
     destination: T
   ): T {
-    this.on('data', chunk => destination.write(chunk))
+    this.on('data', chunk => {
+      if (destination.write(chunk) === false) {
+        this.pause()
+        const resume = () => this.resume()
+        const emitter = destination as T & {
+          once?: (event: string, listener: () => void) => unknown
+        }
+        if (emitter.once !== undefined) {
+          emitter.once('drain', resume)
+        } else {
+          queueMicrotask(resume)
+        }
+      }
+    })
     this.on('end', () => destination.end())
     return destination
   }
+
+  public pause() {
+    this.paused = true
+    return this
+  }
+
+  public resume() {
+    this.paused = false
+    const waiters = this.resumeWaiters.splice(0)
+    for (const resolve of waiters) {
+      resolve()
+    }
+    return this
+  }
+
+  private async waitWhilePaused() {
+    while (this.paused && !this.destroyed) {
+      await new Promise<void>(resolve => this.resumeWaiters.push(resolve))
+    }
+  }
   public destroy() {
     this.destroyed = true
+    this.resume()
     return this
   }
   public close() {
     this.destroyed = true
+    this.resume()
   }
 }
 

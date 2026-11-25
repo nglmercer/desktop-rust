@@ -13,7 +13,7 @@ if it regresses.
 | Legacy Git runner calls (`await git(`) in `lib/git` | 18 in 8 files | 0 |
 | Renderer files importing `dugite` | 2 | 0 |
 | Renderer files importing `fs` | 8 | 0 (host operations only) |
-| Renderer files importing `child_process` | 5 | 0 |
+| Renderer files importing `child_process` | 3 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 406 | 0 |
 | Rust code (crates, non-test) | 91,173 lines | — |
@@ -111,7 +111,7 @@ Follows R2. Each grep must reach zero or be explicitly host-only:
 
 - [ ] `dugite` (currently 2 files)
 - [ ] `fs` (currently 8 files)
-- [ ] `child_process` (5), `os` (0), `crypto` (0), `keytar` (0)
+- [ ] `child_process` (3), `os` (0), `crypto` (0), `keytar` (0)
 - [ ] Delete the matching `app/src/web/*` shims only after their imports are gone.
 
 ### R6 — Delete legacy code and packages (M)

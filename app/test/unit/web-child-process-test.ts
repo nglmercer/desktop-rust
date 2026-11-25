@@ -179,6 +179,25 @@ describe('child_process stdin flow control', () => {
     )
   })
 
+  it('reports AbortError and kills the child when its AbortSignal fires', async () => {
+    const controller = new AbortController()
+    const child = spawn('cat', [], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      signal: controller.signal,
+    })
+    await once(child, 'spawn')
+
+    const failed = once(child, 'error')
+    controller.abort()
+    const [error] = await failed
+    assert.strictEqual((error as Error).name, 'AbortError')
+    await settle()
+    assert.ok(
+      fake.calls.some(call => call.channel === 'desktop.io.process-kill'),
+      'the abort is forwarded to the host as a kill'
+    )
+  })
+
   it('forwards a kill requested before Rust assigns the process id', async () => {
     const child = spawn('cat', [], { stdio: ['pipe', 'pipe', 'pipe'] })
     assert.strictEqual(child.kill('SIGKILL'), true)

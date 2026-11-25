@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'child_process'
+import { execFile, spawn, type ChildProcess } from '../../web/child_process'
 import { basename, join } from 'path'
 import type { ProcessProxyConnection as Connection } from 'process-proxy'
 import type { HookCallbackOptions } from '../git'
@@ -6,14 +6,32 @@ import type { ShellEnvResult } from './get-shell-env'
 import { shellFriendlyNames } from './config'
 import type { Writable } from 'stream'
 import { pipeline } from 'stream/promises'
-import { promisify } from 'util'
 import memoizeOne from 'memoize-one'
 import which from 'which'
 import { createReadStream, createWriteStream } from '../../web/fs'
 import { spawnTraditionalHook } from './traditional-hook'
 import { constants as osConstants } from '../../web/os'
 
-const execFileAsync = promisify(execFile)
+type PipedChildProcess = ChildProcess & {
+  stdin: NonNullable<ChildProcess['stdin']>
+  stdout: NonNullable<ChildProcess['stdout']>
+  stderr: NonNullable<ChildProcess['stderr']>
+}
+
+const execFileAsync = (
+  file: string,
+  args: readonly string[],
+  options: Record<string, unknown>
+) =>
+  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    execFile(
+      file,
+      args,
+      options,
+      (error: Error | null, stdout: string, stderr: string) =>
+        error === null ? resolve({ stdout, stderr }) : reject(error)
+    )
+  })
 
 const ignoredOnFailureHooks = [
   'post-applypatch',
@@ -263,14 +281,14 @@ export const createHooksProxy = (
         },
         signal: abortController.signal,
       }
-      const child =
+      const child: PipedChildProcess =
         !__WIN32__ && originalHooksPath !== undefined
           ? spawnTraditionalHook(
               join(originalHooksPath, hookName),
               proxyArgs.slice(1),
               options
             )
-          : spawn(gitPath, args, options)
+          : (spawn(gitPath, args, options) as PipedChildProcess)
       child.on('close', (code, signal) => resolve({ code, signal }))
       child.on('error', err => reject(err))
 

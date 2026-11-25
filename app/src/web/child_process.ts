@@ -129,10 +129,13 @@ class OutputStream extends EventEmitter {
   }
 
   public pipe<T extends { write(chunk: any): any; end?(): any }>(
-    destination: T
+    destination: T,
+    options?: { end?: boolean }
   ): T {
     this.on('data', chunk => destination.write(chunk))
-    this.on('end', () => destination.end?.())
+    if (options?.end !== false) {
+      this.on('end', () => destination.end?.())
+    }
     return destination
   }
 }
@@ -476,6 +479,7 @@ export interface ISpawnOptions {
   shell?: boolean | string
   windowsHide?: boolean
   detached?: boolean
+  signal?: AbortSignal
 }
 
 function isArgumentList(
@@ -514,6 +518,21 @@ export function spawn(
         )
 
   const child = new ChildProcess(modes)
+  const signal = options.signal
+  const abort = () => {
+    child.kill()
+    const error = new Error('The operation was aborted')
+    error.name = 'AbortError'
+    queueMicrotask(() => child.emit('error', error))
+  }
+  if (signal !== undefined) {
+    if (signal.aborted) {
+      queueMicrotask(abort)
+    } else {
+      signal.addEventListener('abort', abort, { once: true })
+      child.once('close', () => signal.removeEventListener('abort', abort))
+    }
+  }
   installRouter()
 
   bridge()
