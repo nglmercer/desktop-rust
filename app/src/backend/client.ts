@@ -1633,6 +1633,19 @@ export class BackendClient {
     }
   }
 
+  /** Bind the browser bridge to the repository containing one explicit path. */
+  async selectBrowserRepositoryAtPath(path: string | null): Promise<void> {
+    if (this.transport !== 'ws') return
+    if (path === null) {
+      await this.selectBrowserRepository(null)
+      return
+    }
+    const type = await this.repositoryType(path)
+    await this.selectBrowserRepository(
+      type.kind === 'regular' ? type.topLevelWorkingDirectory : null
+    )
+  }
+
   async waitReady(): Promise<ReadyPayload> {
     if (this.transport === 'wry') {
       return { ready: true, version: 3, capabilities: this.wry!.capabilities() }

@@ -302,6 +302,34 @@ describe('backend Copilot session cleanup', () => {
     })
   })
 
+  it('resolves browser selection paths before binding the WebSocket repository', async () => {
+    const client = new BackendClient()
+    ;(client as unknown as { transport: 'ws' }).transport = 'ws'
+    const repositoryType = vi
+      .spyOn(client, 'repositoryType')
+      .mockResolvedValue({
+        kind: 'regular',
+        topLevelWorkingDirectory: '/repo',
+        gitDir: '/repo/.git',
+      })
+    const select = vi
+      .spyOn(client, 'selectBrowserRepository')
+      .mockResolvedValue()
+    await client.selectBrowserRepositoryAtPath('/repo/nested')
+    expect(repositoryType).toHaveBeenCalledWith('/repo/nested')
+    expect(select).toHaveBeenLastCalledWith('/repo')
+    repositoryType.mockResolvedValue({ kind: 'missing' })
+    await client.selectBrowserRepositoryAtPath('/missing')
+    expect(select).toHaveBeenLastCalledWith(null)
+
+    const detached = new BackendClient()
+    const detachedSelect = vi
+      .spyOn(detached, 'selectBrowserRepository')
+      .mockResolvedValue()
+    await detached.selectBrowserRepositoryAtPath('/repo/nested')
+    expect(detachedSelect).not.toHaveBeenCalled()
+  })
+
   it('routes typed native clone operations through Wry and validates responses', async () => {
     const id = '11111111-1111-1111-1111-111111111111'
     const input = {

@@ -80,6 +80,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | apertura genérica de carpetas sin consumidores (`showFolderContents`, `is-application-bundle` y canales `unsafe-open-directory`/`confirm-reveal-directory`) | apertura confinada de repositorios registrados; el host usa reveal seguro sin clasificar metadata en el renderer | `app/test/unit/reveal-repository-routing-test.ts`, `app/test/unit/ipc-contract-test.ts`, `cargo check --workspace --locked` |
 | imports renderer escritos como builtin `os` aunque Vite ya los resolvía al shim host | frontera explícita `app/src/web/os.ts`; queda prohibido reintroducir `from 'os'` fuera de `web/` | `app/test/unit/file-system-test.ts`, `app/test/unit/copilot-app-test.ts`, `app/test/unit/macos-version-from-darwin-test.ts`, `pnpm migration:check` |
 | ramas `transportKind` de clone/recovery nativo en la UI | métodos tipados `cloneSelectedRepository`, `listNativeCloneRecoveries` y `recoverNativeClone` del cliente backend | `app/test/unit/native-clone-ui-test.ts`, `app/test/unit/backend-client-session-test.ts` |
+| puerta `transportKind` de selección de repositorio browser en `AppStore` | flujo tipado `selectBrowserRepositoryAtPath` que clasifica la ruta y limpia la selección cuando no es un working tree regular | `app/test/unit/backend-client-session-test.ts`, `app/test/unit/browser-repository-selection-test.ts` |
 | fallback legacy de `fetch`/`fetchRefspec` y resolución proxy incompatible con IPC | fetch revisado Rust obligatorio; proxies explícitos pasan por contrato tipado y se redactan en diagnósticos | `app/test/unit/rust-fetch-routing-test.ts`, `app/test/unit/git/fetch-test.ts`, tests Rust `renderer_fetch`/`process` |
 | fallbacks shell de descubrimiento/alta/borrado/URL/HEAD de remotes | descubrimiento seguro y mutaciones revisadas Rust obligatorias; URLs ambiguas o con credenciales se rechazan explícitamente | `app/test/unit/rust-remote-presence-test.ts`, `app/test/unit/git/remote-discovery-test.ts`, `app/test/unit/git/remote-management-test.ts` |
 | imports renderer directos de `crypto` y `keytar` | boundary web explícita ya respaldada por Rust (`web/crypto`, `web/keytar`) | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
@@ -110,7 +111,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | scripts npm residuales de release | publicación/versionado verificados con pnpm/Rust sin npm CLI |
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
-La línea base numérica viva está en `pnpm migration:status` (6 comprobaciones
+La línea base numérica viva está en `pnpm migration:status` (5 comprobaciones
 `transportKind`, 28 llamadas legacy Git, 17 imports `dugite`, 17 imports `fs`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 

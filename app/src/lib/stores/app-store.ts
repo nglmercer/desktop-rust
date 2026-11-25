@@ -645,16 +645,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     | null
     | undefined
   private readonly browserRepositorySelection = new RepositorySelectionQueue(
-    async path => {
-      if (path === null) {
-        await backend().selectBrowserRepository(null)
-        return
-      }
-      const type = await getRepositoryType(path)
-      await backend().selectBrowserRepository(
-        type.kind === 'regular' ? type.topLevelWorkingDirectory : null
-      )
-    }
+    path => backend().selectBrowserRepositoryAtPath(path)
   )
   private readonly gitStoreCache: GitStoreCache
   private readonly assistedCommits: AssistedCommitCoordinator
@@ -2366,7 +2357,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
   ): Promise<Repository | null> {
     const selectionRevision = ++this.repositorySelectionRevision
     this.requestedRepositorySelection = repository
-    if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
+    if (typeof window !== 'undefined') {
       try {
         const current = await this.browserRepositorySelection.select(
           repository instanceof Repository ? repository.path : null
