@@ -10,11 +10,14 @@ import { Repository } from '../../models/repository'
 import { IPullProgress } from '../../models/progress'
 import { PullProgressParser, executionOptionsWithProgress } from '../progress'
 import { IRemote } from '../../models/remote'
-import { envForRemoteOperation } from './environment'
+import {
+  backendRemoteProxy,
+  envForProxy,
+  envForRemoteOperation,
+} from './environment'
 import { getConfigValue } from './config'
 import { GitError as DugiteError } from 'dugite'
 import { backend, FetchPreviewUnsupported } from '../../backend/client'
-import { envForProxy } from './environment'
 import { FetchStreamProgressParser } from '../progress/fetch-stream'
 import {
   withoutRepositoryGitAccess,
@@ -77,18 +80,6 @@ export async function pull(
         typeof (window as any).__desktop?.invokeWithProgress !== 'function')
     ) {
       native = false
-    } else if (
-      [
-        'http_proxy',
-        'https_proxy',
-        'HTTPS_PROXY',
-        'all_proxy',
-        'ALL_PROXY',
-      ].some(key => key in process.env)
-    ) {
-      native = false
-    } else if ((await envForProxy(remote.url)) !== undefined) {
-      native = false
     }
   }
   if (transport === 'ws' && hasTerminalObserver) {
@@ -135,6 +126,7 @@ export async function pull(
     if (callback !== undefined) {
       observe({ kind: 'pull', title, value: 0, remote: remote.name })
     }
+    const proxy = backendRemoteProxy(await envForProxy(remote.url))
     try {
       const failure = await withRepositoryGitOperation(
         repository.path,
@@ -154,6 +146,7 @@ export async function pull(
                     expected_saml_owner:
                       repository.gitHubRepository.owner.login,
                   }),
+              ...(proxy === undefined ? {} : { proxy }),
             },
             parser === undefined ? undefined : chunk => parser.push(chunk)
           ),

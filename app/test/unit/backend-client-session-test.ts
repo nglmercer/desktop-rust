@@ -55,6 +55,13 @@ describe('backend Copilot session cleanup', () => {
       retryable: false,
     })
     expect(invoke).toHaveBeenCalledTimes(3)
+    await expect(
+      client.pullRepositoryRemote('/repo', {
+        ...request,
+        proxy: { http: 'http://proxy.invalid/\nforge' },
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' })
+    expect(invoke).toHaveBeenCalledTimes(3)
   })
 
   it('discovers terminals and requests a repository subdirectory through Wry', async () => {

@@ -85,6 +85,8 @@ pub struct RendererPullRequest {
     pub require_hook_callbacks: bool,
     #[serde(default)]
     pub expected_saml_owner: Option<String>,
+    #[serde(default)]
+    pub proxy: Option<crate::RendererProxy>,
 }
 
 impl std::fmt::Debug for RendererPullRequest {
@@ -95,6 +97,7 @@ impl std::fmt::Debug for RendererPullRequest {
             .field("no_verify", &self.no_verify)
             .field("report_progress", &self.report_progress)
             .field("require_hook_callbacks", &self.require_hook_callbacks)
+            .field("proxy", &self.proxy)
             .finish()
     }
 }
@@ -123,6 +126,9 @@ impl Repository {
     }
 
     async fn renderer_pull_review(&self, request: &RendererPullRequest) -> Result<(String, bool)> {
+        if let Some(proxy) = &request.proxy {
+            proxy.validate()?;
+        }
         ensure!(
             !request.remote.starts_with('-'),
             "Cannot pull from a remote whose name starts with '-'"
@@ -234,9 +240,14 @@ impl Repository {
             command.push("--no-verify".into());
         }
         command.extend(args(&["--", &request.remote]));
-        let output =
-            process::run_bound_remote_fetch(&self.path, &command, false, request.report_progress)
-                .await?;
+        let output = process::run_bound_remote_fetch_with_proxy(
+            &self.path,
+            &command,
+            false,
+            request.report_progress,
+            request.proxy.as_ref(),
+        )
+        .await?;
         let error_kind = if output.code == 0 {
             None
         } else {
@@ -388,6 +399,7 @@ mod tests {
                 report_progress: false,
                 require_hook_callbacks: false,
                 expected_saml_owner: None,
+                proxy: None,
             }
         }
         fn commit(&self, directory: &Path, name: &str, contents: &str) {

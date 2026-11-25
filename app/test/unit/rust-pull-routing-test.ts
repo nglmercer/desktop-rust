@@ -49,6 +49,19 @@ vi.mock('../../src/lib/git/core', () => ({
 vi.mock('../../src/lib/git/environment', () => ({
   envForRemoteOperation: mocks.environment,
   envForProxy: mocks.proxy,
+  backendRemoteProxy: (
+    environment: Record<string, string | undefined> | undefined
+  ) =>
+    environment === undefined
+      ? undefined
+      : {
+          ...(typeof environment.http_proxy === 'string'
+            ? { http: environment.http_proxy }
+            : {}),
+          ...(typeof environment.https_proxy === 'string'
+            ? { https: environment.https_proxy }
+            : {}),
+        },
 }))
 vi.mock('../../src/lib/git/config', () => ({
   getConfigValue: async () => null,
@@ -126,6 +139,20 @@ describe('Rust pull routing', () => {
       )
     }
   )
+
+  it('forwards an explicitly resolved proxy through the native pull contract', async () => {
+    mocks.proxy.mockResolvedValue({ https_proxy: 'http://proxy.invalid' })
+    await pull(repository, remote)
+    expect(mocks.git).not.toHaveBeenCalled()
+    expect(mocks.proxy).toHaveBeenCalledWith(remote.url)
+    expect(mocks.pull).toHaveBeenCalledWith(
+      '/repo',
+      expect.objectContaining({
+        proxy: { https: 'http://proxy.invalid' },
+      }),
+      undefined
+    )
+  })
 
   it('uses the prior Wry route before mutation when the hook environment is enabled', async () => {
     mocks.transport = 'wry'

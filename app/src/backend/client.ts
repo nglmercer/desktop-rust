@@ -64,7 +64,7 @@ export type RemoteProxy = {
 
 function validateRemoteProxy(
   proxy: RemoteProxy | undefined,
-  operation: 'fetch' | 'push'
+  operation: 'fetch' | 'pull' | 'push'
 ): void {
   if (
     proxy !== undefined &&
@@ -7864,6 +7864,7 @@ export class BackendClient {
       readonly report_progress: boolean
       readonly require_hook_callbacks: boolean
       readonly expected_saml_owner?: string
+      readonly proxy?: RemoteProxy
     },
     onProgress?: (chunk: FetchProgressChunk) => void
   ): Promise<PullFailure | undefined> {
@@ -7874,6 +7875,7 @@ export class BackendClient {
     ) {
       throw new FetchPreviewUnsupported('Native pull progress is unavailable')
     }
+    validateRemoteProxy(request.proxy, 'pull')
     const call = (
       method: 'renderer_pull_preview' | 'renderer_pull',
       extra: Record<string, unknown> = {}

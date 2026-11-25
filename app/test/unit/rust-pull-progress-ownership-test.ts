@@ -19,6 +19,7 @@ vi.mock('../../src/lib/git/core', () => ({
 vi.mock('../../src/lib/git/environment', () => ({
   envForProxy: async () => undefined,
   envForRemoteOperation: async () => ({}),
+  backendRemoteProxy: () => undefined,
 }))
 vi.mock('../../src/lib/git/config', () => ({
   getConfigValue: async () => null,

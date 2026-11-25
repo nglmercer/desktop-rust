@@ -549,15 +549,6 @@ fn live_extra_redactions(live: Option<&LiveOutput>) -> &[Vec<u8>] {
 
 /// Keep credential-manager prompts suppressed for background fetches while
 /// allowing the normal interactive flow for user-initiated operations.
-pub(crate) async fn run_bound_remote_fetch(
-    path: &Path,
-    args: &[OsString],
-    is_background_task: bool,
-    report_progress: bool,
-) -> Result<RawOutput> {
-    run_bound_remote_fetch_with_proxy(path, args, is_background_task, report_progress, None).await
-}
-
 /// Run a remote fetch with proxy settings explicitly resolved by the host.
 pub(crate) async fn run_bound_remote_fetch_with_proxy(
     path: &Path,
@@ -1756,9 +1747,15 @@ mod tests {
     async fn remote_fetch_sets_credential_manager_interactivity_for_descendants() {
         let command = crate::args(&["-c", "alias.probe=!printf %s \"$GCM_INTERACTIVE\"", "probe"]);
         for (background, expected) in [(true, &b"0"[..]), (false, &b"1"[..])] {
-            let result = run_bound_remote_fetch(&std::env::temp_dir(), &command, background, false)
-                .await
-                .unwrap();
+            let result = run_bound_remote_fetch_with_proxy(
+                &std::env::temp_dir(),
+                &command,
+                background,
+                false,
+                None,
+            )
+            .await
+            .unwrap();
             assert_eq!(result.code, 0);
             assert_eq!(result.stdout, expected);
         }
@@ -1792,9 +1789,10 @@ mod tests {
             "alias.probe=!printf %s \"${GIT_LFS_PROGRESS-unset}\"",
             "probe",
         ]);
-        let result = run_bound_remote_fetch(&std::env::temp_dir(), &command, false, false)
-            .await
-            .unwrap();
+        let result =
+            run_bound_remote_fetch_with_proxy(&std::env::temp_dir(), &command, false, false, None)
+                .await
+                .unwrap();
         assert_eq!(result.code, 0);
         assert_eq!(result.stdout, b"unset");
     }
@@ -1811,7 +1809,7 @@ mod tests {
         let output = crate::hook_progress::scope(
             sender,
             42,
-            run_bound_remote_fetch(&std::env::temp_dir(), &command, false, true),
+            run_bound_remote_fetch_with_proxy(&std::env::temp_dir(), &command, false, true, None),
         )
         .await
         .unwrap();
