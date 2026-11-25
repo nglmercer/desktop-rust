@@ -1,4 +1,4 @@
-import { cp, mkdtemp, rm } from 'fs/promises'
+import { cp, mkdtemp, rm } from '../../web/fs-promises'
 import type { AddressInfo } from 'net'
 import { tmpdir } from '../../web/os'
 import { join } from 'path'
