@@ -1,23 +1,24 @@
 import assert from 'node:assert'
-import childProcess, { ChildProcess } from 'child_process'
+import childProcess from 'child_process'
 import { mkdir, realpath, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, it, vi } from 'vitest'
 import { promisify } from 'node:util'
 
 import { launch, Shell } from '../../src/lib/shells/win32'
+import { spawn as webSpawn } from '../../src/web/child_process'
 import { createTempDirectory } from '../helpers/temp'
 
-vi.mock('child_process', async importOriginal => {
-  const actual = await importOriginal<typeof import('child_process')>()
-  const spawn = vi.fn()
-  return { ...actual, spawn, default: { ...actual, spawn } }
+vi.mock('../../src/web/child_process', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('../../src/web/child_process')>()
+  return { ...actual, spawn: vi.fn() }
 })
 
 const execFile = promisify(childProcess.execFile)
 
 describe('Cygwin launch', () => {
-  afterEach(() => vi.mocked(childProcess.spawn).mockReset())
+  afterEach(() => vi.mocked(webSpawn).mockReset())
   const shellPath = 'C:\\Program Files\\Cygwin\\bin\\mintty.exe'
   const paths = [
     'C:\\repositories\\project',
@@ -34,17 +35,19 @@ describe('Cygwin launch', () => {
 
   for (const path of paths) {
     it(`passes the repository path through the environment for ${path}`, () => {
-      const child = new ChildProcess()
-      const spawn = vi
-        .mocked(childProcess.spawn)
-        .mockImplementation(() => child)
+      const child = {} as ReturnType<typeof webSpawn>
+      const spawn = vi.mocked(webSpawn).mockImplementation(() => child)
 
       assert.strictEqual(
         launch({ shell: Shell.Cygwin, path: shellPath }, path),
         child
       )
       assert.strictEqual(spawn.mock.calls.length, 1)
-      const [executable, args, options] = spawn.mock.calls[0]
+      const [executable, args, options] = spawn.mock.calls[0] as [
+        string,
+        string[],
+        any,
+      ]
       assert.strictEqual(executable, shellPath)
       assert.deepStrictEqual(args, [
         '/bin/sh',
@@ -79,14 +82,16 @@ describe('Cygwin launch', () => {
       await writeFile(join(bin, 'bash'), '#!/bin/sh\npwd -P\n', { mode: 0o755 })
 
       const spawn = vi
-        .mocked(childProcess.spawn)
-        .mockImplementation(() => new ChildProcess())
+        .mocked(webSpawn)
+        .mockImplementation(() => ({}) as ReturnType<typeof webSpawn>)
 
       for (const path of paths) {
         const directory = join(root, path)
         await mkdir(directory)
         launch({ shell: Shell.Cygwin, path: shellPath }, directory)
-        const [, args, options] = spawn.mock.calls[spawn.mock.calls.length - 1]
+        const [, args, options] = spawn.mock.calls[
+          spawn.mock.calls.length - 1
+        ] as [string, string[], any]
         assert.ok(args)
         assert.ok(options?.env)
         // Stand-ins isolate the shell script from Cygwin and login profiles.
@@ -98,7 +103,9 @@ describe('Cygwin launch', () => {
       }
 
       launch({ shell: Shell.Cygwin, path: shellPath }, join(root, 'missing'))
-      const [, args, options] = spawn.mock.calls[spawn.mock.calls.length - 1]
+      const [, args, options] = spawn.mock.calls[
+        spawn.mock.calls.length - 1
+      ] as [string, string[], any]
       assert.ok(args)
       assert.ok(options?.env)
       await assert.rejects(
@@ -113,7 +120,7 @@ describe('Cygwin launch', () => {
 
   it('propagates errors when starting the terminal', () => {
     const error = new Error('Unable to start terminal')
-    vi.mocked(childProcess.spawn).mockImplementation(() => {
+    vi.mocked(webSpawn).mockImplementation(() => {
       throw error
     })
 

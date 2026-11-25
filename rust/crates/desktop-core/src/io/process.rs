@@ -396,8 +396,44 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
         .unwrap_or_default();
     let piped = |index: usize| stdio.get(index).map(String::as_str).unwrap_or("pipe") != "ignore";
 
-    let mut child_command = Command::new(&command);
-    child_command.args(&args);
+    let shell = o.get("shell");
+    let use_shell = shell.is_some_and(|value| {
+        value.as_bool().unwrap_or(false) || value.as_str().is_some_and(|s| !s.is_empty())
+    });
+    let mut child_command = if use_shell {
+        let joined = if args.is_empty() {
+            command.to_string_lossy().into_owned()
+        } else {
+            format!("{} {}", command.to_string_lossy(), args.join(" "))
+        };
+        #[cfg(windows)]
+        {
+            let shell_program = shell
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| std::env::var("comspec").ok())
+                .unwrap_or_else(|| "C:\\Windows\\System32\\cmd.exe".into());
+            let mut command = Command::new(shell_program);
+            // cmd's /s mode expects the complete command line as one quoted
+            // argument, matching Node's windowsVerbatimArguments behavior.
+            command.args(["/d", "/s", "/c", &format!("\"{joined}\"")]);
+            command
+        }
+        #[cfg(not(windows))]
+        {
+            let shell_program = shell
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("/bin/sh");
+            let mut command = Command::new(shell_program);
+            command.args(["-c", &joined]);
+            command
+        }
+    } else {
+        let mut command = Command::new(&command);
+        command.args(&args);
+        command
+    };
     if let Some(cwd) = o
         .get("cwd")
         .and_then(Value::as_str)
@@ -1023,6 +1059,30 @@ mod tests {
         ack(&json!({ "id": id, "stream": "stdout", "seq": seq })).unwrap();
         ack(&json!({ "id": id, "stream": "stdout", "seq": seq })).unwrap();
         assert_eq!(output_of(&recorder, id, "stdout"), b"abc");
+    }
+
+    #[test]
+    fn shell_commands_join_the_command_line_like_node() {
+        let recorder = Arc::new(Recorder::default());
+        let app = app(&recorder);
+        let spawned = spawn(
+            &app,
+            &json!({
+                "command": "printf",
+                "args": ["'%s'", "shell", "test"],
+                "shell": true,
+                "stdio": ["pipe", "pipe", "pipe"]
+            }),
+        )
+        .unwrap();
+        let id = spawned["id"].as_u64().unwrap();
+        wait_for(
+            &recorder,
+            id,
+            Instant::now() + Duration::from_secs(10),
+            "shell printf",
+        );
+        assert_eq!(output_of(&recorder, id, "stdout"), b"shelltest");
     }
 
     #[test]

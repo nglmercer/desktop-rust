@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn } from '../../web/child_process'
 import * as Path from 'path'
 import {
   enumerateValues,
@@ -13,6 +13,9 @@ import { parseEnumValue } from '../enum'
 import { pathExists } from '../path-exists'
 import type { FoundShell } from './shared'
 import type { IChildProcess } from '../process/child-process'
+
+const spawnShell = (...args: Parameters<typeof spawn>) =>
+  spawn(...args) as unknown as IChildProcess
 import {
   expandTargetPathArgument,
   type ICustomIntegration,
@@ -486,17 +489,17 @@ async function findFluentTerminal(): Promise<string | null> {
 export function launch(
   foundShell: FoundShell<Shell>,
   path: string
-): ChildProcess {
+): IChildProcess {
   const shell = foundShell.shell
 
   switch (shell) {
     case Shell.PowerShell:
-      return spawn('START', ['"PowerShell"', `"${foundShell.path}"`], {
+      return spawnShell('START', ['"PowerShell"', `"${foundShell.path}"`], {
         shell: true,
         cwd: path,
       })
     case Shell.PowerShellCore:
-      return spawn(
+      return spawnShell(
         'START',
         [
           '"PowerShell Core"',
@@ -512,7 +515,7 @@ export function launch(
     case Shell.Hyper: {
       const hyperPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${hyperPath}`)
-      return spawn(hyperPath, [`"${path}"`], {
+      return spawnShell(hyperPath, [`"${path}"`], {
         shell: true,
         cwd: path,
       })
@@ -520,7 +523,7 @@ export function launch(
     case Shell.Alacritty: {
       const alacrittyPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${alacrittyPath}`)
-      return spawn(alacrittyPath, [`--working-directory "${path}"`], {
+      return spawnShell(alacrittyPath, [`--working-directory "${path}"`], {
         shell: true,
         cwd: path,
       })
@@ -528,7 +531,7 @@ export function launch(
     case Shell.GitBash: {
       const gitBashPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${gitBashPath}`)
-      return spawn(gitBashPath, [`--cd="${path}"`], {
+      return spawnShell(gitBashPath, [`--cd="${path}"`], {
         shell: true,
         cwd: path,
       })
@@ -538,7 +541,7 @@ export function launch(
       log.info(`launching ${shell} at path: ${cygwinPath}`)
       // Pass the path through the environment so shell metacharacters in
       // directory names remain literal instead of becoming part of the script.
-      return spawn(
+      return spawnShell(
         cygwinPath,
         [
           '/bin/sh',
@@ -554,18 +557,18 @@ export function launch(
     case Shell.Warp: {
       const warpPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${warpPath}`)
-      return spawn(warpPath, [`warp://action/new_tab?path="${path}"`], {
+      return spawnShell(warpPath, [`warp://action/new_tab?path="${path}"`], {
         shell: true,
         cwd: path,
       })
     }
     case Shell.WSL:
-      return spawn('START', ['"WSL"', `"${foundShell.path}"`], {
+      return spawnShell('START', ['"WSL"', `"${foundShell.path}"`], {
         shell: true,
         cwd: path,
       })
     case Shell.Cmd:
-      return spawn(
+      return spawnShell(
         'START',
         ['"Command Prompt"', `"${foundShell.path}"`, ...foundShell.extraArgs!],
         {
@@ -576,12 +579,15 @@ export function launch(
     case Shell.WindowsTerminal: {
       const windowsTerminalPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${windowsTerminalPath}`)
-      return spawn(windowsTerminalPath, ['-d .'], { shell: true, cwd: path })
+      return spawnShell(windowsTerminalPath, ['-d .'], {
+        shell: true,
+        cwd: path,
+      })
     }
     case Shell.FluentTerminal: {
       const fluentTerminalPath = `"${foundShell.path}"`
       log.info(`launching ${shell} at path: ${fluentTerminalPath}`)
-      return spawn(fluentTerminalPath, ['new'], { shell: true, cwd: path })
+      return spawnShell(fluentTerminalPath, ['new'], { shell: true, cwd: path })
     }
     default:
       return assertNever(shell, `Unknown shell: ${shell}`)

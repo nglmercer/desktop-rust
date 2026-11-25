@@ -543,6 +543,7 @@ export function spawn(
       env,
       stdio: modes,
       detached: options.detached === true,
+      shell: options.shell,
     })
     .then(
       ({
