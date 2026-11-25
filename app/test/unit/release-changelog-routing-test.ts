@@ -61,12 +61,6 @@ describe('release changelog transport', () => {
     await expect(generateDevReleaseSummary()).resolves.toEqual([])
   })
 
-  it('returns no summaries when the native changelog request is unsuccessful', async () => {
-    mocks.transport = 'wry'
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
-    await expect(generateReleaseSummary('3.0.0')).resolves.toEqual([])
-  })
-
   it.each(['empty', 'offline'])(
     'reports %s release notes instead of opening an empty test popup',
     async failure => {
@@ -116,20 +110,14 @@ describe('release changelog transport', () => {
     }
   )
 
-  it('keeps the existing fetch path for the native Wry host', async () => {
+  it('uses the Rust host for the native Wry transport without browser fetch', async () => {
     mocks.transport = 'wry'
-    const fetcher = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => [release],
-    })
+    const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
     vi.stubGlobal('__RELEASE_CHANNEL__', 'test')
 
     await expect(getChangeLog(2)).resolves.toEqual([release])
-    const url = new URL(fetcher.mock.calls[0][0])
-    expect(url.origin).toBe('https://central.github.com')
-    expect(url.searchParams.get('env')).toBe('test')
-    expect(url.searchParams.get('limit')).toBe('2')
-    expect(mocks.changelog).not.toHaveBeenCalled()
+    expect(mocks.changelog).toHaveBeenCalledWith('test', 2)
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

@@ -7,7 +7,6 @@ import {
 import { getVersion } from '../ui/lib/app-proxy'
 import { formatDate } from './format-date'
 import { offsetFromNow } from './offset-from'
-import { getUserAgent } from './http'
 import { backend } from '../backend/client'
 import { readBundledTemplate } from '../ui/add-repository/bundled-templates'
 
@@ -91,34 +90,11 @@ export function getReleaseSummary(
 export async function getChangeLog(
   limit?: number
 ): Promise<ReadonlyArray<ReleaseMetadata>> {
-  if (typeof window !== 'undefined' && backend().transportKind === 'ws') {
-    const channel =
-      __RELEASE_CHANNEL__ === 'beta' || __RELEASE_CHANNEL__ === 'test'
-        ? __RELEASE_CHANNEL__
-        : null
-    return backend().releaseChangelog(channel, limit)
-  }
-  const changelogURL = new URL(
-    'https://central.github.com/deployments/desktop/desktop/changelog.json'
-  )
-
-  if (__RELEASE_CHANNEL__ === 'beta' || __RELEASE_CHANNEL__ === 'test') {
-    changelogURL.searchParams.set('env', __RELEASE_CHANNEL__)
-  }
-
-  if (limit !== undefined) {
-    changelogURL.searchParams.set('limit', limit.toString())
-  }
-
-  const response = await fetch(changelogURL.toString(), {
-    headers: { 'user-agent': getUserAgent() },
-  })
-  if (response.ok) {
-    const releases: ReadonlyArray<ReleaseMetadata> = await response.json()
-    return releases
-  } else {
-    return []
-  }
+  const channel =
+    __RELEASE_CHANNEL__ === 'beta' || __RELEASE_CHANNEL__ === 'test'
+      ? __RELEASE_CHANNEL__
+      : null
+  return backend().releaseChangelog(channel, limit)
 }
 
 export async function generateReleaseSummary(

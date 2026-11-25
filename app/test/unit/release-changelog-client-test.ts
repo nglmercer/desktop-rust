@@ -37,6 +37,32 @@ describe('Rust release changelog client', () => {
     expect(close).toHaveBeenCalledOnce()
   })
 
+  it('routes native shell requests through typed git_info', async () => {
+    const release = {
+      name: 'Release',
+      notes: ['[Fixed] Example'],
+      pub_date: '2025-01-01',
+      version: '3.0.0',
+    }
+    const client: BackendClient = Object.create(BackendClient.prototype)
+    Object.defineProperty(client, 'transport', { value: 'wry' })
+    const request = vi.fn().mockResolvedValue([release])
+    Object.defineProperty(client, 'request', { value: request })
+
+    await expect(client.releaseChangelog('test', 2)).resolves.toEqual([release])
+    expect(request).toHaveBeenCalledWith(
+      'git_info',
+      {
+        operation: {
+          type: 'release_changelog',
+          channel: 'test',
+          limit: 2,
+        },
+      },
+      { deadlineMs: 40_000 }
+    )
+  })
+
   it.each([
     null,
     {},

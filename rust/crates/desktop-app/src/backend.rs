@@ -90,6 +90,10 @@ enum GitInfoOperation {
     GlobalConfigPath {},
     AvailableEditors {},
     AvailableTerminals {},
+    ReleaseChangelog {
+        channel: Option<desktop_backend::ReleaseNotesChannel>,
+        limit: Option<u16>,
+    },
     ValidateCustomIntegration {
         path: String,
     },
@@ -1970,6 +1974,7 @@ impl Backend {
                             GitInfoOperation::GlobalConfigPath {} => desktop_backend::git_global_config_path().await.map(serde_json::Value::String),
                             GitInfoOperation::AvailableEditors {} => desktop_backend::available_editors(desktop_backend::ExternalEditor::Automatic).await,
                             GitInfoOperation::AvailableTerminals {} => desktop_backend::available_terminals().await,
+                            GitInfoOperation::ReleaseChangelog { channel, limit } => desktop_backend::release_changelog(channel, limit).await,
                             GitInfoOperation::ValidateCustomIntegration { path } => desktop_backend::validate_custom_integration_path(path).await,
                             GitInfoOperation::CloneDestinationStatus { path } => desktop_backend::clone_destination_status(Path::new(&path)).await.map(|status| serde_json::json!(status)),
                             GitInfoOperation::ParseWindowsIntegrationArguments { arguments } => desktop_backend::parse_windows_integration_arguments(arguments).await.map(|args| serde_json::json!(args)),
@@ -2376,6 +2381,31 @@ impl Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn wry_release_changelog_operation_is_typed() {
+        let operation: GitInfoOperation = serde_json::from_value(json!({
+            "type": "release_changelog",
+            "channel": "beta",
+            "limit": 2
+        }))
+        .unwrap();
+        assert!(matches!(
+            operation,
+            GitInfoOperation::ReleaseChangelog {
+                channel: Some(desktop_backend::ReleaseNotesChannel::Beta),
+                limit: Some(2)
+            }
+        ));
+        assert!(
+            serde_json::from_value::<GitInfoOperation>(json!({
+                "type": "release_changelog",
+                "channel": "stable",
+                "limit": 2
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn wry_reveal_repository_requires_a_registered_repository() {

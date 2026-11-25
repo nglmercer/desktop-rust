@@ -53,14 +53,14 @@ Measured on 2026-11-25 with `pnpm migration:status`:
 
 | Measure | Current | Done when |
 | --- | --- | --- |
-| Fallback checks (`transportKind`) in renderer | 12 in 6 files | 0 |
+| Fallback checks (`transportKind`) in renderer | 11 in 5 files | 0 |
 | Legacy Git runner calls (`await git(`) in `lib/git` | 28 in 10 files | 0 |
 | Renderer files importing `dugite` | 17 | 0 |
 | Renderer files importing `fs` | 17 | 0 (host operations only) |
 | Renderer files importing `child_process` | 8 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 8 / 0 / 0 | 0 |
-| Unit test files on the Node runner | 0 of 410 | 0 |
-| Rust code (crates, non-test) | 89,869 lines | — |
+| Unit test files on the Node runner | 0 of 409 | 0 |
+| Rust code (crates, non-test) | 90,329 lines | — |
 
 These numbers mean the test-runner migration is complete, but the renderer still
 contains Node-backed Git and filesystem implementations. They are not Electron

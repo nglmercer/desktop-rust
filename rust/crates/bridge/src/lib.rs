@@ -1,5 +1,4 @@
 //! Loopback HTTP/WebSocket transport for the browser and native shells.
-mod changelog;
 #[cfg(feature = "embedded-ui")]
 mod frontend;
 use axum::{
@@ -327,7 +326,7 @@ enum ManagementOperation {
     },
     ReleaseChangelog {
         #[serde(default)]
-        channel: Option<changelog::Channel>,
+        channel: Option<desktop_core::ReleaseNotesChannel>,
         #[serde(default)]
         limit: Option<u16>,
     },
@@ -661,7 +660,7 @@ async fn execute(
                 expected_repository.is_none(),
                 "release notes requests cannot use a selected-repository binding"
             );
-            changelog::fetch(channel, limit).await
+            desktop_core::release_changelog(channel, limit).await
         }
         ApplicationOperation::Management(RevealRepository { repository_path }) => {
             anyhow::ensure!(

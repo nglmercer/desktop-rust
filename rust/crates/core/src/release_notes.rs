@@ -1,4 +1,4 @@
-//! Public release notes fetched by the browser bridge from a fixed origin.
+//! Public release notes fetched by the Rust host from a fixed origin.
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -11,7 +11,7 @@ static REQUESTS: Semaphore = Semaphore::const_new(4);
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Channel {
+pub enum ReleaseNotesChannel {
     Beta,
     Test,
 }
@@ -42,7 +42,7 @@ fn client() -> Result<&'static reqwest::Client> {
         .map_err(|_| anyhow::anyhow!("Unable to initialize release notes client"))
 }
 
-fn changelog_url(channel: Option<Channel>, limit: Option<u16>) -> Result<reqwest::Url> {
+fn changelog_url(channel: Option<ReleaseNotesChannel>, limit: Option<u16>) -> Result<reqwest::Url> {
     ensure!(
         limit.is_none_or(|limit| limit <= 250),
         "Invalid changelog limit"
@@ -57,8 +57,8 @@ fn changelog_url(channel: Option<Channel>, limit: Option<u16>) -> Result<reqwest
             query.append_pair(
                 "env",
                 match channel {
-                    Channel::Beta => "beta",
-                    Channel::Test => "test",
+                    ReleaseNotesChannel::Beta => "beta",
+                    ReleaseNotesChannel::Test => "test",
                 },
             );
         }
@@ -103,12 +103,15 @@ async fn fetch_from(client: &reqwest::Client, url: reqwest::Url) -> Result<Value
     Ok(serde_json::to_value(releases)?)
 }
 
-pub(crate) async fn fetch(channel: Option<Channel>, limit: Option<u16>) -> Result<Value> {
+pub async fn release_changelog(
+    channel: Option<ReleaseNotesChannel>,
+    limit: Option<u16>,
+) -> Result<Value> {
     let url = changelog_url(channel, limit)?;
     let _permit = REQUESTS
         .try_acquire()
         .context("Too many release note requests")?;
-    desktop_core::cancellation::wait(fetch_from(client()?, url)).await?
+    crate::cancellation::wait(fetch_from(client()?, url)).await?
 }
 
 #[cfg(test)]
@@ -152,10 +155,12 @@ mod tests {
     #[test]
     fn constructs_only_the_fixed_endpoint_with_supported_options() {
         assert_eq!(changelog_url(None, None).unwrap().as_str(), CHANGELOG_URL);
-        let url = changelog_url(Some(Channel::Beta), Some(250)).unwrap();
+        let url = changelog_url(Some(ReleaseNotesChannel::Beta), Some(250)).unwrap();
         assert_eq!(url.as_str(), format!("{CHANGELOG_URL}?env=beta&limit=250"));
         assert_eq!(
-            changelog_url(Some(Channel::Test), None).unwrap().query(),
+            changelog_url(Some(ReleaseNotesChannel::Test), None)
+                .unwrap()
+                .query(),
             Some("env=test")
         );
         assert!(changelog_url(None, Some(251)).is_err());
@@ -223,12 +228,12 @@ mod tests {
             let _ = ready.send(());
             tokio::time::sleep(Duration::from_secs(2)).await;
         });
-        let token = desktop_core::cancellation::Cancellation::default();
+        let token = crate::cancellation::Cancellation::default();
         let scoped = token.clone();
         let task = tokio::spawn(async move {
             let client = test_client();
             scoped
-                .scope(desktop_core::cancellation::wait(fetch_from(&client, url)))
+                .scope(crate::cancellation::wait(fetch_from(&client, url)))
                 .await
         });
         received.await.unwrap();

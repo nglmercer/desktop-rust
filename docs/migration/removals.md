@@ -53,6 +53,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `getGlobalConfigPath` sin consumidores de producción | edición de configuración global abierta directamente por el host Rust | `app/test/unit/rust-global-git-identity-test.ts`, `app/test/unit/git/config-test.ts` |
 | `DiscardChangesError` y handler legacy de fallos al mover a papelera | descarte revisado/recuperable Rust obligatorio | `pnpm check:types`, `pnpm lint` |
 | `getRemoteURL` sin consumidores de producción y su fallback shell para URLs sensibles | lectura de remotes segura Rust; tests de fixtures usan `getRemotes` | `app/test/unit/git/remote-management-test.ts`, `app/test/unit/rust-remote-presence-test.ts` |
+| fallback directo de release notes mediante `fetch` cross-origin en Tao/Wry | operación Rust `release_changelog` compartida por WebSocket y Tao/Wry | `app/test/unit/release-changelog-routing-test.ts`, `app/test/unit/release-changelog-client-test.ts` |
 | fallback shell general de `deleteRef` sin consumidores de producción | única operación viva acotada a eliminación revisada de HEAD inicial | `app/test/unit/rust-submodule-routing-test.ts`, `app/test/unit/rust-first-undo-routing-test.ts` |
 | inicialización, README, commit inicial y remote de tutorial mediante filesystem/shell directos | operaciones Rust de creación de repositorio ya usadas por el diálogo de nuevo repositorio | `app/test/unit/tutorial-repository-accounts-test.ts` |
 | lectura filesystem backend-less de conflictos para contexto Copilot | captura certificada/acotada Rust obligatoria bajo lease uniforme | `app/test/unit/copilot-conflict-context-native-test.ts`, `app/test/unit/copilot-conflict-context-test.ts` |
@@ -102,7 +103,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | scripts npm residuales de release | publicación/versionado verificados con pnpm/Rust sin npm CLI |
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
-La línea base numérica viva está en `pnpm migration:status` (12 comprobaciones
+La línea base numérica viva está en `pnpm migration:status` (11 comprobaciones
 `transportKind`, 28 llamadas legacy Git, 17 imports `dugite`, 17 imports `fs`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 

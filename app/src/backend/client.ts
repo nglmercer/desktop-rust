@@ -1848,18 +1848,11 @@ export class BackendClient {
     }
   }
 
-  /** Read the public Desktop changelog through the browser's Rust bridge. */
+  /** Read the public Desktop changelog through the Rust host. */
   async releaseChangelog(
     channel: 'beta' | 'test' | null,
     limit?: number
   ): Promise<ReadonlyArray<ReleaseMetadata>> {
-    if (this.transport !== 'ws') {
-      throw new BackendError({
-        code: 'unsupported',
-        message: 'Changelog bridge requires the browser transport',
-        retryable: false,
-      })
-    }
     if (
       limit !== undefined &&
       (!Number.isInteger(limit) || limit < 0 || limit > 250)
@@ -1870,27 +1863,48 @@ export class BackendClient {
         retryable: false,
       })
     }
-    // Release notes can take up to 30 seconds over the network. The bridge
-    // serializes each connection, so use a separate authenticated connection
-    // to keep repository operations responsive.
-    const changelog = (this.wsChangelog ??= this.ws!.auxiliary())
-    this.changelogRequests++
+
     let value: unknown
-    try {
-      value = await changelog.request(
-        'release_changelog',
+    if (this.transport === 'wry') {
+      value = await this.request(
+        'git_info',
         {
-          channel,
-          limit: limit ?? null,
+          operation: {
+            type: 'release_changelog',
+            channel,
+            limit: limit ?? null,
+          },
         },
         { deadlineMs: 40_000 }
       )
-    } finally {
-      this.changelogRequests--
-      if (this.changelogRequests === 0 && this.wsChangelog === changelog) {
-        this.wsChangelog = null
-        changelog.close()
+    } else if (this.transport === 'ws') {
+      // Release notes can take up to 30 seconds over the network. The bridge
+      // serializes each connection, so use a separate authenticated connection
+      // to keep repository operations responsive.
+      const changelog = (this.wsChangelog ??= this.ws!.auxiliary())
+      this.changelogRequests++
+      try {
+        value = await changelog.request(
+          'release_changelog',
+          {
+            channel,
+            limit: limit ?? null,
+          },
+          { deadlineMs: 40_000 }
+        )
+      } finally {
+        this.changelogRequests--
+        if (this.changelogRequests === 0 && this.wsChangelog === changelog) {
+          this.wsChangelog = null
+          changelog.close()
+        }
       }
+    } else {
+      throw new BackendError({
+        code: 'unsupported',
+        message: 'Changelog requires a Rust backend transport',
+        retryable: false,
+      })
     }
     if (
       !Array.isArray(value) ||
