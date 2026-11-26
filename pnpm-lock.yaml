@@ -284,9 +284,6 @@ importers:
         specifier: ^3.0.2
         version: 3.0.3
     devDependencies:
-      '@testing-library/dom':
-        specifier: 8.20.1
-        version: 8.20.1
       '@testing-library/react':
         specifier: 12.1.5
         version: 12.1.5(@types/react@16.14.70)(react-dom@16.14.0(react@16.14.0))(react@16.14.0)

@@ -60,7 +60,6 @@
     "untildify": "^3.0.2"
   },
   "devDependencies": {
-    "@testing-library/dom": "8.20.1",
     "@testing-library/react": "12.1.5"
   }
 }
