@@ -623,10 +623,6 @@ export default defineConfig({
         replacement: path.resolve(__dirname, 'app/src/web/net.ts'),
       },
       {
-        find: /^module$/,
-        replacement: path.resolve(__dirname, 'app/src/web/module.ts'),
-      },
-      {
         find: /^os$/,
         replacement: path.resolve(__dirname, 'app/src/web/os.ts'),
       },
@@ -641,10 +637,6 @@ export default defineConfig({
       {
         find: /^node:async_hooks$/,
         replacement: path.resolve(__dirname, 'app/src/web/async_hooks.ts'),
-      },
-      {
-        find: 'node:module',
-        replacement: path.resolve(__dirname, 'app/src/web/module.ts'),
       },
       {
         find: /^node:fs$/,
