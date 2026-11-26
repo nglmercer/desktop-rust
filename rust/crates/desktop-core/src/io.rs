@@ -746,13 +746,30 @@ fn metadata_json(meta: &std::fs::Metadata) -> Value {
             .map(|d| d.as_secs_f64() * 1000.0)
             .unwrap_or(0.0)
     };
+    let nanos = |time: std::io::Result<std::time::SystemTime>| {
+        time.ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i128 * 1_000_000_000 + i128::from(d.subsec_nanos()))
+            .unwrap_or(0)
+    };
     #[cfg(unix)]
-    let (mode, dev, ino) = {
+    let (mode, dev, ino, nlink, uid, gid, rdev, blksize, blocks, ctime_ns) = {
         use std::os::unix::fs::MetadataExt;
-        (meta.mode(), meta.dev(), meta.ino())
+        (
+            meta.mode(),
+            meta.dev(),
+            meta.ino(),
+            meta.nlink(),
+            meta.uid(),
+            meta.gid(),
+            meta.rdev(),
+            meta.blksize(),
+            meta.blocks(),
+            meta.ctime() as i128 * 1_000_000_000 + i128::from(meta.ctime_nsec()),
+        )
     };
     #[cfg(not(unix))]
-    let (mode, dev, ino) = (
+    let (mode, dev, ino, nlink, uid, gid, rdev, blksize, blocks, ctime_ns) = (
         if meta.permissions().readonly() {
             0o444u32
         } else {
@@ -760,6 +777,13 @@ fn metadata_json(meta: &std::fs::Metadata) -> Value {
         },
         0u64,
         0u64,
+        1u64,
+        0u32,
+        0u32,
+        0u64,
+        0u64,
+        0u64,
+        nanos(meta.modified()),
     );
 
     let file_type = meta.file_type();
@@ -772,10 +796,22 @@ fn metadata_json(meta: &std::fs::Metadata) -> Value {
         "dev": dev,
         // Inode numbers can exceed 2^53; identity comparisons need the exact value.
         "ino": ino.to_string(),
+        "nlink": nlink,
+        "uid": uid,
+        "gid": gid,
+        "rdev": rdev,
+        "blksize": blksize,
+        "blocks": blocks,
         "mtimeMs": millis(meta.modified()),
         "atimeMs": millis(meta.accessed()),
         "birthtimeMs": millis(meta.created()),
         "ctimeMs": millis(meta.modified()),
+        // Nanosecond precision is required by bigint fencing. JSON numbers
+        // cannot represent these values exactly, so they travel as decimal strings.
+        "mtimeNs": nanos(meta.modified()).to_string(),
+        "atimeNs": nanos(meta.accessed()).to_string(),
+        "birthtimeNs": nanos(meta.created()).to_string(),
+        "ctimeNs": ctime_ns.to_string(),
     })
 }
 
@@ -1611,6 +1647,35 @@ mod tests {
             read_range(&json!({ "path": file, "offset": -1, "length": 2u64 })),
             Err(AppError::BadArgs(_))
         ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metadata_preserves_exact_unix_bigint_fencing_fields() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = temp_dir("metadata");
+        let file = dir.join("regular");
+        std::fs::write(&file, b"metadata").unwrap();
+        let native = std::fs::symlink_metadata(&file).unwrap();
+        let value = metadata_json(&native);
+        let expected_ns = |seconds: i64, nanoseconds: i64| {
+            (seconds as i128 * 1_000_000_000 + i128::from(nanoseconds)).to_string()
+        };
+        assert_eq!(value["nlink"], native.nlink());
+        assert_eq!(value["uid"], native.uid());
+        assert_eq!(value["gid"], native.gid());
+        assert_eq!(value["rdev"], native.rdev());
+        assert_eq!(value["blksize"], native.blksize());
+        assert_eq!(value["blocks"], native.blocks());
+        assert_eq!(
+            value["mtimeNs"],
+            expected_ns(native.mtime(), native.mtime_nsec())
+        );
+        assert_eq!(
+            value["ctimeNs"],
+            expected_ns(native.ctime(), native.ctime_nsec())
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

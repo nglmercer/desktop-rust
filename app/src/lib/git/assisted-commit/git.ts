@@ -67,7 +67,7 @@ export async function readOptionalFile(path: string): Promise<Buffer | null> {
 
 async function optionalStat(path: string): Promise<IFileMetadata | null> {
   try {
-    return await lstat(path)
+    return (await lstat(path)) as IFileMetadata
   } catch (error) {
     if (isErrnoException(error) && error.code === 'ENOENT') {
       return null
@@ -339,7 +339,9 @@ export function verifySelectedFileVersionsSync(
     let current: IFileMetadata | null
     try {
       // eslint-disable-next-line no-sync
-      current = lstatSync(join(data.snapshot.repositoryPath, file.file.path))
+      current = lstatSync(
+        join(data.snapshot.repositoryPath, file.file.path)
+      ) as IFileMetadata
     } catch (error) {
       if (isErrnoException(error) && error.code === 'ENOENT') {
         current = null

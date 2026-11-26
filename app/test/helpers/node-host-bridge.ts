@@ -1,6 +1,12 @@
 import { vi } from 'vitest'
 import { spawn as nodeSpawn } from 'node:child_process'
-import { lstatSync, readFileSync, statSync } from 'node:fs'
+import {
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 const LIMITS = {
@@ -24,6 +30,32 @@ function metadata(value: {
     isFile: value.isFile(),
     isDirectory: value.isDirectory(),
     isSymbolicLink: value.isSymbolicLink(),
+  }
+}
+
+function statResult(value: any) {
+  const integer = (entry: number | bigint) =>
+    typeof entry === 'bigint' ? Number(entry) : entry
+  return {
+    ...metadata(value),
+    size: integer(value.size),
+    mode: integer(value.mode),
+    dev: integer(value.dev),
+    ino: String(value.ino),
+    nlink: integer(value.nlink),
+    uid: integer(value.uid),
+    gid: integer(value.gid),
+    rdev: integer(value.rdev),
+    blksize: integer(value.blksize),
+    blocks: integer(value.blocks),
+    mtimeMs: integer(value.mtimeMs),
+    atimeMs: integer(value.atimeMs),
+    birthtimeMs: integer(value.birthtimeMs),
+    ctimeMs: integer(value.ctimeMs),
+    mtimeNs: String(value.mtimeNs ?? 0),
+    atimeNs: String(value.atimeNs ?? 0),
+    birthtimeNs: String(value.birthtimeNs ?? 0),
+    ctimeNs: String(value.ctimeNs ?? 0),
   }
 }
 
@@ -82,18 +114,7 @@ export function installNodeHostBridge() {
         await fs.chmod(options.path, options.mode)
         return null
       case 'lstat': {
-        const value = await fs.lstat(options.path)
-        return {
-          ...metadata(value),
-          size: value.size,
-          mode: value.mode,
-          dev: value.dev,
-          ino: String(value.ino),
-          mtimeMs: value.mtimeMs,
-          atimeMs: value.atimeMs,
-          birthtimeMs: value.birthtimeMs,
-          ctimeMs: value.ctimeMs,
-        }
+        return statResult(await fs.lstat(options.path, { bigint: true }))
       }
       case 'read-range': {
         const bytes = readFileSync(options.path)
@@ -143,18 +164,7 @@ export function installNodeHostBridge() {
         await fs.access(options.path, options.mode)
         return null
       case 'stat': {
-        const value = await fs.stat(options.path)
-        return {
-          ...metadata(value),
-          size: value.size,
-          mode: value.mode,
-          dev: value.dev,
-          ino: String(value.ino),
-          mtimeMs: value.mtimeMs,
-          atimeMs: value.atimeMs,
-          birthtimeMs: value.birthtimeMs,
-          ctimeMs: value.ctimeMs,
-        }
+        return statResult(await fs.stat(options.path, { bigint: true }))
       }
       case 'readdir':
         return (await fs.readdir(options.path, { withFileTypes: true })).map(
@@ -301,30 +311,6 @@ export function installNodeHostBridge() {
       }
     })
 
-  const statResult = (value: {
-    size: number
-    mode: number
-    dev: number | bigint
-    ino: number | bigint
-    mtimeMs: number
-    atimeMs: number
-    birthtimeMs: number
-    ctimeMs: number
-    isFile(): boolean
-    isDirectory(): boolean
-    isSymbolicLink(): boolean
-  }) => ({
-    ...metadata(value),
-    size: value.size,
-    mode: value.mode,
-    dev: value.dev,
-    ino: String(value.ino),
-    mtimeMs: value.mtimeMs,
-    atimeMs: value.atimeMs,
-    birthtimeMs: value.birthtimeMs,
-    ctimeMs: value.ctimeMs,
-  })
-
   const bridge = {
     invoke(channel: string, options: any): Promise<unknown> {
       if (channel.startsWith('desktop.io.fs-')) {
@@ -442,7 +428,18 @@ export function installNodeHostBridge() {
     },
     invokeSync(channel: string, options: any): unknown {
       if (channel === 'desktop.io.fs-lstat') {
-        return statResult(lstatSync(options.path))
+        return statResult(lstatSync(options.path, { bigint: true }))
+      }
+      if (channel === 'desktop.io.fs-realpath') {
+        return realpathSync.native(options.path)
+      }
+      if (channel === 'desktop.io.fs-readdir') {
+        return readdirSync(options.path, { withFileTypes: true }).map(
+          entry => ({
+            name: entry.name,
+            ...metadata(entry),
+          })
+        )
       }
       throw new Error(`unexpected sync ${channel}`)
     },

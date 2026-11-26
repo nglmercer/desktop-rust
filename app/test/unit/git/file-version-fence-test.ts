@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'vitest'
+import { afterAll, beforeAll, describe, it } from 'vitest'
 import {
   link,
   mkdir,
@@ -17,6 +17,13 @@ import {
   captureObjectDirectoryRoutingFence,
 } from '../../../src/lib/git/file-version-fence'
 import { createTempDirectory } from '../../helpers/temp'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
+
+beforeAll(() => installNodeHostBridge())
+afterAll(() => uninstallNodeHostBridge())
 
 describe('push backing file version fence', () => {
   for (const nested of [false, true]) {

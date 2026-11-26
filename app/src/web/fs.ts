@@ -22,10 +22,20 @@ interface IRawStats {
   mode: number
   dev: number
   ino: string
+  nlink: number
+  uid: number
+  gid: number
+  rdev: number
+  blksize: number
+  blocks: number
   mtimeMs: number
   atimeMs: number
   birthtimeMs: number
   ctimeMs: number
+  mtimeNs: string
+  atimeNs: string
+  birthtimeNs: string
+  ctimeNs: string
 }
 
 interface IRawDirent {
@@ -123,14 +133,24 @@ function decode(base64: string, options: ReadOptions): any {
 }
 
 export class Stats {
-  public readonly size: number
-  public readonly mode: number
+  public readonly size: number | bigint
+  public readonly mode: number | bigint
   public readonly dev: number | bigint
   public readonly ino: number | bigint
-  public readonly mtimeMs: number
-  public readonly atimeMs: number
-  public readonly ctimeMs: number
-  public readonly birthtimeMs: number
+  public readonly nlink: number | bigint
+  public readonly uid: number | bigint
+  public readonly gid: number | bigint
+  public readonly rdev: number | bigint
+  public readonly blksize: number | bigint
+  public readonly blocks: number | bigint
+  public readonly mtimeMs: number | bigint
+  public readonly atimeMs: number | bigint
+  public readonly ctimeMs: number | bigint
+  public readonly birthtimeMs: number | bigint
+  public readonly mtimeNs: bigint | undefined
+  public readonly atimeNs: bigint | undefined
+  public readonly ctimeNs: bigint | undefined
+  public readonly birthtimeNs: bigint | undefined
   public readonly mtime: Date
   public readonly atime: Date
   public readonly ctime: Date
@@ -140,14 +160,28 @@ export class Stats {
     private readonly raw: IRawStats,
     bigint = false
   ) {
-    this.size = raw.size
-    this.mode = raw.mode
-    this.dev = bigint ? BigInt(raw.dev) : raw.dev
-    this.ino = bigint ? BigInt(raw.ino) : Number(raw.ino)
-    this.mtimeMs = raw.mtimeMs
-    this.atimeMs = raw.atimeMs
-    this.ctimeMs = raw.ctimeMs
-    this.birthtimeMs = raw.birthtimeMs
+    const integer = (value: number | string) =>
+      bigint ? BigInt(value) : Number(value)
+    const milliseconds = (value: number) =>
+      bigint ? BigInt(Math.trunc(value)) : value
+    this.size = integer(raw.size)
+    this.mode = integer(raw.mode)
+    this.dev = integer(raw.dev)
+    this.ino = integer(raw.ino)
+    this.nlink = integer(raw.nlink)
+    this.uid = integer(raw.uid)
+    this.gid = integer(raw.gid)
+    this.rdev = integer(raw.rdev)
+    this.blksize = integer(raw.blksize)
+    this.blocks = integer(raw.blocks)
+    this.mtimeMs = milliseconds(raw.mtimeMs)
+    this.atimeMs = milliseconds(raw.atimeMs)
+    this.ctimeMs = milliseconds(raw.ctimeMs)
+    this.birthtimeMs = milliseconds(raw.birthtimeMs)
+    this.mtimeNs = bigint ? BigInt(raw.mtimeNs) : undefined
+    this.atimeNs = bigint ? BigInt(raw.atimeNs) : undefined
+    this.ctimeNs = bigint ? BigInt(raw.ctimeNs) : undefined
+    this.birthtimeNs = bigint ? BigInt(raw.birthtimeNs) : undefined
     this.mtime = new Date(raw.mtimeMs)
     this.atime = new Date(raw.atimeMs)
     this.ctime = new Date(raw.ctimeMs)
@@ -304,10 +338,20 @@ function bundledStats(entry: IBundleEntry | null, path: string, options: any) {
     mode: entry.kind === 'file' ? 0o100444 : 0o40555,
     dev: 0,
     ino: '0',
+    nlink: 1,
+    uid: 0,
+    gid: 0,
+    rdev: 0,
+    blksize: 0,
+    blocks: 0,
     mtimeMs: 0,
     atimeMs: 0,
     birthtimeMs: 0,
     ctimeMs: 0,
+    mtimeNs: '0',
+    atimeNs: '0',
+    birthtimeNs: '0',
+    ctimeNs: '0',
   }
   return new Stats(raw, statOptions(options))
 }

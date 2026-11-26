@@ -1,13 +1,22 @@
-import {
-  BigIntStats,
-  lstatSync,
-  realpathSync,
-  readdirSync,
-  opendirSync,
-} from 'fs'
-import { lstat, realpath } from 'fs/promises'
+import { lstatSync, realpathSync, readdirSync, opendirSync } from '../../web/fs'
+import { lstat, realpath } from '../../web/fs-promises'
 import { isErrnoException } from '../errno-exception'
 import { basename, dirname, join } from 'path'
+
+interface IBigIntMetadata {
+  readonly dev: bigint
+  readonly ino: bigint
+  readonly mode: bigint
+  readonly size: bigint
+  readonly nlink: bigint
+  readonly mtimeNs: bigint
+  readonly ctimeNs: bigint
+  isFile(): boolean
+  isDirectory(): boolean
+  isSymbolicLink(): boolean
+}
+
+const bigintMetadata = (stat: unknown) => stat as IBigIntMetadata
 
 /** A certified identity/version changed, distinct from an unexpected I/O failure. */
 export class AssistedCommitFileVersionMismatchError extends Error {
@@ -26,7 +35,7 @@ export function isAssistedCommitPathLayoutError(error: unknown): boolean {
   )
 }
 
-function version(stat: BigIntStats | null): string {
+function version(stat: IBigIntMetadata | null): string {
   return stat === null
     ? 'missing'
     : [
@@ -37,9 +46,9 @@ function version(stat: BigIntStats | null): string {
       ].join(':')
 }
 
-async function optionalStat(path: string): Promise<BigIntStats | null> {
+async function optionalStat(path: string): Promise<IBigIntMetadata | null> {
   try {
-    return await lstat(path, { bigint: true })
+    return bigintMetadata(await lstat(path, { bigint: true }))
   } catch (error) {
     if (isErrnoException(error) && error.code === 'ENOENT') {
       return null
@@ -90,10 +99,10 @@ export async function captureFileVersionFence(
   )
   return function verifyFileVersionsSync() {
     for (const file of files) {
-      let stat: BigIntStats | null
+      let stat: IBigIntMetadata | null
       try {
         // eslint-disable-next-line no-sync
-        stat = lstatSync(file.path, { bigint: true })
+        stat = bigintMetadata(lstatSync(file.path, { bigint: true }))
       } catch (error) {
         if (isErrnoException(error) && error.code === 'ENOENT') {
           stat = null
@@ -107,13 +116,15 @@ export async function captureFileVersionFence(
         }
       }
       let physical: string | null
-      let target: BigIntStats | null
+      let target: IBigIntMetadata | null
       try {
         // eslint-disable-next-line no-sync
         physical = stat === null ? null : realpathSync.native(file.path)
         // eslint-disable-next-line no-sync
         target =
-          physical === null ? null : lstatSync(physical, { bigint: true })
+          physical === null
+            ? null
+            : bigintMetadata(lstatSync(physical, { bigint: true }))
       } catch (error) {
         if (
           (isErrnoException(error) && error.code === 'ENOENT') ||
@@ -156,10 +167,10 @@ export async function captureMutableFileRoutingFence(
   const verify = () => {
     verifyParents()
     for (const file of files) {
-      let stat: BigIntStats
+      let stat: IBigIntMetadata
       try {
         // eslint-disable-next-line no-sync
-        stat = lstatSync(file.path, { bigint: true })
+        stat = bigintMetadata(lstatSync(file.path, { bigint: true }))
       } catch (error) {
         if (isErrnoException(error) && error.code === 'ENOENT') {
           continue
@@ -230,7 +241,7 @@ async function captureTreeRoutingFence(
       }
       try {
         // eslint-disable-next-line no-sync
-        const stat = lstatSync(path, { bigint: true })
+        const stat = bigintMetadata(lstatSync(path, { bigint: true }))
         if (
           stat.isSymbolicLink() ||
           (!stat.isDirectory() &&
