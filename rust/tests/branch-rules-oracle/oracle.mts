@@ -5,8 +5,16 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { build } from 'vite'
-import ts from '@typescript/compiler-api'
+import {
+  isClassDeclaration,
+  isEnumDeclaration,
+  isFunctionDeclaration,
+  isMethodDeclaration,
+  type SourceFile,
+} from 'typescript/unstable/ast'
 import { matcherSource } from './matcher-source.mts'
+import { openTypeScriptProject } from './typescript7-project.mts'
+import { transpileTypeScript } from './transpile-typescript.mts'
 
 const here = path.dirname(fileURLToPath(import.meta.url)),
   root = path.resolve(here, '../../..'),
@@ -44,16 +52,20 @@ const sources: Record<string, string> = Object.fromEntries(
     ])
   )
 )
-const trees: Record<string, ts.SourceFile> = Object.fromEntries(
-  Object.entries(sources).map(([key, source]) => [
-    key,
-    ts.createSourceFile(files[key], source, ts.ScriptTarget.Latest, true),
-  ])
+const typeScript = openTypeScriptProject(root)
+const trees: Record<string, SourceFile> = Object.fromEntries(
+  Object.entries(files).map(([key, filename]) => {
+    const tree = typeScript.project.program.getSourceFile(
+      path.join(root, filename)
+    )
+    assert(tree, `Missing authoritative source ${filename}`)
+    return [key, tree]
+  })
 )
 function declaration(key: string, name: string): string {
   const found = trees[key].statements.find(
     node =>
-      (ts.isEnumDeclaration(node) || ts.isFunctionDeclaration(node)) &&
+      (isEnumDeclaration(node) || isFunctionDeclaration(node)) &&
       node.name?.text === name
   )
   assert(found, `Missing authoritative declaration ${name} in ${files[key]}`)
@@ -61,11 +73,11 @@ function declaration(key: string, name: string): string {
 }
 function method(name: string): string {
   const api = trees.api.statements
-    .filter(ts.isClassDeclaration)
+    .filter(isClassDeclaration)
     .find(node => node.name?.text === 'API')
-  const found = api?.members.find(
-    node => node.name?.getText(trees.api) === name
-  )
+  const found = api?.members
+    .filter(isMethodDeclaration)
+    .find(node => node.name.getText(trees.api) === name)
   assert(found, `Missing authoritative API method ${name}`)
   return found.getText(trees.api)
 }
@@ -107,7 +119,8 @@ const aliases = new Map(
     ['app/src/ui/lib/row', 'ui'],
   ].map(([filename, value]) => [path.join(root, filename), value])
 )
-const matcher = await matcherSource(root)
+const matcher = await matcherSource(root, typeScript.project)
+typeScript.api.close()
 const entry = `export {checkBranchNameRules} from ${JSON.stringify(path.join(root, files.checker))};export {parseRepoRules,useRepoRulesLogic} from ${JSON.stringify(path.join(root, files.helper))};export {GitHubRepository} from 'oracle:repository';export {toMatcher} from 'oracle:matcher';`
 const compiled = await build({
   configFile: false,
@@ -133,18 +146,17 @@ const compiled = await build({
         const replacement = aliases.get(key)
         if (replacement) return `\0oracle:${replacement}`
       },
-      load(id) {
+      async load(id) {
         if (id === '\0oracle:entry') return entry
         if (id === '\0oracle:matcher') return matcher
         if (id.startsWith('\0oracle:')) {
           const source = modules[id.slice('\0oracle:'.length)]
           assert(source, `Unknown oracle module ${id}`)
-          return ts.transpileModule(source, {
-            compilerOptions: {
-              target: ts.ScriptTarget.ES2020,
-              module: ts.ModuleKind.ESNext,
-            },
-          }).outputText
+          return transpileTypeScript(
+            root,
+            `branch-rules-${id.slice('\0oracle:'.length)}.ts`,
+            source
+          )
         }
       },
     },

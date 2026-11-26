@@ -11,8 +11,7 @@ La cadena rápida actual es TypeScript 7 para `tsc` (`pnpm check:types` y
 `pnpm compile:script`), oxlint para análisis estático (`pnpm lint:oxlint`),
 Biome para formateo (`pnpm format:check`) y Vitest como único runner de pruebas
 TypeScript (`pnpm test`). `@typescript/compiler-api` queda instalado de forma explícita solo para la API
-de compilación usada por `script/ts-register.cjs` y el oracle de reglas de
-ramas. ESLint,
+de compilación usada por `script/ts-register.cjs`. ESLint,
 Prettier y el enrutado explícito de suites mediante `vitest-suites.json` ya no
 forman parte del flujo raíz.
 

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 import { build } from 'vite'
 import { matcherSource } from './matcher-source.mts'
+import { openTypeScriptProject } from './typescript7-project.mts'
 
 const here = path.dirname(fileURLToPath(import.meta.url)),
   root = path.resolve(here, '../../..'),
@@ -23,7 +24,9 @@ const license = await readFile(
   path.join(path.dirname(engine), '../LICENSE'),
   'utf8'
 )
-const matcher = await matcherSource(root)
+const typeScript = openTypeScriptProject(root)
+const matcher = await matcherSource(root, typeScript.project)
+typeScript.api.close()
 const entry = `import {toMatcher} from 'virtual:desktop-matcher';
 globalThis.__desktopMatchRules = function(patternsJSON,branch) {
   if (typeof patternsJSON !== 'string' || typeof branch !== 'string') throw new TypeError('Matcher requires JSON parameters and branch text');

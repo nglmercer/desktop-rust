@@ -113,8 +113,7 @@ specific set of dependencies - this will make reviews easier to perform.
 
 TypeScript 7 is the canonical `typescript` package and command-line type
 checker. `@typescript/compiler-api` remains installed side-by-side only for the
-legacy compiler API used by `script/ts-register.cjs` and the branch-rules
-oracle.
+legacy compiler API used by `script/ts-register.cjs`.
 
 When upgrading either compiler:
 
