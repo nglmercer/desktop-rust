@@ -2,9 +2,9 @@
 // `desktop.io.fs-*` commands: asynchronous ones over the IPC bridge, the
 // `*Sync` ones over a blocking request (see `invokeSync` in ipc-shim.ts).
 //
-// File handles are emulated by path. There is no real descriptor behind
-// them, so a handle does not pin an inode the way Node's does: code that
-// relies on that for locking gets best-effort behaviour here.
+// Asynchronous file handles are real host-owned descriptors. Their stat,
+// read, write and chmod operations pin the inode that was opened, matching
+// the locking semantics high-integrity Git metadata updates rely on.
 
 import { Writable } from 'stream'
 
@@ -419,17 +419,23 @@ export class FileHandle {
 
   public constructor(
     private readonly path: string,
-    private readonly mode: IOpenMode
+    private readonly mode: IOpenMode,
+    private readonly handleId?: number
   ) {}
 
   public async stat(options?: any) {
-    return new Stats(
-      await call('stat', { path: this.path }),
-      statOptions(options)
-    )
+    const raw =
+      this.handleId === undefined
+        ? await call('stat', { path: this.path })
+        : await call('handle-stat', { id: this.handleId })
+    return new Stats(raw, statOptions(options))
   }
   public async readFile(options?: ReadOptions) {
-    return decode(await call('read-file', { path: this.path }), options)
+    const base64 =
+      this.handleId === undefined
+        ? await call('read-file', { path: this.path })
+        : await call('handle-read-file', { id: this.handleId })
+    return decode(base64, options)
   }
   public async read(
     buffer: Uint8Array,
@@ -444,17 +450,25 @@ export class FileHandle {
     return { bytesRead: chunk.byteLength, buffer }
   }
   public async writeFile(data: unknown, options?: any) {
+    if (this.handleId !== undefined) {
+      const encoding = typeof options === 'string' ? options : options?.encoding
+      await call('handle-write-file', {
+        id: this.handleId,
+        data: bridge().encodeBase64(toBytes(data, encoding)),
+      })
+      return
+    }
     await call(
       'write-file',
       writeArgs(this.path, data, options, this.mode.append)
     )
   }
   public async appendFile(data: unknown, options?: any) {
-    await call('write-file', writeArgs(this.path, data, options, true))
+    await this.writeFile(data, options)
   }
   public async write(data: unknown) {
     const bytes = toBytes(data)
-    await call('write-file', writeArgs(this.path, bytes, undefined, true))
+    await this.writeFile(bytes)
     return { bytesWritten: bytes.byteLength, buffer: data }
   }
   public async truncate() {
@@ -464,14 +478,28 @@ export class FileHandle {
     )
   }
   public async chmod(mode: number) {
-    await call('chmod', { path: this.path, mode })
+    await call(
+      this.handleId === undefined ? 'chmod' : 'handle-chmod',
+      this.handleId === undefined
+        ? { path: this.path, mode }
+        : { id: this.handleId, mode }
+    )
   }
-  public async utimes() {
-    // Timestamps cannot be set through the bridge yet.
+  public async utimes(atime: number, mtime: number) {
+    if (this.handleId !== undefined) {
+      await call('handle-utimes', { id: this.handleId, atime, mtime })
+    }
   }
-  public async sync() {}
+  public async sync() {
+    if (this.handleId !== undefined) {
+      await call('handle-sync', { id: this.handleId })
+    }
+  }
   public async datasync() {}
   public async close() {
+    if (this.handleId !== undefined) {
+      await call('handle-close', { id: this.handleId })
+    }
     this.closed = true
   }
   public async [Symbol.asyncDispose]() {
@@ -485,21 +513,18 @@ export class FileHandle {
 async function open(path: PathLike, flags?: string | number, mode?: number) {
   const target = toPath(path)
   const how = openMode(flags)
-  if (how.create) {
-    if (how.exclusive || how.truncate) {
-      await call('write-file', {
-        path: target,
-        data: '',
-        exclusive: how.exclusive,
-        mode,
-      })
-    } else {
-      await call('write-file', { path: target, data: '', append: true, mode })
+  if (!isBundled(target)) {
+    const opened = (await call('open', { path: target, flags, mode })) as {
+      id: number
     }
-  } else {
-    // Opening for read must fail now if the file is missing.
-    await call('stat', { path: target })
+    return new FileHandle(target, how, opened.id)
   }
+  if (how.create) {
+    throw missing(target)
+  }
+  // Bundled resources are read-only and have no host inode to pin. Keep them
+  // on the path emulation used by the rest of the bundle resource surface.
+  bundledStats(await bundleEntry(target), target, undefined)
   return new FileHandle(target, how)
 }
 
@@ -825,7 +850,7 @@ export class Dir {
 export const opendirSync = (path: PathLike) =>
   new Dir(toPath(path), callSync('readdir', { path: toPath(path) }))
 
-// Descriptors are emulated by path, like FileHandle above. Each one keeps its
+// Legacy numeric descriptors are emulated by path. Each one keeps its
 // cursor, and the identity of the file it was opened on: a read after that
 // file was replaced fails instead of returning another file's bytes.
 interface IDescriptor {

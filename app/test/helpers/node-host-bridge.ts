@@ -67,11 +67,13 @@ const listeners = new Map<string, (event: unknown, message: any) => void>()
 
 export function installNodeHostBridge() {
   const children = new Map<number, INodeChild>()
+  const fileHandles = new Map<number, import('fs/promises').FileHandle>()
   const gitCancellations = new Map<
     number,
     { child?: ReturnType<typeof nodeSpawn>; cancelled: boolean }
   >()
   let nextId = 1
+  let nextFileHandleId = 1
 
   const emit = (message: Record<string, unknown>) => {
     listeners.get('desktop-process')?.(null, message)
@@ -96,6 +98,81 @@ export function installNodeHostBridge() {
             mode: options.mode,
           })
         }
+        return null
+      }
+      case 'open': {
+        const handle = await fs.open(options.path, options.flags, options.mode)
+        const id = nextFileHandleId++
+        fileHandles.set(id, handle)
+        return { id }
+      }
+      case 'handle-stat': {
+        const handle = fileHandles.get(options.id)
+        if (handle === undefined) {
+          throw Object.assign(new Error('EBADF: bad file descriptor'), {
+            code: 'EBADF',
+          })
+        }
+        return statResult(await handle.stat({ bigint: true }))
+      }
+      case 'handle-read-file': {
+        const handle = fileHandles.get(options.id)
+        if (handle === undefined) {
+          throw Object.assign(new Error('EBADF: bad file descriptor'), {
+            code: 'EBADF',
+          })
+        }
+        return (await handle.readFile()).toString('base64')
+      }
+      case 'handle-write-file': {
+        const handle = fileHandles.get(options.id)
+        if (handle === undefined) {
+          throw Object.assign(new Error('EBADF: bad file descriptor'), {
+            code: 'EBADF',
+          })
+        }
+        await handle.writeFile(Buffer.from(options.data ?? '', 'base64'))
+        return null
+      }
+      case 'handle-chmod': {
+        const handle = fileHandles.get(options.id)
+        if (handle === undefined) {
+          throw Object.assign(new Error('EBADF: bad file descriptor'), {
+            code: 'EBADF',
+          })
+        }
+        await handle.chmod(options.mode)
+        return null
+      }
+      case 'handle-utimes': {
+        const handle = fileHandles.get(options.id)
+        if (handle === undefined) {
+          throw Object.assign(new Error('EBADF: bad file descriptor'), {
+            code: 'EBADF',
+          })
+        }
+        await handle.utimes(options.atime, options.mtime)
+        return null
+      }
+      case 'handle-sync': {
+        const handle = fileHandles.get(options.id)
+        if (handle === undefined) {
+          throw Object.assign(new Error('EBADF: bad file descriptor'), {
+            code: 'EBADF',
+          })
+        }
+        await handle.sync()
+        return null
+      }
+      case 'handle-close': {
+        const handle = fileHandles.get(options.id)
+        if (handle === undefined) {
+          throw Object.assign(new Error('EBADF: bad file descriptor'), {
+            code: 'EBADF',
+          })
+        }
+        await handle.close()
+        fileHandles.delete(options.id)
         return null
       }
       case 'read-file': {

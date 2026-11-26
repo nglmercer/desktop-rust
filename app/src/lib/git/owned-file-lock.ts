@@ -1,6 +1,12 @@
-import { Stats } from 'fs'
-import { FileHandle, lstat, open, unlink } from 'fs/promises'
+import { FileHandle, lstat, open, unlink } from '../../web/fs-promises'
 import { isErrnoException } from '../errno-exception'
+
+/** Non-bigint identity/mode metadata for an owned lock. */
+export interface IOwnedFileStat {
+  readonly dev: number
+  readonly ino: number
+  readonly mode: number
+}
 
 /** Ownership registered immediately after exclusive creation, before stat. */
 export interface IOwnedFileLease {
@@ -9,7 +15,7 @@ export interface IOwnedFileLease {
   /** Exclusively created handle, owned until cleanup finishes. */
   readonly handle: FileHandle
   /** Device/inode identity used to avoid removing a replacement lock. */
-  stat: Stats | undefined
+  stat: IOwnedFileStat | undefined
   /** Whether the owned handle was successfully closed. */
   closed: boolean
   /** Whether this process removed/installed the path or lost ownership of it. */
@@ -19,7 +25,7 @@ export interface IOwnedFileLease {
 /** An initialized exclusive lock with a known owned inode. */
 export interface IOwnedFileLock extends IOwnedFileLease {
   /** Device/inode identity established during initialization. */
-  stat: Stats
+  stat: IOwnedFileStat
 }
 
 /** Close and remove only an owned lock, retaining failed steps for retry. */
@@ -29,7 +35,7 @@ export async function releaseOwnedFileLock(
   const errors: unknown[] = []
   if (!lock.consumed && lock.stat === undefined) {
     try {
-      lock.stat = await lock.handle.stat()
+      lock.stat = (await lock.handle.stat()) as IOwnedFileStat
     } catch (error) {
       throw new AggregateError(
         [error],
@@ -89,7 +95,9 @@ export async function acquireOwnedFileLock(
   }
   try {
     onOwnershipAcquired?.(lease)
-    return Object.assign(lease, { stat: await handle.stat() })
+    return Object.assign(lease, {
+      stat: (await handle.stat()) as IOwnedFileStat,
+    })
   } catch (error) {
     try {
       await releaseOwnedFileLock(lease)

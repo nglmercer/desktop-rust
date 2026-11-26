@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -67,7 +67,13 @@ pub fn lane(channel: &str) -> Lane {
         "process-write" | "process-end" | "process-kill" | "process-ack" | "cancel" => {
             Lane::Control
         }
-        "git-exec" | "http-fetch" | "process-spawn" | "fs-copy" | "fs-copy-file" | "fs-hash"
+        "git-exec"
+        | "http-fetch"
+        | "process-spawn"
+        | "fs-copy"
+        | "fs-copy-file"
+        | "fs-hash"
+        | "fs-handle-read-file"
         | "open-path" => Lane::Long,
         "fs-rm" => Lane::Long,
         _ => Lane::Short,
@@ -138,6 +144,10 @@ pub fn invoke(app: &DesktopApp, channel: &str, args: &[Value]) -> Result<Value> 
 /// credit. See [`process::shutdown`].
 pub fn shutdown(app: &DesktopApp) {
     process::shutdown(app);
+    file_handles()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
 }
 
 /// Live counters for development tooling. Holds no stream content.
@@ -815,6 +825,131 @@ fn metadata_json(meta: &std::fs::Metadata) -> Value {
     })
 }
 
+struct FileHandleEntry {
+    file: Mutex<File>,
+}
+
+fn file_handles() -> &'static Mutex<HashMap<u64, Arc<FileHandleEntry>>> {
+    static HANDLES: OnceLock<Mutex<HashMap<u64, Arc<FileHandleEntry>>>> = OnceLock::new();
+    HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn file_handle(o: &Value) -> Result<Arc<FileHandleEntry>> {
+    let id = unsigned(o, "id")?;
+    file_handles()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| AppError::Coded {
+            code: "EBADF".into(),
+            message: format!("EBADF: bad file descriptor, stat '{id}'"),
+        })
+}
+
+fn open_options(o: &Value) -> Result<std::fs::OpenOptions> {
+    let mut options = std::fs::OpenOptions::new();
+    if let Some(flags) = o.get("flags").and_then(Value::as_u64) {
+        // The web shim uses Linux's stable numeric constants on every platform.
+        const O_RDONLY: u64 = 0;
+        const O_WRONLY: u64 = 1;
+        const O_RDWR: u64 = 2;
+        const O_CREAT: u64 = 0o100;
+        const O_EXCL: u64 = 0o200;
+        const O_TRUNC: u64 = 0o1000;
+        const O_APPEND: u64 = 0o2000;
+        match flags & 3 {
+            O_RDONLY => {
+                options.read(true);
+            }
+            O_WRONLY => {
+                options.write(true);
+            }
+            O_RDWR => {
+                options.read(true).write(true);
+            }
+            _ => return Err(AppError::BadArgs("invalid open access mode".into())),
+        }
+        if flags & O_CREAT != 0 {
+            if flags & O_EXCL != 0 {
+                options.create_new(true);
+            } else {
+                options.create(true);
+            }
+        }
+        if flags & O_TRUNC != 0 {
+            options.truncate(true);
+        }
+        if flags & O_APPEND != 0 {
+            options.append(true);
+        }
+    } else {
+        let flags = o.get("flags").and_then(Value::as_str).unwrap_or("r");
+        match flags {
+            "r" => {
+                options.read(true);
+            }
+            "r+" => {
+                options.read(true).write(true);
+            }
+            "w" | "w+" => {
+                if flags == "w+" {
+                    options.read(true);
+                }
+                options.write(true).create(true).truncate(true);
+            }
+            "wx" | "wx+" | "x" | "x+" => {
+                if flags.ends_with('+') {
+                    options.read(true);
+                }
+                options.write(true).create_new(true);
+            }
+            "a" | "a+" => {
+                if flags == "a+" {
+                    options.read(true);
+                }
+                options.append(true).create(true);
+            }
+            "ax" | "ax+" => {
+                if flags == "ax+" {
+                    options.read(true);
+                }
+                options.append(true).create_new(true);
+            }
+            _ => {
+                return Err(AppError::BadArgs(format!(
+                    "unsupported open flags `{flags}`"
+                )));
+            }
+        }
+    }
+    #[cfg(unix)]
+    if let Some(mode) = o.get("mode").and_then(Value::as_u64) {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode as u32);
+    }
+    Ok(options)
+}
+
+fn open_handle(o: &Value) -> Result<Value> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let target = PathBuf::from(string(o, "path")?);
+    let file = open_options(o)?
+        .open(&target)
+        .map_err(|e| io_error(&e, &format!("open '{}'", target.display())))?;
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    file_handles()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            id,
+            Arc::new(FileHandleEntry {
+                file: Mutex::new(file),
+            }),
+        );
+    Ok(json!({ "id": id }))
+}
+
 fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
     let path = || string(o, "path").map(PathBuf::from);
     let wrap = |result: std::io::Result<Value>, what: &str| {
@@ -827,6 +962,108 @@ fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
     };
 
     match operation {
+        "open" => open_handle(o),
+        "handle-stat" => {
+            let entry = file_handle(o)?;
+            entry
+                .file
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .metadata()
+                .map(|m| metadata_json(&m))
+                .map_err(|e| io_error(&e, "stat file handle"))
+        }
+        "handle-read-file" => {
+            let entry = file_handle(o)?;
+            let mut bytes = Vec::new();
+            entry
+                .file
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .read_to_end(&mut bytes)
+                .map_err(|e| io_error(&e, "read file handle"))?;
+            Ok(json!(base64_encode(&bytes)))
+        }
+        "handle-write-file" => {
+            let entry = file_handle(o)?;
+            let data = base64_decode(&string(o, "data")?)?;
+            entry
+                .file
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .write_all(&data)
+                .map_err(|e| io_error(&e, "write file handle"))?;
+            Ok(Value::Null)
+        }
+        "handle-chmod" => {
+            let entry = file_handle(o)?;
+            #[cfg(unix)]
+            let result = {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = o.get("mode").and_then(Value::as_u64).unwrap_or(0o644) as u32;
+                entry
+                    .file
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .set_permissions(std::fs::Permissions::from_mode(mode))
+            };
+            #[cfg(not(unix))]
+            let result = entry
+                .file
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .metadata()
+                .map(|_| ());
+            result.map_err(|e| io_error(&e, "chmod file handle"))?;
+            Ok(Value::Null)
+        }
+        "handle-utimes" => {
+            let entry = file_handle(o)?;
+            let seconds = |key: &str| -> Result<std::time::SystemTime> {
+                let value = o
+                    .get(key)
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| AppError::BadArgs(format!("`{key}` must be a number")))?;
+                if !(value.is_finite() && (0.0..=253_402_300_799.0).contains(&value)) {
+                    return Err(AppError::BadArgs(format!(
+                        "`{key}` must be a finite non-negative number"
+                    )));
+                }
+                Ok(UNIX_EPOCH + Duration::from_secs_f64(value))
+            };
+            let times = std::fs::FileTimes::new()
+                .set_accessed(seconds("atime")?)
+                .set_modified(seconds("mtime")?);
+            entry
+                .file
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .set_times(times)
+                .map_err(|e| io_error(&e, "utimes file handle"))?;
+            Ok(Value::Null)
+        }
+        "handle-sync" => {
+            let entry = file_handle(o)?;
+            entry
+                .file
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .sync_all()
+                .map_err(|e| io_error(&e, "sync file handle"))?;
+            Ok(Value::Null)
+        }
+        "handle-close" => {
+            let id = unsigned(o, "id")?;
+            file_handles()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id)
+                .ok_or_else(|| AppError::Coded {
+                    code: "EBADF".into(),
+                    message: format!("EBADF: bad file descriptor, close '{id}'"),
+                })?;
+            Ok(Value::Null)
+        }
         "read-file" => wrap(
             std::fs::read(path()?).map(|b| json!(base64_encode(&b))),
             "open",
@@ -1647,6 +1884,64 @@ mod tests {
             read_range(&json!({ "path": file, "offset": -1, "length": 2u64 })),
             Err(AppError::BadArgs(_))
         ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_file_handles_pin_the_original_inode_across_path_replacement() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = temp_dir("handle-pinning");
+        let path = dir.join("lock");
+        std::fs::write(&path, b"original").unwrap();
+        let opened = fs_invoke(
+            "open",
+            &json!({"path": path, "flags": "wx", "mode": 0o600u32}),
+        );
+        assert!(opened.is_err(), "an existing path cannot be recreated");
+        std::fs::remove_file(&path).unwrap();
+        let opened = fs_invoke(
+            "open",
+            &json!({"path": path, "flags": "wx", "mode": 0o600u32}),
+        )
+        .unwrap();
+        let id = opened["id"].as_u64().unwrap();
+        let original = std::fs::symlink_metadata(&path).unwrap();
+        let replacement = dir.join("replacement");
+        std::fs::write(&replacement, b"replacement").unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        let stat = fs_invoke("handle-stat", &json!({"id": id})).unwrap();
+        assert_eq!(stat["dev"].as_u64().unwrap(), original.dev());
+        assert_eq!(stat["ino"].as_str().unwrap(), original.ino().to_string());
+        fs_invoke(
+            "handle-write-file",
+            &json!({"id": id, "data": base64_encode(b"owned")}),
+        )
+        .unwrap();
+        fs_invoke(
+            "handle-utimes",
+            &json!({"id": id, "atime": 1000.0, "mtime": 2000.0}),
+        )
+        .unwrap();
+        let timed = fs_invoke("handle-stat", &json!({"id": id})).unwrap();
+        assert_eq!(timed["mtimeNs"].as_str().unwrap(), "2000000000000");
+        fs_invoke("handle-close", &json!({"id": id})).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+        assert!(fs_invoke("handle-stat", &json!({"id": id})).is_err());
+
+        let readable = dir.join("readable");
+        std::fs::write(&readable, b"original bytes").unwrap();
+        let opened = fs_invoke("open", &json!({"path": readable, "flags": 0u64})).unwrap();
+        let read_id = opened["id"].as_u64().unwrap();
+        let replacement = dir.join("readable-replacement");
+        std::fs::write(&replacement, b"replacement bytes").unwrap();
+        std::fs::rename(&replacement, &readable).unwrap();
+        let bytes = fs_invoke("handle-read-file", &json!({"id": read_id})).unwrap();
+        assert_eq!(
+            base64_decode(bytes.as_str().unwrap()).unwrap(),
+            b"original bytes"
+        );
+        fs_invoke("handle-close", &json!({"id": read_id})).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
 
