@@ -100,9 +100,6 @@ importers:
       '@types/marked':
         specifier: ^4.0.1
         version: 4.3.2
-      '@types/memoize-one':
-        specifier: ^3.1.1
-        version: 3.1.2
       '@types/node':
         specifier: 22.10.9
         version: 22.10.9
@@ -223,9 +220,6 @@ importers:
       marked:
         specifier: ^4.0.10
         version: 4.3.0
-      memoize-one:
-        specifier: ^4.0.3
-        version: 4.1.0
       primer-support:
         specifier: ^4.0.0
         version: 4.7.2
@@ -1085,9 +1079,6 @@ packages:
 
   '@types/marked@4.3.2':
     resolution: {integrity: sha512-a79Yc3TOk6dGdituy8hmTTJXjOkZ7zsFYV10L337ttq/rec8lRMDBpV7fL3uLx6TgbFCa5DU/h8FmIBQPSbU0w==}
-
-  '@types/memoize-one@3.1.2':
-    resolution: {integrity: sha512-A5ydEHaD2xdUbrXlAjF2TifOkYq7TJXU+5t7rLqBGfispKdJJoZnWwPQPyvjh0exxGTTO1ugLB+5jL9P3DQh5w==}
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
@@ -2236,10 +2227,6 @@ packages:
 
   mdurl@2.1.0:
     resolution: {integrity: sha512-1+HBaOx0zi/dQWht8rNv9MYf9qqpqL/kxI0hXImU6Y547zM6Sni8BQibt7ifgMcYtQg41ao3Ivd6cnSM86inpg==}
-
-  memoize-one@4.1.0:
-    resolution: {integrity: sha512-2GApq0yI/b22J2j9rhbrAlsHb0Qcz+7yWxeLG8h+95sl1XPUgeLimQSOdur4Vw7cUhrBHwaUZxWFZueojqNRzA==}
-    deprecated: New custom equality api does not play well with all equality helpers. Please use v5.x
 
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
@@ -3719,8 +3706,6 @@ snapshots:
 
   '@types/marked@4.3.2': {}
 
-  '@types/memoize-one@3.1.2': {}
-
   '@types/ms@2.1.0': {}
 
   '@types/node@22.10.9':
@@ -4885,8 +4870,6 @@ snapshots:
       safe-buffer: 5.2.1
 
   mdurl@2.1.0: {}
-
-  memoize-one@4.1.0: {}
 
   micromark-core-commonmark@2.0.3:
     dependencies:

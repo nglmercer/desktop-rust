@@ -10,7 +10,7 @@ import {
   removeMostRecentSSHCredential,
 } from '../ssh/ssh-credential-storage'
 import { GitErrorKind } from '../git/error-kind'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../memoize-one'
 import { GitError, getDescriptionForError } from '../git/core'
 import { getDesktopAskpassTrampolineFilename } from 'desktop-trampoline'
 import type { IAccountIdentity } from '../../models/account'

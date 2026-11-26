@@ -1,5 +1,5 @@
 import * as OS from '../web/os'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from './memoize-one'
 
 /**
  * The macOS product version for a Darwin kernel release (for example

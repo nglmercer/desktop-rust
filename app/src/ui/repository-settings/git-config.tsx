@@ -5,7 +5,7 @@ import { GitConfigUserForm } from '../lib/git-config-user-form'
 import { Row } from '../lib/row'
 import { RadioGroup } from '../lib/radio-group'
 import { assertNever } from '../../lib/fatal-error'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 
 interface IGitConfigProps {
   readonly account: Account | null

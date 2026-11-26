@@ -1,4 +1,4 @@
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../memoize-one'
 import { EmojiFilter } from './emoji-filter'
 import { IssueLinkFilter } from './issue-link-filter'
 import { IssueMentionFilter } from './issue-mention-filter'

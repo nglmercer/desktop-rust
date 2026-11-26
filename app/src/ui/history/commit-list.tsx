@@ -1,5 +1,5 @@
 import * as React from 'react'
-import memoize from 'memoize-one'
+import { memoizeOne as memoize } from '../../lib/memoize-one'
 import { GitHubRepository } from '../../models/github-repository'
 import { Commit, CommitOneLine } from '../../models/commit'
 import { CommitListItem } from './commit-list-item'
@@ -7,7 +7,7 @@ import { KeyboardInsertionData, List } from '../lib/list'
 import { arrayEquals } from '../../lib/equality'
 import { DragData, DragType } from '../../models/drag-drop'
 import classNames from 'classnames'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 import { IMenuItem, showContextualMenu } from '../../lib/menu-item'
 import { getDotComAPIEndpoint } from '../../lib/api'
 import { writeClipboardText } from '../main-process-proxy'
@@ -202,7 +202,9 @@ export class CommitList extends React.Component<
   ICommitListProps,
   ICommitListState
 > {
-  private commitsHash = memoize(makeCommitsHash, arrayEquals)
+  private commitsHash = memoize(makeCommitsHash, (a, b) =>
+    arrayEquals(a as ReadonlyArray<unknown>, b as ReadonlyArray<unknown>)
+  )
   private commitIndexBySha = memoizeOne(
     (commitSHAs: ReadonlyArray<string>) =>
       new Map(commitSHAs.map((sha, index) => [sha, index]))

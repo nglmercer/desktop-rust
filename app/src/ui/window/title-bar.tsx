@@ -1,5 +1,5 @@
 import * as React from 'react'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 import { WindowState } from '../../lib/window-state'
 import { WindowControls } from './window-controls'
 import { Octicon } from '../octicons/octicon'

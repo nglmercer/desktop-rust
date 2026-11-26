@@ -10,7 +10,7 @@ import { WorktreeListItem } from './worktree-list-item'
 import { Button } from '../lib/button'
 import type { IMatches } from '../../lib/fuzzy-find'
 import type { ClickSource } from '../lib/list'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 
 const RowHeight = 30
 

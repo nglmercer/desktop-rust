@@ -6,7 +6,7 @@ import type { ShellEnvResult } from './get-shell-env'
 import { shellFriendlyNames } from './config'
 import type { Writable } from 'stream'
 import { pipeline } from 'stream/promises'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../memoize-one'
 import { which } from '../executable-path'
 import { createReadStream, createWriteStream } from '../../web/fs'
 import { spawnTraditionalHook } from './traditional-hook'
@@ -111,7 +111,10 @@ const memoizedGetExecPathFromGit = memoizeOne(
   // that should be rare enough that we can get away with not worrying about
   // cache invalidation here.
   (a, b) =>
-    typeof a === 'string' ? a === b : a?.GIT_EXEC_PATH === b?.GIT_EXEC_PATH
+    typeof a === 'string'
+      ? a === b
+      : (a as Record<string, string | undefined> | undefined)?.GIT_EXEC_PATH ===
+        (b as Record<string, string | undefined> | undefined)?.GIT_EXEC_PATH
 )
 
 // We're invoking our own built-in Git binary here (git hook run) because we

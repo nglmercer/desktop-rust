@@ -145,7 +145,7 @@ import { DeleteTag } from './delete-tag'
 import { ChooseForkSettings } from './choose-fork-settings'
 import { DiscardSelection } from './discard-changes/discard-selection-dialog'
 import { LocalChangesOverwrittenDialog } from './local-changes-overwritten/local-changes-overwritten-dialog'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../lib/memoize-one'
 import { AheadBehindStore } from '../lib/stores/ahead-behind-store'
 import {
   getAccountForCommitMessageGeneration,

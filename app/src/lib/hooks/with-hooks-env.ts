@@ -8,7 +8,7 @@ import { getRepoHooks, getRepoHooksPath } from './get-repo-hooks'
 import { createHooksProxy } from './hooks-proxy'
 import { getShellEnv } from './get-shell-env'
 import { quoteGitConfigParameter } from './git-config-parameters'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../memoize-one'
 import {
   getCacheHooksEnv,
   getGitHookEnvShell,

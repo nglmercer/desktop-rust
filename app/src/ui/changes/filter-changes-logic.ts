@@ -1,6 +1,6 @@
 import { IFileListFilterState } from '../../lib/app-state'
 import { IChangesListItem } from './filter-changes-list'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 
 /**
  * Apply filter options to determine if a file should be shown

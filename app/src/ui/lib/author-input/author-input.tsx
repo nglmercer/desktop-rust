@@ -13,7 +13,7 @@ import {
   UnknownAuthor,
 } from '../../../models/author'
 import { getLegacyStealthEmailForUser } from '../../../lib/email'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../../lib/memoize-one'
 import { FocusContainer } from '../focus-container'
 import { AuthorHandle } from './author-handle'
 import { getFullTextForAuthor } from './author-text'

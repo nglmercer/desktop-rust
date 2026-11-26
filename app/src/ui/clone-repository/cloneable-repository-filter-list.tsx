@@ -7,7 +7,7 @@ import {
   groupRepositories,
   YourRepositoriesIdentifier,
 } from './group-repositories'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 import { Button } from '../lib/button'
 import { IMatches } from '../../lib/fuzzy-find'
 import { Octicon, syncClockwise } from '../octicons'

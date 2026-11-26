@@ -36,7 +36,7 @@ import {
   IRowSelectableGroupStaticData,
   SideBySideDiffRow,
 } from './side-by-side-diff-row'
-import memoize from 'memoize-one'
+import { memoizeOne as memoize } from '../../lib/memoize-one'
 import {
   findInteractiveOriginalDiffRange,
   DiffRangeType,

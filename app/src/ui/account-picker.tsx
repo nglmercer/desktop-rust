@@ -16,7 +16,7 @@ import { IMatches } from '../lib/fuzzy-find'
 import { Avatar } from './lib/avatar'
 import { lookupPreferredEmail } from '../lib/email'
 import { IAvatarUser } from '../models/avatar'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../lib/memoize-one'
 import { groupAccountsByHost } from '../lib/group-accounts-by-host'
 
 interface IAccountPickerProps {

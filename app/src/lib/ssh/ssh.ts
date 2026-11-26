@@ -1,4 +1,4 @@
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../memoize-one'
 import { pathExists } from '../path-exists'
 import { getBoolean } from '../local-storage'
 import {

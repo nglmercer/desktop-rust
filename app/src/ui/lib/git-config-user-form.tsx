@@ -9,7 +9,7 @@ import {
 import { Select } from './select'
 import { GitEmailNotFoundWarning } from './git-email-not-found-warning'
 import { getStealthEmailForAccount } from '../../lib/email'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 
 const OtherEmailSelectValue = 'Other'
 

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 
 import { formatCompactNumber, formatNumber } from '../../lib/format-number'
 import { DefaultCopilotModel } from '../../lib/stores/copilot-store'

@@ -1,4 +1,4 @@
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../../lib/memoize-one'
 
 /** This method is a memoizedOne for a consistent means of handling when the
  * isTopMost property of the `DialogStackContext` changes in the various popups

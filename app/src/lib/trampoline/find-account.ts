@@ -1,4 +1,4 @@
-import memoizeOne from 'memoize-one'
+import { memoizeOne } from '../memoize-one'
 import { getHTMLURL } from '../api'
 import { getGenericPassword, getGenericUsername } from '../generic-git-auth'
 import type { AccountsStore } from '../stores'
