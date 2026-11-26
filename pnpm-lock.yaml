@@ -196,9 +196,6 @@ importers:
       codemirror-mode-zig:
         specifier: ^1.0.7
         version: 1.0.15
-      compare-versions:
-        specifier: ^3.6.0
-        version: 3.6.0
       date-fns:
         specifier: ^4.1.0
         version: 4.4.0
@@ -1575,9 +1572,6 @@ packages:
   commander@8.3.0:
     resolution: {integrity: sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww==}
     engines: {node: '>= 12'}
-
-  compare-versions@3.6.0:
-    resolution: {integrity: sha512-W6Af2Iw1z4CB7q4uU4hv646dW9GQuBM+YpC0UvUCWSD8w90SJjp+ujJuXaEMtAXBtSqGfMPuFOVn4/+FlaqfBA==}
 
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
@@ -4170,8 +4164,6 @@ snapshots:
   commander@15.0.0: {}
 
   commander@8.3.0: {}
-
-  compare-versions@3.6.0: {}
 
   concat-map@0.0.1: {}
 

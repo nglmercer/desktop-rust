@@ -136,6 +136,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `script/ts-register.cjs` y `@typescript/compiler-api` | scripts TypeScript ESM ejecutados mediante `@oxc-node/core/register`; TypeScript 7 como checker canónico | `pnpm migration:check`, `pnpm compile:script`, `pnpm test:script` |
 | `app/test/backend-transport-tsconfig.json` y su paso CI duplicado | `pnpm check:types` raíz, que ya incluye `app/**/*.ts` con la configuración estricta vigente | `pnpm check:types`, `pnpm lint`, validación de workflow por inspección estática |
 | `byline` y `@types/byline` | `app/src/lib/line-stream.ts`, divisor UTF-8 local para registros CR/LF usado por progreso Git/LFS y tailing | `app/test/unit/line-stream-test.ts`, `tailer-test.ts`, `tailer-web-fs-test.ts`, `progress/git-test.ts` |
+| `compare-versions` | comparación local estricta de versiones numéricas del sistema en `app/src/lib/get-os.ts` | `app/test/unit/system-version-comparison-test.ts`, `macos-version-from-darwin-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

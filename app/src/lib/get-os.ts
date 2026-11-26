@@ -1,8 +1,5 @@
 import * as OS from '../web/os'
-import compareVersions from 'compare-versions'
 import memoizeOne from 'memoize-one'
-
-const { compare } = compareVersions
 
 /**
  * The macOS product version for a Darwin kernel release (for example
@@ -26,18 +23,43 @@ export function macOSVersionFromDarwinRelease(
   return darwin >= 4 ? `10.${darwin - 4}.${minor}` : undefined
 }
 
+export function compareSystemVersions(
+  left: string,
+  right: string
+): -1 | 0 | 1 | undefined {
+  const parse = (version: string) => {
+    if (!/^\d+(?:\.\d+)*$/.test(version)) return undefined
+    return version.split('.').map(part => parseInt(part, 10))
+  }
+  const leftParts = parse(left)
+  const rightParts = parse(right)
+  if (leftParts === undefined || rightParts === undefined) return undefined
+  const length = Math.max(leftParts.length, rightParts.length)
+  for (let index = 0; index < length; index++) {
+    const leftPart = leftParts[index] ?? 0
+    const rightPart = rightParts[index] ?? 0
+    if (leftPart < rightPart) return -1
+    if (leftPart > rightPart) return 1
+  }
+  return 0
+}
+
 function getSystemVersionSafe() {
   return __DARWIN__ ? macOSVersionFromDarwinRelease(OS.release()) : OS.release()
 }
 
 function systemVersionGreaterThanOrEqualTo(version: string) {
   const sysver = getSystemVersionSafe()
-  return sysver === undefined ? false : compare(sysver, version, '>=')
+  if (sysver === undefined) return false
+  const comparison = compareSystemVersions(sysver, version)
+  return comparison !== undefined && comparison >= 0
 }
 
 function systemVersionLessThan(version: string) {
   const sysver = getSystemVersionSafe()
-  return sysver === undefined ? false : compare(sysver, version, '<')
+  if (sysver === undefined) return false
+  const comparison = compareSystemVersions(sysver, version)
+  return comparison !== undefined && comparison < 0
 }
 
 /** Get the OS we're currently running on. */
