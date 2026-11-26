@@ -9269,6 +9269,7 @@ export class BackendClient {
     request: {
       readonly todo: string
       readonly retained_commit: string | null
+      readonly expected_head: string
       readonly no_verify: boolean
       readonly commit_message: string | null
     }
@@ -9283,8 +9284,10 @@ export class BackendClient {
       request.todo.length === 0 ||
       request.todo.length > 1024 * 1024 ||
       !request.todo.endsWith('\n') ||
+      !oid.test(request.expected_head) ||
       (request.retained_commit !== null &&
-        !oid.test(request.retained_commit)) ||
+        (!oid.test(request.retained_commit) ||
+          request.retained_commit.length !== request.expected_head.length)) ||
       (request.commit_message !== null &&
         (request.commit_message.length > 1024 * 1024 ||
           request.commit_message.includes('\0')))

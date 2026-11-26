@@ -462,6 +462,7 @@ export async function rebaseInteractive(
   repository: Repository,
   todo: string,
   lastRetainedCommitRef: string | null,
+  expectedHead: string,
   opts?: RebaseInteractiveOptions & { readonly commitMessage?: string }
 ): Promise<RebaseResult> {
   const { progressCallback, commits } = opts ?? {}
@@ -477,6 +478,7 @@ export async function rebaseInteractive(
       backend().repositoryRebaseInteractive(repository.path, {
         todo,
         retained_commit: lastRetainedCommitRef,
+        expected_head: expectedHead,
         no_verify: opts?.noVerify === true,
         commit_message: opts?.commitMessage ?? null,
       }),

@@ -125,12 +125,18 @@ export async function squash(
       )
     }
 
-    return await rebaseInteractive(repository, todo, lastRetainedCommitRef, {
-      action: MultiCommitOperationKind.Squash,
-      commitMessage: commitMessage.trim() === '' ? undefined : commitMessage,
-      progressCallback,
-      commits: [...toSquash, squashOnto],
-    })
+    return await rebaseInteractive(
+      repository,
+      todo,
+      lastRetainedCommitRef,
+      commits[0].sha,
+      {
+        action: MultiCommitOperationKind.Squash,
+        commitMessage: commitMessage.trim() === '' ? undefined : commitMessage,
+        progressCallback,
+        commits: [...toSquash, squashOnto],
+      }
+    )
   } catch (e) {
     log.error(e)
     return RebaseResult.Error

@@ -1171,6 +1171,7 @@ pub struct RendererRebaseStartRequest {
 pub struct RendererInteractiveRebaseRequest {
     pub todo: String,
     pub retained_commit: Option<String>,
+    pub expected_head: String,
     pub no_verify: bool,
     pub commit_message: Option<String>,
 }

@@ -116,11 +116,17 @@ export async function reorder(
       )
     }
 
-    return await rebaseInteractive(repository, todo, lastRetainedCommitRef, {
-      action: MultiCommitOperationKind.Reorder,
-      progressCallback,
-      commits,
-    })
+    return await rebaseInteractive(
+      repository,
+      todo,
+      lastRetainedCommitRef,
+      commits[0].sha,
+      {
+        action: MultiCommitOperationKind.Reorder,
+        progressCallback,
+        commits,
+      }
+    )
   } catch (e) {
     log.error(e)
     return RebaseResult.Error

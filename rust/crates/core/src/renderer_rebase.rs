@@ -9,6 +9,11 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+/// Quote one path for the limited shell command language Git uses for editors.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 impl Repository {
     /// Run a renderer-generated interactive rebase program without exposing a
     /// shell editor string or renderer temporary path across the host boundary.
@@ -41,6 +46,16 @@ impl Repository {
             anyhow::ensure!(oid(retained), "Invalid retained commit object ID");
         }
         anyhow::ensure!(
+            oid(&request.expected_head),
+            "Invalid expected HEAD object ID"
+        );
+        if let Some(retained) = &request.retained_commit {
+            anyhow::ensure!(
+                retained.len() == request.expected_head.len(),
+                "Interactive rebase object IDs use different hash algorithms"
+            );
+        }
+        anyhow::ensure!(
             !request.todo.is_empty()
                 && request.todo.len() <= 1024 * 1024
                 && request.todo.ends_with('\n')
@@ -62,6 +77,14 @@ impl Repository {
                 "Invalid interactive rebase commit message"
             );
         }
+        let head = self
+            .run(&args(&["rev-parse", "--verify", "HEAD^{commit}"]))
+            .await?;
+        anyhow::ensure!(
+            head.code == 0
+                && head.stdout.strip_suffix(b"\n") == Some(request.expected_head.as_bytes()),
+            "HEAD changed; refresh before rebasing"
+        );
         anyhow::ensure!(
             self.operation_state().await?.is_none(),
             "Finish or abort the current Git operation first"
@@ -89,7 +112,7 @@ impl Repository {
                 !path.contains(['"', '\r', '\n', '\0']),
                 "Temporary rebase path cannot be represented safely"
             );
-            Ok(format!("cat \"{path}\" >"))
+            Ok(format!("cat {} >", shell_quote(path)))
         };
         let sequence_editor = editor_command(&todo_path)?;
         let editor = match &request.commit_message {
@@ -724,6 +747,39 @@ mod tests {
         assert_eq!(result["outcome"], "complete");
         assert_eq!(f.git(&["show", "HEAD:file"]), "main");
         assert!(repo.renderer_rebase_state().await.unwrap().is_null());
+    }
+
+    #[test]
+    fn shell_quote_preserves_shell_metacharacters_as_data() {
+        assert_eq!(shell_quote("/tmp/plain"), "'/tmp/plain'");
+        assert_eq!(
+            shell_quote("/tmp/$(touch nope)/it's here"),
+            "'/tmp/$(touch nope)/it'\\''s here'"
+        );
+    }
+
+    #[tokio::test]
+    async fn interactive_rebase_refuses_a_changed_head_before_starting() {
+        let (f, _) = Fixture::new();
+        f.git(&["rebase", "--abort"]);
+        let head = f.git(&["rev-parse", "HEAD"]);
+        let parent = f.git(&["rev-parse", "HEAD^"]);
+        let other = f.git(&["rev-parse", "main"]);
+        assert_ne!(head, other);
+        let request = RendererInteractiveRebaseRequest {
+            todo: format!("pick {head} source\n"),
+            retained_commit: Some(parent),
+            expected_head: other,
+            no_verify: false,
+            commit_message: None,
+        };
+        let repo = Repository::open(&f.0).await.unwrap();
+        let error = repo
+            .renderer_rebase_interactive(&request)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("HEAD changed"));
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), head);
     }
 
     #[tokio::test]
