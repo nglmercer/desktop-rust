@@ -85,9 +85,15 @@ export function measure(): IMetrics {
       0
     )
 
+  const fallbackCheck = /transportKind\s*(?:===|!==)/g
+  const fallbackCheckFile = /transportKind\s*(?:===|!==)/
   return {
-    transportChecks: count(/transportKind/g),
-    transportCheckFiles: filesMatching(/transportKind/),
+    // Count fallback decisions, not the backend transport descriptor itself.
+    // The web-only host bridge is excluded above, so counting every identifier
+    // would forever report the backend client's public `transportKind` getter
+    // even after all operational fallback branches are gone.
+    transportChecks: count(fallbackCheck),
+    transportCheckFiles: filesMatching(fallbackCheckFile),
     legacyGitCalls: legacyGit.reduce((a, b) => a + b, 0),
     legacyGitCallFiles: legacyGit.filter(n => n > 0).length,
     imports,

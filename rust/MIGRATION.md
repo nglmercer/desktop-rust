@@ -48,23 +48,23 @@ installer.
 
 ## Measured migration baseline
 
-Measured on 2026-11-25 with `pnpm migration:status`:
+Measured on 2026-11-26 with `pnpm migration:status`:
 
 | Measure | Current | Done when |
 | --- | --- | --- |
-| Fallback checks (`transportKind`) in renderer | 2 in 2 files | 0 |
-| Legacy Git runner calls (`await git(`) in `lib/git` | 5 in 5 files | 0 |
+| Fallback checks (`transportKind`) in renderer | 0 in 0 files | 0 |
+| Legacy Git runner calls (`await git(`) in `lib/git` | 0 in 0 files | 0 |
 | Renderer files importing `dugite` | 0 | 0 |
 | Renderer files importing `fs` | 0 | 0 (host operations only) |
 | Renderer files importing `child_process` | 0 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 426 | 0 |
-| Rust code (crates, non-test) | 92,373 lines | — |
+| Rust code (crates, non-test) | 93,816 lines | — |
 
-These numbers mean the test-runner migration is complete, but the renderer still
-contains Node-backed Git and filesystem implementations. They are not Electron
-runtime code; they are fallback implementations retained until each operation is
-proven against the Rust backend. [`ROADMAP.md`](ROADMAP.md) is the authoritative
+These numbers mean the measured renderer fallback branches, direct legacy Git
+runner calls, renderer Node API imports, and separate Node test suites are gone.
+Compatibility shims and host-facing infrastructure remain migration artifacts
+and still require runtime evidence before removal. [`ROADMAP.md`](ROADMAP.md) is the authoritative
 worklist for retiring them module by module.
 
 ## What has already been removed

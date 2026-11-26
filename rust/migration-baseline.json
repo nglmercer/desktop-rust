@@ -1,5 +1,5 @@
 {
-  "transportChecks": 1,
+  "transportChecks": 0,
   "legacyGitCalls": 0,
   "nodeTestFiles": 0,
   "imports.dugite": 0,
