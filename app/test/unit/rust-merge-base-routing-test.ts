@@ -44,7 +44,7 @@ describe.each(['wry', 'ws'])('Rust merge-base lookup via %s', transport => {
     )
     expect(mocks.base).toHaveBeenCalledWith('/repo', 'HEAD', 'topic')
     expect(mocks.git).not.toHaveBeenCalled()
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 3 : 0)
+    expect(mocks.scope).toHaveBeenCalledTimes(3)
   })
   it.each([
     ['complete', MergeResult.Success],

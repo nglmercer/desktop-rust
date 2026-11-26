@@ -56,7 +56,7 @@ describe('Rust ahead/behind lookup', () => {
     const error = new Error('repository changed')
     mocks.aheadBehind.mockRejectedValueOnce(error)
     await expect(getAheadBehind(repository, 'topic...main')).rejects.toBe(error)
-    expect(mocks.scope).not.toHaveBeenCalled()
+    expect(mocks.scope).toHaveBeenCalledTimes(3)
     expect(mocks.git).not.toHaveBeenCalled()
   })
 
@@ -125,7 +125,7 @@ describe('Rust revision and merge history', () => {
     await expect(
       doMergeCommitsExistAfterCommit(repository, 'base')
     ).rejects.toBe(error)
-    expect(mocks.scope).not.toHaveBeenCalled()
+    expect(mocks.scope).toHaveBeenCalledTimes(4)
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

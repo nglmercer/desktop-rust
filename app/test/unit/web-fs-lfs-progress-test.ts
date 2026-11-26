@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createLFSProgressFile } from '../../src/lib/progress/lfs'
 
@@ -7,24 +7,40 @@ import { createLFSProgressFile } from '../../src/lib/progress/lfs'
 // of the host filesystem bridge. Writes use real wx semantics so the exclusive
 // create contract is exercised rather than only the request shape.
 function installBridge() {
-  const writes: Array<{ path: string; exclusive?: boolean }> = []
+  const openings: Array<{ path: string; flags?: string | number }> = []
+  const handles = new Map<number, number>()
+  let nextHandle = 1
   vi.stubGlobal('__desktop', {
     invoke: (
       channel: string,
-      options: { path: string; data: string; exclusive?: boolean }
+      options: {
+        path: string
+        flags?: string | number
+        mode?: number
+        id: number
+      }
     ) => {
-      if (channel !== 'desktop.io.fs-write-file') {
-        return Promise.reject(new Error(`unexpected ${channel}`))
+      if (channel === 'desktop.io.fs-open') {
+        openings.push({ path: options.path, flags: options.flags })
+        try {
+          const handle = openSync(options.path, options.flags ?? 'wx', options.mode)
+          const id = nextHandle++
+          handles.set(id, handle)
+          return Promise.resolve({ id })
+        } catch (error) {
+          return Promise.reject(error)
+        }
       }
-      writes.push({ path: options.path, exclusive: options.exclusive })
-      try {
-        writeFileSync(options.path, Buffer.from(options.data, 'base64'), {
-          flag: options.exclusive === true ? 'wx' : 'w',
-        })
+      if (channel === 'desktop.io.fs-handle-close') {
+        const handle = handles.get(options.id)
+        if (handle === undefined) {
+          return Promise.reject(new Error('EBADF: bad file descriptor'))
+        }
+        handles.delete(options.id)
+        closeSync(handle)
         return Promise.resolve(null)
-      } catch (error) {
-        return Promise.reject(error)
       }
+      return Promise.reject(new Error(`unexpected ${channel}`))
     },
     invokeSync: () => {
       throw new Error('unexpected synchronous call')
@@ -32,7 +48,7 @@ function installBridge() {
     encodeBase64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
     decodeBase64: (text: string) => new Uint8Array(Buffer.from(text, 'base64')),
   })
-  return writes
+  return openings
 }
 
 describe('LFS progress file creation through the host filesystem', () => {
@@ -41,7 +57,7 @@ describe('LFS progress file creation through the host filesystem', () => {
   })
 
   it('creates unique empty files exclusively in the host temporary directory', async () => {
-    const writes = installBridge()
+    const openings = installBridge()
     const first = await createLFSProgressFile()
     const second = await createLFSProgressFile()
     try {
@@ -49,9 +65,9 @@ describe('LFS progress file creation through the host filesystem', () => {
       expect(first.startsWith(tmpdir())).toBe(true)
       expect(existsSync(first)).toBe(true)
       expect(existsSync(second)).toBe(true)
-      expect(writes).toEqual([
-        { path: first, exclusive: true },
-        { path: second, exclusive: true },
+      expect(openings).toEqual([
+        { path: first, flags: 'wx' },
+        { path: second, flags: 'wx' },
       ])
     } finally {
       rmSync(first, { force: true })

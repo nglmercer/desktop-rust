@@ -48,7 +48,7 @@ describe('Rust branch enumeration', () => {
     await expect(getBranchesDifferingFromUpstream(repository)).rejects.toBe(
       failure
     )
-    expect(mocks.scope).not.toHaveBeenCalled()
+    expect(mocks.scope).toHaveBeenCalledTimes(2)
     expect(mocks.git).not.toHaveBeenCalled()
   })
 

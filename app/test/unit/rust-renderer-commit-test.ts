@@ -70,7 +70,7 @@ describe.each(['ws', 'wry'])('Rust commit lookup over %s', transport => {
       email: 'other@example.invalid',
     })
     expect(mocks.git).not.toHaveBeenCalled()
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+    expect(mocks.scope).toHaveBeenCalledTimes(1)
   })
   it('preserves missing revisions and propagates backend failures', async () => {
     mocks.commit

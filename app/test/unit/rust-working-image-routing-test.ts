@@ -45,7 +45,7 @@ describe.each(['wry', 'ws'])('working image over %s', transport => {
       'renderer_working_file',
       { path: '[a].PNG' }
     )
-    expect(mocks.scope).toHaveBeenCalledTimes(transport === 'wry' ? 1 : 0)
+    expect(mocks.scope).toHaveBeenCalledTimes(1)
   })
   it('propagates missing-file failures', async () => {
     mocks.snapshot.mockRejectedValueOnce(new Error('missing'))
