@@ -74,8 +74,6 @@ Priority guidance:
 
 Known contract decisions still open:
 
-- Free-form history filters such as `--grep` remain Node-only; the app's typed
-  first-parent/remotes queries should not keep that fallback.
 - Rust remote discovery intentionally isolates global/system configuration;
   decide whether tests and product behavior should preserve that isolation.
 - Rebase and cherry-pick do not stream live progress yet.
