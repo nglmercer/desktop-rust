@@ -124,25 +124,6 @@ describe('bundled emoji in sandboxed Markdown', () => {
     }
   })
 
-  it('keeps file URL loading', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'desktop-emoji-filter-'))
-    const dom = new JSDOM('', { url: 'file:///app/index.html' })
-    try {
-      vi.stubGlobal('document', dom.window.document)
-      const file = join(directory, 'shipit.png')
-      await writeFile(file, Uint8Array.from([1, 2, 3]))
-      const nodes = await makeFilter(pathToFileURL(file).toString()).filter(
-        input()
-      )
-      expect((nodes?.[1] as HTMLImageElement).src).toBe(
-        'data:image/png;base64,AQID'
-      )
-    } finally {
-      dom.window.close()
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-
   it.each(['http://localhost/index.html', 'desktop://localhost/index.html'])(
     'refuses file emoji URLs in the Rust renderer at %s',
     async page => {

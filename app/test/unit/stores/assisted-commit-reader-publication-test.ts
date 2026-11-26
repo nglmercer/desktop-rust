@@ -1,4 +1,3 @@
-import { vi } from 'vitest'
 import { writeFile, rename, mkdir } from 'fs/promises'
 import { createTempDirectory } from '../../helpers/temp'
 import { Repository } from '../../../src/models/repository'
@@ -10,6 +9,7 @@ import assert from 'node:assert'
 import { before, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import { join } from 'path'
+import { backend } from '../../../src/backend/client'
 
 let harness: typeof import('../../helpers/assisted-commit-run')
 let fixtures: typeof import('../../helpers/assisted-commit')
@@ -18,21 +18,7 @@ let diffs: typeof import('../../../src/lib/git/diff')
 let diffModels: typeof import('../../../src/models/diff')
 let operations: typeof import('../../../src/lib/git/repository-operation')
 let runErrors: typeof import('../../../src/lib/assisted-commit-run')
-let afterStat:
-  | ((path: Parameters<typeof FileSystem.lstat>[0]) => Promise<void>)
-  | undefined
-
 before(async () => {
-  const stat = FileSystem.lstat
-  vi.doMock('fs/promises', async () => ({
-    ...(await vi.importActual('fs/promises')),
-    ...FileSystem,
-    lstat: async (...args: Parameters<typeof FileSystem.lstat>) => {
-      const result = await stat(...args)
-      await afterStat?.(args[0])
-      return result
-    },
-  }))
   ;[harness, fixtures, models, diffs, diffModels, operations, runErrors] =
     await Promise.all([
       import('../../helpers/assisted-commit-run'),
@@ -91,13 +77,15 @@ describe('assisted certified diff publication', () => {
       }
     }
     let injected = false
+    const client = backend()
+    const workingDiff = client.repositoryRendererWorkingDiff
     t.after(() => {
-      afterStat = undefined
+      client.repositoryRendererWorkingDiff = workingDiff
     })
-    afterStat = async path => {
-      if (path === join(repository.path, 'file') && !injected) {
+    client.repositoryRendererWorkingDiff = async (...args) => {
+      const result = await workingDiff.apply(client, args)
+      if (args[0] === repository.path && args[1] === 'file' && !injected) {
         injected = true
-        afterStat = undefined
         await FileSystem.writeFile(
           join(repository.path, 'later'),
           'new unselected file\n'
@@ -116,6 +104,7 @@ describe('assisted certified diff publication', () => {
             )
         )
       }
+      return result
     }
     await reload(repository)
     assert.strictEqual(injected, true)
