@@ -13,7 +13,6 @@ import { CommitIdentity } from '../../models/commit-identity'
 import { parseRawUnfoldedTrailers } from './interpret-trailers'
 import { createLogParser } from './git-delimiter-parser'
 import { forceUnwrap } from '../fatal-error'
-import assert from 'assert'
 import { backend } from '../../backend/client'
 import { withRepositoryGitOperation } from './repository-operation'
 
@@ -369,6 +368,8 @@ export async function getAuthors(repository: Repository, shas: string[]) {
     size += bytes
   }
   await flush()
-  assert.equal(authors.length, shas.length, 'Commit to author mismatch')
+  if (authors.length !== shas.length) {
+    throw new Error('Commit to author mismatch')
+  }
   return authors
 }

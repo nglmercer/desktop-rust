@@ -12,6 +12,30 @@ describe('GitProgressParser', () => {
     assert.throws(() => new GitProgressParser([]))
   })
 
+  it('removes terminal control sequences before parsing progress', () => {
+    const parser = new GitProgressParser([
+      { title: 'remote: Compressing objects', weight: 1 },
+    ])
+
+    assert.equal(
+      parser.parse(
+        '\u001b[31mremote: Compressing objects:\u001b[0m  72% (16/22)'
+      ).percent,
+      16 / 22
+    )
+    assert.equal(
+      parser.parse(
+        '\u001b]0;title\u0007remote: Compressing objects:  72% (16/22)'
+      ).percent,
+      16 / 22
+    )
+    assert.equal(
+      parser.parse('\u009b31mremote: Compressing objects:  72% (16/22)')
+        .percent,
+      16 / 22
+    )
+  })
+
   it('parses progress with one step', () => {
     const parser = new GitProgressParser([
       { title: 'remote: Compressing objects', weight: 1 },
