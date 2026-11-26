@@ -1,79 +1,88 @@
 import assert from 'node:assert'
-import { dirname, resolve } from 'node:path'
-import ts from '@typescript/compiler-api'
+import { resolve } from 'node:path'
+import {
+  API,
+  TypeFlags,
+  type Checker,
+  type Project,
+  type Type,
+} from 'typescript/unstable/sync'
+import { isTypeAliasDeclaration, SyntaxKind } from 'typescript/unstable/ast'
 
 import { buildStatsPayload } from '../../src/lib/stats/stats-payload'
 import type { StatsPayload } from '../../src/lib/stats/stats-store'
 
 type ITelemetryPayload = ReturnType<typeof buildStatsPayload>
 
-function getDailyStatsType(): {
-  readonly checker: ts.TypeChecker
-  readonly type: ts.Type
-} {
-  const configPath = resolve('tsconfig.json')
-  const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
+interface IStatsTypeContext {
+  readonly api: API
+  readonly project: Project
+  readonly checker: Checker
+  readonly type: Type
+}
 
-  if (configFile.error !== undefined) {
-    throw new Error(
-      ts.formatDiagnostic(configFile.error, {
-        getCanonicalFileName: fileName => fileName,
-        getCurrentDirectory: ts.sys.getCurrentDirectory,
-        getNewLine: () => ts.sys.newLine,
-      })
+function getDailyStatsType(): IStatsTypeContext {
+  const api = new API({ cwd: process.cwd() })
+  try {
+    const snapshot = api.updateSnapshot({
+      openProjects: [resolve('tsconfig.json')],
+    })
+    const project = snapshot.getProjects()[0]
+    assert.notStrictEqual(
+      project,
+      undefined,
+      'Could not open the root TypeScript project'
     )
-  }
 
-  const config = ts.parseJsonConfigFileContent(
-    configFile.config,
-    ts.sys,
-    dirname(configPath)
-  )
-  const statsStorePath = resolve('app/src/lib/stats/stats-store.ts')
-  const program = ts.createProgram([statsStorePath], config.options)
-  const sourceFile = program.getSourceFile(statsStorePath)
+    const statsStorePath = resolve('app/src/lib/stats/stats-store.ts')
+    const sourceFile = project.program.getSourceFile(statsStorePath)
+    assert.notStrictEqual(sourceFile, undefined)
 
-  assert.notStrictEqual(sourceFile, undefined)
+    const dailyStatsDeclaration = sourceFile?.statements.find(
+      statement =>
+        statement.kind === SyntaxKind.TypeAliasDeclaration &&
+        isTypeAliasDeclaration(statement) &&
+        statement.name.text === 'DailyStats'
+    )
 
-  const dailyStatsDeclaration = sourceFile?.statements.find(
-    statement =>
-      ts.isTypeAliasDeclaration(statement) &&
-      statement.name.text === 'DailyStats'
-  )
+    assert.ok(
+      dailyStatsDeclaration !== undefined &&
+        isTypeAliasDeclaration(dailyStatsDeclaration),
+      'Could not find the DailyStats type alias'
+    )
 
-  assert.ok(
-    dailyStatsDeclaration !== undefined &&
-      ts.isTypeAliasDeclaration(dailyStatsDeclaration),
-    'Could not find the DailyStats type alias'
-  )
-
-  const checker = program.getTypeChecker()
-  return {
-    checker,
-    type: checker.getTypeAtLocation(dailyStatsDeclaration),
+    const checker = project.checker
+    const type = checker.getTypeAtLocation(dailyStatsDeclaration)
+    if (type === undefined) {
+      throw new Error('Could not resolve the DailyStats type')
+    }
+    return { api, project, checker, type }
+  } catch (error) {
+    api.close()
+    throw error
   }
 }
 
-function withoutUndefined(type: ts.Type): ReadonlyArray<ts.Type> {
-  const types = type.isUnion() ? type.types : [type]
-  return types.filter(member => (member.flags & ts.TypeFlags.Undefined) === 0)
+function withoutUndefined(type: Type): ReadonlyArray<Type> {
+  const types = type.isUnionType() ? (type.getTypes() ?? []) : [type]
+  return types.filter(member => (member.flags & TypeFlags.Undefined) === 0)
 }
 
-function hasFlag(types: ReadonlyArray<ts.Type>, flag: ts.TypeFlags): boolean {
+function hasFlag(types: ReadonlyArray<Type>, flag: TypeFlags): boolean {
   return types.some(type => (type.flags & flag) !== 0)
 }
 
-function exampleValueForType(type: ts.Type): string | number | boolean | null {
+function exampleValueForType(type: Type): string | number | boolean | null {
   const types = withoutUndefined(type)
 
-  if (hasFlag(types, ts.TypeFlags.Null)) {
+  if (hasFlag(types, TypeFlags.Null)) {
     return null
   }
 
   if (
     hasFlag(
       types,
-      ts.TypeFlags.Number | ts.TypeFlags.NumberLiteral | ts.TypeFlags.NumberLike
+      TypeFlags.Number | TypeFlags.NumberLiteral | TypeFlags.NumberLike
     )
   ) {
     return 1
@@ -82,15 +91,13 @@ function exampleValueForType(type: ts.Type): string | number | boolean | null {
   if (
     hasFlag(
       types,
-      ts.TypeFlags.Boolean |
-        ts.TypeFlags.BooleanLiteral |
-        ts.TypeFlags.BooleanLike
+      TypeFlags.Boolean | TypeFlags.BooleanLiteral | TypeFlags.BooleanLike
     )
   ) {
     return true
   }
 
-  const stringLiteral = types.find(type => type.isStringLiteral())
+  const stringLiteral = types.find(type => type.isStringLiteralType())
   if (stringLiteral !== undefined) {
     return stringLiteral.value
   }
@@ -98,7 +105,7 @@ function exampleValueForType(type: ts.Type): string | number | boolean | null {
   if (
     hasFlag(
       types,
-      ts.TypeFlags.String | ts.TypeFlags.StringLiteral | ts.TypeFlags.StringLike
+      TypeFlags.String | TypeFlags.StringLiteral | TypeFlags.StringLike
     )
   ) {
     return 'example'
@@ -108,21 +115,27 @@ function exampleValueForType(type: ts.Type): string | number | boolean | null {
 }
 
 function buildExampleStatsPayload(): StatsPayload {
-  const { checker, type } = getDailyStatsType()
-  const entries = checker.getPropertiesOfType(type).map(property => {
-    const declaration = property.valueDeclaration ?? property.declarations?.[0]
-    if (declaration === undefined) {
-      throw new Error(`Could not find the declaration for ${property.name}`)
-    }
+  const context = getDailyStatsType()
+  try {
+    const { checker, project, type } = context
+    const entries = checker.getPropertiesOfType(type).map(property => {
+      const handle = property.valueDeclaration ?? property.declarations[0]
+      const declaration = handle?.resolve(project)
+      if (declaration === undefined) {
+        throw new Error(`Could not find the declaration for ${property.name}`)
+      }
 
-    const propertyType = checker.getTypeOfSymbolAtLocation(
-      property,
-      declaration
-    )
-    return [property.name, exampleValueForType(propertyType)]
-  })
+      const propertyType = checker.getTypeOfSymbolAtLocation(
+        property,
+        declaration
+      )
+      return [property.name, exampleValueForType(propertyType)]
+    })
 
-  return Object.fromEntries(entries) as StatsPayload
+    return Object.fromEntries(entries) as StatsPayload
+  } finally {
+    context.api.close()
+  }
 }
 
 export function generateUsageDataExample(): ITelemetryPayload {

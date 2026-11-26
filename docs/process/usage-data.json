@@ -7,7 +7,7 @@
         "version": "example",
         "osVersion": "example",
         "platform": "example",
-        "architecture": "x64",
+        "architecture": "arm64",
         "guid": "example",
         "theme": "example",
         "selectedTerminalEmulator": "example",

@@ -24,9 +24,8 @@ cargo test          # Rust tests
 
 TypeScript 7 is the `typescript` package and the `tsc` binary in
 `node_modules/.bin`. `@typescript/compiler-api` remains installed side-by-side
-only for code that imports the old compiler API (`script/ts-register.cjs`,
-native-module emission tests, usage-data introspection, and the branch-rules
-oracle). Do not add new compiler-API consumers; use the TypeScript 7 CLI for
+only for code that imports the old compiler API (`script/ts-register.cjs` and
+the branch-rules oracle). Do not add new compiler-API consumers; use the TypeScript 7 CLI for
 normal checking.
 
 ## Debugging the desktop shell

@@ -33,8 +33,7 @@ installer.
 - TypeScript 7 is the canonical `typescript` package and provides the fast
   `tsc` used by `pnpm check:types` and `pnpm compile:script`.
 - `@typescript/compiler-api` remains installed side-by-side only for compiler-API
-  compatibility in `script/ts-register.cjs`, native-module emission tests,
-  usage-data introspection and the branch-rules oracle.
+  compatibility in `script/ts-register.cjs` and the branch-rules oracle.
 - oxlint is the JavaScript/TypeScript linter. Project rules live in
   `oxlint-rules/`; run `pnpm lint:oxlint`, `pnpm lint:security` and
   `pnpm test:oxlint`.
