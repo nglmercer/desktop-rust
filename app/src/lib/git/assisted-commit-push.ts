@@ -24,6 +24,7 @@ import { IAssistedCommitHead } from '../../models/assisted-commit'
 import { AssistedCommitError, readAssistedCommitHead } from './assisted-commit'
 import { quoteConfig } from './assisted-commit/git'
 import { git, isGitError } from './core'
+import { backend } from '../../backend/client'
 import { isErrnoException } from '../errno-exception'
 import { getRemotes } from './remote'
 import {
@@ -1357,13 +1358,12 @@ export async function completeAssistedCommitPushPublication(
     { name: `branch.${branch}.remote`, expected: destination.remote.name },
     { name: `branch.${branch}.merge`, expected: destination.remoteRef },
   ]
-  const config = await git(
-    ['rev-parse', '--path-format=absolute', '--git-path', 'config'],
+  const config = await backend().repositoryAssistedCommitGitPath(
     repository.path,
-    'assistedPublicationConfigPath'
+    'config'
   )
   verifyOriginalOwner()
-  const configPath = await realpath(config.stdout.replace(/\r?\n$/, ''))
+  const configPath = await realpath(config)
   if (configPath !== destination.configurationPath) {
     throw new AssistedCommitPushError(
       'The original publication configuration owner changed. Review repository settings.',
@@ -1395,7 +1395,7 @@ export async function completeAssistedCommitPushPublication(
       }
     })()
     const verify = await capturePublicationFileVersionFence([
-      config.stdout.replace(/\r?\n$/, ''),
+      config,
       configPath,
       ...inputs,
     ])
@@ -1614,14 +1614,7 @@ export async function prepareAssistedCommitPushDestination(
   const configurationFiles = await readConfigurationFiles(repository)
   const paths = await Promise.all(
     ['config', 'config.worktree', 'packed-refs', destination.branchRef].map(
-      async name => {
-        const result = await git(
-          ['rev-parse', '--path-format=absolute', '--git-path', name],
-          repository.path,
-          'assistedPushBackingPath'
-        )
-        return result.stdout.replace(/\r?\n$/, '')
-      }
+      name => backend().repositoryAssistedCommitGitPath(repository.path, name)
     )
   )
   const verifyFiles = await captureFileVersionFence([

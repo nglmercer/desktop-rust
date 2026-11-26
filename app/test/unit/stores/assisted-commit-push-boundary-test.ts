@@ -640,10 +640,10 @@ function nodeBackend(t: TestContext) {
           path: string,
           gitPath: string
         ) => {
-          const result = await actualExec(
+          const result = (await interceptingGitExec(actualExec)(
             ['rev-parse', '--path-format=absolute', '--git-path', gitPath],
             path
-          )
+          )) as Dugite.IGitStringResult
           return result.stdout.trim()
         },
         repositoryLastFetch: async (path: string) => {
@@ -5929,6 +5929,7 @@ describe('assisted native push boundary', () => {
       'copied-common'
     )
     await FileSystem.writeFile(join(linked, 'file'), 'after\n')
+    nodeBackend(t)
     const h = await harness.createAssistedCommitRunHarness(t)
     const repository = await h.register(linkedRepository)
     h.dispatcher.setPushAfterAssistedCommit(repository, true)
