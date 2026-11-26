@@ -211,6 +211,14 @@ export async function startRustBackend(): Promise<IRustBackend> {
   // first session's client is the stable handle tests hold; a restarted
   // session's client is installed as `backend()` with the same behavior.
   const handle = active.client
+  const sendHookDecision = handle.sendHookDecision.bind(handle)
+  handle.sendHookDecision = (requestId, decisionId, ignoreFailure) => {
+    if (active.client === handle) {
+      sendHookDecision(requestId, decisionId, ignoreFailure)
+    } else {
+      active.client.sendHookDecision(requestId, decisionId, ignoreFailure)
+    }
+  }
   let selected: string | null = null
   let restarting: Promise<void> | undefined
   const restartForChangedGitEnvironment = async (session: ISession) => {

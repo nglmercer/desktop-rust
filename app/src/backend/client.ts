@@ -1830,6 +1830,16 @@ export class BackendClient {
     else if (this.transport === 'ws') this.ws!.cancel(requestId)
   }
 
+  sendHookDecision(
+    requestId: number,
+    decisionId: string,
+    ignoreFailure: boolean
+  ): void {
+    if (this.transport === 'ws') {
+      this.ws!.hookDecision(requestId, decisionId, ignoreFailure)
+    }
+  }
+
   subscribe(event: string, listener: (...args: unknown[]) => void): () => void {
     if (this.transport === 'wry') return this.wry!.subscribe(event, listener)
     if (this.transport === 'ws') return this.ws!.subscribe(event, listener)
@@ -6202,7 +6212,7 @@ export class BackendClient {
         if (this.transport === 'wry') {
           this.wry!.hookDecision(decisionId, verified)
         } else if (this.transport === 'ws' && typeof requestId === 'number') {
-          this.ws!.hookDecision(requestId, decisionId, verified)
+          this.sendHookDecision(requestId, decisionId, verified)
         }
       }
       if (verification !== undefined) {
@@ -9076,7 +9086,7 @@ export class BackendClient {
                             this.transport === 'ws' &&
                             typeof requestId === 'number'
                           ) {
-                            this.ws!.hookDecision(requestId, decisionId, ignore)
+                            this.sendHookDecision(requestId, decisionId, ignore)
                           }
                         }
                         try {
