@@ -39,6 +39,79 @@ const filesMatching = (pattern: RegExp) =>
 const importOf = (modules: string) =>
   new RegExp(`(?:from|require\\()\\s*['"](?:${modules})['"]`)
 
+// Comments and string contents are not command invocations. This small lexer
+// keeps line/column structure stable enough for the conservative call-site
+// count below without depending on a TypeScript AST implementation.
+function stripCommentsAndStrings(source: string): string {
+  let state: 'code' | 'single' | 'double' | 'template' | 'line' | 'block' =
+    'code'
+  let escaped = false
+  let result = ''
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index]
+    const next = source[index + 1]
+    if (state === 'code') {
+      if (character === '/' && next === '/') {
+        state = 'line'
+        result += '  '
+        index++
+      } else if (character === '/' && next === '*') {
+        state = 'block'
+        result += '  '
+        index++
+      } else if (character === "'") {
+        state = 'single'
+        result += ' '
+      } else if (character === '"') {
+        state = 'double'
+        result += ' '
+      } else if (character === '`') {
+        state = 'template'
+        result += ' '
+      } else {
+        result += character
+      }
+      continue
+    }
+    if (state === 'line') {
+      if (character === '\n') {
+        state = 'code'
+        result += character
+      } else {
+        result += ' '
+      }
+      continue
+    }
+    if (state === 'block') {
+      if (character === '*' && next === '/') {
+        state = 'code'
+        result += '  '
+        index++
+      } else {
+        result += character === '\n' ? character : ' '
+      }
+      continue
+    }
+    if (escaped) {
+      escaped = false
+    } else if (character === '\\') {
+      escaped = true
+    } else if (
+      (state === 'single' && character === "'") ||
+      (state === 'double' && character === '"') ||
+      (state === 'template' && character === '`')
+    ) {
+      state = 'code'
+    }
+    result += character === '\n' ? character : ' '
+  }
+  return result
+}
+
+function countOccurrences(source: string, pattern: RegExp): number {
+  return source.match(pattern)?.length ?? 0
+}
+
 export interface IMetrics {
   readonly transportChecks: number
   readonly transportCheckFiles: number
@@ -51,12 +124,30 @@ export interface IMetrics {
 }
 
 export function measure(): IMetrics {
-  const gitSources = [...text].filter(([file]) =>
-    file.startsWith(path.join(srcRoot, 'lib', 'git') + path.sep)
+  const coreRunner = path.join(srcRoot, 'lib', 'git', 'core.ts')
+  const assistedRunner = path.join(
+    srcRoot,
+    'lib',
+    'git',
+    'assisted-commit',
+    'git.ts'
   )
-  const legacyGit = gitSources.map(
-    ([, source]) => source.match(/await git\(/g)?.length ?? 0
-  )
+  const legacyGit = [...text].map(([file, source]) => {
+    const stripped = stripCommentsAndStrings(source)
+    // Every privateGit call is a renderer-specified Git command. The core
+    // runner itself is transport infrastructure, and the two branches inside
+    // privateGit are the shared transport for those call sites rather than
+    // additional operations.
+    const privateCalls = countOccurrences(
+      stripped,
+      /(?<!function\s)(?<![\w$.])privateGit\s*\(/g
+    )
+    const directCalls =
+      file === coreRunner || file === assistedRunner
+        ? 0
+        : countOccurrences(stripped, /(?<!function\s)(?<![\w$.])git\s*\(/g)
+    return privateCalls + directCalls
+  })
   const imports: Record<string, number> = {}
   for (const [name, modules] of Object.entries({
     dugite: 'dugite',
@@ -146,7 +237,7 @@ export function compareWithBaseline(
 function report(metrics: IMetrics) {
   const lines = [
     `Fallback checks (transportKind):   ${metrics.transportChecks} in ${metrics.transportCheckFiles} files`,
-    `Legacy Git runner calls (lib/git): ${metrics.legacyGitCalls} in ${metrics.legacyGitCallFiles} files`,
+    `Renderer-driven Git command sites: ${metrics.legacyGitCalls} in ${metrics.legacyGitCallFiles} files`,
     ...Object.entries(metrics.imports).map(
       ([name, files]) => `Renderer files importing ${name.padEnd(14)} ${files}`
     ),
