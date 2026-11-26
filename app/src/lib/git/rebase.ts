@@ -1,6 +1,6 @@
 import type { IChildProcess } from '../process/child-process'
 import { GitErrorKind } from './error-kind'
-import byline from 'byline'
+import { forEachLine } from '../line-stream'
 
 import { Repository } from '../../models/repository'
 import { RebaseInternalState, RebaseProgressOptions } from '../../models/rebase'
@@ -257,7 +257,7 @@ function configureOptionsForRebase<T extends IGitExecutionOptions>(
       }
       const parser = new GitRebaseParser(commits)
 
-      byline(process.stderr).on('data', (line: string) => {
+      forEachLine(process.stderr, line => {
         const progress = parser.parse(line)
 
         if (progress != null) {

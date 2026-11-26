@@ -135,6 +135,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | dependencia renderer `which` y tipos raíz asociados | resolución executable local mediante filesystem host-backed, PATH personalizado, bits Unix y PATHEXT Windows | `app/test/unit/executable-path-test.ts`, `app/test/unit/traditional-hook-test.ts`, `pnpm migration:check` |
 | `script/ts-register.cjs` y `@typescript/compiler-api` | scripts TypeScript ESM ejecutados mediante `@oxc-node/core/register`; TypeScript 7 como checker canónico | `pnpm migration:check`, `pnpm compile:script`, `pnpm test:script` |
 | `app/test/backend-transport-tsconfig.json` y su paso CI duplicado | `pnpm check:types` raíz, que ya incluye `app/**/*.ts` con la configuración estricta vigente | `pnpm check:types`, `pnpm lint`, validación de workflow por inspección estática |
+| `byline` y `@types/byline` | `app/src/lib/line-stream.ts`, divisor UTF-8 local para registros CR/LF usado por progreso Git/LFS y tailing | `app/test/unit/line-stream-test.ts`, `tailer-test.ts`, `tailer-web-fs-test.ts`, `progress/git-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

@@ -24,7 +24,6 @@
     "@github/copilot-sdk": "1.0.27-preview.1",
     "@xterm/xterm": "^5.5.0",
     "app-path": "^3.3.0",
-    "byline": "^5.0.0",
     "classnames": "^2.2.5",
     "codemirror": "^5.65.17",
     "codemirror-mode-elixir": "^1.1.2",

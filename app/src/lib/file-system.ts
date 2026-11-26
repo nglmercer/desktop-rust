@@ -1,6 +1,6 @@
 import { Disposable } from 'event-kit'
 import { Tailer } from './tailer'
-import byline from 'byline'
+import { forEachLine, type LineStream } from './line-stream'
 import { randomUUID } from '../web/random-uuid'
 import { join } from 'path'
 import { tmpdir } from '../web/os'
@@ -29,17 +29,9 @@ export function tailByLine(
   })
 
   const onDataDisposable = tailer.onDataAvailable(stream => {
-    byline(stream as unknown as NodeJS.ReadableStream).on(
-      'data',
-      (buffer: Buffer) => {
-        if (onDataDisposable.disposed) {
-          return
-        }
-
-        const line = buffer.toString()
-        cb(line)
-      }
-    )
+    forEachLine(stream as unknown as LineStream, line => {
+      if (!onDataDisposable.disposed) cb(line)
+    })
   })
 
   tailer.start()

@@ -1,7 +1,7 @@
 import type { IChildProcess } from '../process/child-process'
 import * as Fs from '../../web/fs'
 import * as Path from 'path'
-import byline from 'byline'
+import { forEachLine } from '../line-stream'
 
 import type { IGitProgress, IGitOutput, IGitProgressParser } from './git'
 import type { IGitExecutionOptions } from '../git/core'
@@ -88,7 +88,7 @@ function createProgressProcessCallback(
     // If Node.js encounters a synchronous runtime error while spawning
     // `stderr` will be undefined and the error will be emitted asynchronously
     if (process.stderr) {
-      byline(process.stderr).on('data', (line: string) => {
+      forEachLine(process.stderr, line => {
         const progress = parser.parse(line)
 
         if (lfsProgressActive) {

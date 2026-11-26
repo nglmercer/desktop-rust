@@ -94,7 +94,6 @@
     "@biomejs/biome": "2.6.7",
     "@github/markdownlint-github": "^0.8.3",
     "@oxc-node/core": "1.0.2",
-    "@types/byline": "^4.2.31",
     "@types/codemirror": "^5.60.15",
     "@types/deep-equal": "^1.0.1",
     "@types/dompurify": "^2.3.1",
