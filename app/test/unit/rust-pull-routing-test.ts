@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repository } from '../../src/models/repository'
+import type { TerminalOutput } from '../../src/lib/git/core'
 
 const mocks = vi.hoisted(() => ({
   transport: 'ws',
@@ -130,7 +131,8 @@ describe('Rust pull routing', () => {
           report_progress: true,
           require_hook_callbacks: false,
         },
-        expect.any(Function)
+        expect.any(Function),
+        undefined
       )
       expect(mocks.git).not.toHaveBeenCalled()
       expect(hookFailure).not.toHaveBeenCalled()
@@ -150,6 +152,7 @@ describe('Rust pull routing', () => {
       expect.objectContaining({
         proxy: { https: 'http://proxy.invalid' },
       }),
+      undefined,
       undefined
     )
   })
@@ -219,6 +222,61 @@ describe('Rust pull routing', () => {
       }
       vi.resetModules()
     }
+  })
+
+  it('streams terminal output through the native pull after review', async () => {
+    let subscribe:
+      | ((listener: (chunk: TerminalOutput) => void) => {
+          unsubscribe: () => void
+        })
+      | undefined
+    const terminalObserver = vi.fn(
+      (
+        callback: (listener: (chunk: TerminalOutput) => void) => {
+          unsubscribe: () => void
+        }
+      ) => {
+        subscribe = callback
+      }
+    )
+    const terminal = vi.fn()
+    mocks.pull.mockImplementationOnce(
+      async (_path, _request, onProgress, onReviewed) => {
+        expect(onProgress).toEqual(expect.any(Function))
+        expect(onReviewed).toEqual(expect.any(Function))
+        onReviewed()
+        subscribe?.(terminal)
+        onProgress({
+          stream: 'stderr',
+          data: btoa('From /source\r'),
+        })
+      }
+    )
+    await pull(repository, remote, {
+      onTerminalOutputAvailable: terminalObserver,
+    })
+    expect(mocks.pull).toHaveBeenCalledWith(
+      '/repo',
+      expect.objectContaining({ report_progress: true }),
+      expect.any(Function),
+      expect.any(Function)
+    )
+    expect(terminalObserver).toHaveBeenCalledTimes(1)
+    expect(terminal).toHaveBeenCalledWith('From /source\r')
+    expect(mocks.git).not.toHaveBeenCalled()
+  })
+
+  it('does not register terminal observers before a refused native review', async () => {
+    mocks.transport = 'wry'
+    mocks.pull.mockRejectedValueOnce(
+      new mocks.PreviewUnsupported('unsupported')
+    )
+    const terminalObserver = vi.fn()
+    await pull(repository, remote, {
+      onTerminalOutputAvailable: terminalObserver,
+    })
+    expect(terminalObserver).not.toHaveBeenCalled()
+    expect(mocks.git).toHaveBeenCalledTimes(1)
   })
 
   it('falls back only for a preflight refusal, never after an uncertain result', async () => {

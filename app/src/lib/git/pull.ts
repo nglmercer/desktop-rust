@@ -24,6 +24,7 @@ import {
   withRepositoryGitOperation,
 } from './repository-operation'
 import { fetchFailureToGitError } from './fetch-error'
+import { pushTerminalChunk } from './push-terminal-chunk'
 import { getDescriptionForError, GitError } from './core'
 import { getHooksEnvEnabled } from '../hooks/config'
 
@@ -66,7 +67,6 @@ export async function pull(
   const transport =
     typeof window === 'undefined' ? 'none' : backend().transportKind
   const wry = transport === 'wry'
-  const hasTerminalObserver = options?.onTerminalOutputAvailable !== undefined
   // The legacy runner intercepts hooks and loads a configured shell only when
   // this preference is enabled. Preserve that path until the native hook
   // environment and callbacks have equivalent support.
@@ -75,17 +75,11 @@ export async function pull(
   if (wry && native) {
     if (
       usesHookEnvironment ||
-      hasTerminalObserver ||
       (options?.progressCallback &&
         typeof (window as any).__desktop?.invokeWithProgress !== 'function')
     ) {
       native = false
     }
-  }
-  if (transport === 'ws' && hasTerminalObserver) {
-    throw new FetchPreviewUnsupported(
-      'Pull terminal output is unavailable through this backend'
-    )
   }
   if (transport === 'ws' && usesHookEnvironment) {
     throw new FetchPreviewUnsupported(
@@ -126,6 +120,52 @@ export async function pull(
     if (callback !== undefined) {
       observe({ kind: 'pull', title, value: 0, remote: remote.name })
     }
+    const terminalObserver = options?.onTerminalOutputAvailable
+    const needsStreaming =
+      parser !== undefined || terminalObserver !== undefined
+    const listeners = new Set<(chunk: TerminalOutput) => void>()
+    const terminalChunks: string[] = []
+    const notifyTerminal = (text: string) => {
+      if (!text) {
+        return
+      }
+      pushTerminalChunk(terminalChunks, 256 * 1024, text)
+      for (const listener of listeners) {
+        try {
+          withoutRepositoryGitAccess(() => listener(text))
+        } catch {
+          // Observers cannot terminate a pull.
+        }
+      }
+    }
+    const registerTerminalObserver = () => {
+      if (terminalObserver === undefined) {
+        return
+      }
+      try {
+        withoutRepositoryGitAccess(() =>
+          terminalObserver(listener => {
+            for (const chunk of terminalChunks) {
+              try {
+                withoutRepositoryGitAccess(() => listener(chunk))
+              } catch {
+                // Observers cannot terminate a pull.
+              }
+            }
+            listeners.add(listener)
+            return {
+              unsubscribe: () => listeners.delete(listener),
+            }
+          })
+        )
+      } catch {
+        // Observer setup must not trigger fallback or terminate a pull.
+      }
+    }
+    const decoders = {
+      stdout: new TextDecoder(),
+      stderr: new TextDecoder(),
+    }
     const proxy = backendRemoteProxy(await envForProxy(remote.url))
     try {
       const failure = await withRepositoryGitOperation(
@@ -138,7 +178,7 @@ export async function pull(
               remote: remote.name,
               expected_url: remote.url,
               no_verify: options?.noVerify ?? false,
-              report_progress: parser !== undefined,
+              report_progress: needsStreaming,
               require_hook_callbacks: false,
               ...(repository.gitHubRepository?.owner.login === undefined
                 ? {}
@@ -148,7 +188,27 @@ export async function pull(
                   }),
               ...(proxy === undefined ? {} : { proxy }),
             },
-            parser === undefined ? undefined : chunk => parser.push(chunk)
+            !needsStreaming
+              ? undefined
+              : chunk => {
+                  try {
+                    parser?.push(chunk)
+                  } catch {
+                    // Progress observers cannot terminate a pull.
+                  }
+                  if (chunk.stream === 'lfs') {
+                    return
+                  }
+                  const bytes = Uint8Array.from(atob(chunk.data), character =>
+                    character.charCodeAt(0)
+                  )
+                  notifyTerminal(
+                    decoders[chunk.stream].decode(bytes, { stream: true })
+                  )
+                },
+            terminalObserver === undefined
+              ? undefined
+              : registerTerminalObserver
           ),
         true
       )

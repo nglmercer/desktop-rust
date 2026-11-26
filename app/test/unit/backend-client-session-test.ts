@@ -29,6 +29,7 @@ describe('backend Copilot session cleanup', () => {
       value: { invoke, send: vi.fn(), on: vi.fn() },
     })
     const client = new BackendClient()
+    const reviewed = vi.fn()
     const request = {
       remote: 'origin',
       expected_url: '/source',
@@ -40,20 +41,22 @@ describe('backend Copilot session cleanup', () => {
       message: 'invalid ipc arguments: invalid Git identity request',
     })
     await expect(
-      client.pullRepositoryRemote('/repo', request)
+      client.pullRepositoryRemote('/repo', request, undefined, reviewed)
     ).rejects.toBeInstanceOf(FetchPreviewUnsupported)
     expect(invoke).toHaveBeenCalledTimes(1)
+    expect(reviewed).not.toHaveBeenCalled()
     invoke
       .mockResolvedValueOnce({ remote: 'origin', basis: 'a'.repeat(64) })
       .mockRejectedValueOnce({
         message: 'invalid ipc arguments: invalid Git identity request',
       })
     await expect(
-      client.pullRepositoryRemote('/repo', request)
+      client.pullRepositoryRemote('/repo', request, undefined, reviewed)
     ).rejects.toMatchObject({
       message: expect.stringContaining('outcome is uncertain'),
       retryable: false,
     })
+    expect(reviewed).toHaveBeenCalledTimes(1)
     expect(invoke).toHaveBeenCalledTimes(3)
     await expect(
       client.pullRepositoryRemote('/repo', {

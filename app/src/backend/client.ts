@@ -8188,7 +8188,8 @@ export class BackendClient {
       readonly expected_saml_owner?: string
       readonly proxy?: RemoteProxy
     },
-    onProgress?: (chunk: FetchProgressChunk) => void
+    onProgress?: (chunk: FetchProgressChunk) => void,
+    onReviewed?: () => void
   ): Promise<PullFailure | undefined> {
     if (
       onProgress &&
@@ -8261,6 +8262,7 @@ export class BackendClient {
         retryable: false,
       })
     }
+    onReviewed?.()
     let result: unknown
     try {
       result = await call('renderer_pull', { basis: preview.basis })
