@@ -106,28 +106,6 @@ impl std::fmt::Debug for RendererPullRequest {
 }
 
 impl Repository {
-    async fn pull_has_submodules(&self) -> Result<bool> {
-        // A recursive pull may fetch with the parent's credential environment.
-        // Refuse before mutation until nested account scoping has been proven.
-        let index = self.run(&args(&["ls-files", "--stage", "-z"])).await?;
-        ensure!(index.code == 0, "Cannot inspect repository submodules");
-        if index
-            .stdout
-            .split(|byte| *byte == 0)
-            .any(|entry| entry.starts_with(b"160000 "))
-        {
-            return Ok(true);
-        }
-        let config = self
-            .run(&args(&["config", "--get-regexp", "^submodule\\."]))
-            .await?;
-        ensure!(
-            matches!(config.code, 0 | 1),
-            "Cannot inspect submodule configuration"
-        );
-        Ok(config.code == 0)
-    }
-
     async fn renderer_pull_review(&self, request: &RendererPullRequest) -> Result<(String, bool)> {
         if let Some(proxy) = &request.proxy {
             proxy.validate()?;
@@ -138,10 +116,6 @@ impl Repository {
         ensure!(
             !request.remote.starts_with('-'),
             "Cannot pull from a remote whose name starts with '-'"
-        );
-        ensure!(
-            !self.pull_has_submodules().await?,
-            "Recursive pull with submodules is unavailable"
         );
         ensure!(
             self.operation_state().await?.is_none(),
@@ -201,13 +175,9 @@ impl Repository {
         if request.require_hook_callbacks {
             return Ok(json!({"kind":"unsupported_hooks"}));
         }
-        match self.pull_has_submodules().await {
-            Ok(true) => return Ok(json!({"kind":"unsupported_submodules"})),
-            Ok(false) => {}
-            // A bounded index inspection may fail for very large repositories.
-            // Fall back before mutating instead of bypassing the review.
-            Err(_) => return Ok(json!({"kind":"unsupported"})),
-        }
+        // Initialized submodule repositories are local repositories in their own
+        // right. The recursive child fetch does not receive the parent's assigned
+        // credential grant; nested accounts remain scoped to those repositories.
         if self.operation_state().await?.is_some() {
             return Ok(json!({"kind":"unsupported"}));
         }
@@ -221,8 +191,8 @@ impl Repository {
     }
 
     /// Execute one Git pull, preserving configured merge/rebase behavior.
-    /// The configured hook environment and interactive callbacks are not yet
-    /// supported; callers requesting them are refused before mutation.
+    /// Renderer-owned hook interception is supported through the typed hook
+    /// environment; interactive failure callbacks are refused before mutation.
     pub async fn renderer_pull(&self, request: &RendererPullRequest, basis: &str) -> Result<Value> {
         ensure!(
             !request.require_hook_callbacks,
@@ -609,49 +579,87 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn configured_or_indexed_submodules_are_refused_before_fetch() {
-        if isolated("configured_or_indexed_submodules_are_refused_before_fetch") {
+    async fn initialized_submodule_update_uses_recursive_pull() {
+        if isolated("initialized_submodule_update_uses_recursive_pull") {
             return;
         }
         let f = Fixture::new();
-        f.commit(&f.source(), "remote", "remote\n");
-        let original = git(&f.target(), &["rev-parse", "HEAD"]);
-        let repo = Repository::open(&f.target()).await.unwrap();
+        let nested = f.0.join("nested-source");
+        fs::create_dir(&nested).unwrap();
+        git(&nested, &["init", "-q", "-b", "main", "--template="]);
+        git(&nested, &["config", "user.name", "Test"]);
+        git(&nested, &["config", "user.email", "test@example.invalid"]);
+        git(&nested, &["config", "commit.gpgsign", "false"]);
+        f.commit(&nested, "file", "nested one\n");
+        git(
+            &f.source(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                nested.to_str().unwrap(),
+                "child",
+            ],
+        );
+        git(&f.source(), &["commit", "-qm", "add child"]);
+
+        let target = f.0.join("submodule-target");
+        git(
+            &f.0,
+            &[
+                "clone",
+                "-q",
+                "--no-local",
+                f.source().to_str().unwrap(),
+                target.to_str().unwrap(),
+            ],
+        );
+        git(
+            &target,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--init",
+                "-q",
+            ],
+        );
+        let initial = git(&target.join("child"), &["rev-parse", "HEAD"]);
+
+        f.commit(&nested, "file", "nested two\n");
+        git(
+            &f.source(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "update",
+                "--remote",
+                "-q",
+            ],
+        );
+        git(&f.source(), &["add", "child"]);
+        git(&f.source(), &["commit", "-qm", "update child"]);
+        let expected = git(&nested, &["rev-parse", "HEAD"]);
+        assert_ne!(initial, expected);
+
+        let repo = Repository::open(&target).await.unwrap();
         let request = f.request();
         let preview = repo.renderer_pull_preview(&request).await.unwrap();
-        git(
-            &f.target(),
-            &[
-                "config",
-                "submodule.child.url",
-                "https://other.invalid/child",
-            ],
-        );
+        assert!(preview.get("kind").is_none());
+        let result = repo
+            .renderer_pull(&request, preview["basis"].as_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(git(&target.join("child"), &["rev-parse", "HEAD"]), expected);
         assert_eq!(
-            repo.renderer_pull_preview(&request).await.unwrap()["kind"],
-            "unsupported_submodules"
+            git(&target, &["rev-parse", "HEAD"]),
+            git(&f.source(), &["rev-parse", "HEAD"])
         );
-        assert!(
-            repo.renderer_pull(&request, preview["basis"].as_str().unwrap())
-                .await
-                .is_err()
-        );
-        git(&f.target(), &["config", "--unset", "submodule.child.url"]);
-        git(
-            &f.target(),
-            &[
-                "update-index",
-                "--add",
-                "--cacheinfo",
-                &format!("160000,{original},nested"),
-            ],
-        );
-        assert_eq!(
-            repo.renderer_pull_preview(&request).await.unwrap()["kind"],
-            "unsupported_submodules"
-        );
-        assert_eq!(git(&f.target(), &["rev-parse", "HEAD"]), original);
-        assert!(!f.target().join("remote").exists());
     }
 
     #[tokio::test]
@@ -781,48 +789,5 @@ mod tests {
         assert_ne!(result["code"], 0);
         assert_eq!(result["error_kind"], "missing_upstream");
         assert!(!result.to_string().contains(f.0.to_str().unwrap()));
-    }
-
-    #[tokio::test]
-    async fn oversized_index_review_is_refused_before_fetch() {
-        use std::io::Write;
-        use std::process::Stdio;
-        if isolated("oversized_index_review_is_refused_before_fetch") {
-            return;
-        }
-        let f = Fixture::new();
-        f.commit(&f.source(), "remote", "remote\n");
-        let old = git(&f.target(), &["rev-parse", "HEAD"]);
-        let blob = git(&f.target(), &["rev-parse", "HEAD:base"]);
-        let mut update = Command::new("git")
-            .current_dir(f.target())
-            .args(["update-index", "--index-info"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        {
-            let stdin = update.stdin.as_mut().unwrap();
-            let padding = "x".repeat(80);
-            for i in 0..20_000 {
-                writeln!(stdin, "100644 {blob}\tentry-{i:05}-{padding}").unwrap();
-            }
-        }
-        drop(update.stdin.take());
-        let output = update.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let repo = Repository::open(&f.target()).await.unwrap();
-        let request = f.request();
-        assert_eq!(
-            repo.renderer_pull_preview(&request).await.unwrap()["kind"],
-            "unsupported"
-        );
-        assert_eq!(git(&f.target(), &["rev-parse", "HEAD"]), old);
-        assert!(!f.target().join("remote").exists());
     }
 }

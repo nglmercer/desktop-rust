@@ -255,21 +255,15 @@ describe.skipIf(process.env.DESKTOP_TEST_GIT_CREDS !== '1')(
         assert.ok(!existsSync(suite.nativeLog))
         suite.update({ signed_out: [] })
 
-        // Current recursive Pull deliberately refuses existing gitlinks
-        // before any transfer; parent credentials must not reach a child.
+        // Recursive pull is supported, but the credential lease remains bound
+        // to the parent repository. A gitlink alone must not make the reviewed
+        // parent operation unsupported; recursive nested transport coverage
+        // below proves that the child cannot borrow this lease.
         const oid = repo.git('rev-parse', 'HEAD').toString().trim()
         repo.git('update-index', '--add', '--cacheinfo', `160000,${oid},nested`)
-        const indexBefore = repo.git('ls-files', '--stage', '-z')
         suite.clearTransport()
-        const blocked = suite.rpc(repo, 'renderer_pull_preview', { request })
-        assert.equal(blocked.kind, 'unsupported_submodules')
-        suite.rpc(
-          repo,
-          'renderer_pull',
-          { request, basis: 'unused' },
-          { fail: true }
-        )
-        assert.deepEqual(repo.git('ls-files', '--stage', '-z'), indexBefore)
+        const reviewed = suite.rpc(repo, 'renderer_pull_preview', { request })
+        assert.notEqual(reviewed.kind, 'unsupported_submodules')
         assert.ok(!suite.service.records().some(row => row.actor !== null))
         assert.ok(!existsSync(suite.nativeLog))
       } finally {

@@ -53,108 +53,96 @@ async function setupRepositoryWithSubmodule(
 }
 
 describe('git/pull', () => {
-  // The Rust pull refuses a repository with submodules (it does not review the
-  // submodule remotes it would fetch); the app falls back to the Git runner
-  // there. Until the Rust pull covers them, these run on the Git path only.
-  describe.skipIf(process.env.DESKTOP_TEST_RUST_BACKEND === '1')(
-    'with submodules',
-    () => {
-      it('updates submodule references after pulling changes', async t => {
-        // Setup: Create parent with submodule, clone it
-        const { parent, submodule } = await setupRepositoryWithSubmodule(t)
+  describe('with submodules', () => {
+    it('updates submodule references after pulling changes', async t => {
+      // Setup: Create parent with submodule, clone it
+      const { parent, submodule } = await setupRepositoryWithSubmodule(t)
 
-        const cloned = await cloneRepository(t, parent)
+      const cloned = await cloneRepository(t, parent)
 
-        // Initialize submodules in the cloned repo
-        await exec(
-          ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'],
-          cloned.path
-        )
+      // Initialize submodules in the cloned repo
+      await exec(
+        ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'],
+        cloned.path
+      )
 
-        const submodulePath = Path.join(cloned.path, 'test-submodule')
+      const submodulePath = Path.join(cloned.path, 'test-submodule')
 
-        // Verify initial state
-        const initialLog = await exec(['log', '--oneline'], submodulePath)
-        const initialCommitCount = initialLog.stdout.trim().split('\n').length
-        assert.equal(initialCommitCount, 2, 'Should start with 2 commits')
+      // Verify initial state
+      const initialLog = await exec(['log', '--oneline'], submodulePath)
+      const initialCommitCount = initialLog.stdout.trim().split('\n').length
+      assert.equal(initialCommitCount, 2, 'Should start with 2 commits')
 
-        // Add a new commit to the submodule
-        await makeCommit(submodule, {
-          commitMessage: 'Third commit in submodule',
-          entries: [{ path: 'another-file.txt', contents: 'more content' }],
-        })
-
-        // Update the submodule reference in parent and commit
-        await exec(
-          [
-            '-c',
-            'protocol.file.allow=always',
-            'submodule',
-            'update',
-            '--remote',
-          ],
-          parent.path
-        )
-        await exec(['add', 'test-submodule'], parent.path)
-        await exec(['commit', '-m', 'Update submodule reference'], parent.path)
-
-        const remote: IRemote = {
-          name: 'origin',
-          url: parent.path,
-        }
-
-        // Pull the changes
-        await pull(cloned, remote, undefined)
-
-        // Verify submodule was updated to the new reference
-        const finalLog = await exec(['log', '--oneline'], submodulePath)
-        const finalCommitCount = finalLog.stdout.trim().split('\n').length
-
-        assert.equal(
-          finalCommitCount,
-          3,
-          'Submodule should now have 3 commits after update'
-        )
+      // Add a new commit to the submodule
+      await makeCommit(submodule, {
+        commitMessage: 'Third commit in submodule',
+        entries: [{ path: 'another-file.txt', contents: 'more content' }],
       })
 
-      it('handles pull when there are no submodule changes', async t => {
-        const { parent } = await setupRepositoryWithSubmodule(t)
-        const cloned = await cloneRepository(t, parent)
+      // Update the submodule reference in parent and commit
+      await exec(
+        ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--remote'],
+        parent.path
+      )
+      await exec(['add', 'test-submodule'], parent.path)
+      await exec(['commit', '-m', 'Update submodule reference'], parent.path)
 
-        // Initialize submodules
-        await exec(
-          ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'],
-          cloned.path
-        )
+      const remote: IRemote = {
+        name: 'origin',
+        url: parent.path,
+      }
 
-        // Make a change that doesn't affect submodules
-        await makeCommit(parent, {
-          commitMessage: 'Update README again',
-          entries: [{ path: 'README.md', contents: '# Another update' }],
-        })
+      // Pull the changes
+      await pull(cloned, remote, undefined)
 
-        const remote: IRemote = {
-          name: 'origin',
-          url: parent.path,
-        }
+      // Verify submodule was updated to the new reference
+      const finalLog = await exec(['log', '--oneline'], submodulePath)
+      const finalCommitCount = finalLog.stdout.trim().split('\n').length
 
-        const submodulePath = Path.join(cloned.path, 'test-submodule')
-        const beforeLog = await exec(['log', '--oneline'], submodulePath)
-        const beforeCount = beforeLog.stdout.trim().split('\n').length
+      assert.equal(
+        finalCommitCount,
+        3,
+        'Submodule should now have 3 commits after update'
+      )
+    })
 
-        // Pull should succeed without errors
-        await pull(cloned, remote, undefined)
+    it('handles pull when there are no submodule changes', async t => {
+      const { parent } = await setupRepositoryWithSubmodule(t)
+      const cloned = await cloneRepository(t, parent)
 
-        // Submodule should remain unchanged
-        const afterLog = await exec(['log', '--oneline'], submodulePath)
-        const afterCount = afterLog.stdout.trim().split('\n').length
+      // Initialize submodules
+      await exec(
+        ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'],
+        cloned.path
+      )
 
-        assert.equal(
-          afterCount,
-          beforeCount,
-          'Submodule commits should remain unchanged'
-        )
+      // Make a change that doesn't affect submodules
+      await makeCommit(parent, {
+        commitMessage: 'Update README again',
+        entries: [{ path: 'README.md', contents: '# Another update' }],
       })
-    }
-  )
+
+      const remote: IRemote = {
+        name: 'origin',
+        url: parent.path,
+      }
+
+      const submodulePath = Path.join(cloned.path, 'test-submodule')
+      const beforeLog = await exec(['log', '--oneline'], submodulePath)
+      const beforeCount = beforeLog.stdout.trim().split('\n').length
+
+      // Pull should succeed without errors
+      await pull(cloned, remote, undefined)
+
+      // Submodule should remain unchanged
+      const afterLog = await exec(['log', '--oneline'], submodulePath)
+      const afterCount = afterLog.stdout.trim().split('\n').length
+
+      assert.equal(
+        afterCount,
+        beforeCount,
+        'Submodule commits should remain unchanged'
+      )
+    })
+  })
 })

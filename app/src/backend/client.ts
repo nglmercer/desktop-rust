@@ -8784,9 +8784,7 @@ export class BackendClient {
     }
     if (
       isRecord(preview) &&
-      ['unsupported', 'unsupported_hooks', 'unsupported_submodules'].includes(
-        String(preview.kind)
-      )
+      ['unsupported', 'unsupported_hooks'].includes(String(preview.kind))
     ) {
       throw new FetchPreviewUnsupported(
         'Pull requires functionality not available in the native backend'

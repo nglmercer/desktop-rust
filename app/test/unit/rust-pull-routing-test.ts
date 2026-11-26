@@ -73,6 +73,16 @@ vi.mock('../../src/lib/hooks/config', () => ({
 }))
 vi.mock('../../src/lib/hooks/with-hooks-env', () => ({
   withHooksEnv: mocks.withHooksEnv,
+  rendererHookEnvironment: (
+    environment: Record<string, string | undefined> | undefined
+  ) =>
+    environment === undefined
+      ? undefined
+      : {
+          config_parameters: environment.GIT_CONFIG_PARAMETERS ?? '',
+          process_proxy_port: Number(environment.PROCESS_PROXY_PORT),
+          process_proxy_token: environment.PROCESS_PROXY_TOKEN,
+        },
 }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
@@ -299,21 +309,24 @@ describe('Rust pull routing', () => {
       new mocks.PreviewUnsupported('unsupported')
     )
     const terminalObserver = vi.fn()
-    await pull(repository, remote, {
-      onTerminalOutputAvailable: terminalObserver,
-    })
+    await expect(
+      pull(repository, remote, {
+        onTerminalOutputAvailable: terminalObserver,
+      })
+    ).rejects.toBeInstanceOf(mocks.PreviewUnsupported)
     expect(terminalObserver).not.toHaveBeenCalled()
-    expect(mocks.git).toHaveBeenCalledTimes(1)
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('falls back only for a preflight refusal, never after an uncertain result', async () => {
+  it('never falls back after a preflight refusal or an uncertain result', async () => {
     mocks.transport = 'wry'
     mocks.pull.mockRejectedValueOnce(
       new mocks.PreviewUnsupported('unsupported')
     )
-    await pull(repository, remote)
-    expect(mocks.git).toHaveBeenCalledTimes(1)
-    mocks.git.mockClear()
+    await expect(pull(repository, remote)).rejects.toBeInstanceOf(
+      mocks.PreviewUnsupported
+    )
+    expect(mocks.git).not.toHaveBeenCalled()
     mocks.pull.mockRejectedValueOnce(new Error('pull outcome uncertain'))
     await expect(pull(repository, remote)).rejects.toThrow(
       'pull outcome uncertain'
