@@ -1,4 +1,4 @@
-import { beforeAll, describe, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, it } from 'vitest'
 import assert from 'node:assert'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -6,9 +6,15 @@ import { join } from 'node:path'
 import { getShellEnv } from '../../src/lib/hooks/get-shell-env'
 import { SupportedHooksEnvShell } from '../../src/lib/hooks/config'
 import { buildPrintenvz, getPrintenvzPath } from '../../../script/printenvz'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../helpers/node-host-bridge'
 
 describe('getShellEnv', () => {
   beforeAll(() => buildPrintenvz(), 120_000)
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
 
   it.skipIf(__WIN32__)(
     'rejects valid-looking output if the shell exits unsuccessfully',

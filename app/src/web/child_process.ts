@@ -128,6 +128,15 @@ class OutputStream extends EventEmitter {
     }
   }
 
+  /**
+   * Output is always in flowing mode: Rust blocks are emitted synchronously
+   * and acknowledged only after that emission. There is no paused state to
+   * leave, but callers use resume() to make their draining intent explicit.
+   */
+  public resume() {
+    return this
+  }
+
   public pipe<T extends { write(chunk: any): any; end?(): any }>(
     destination: T,
     options?: { end?: boolean }

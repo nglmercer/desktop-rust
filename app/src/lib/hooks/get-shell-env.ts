@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { getShell } from './get-shell'
-import { spawn } from 'child_process'
+import { spawn } from '../../web/child_process'
 import type { SupportedHooksEnvShell } from './config'
 
 export type ShellEnvResult =
@@ -39,13 +39,18 @@ export const getShellEnv = async (
       cwd,
     })
 
+    const { stdout, stderr } = child
+    if (stdout === null || stderr === null) {
+      throw new Error('Shell environment capture requires piped output')
+    }
+
     const chunks: Buffer[] = []
 
-    child.stdout.on('data', chunk => chunks.push(chunk))
-    child.stdout.on('error', err => reject(err))
+    stdout.on('data', chunk => chunks.push(chunk))
+    stdout.on('error', err => reject(err))
     // Shell startup files may write enough diagnostics to fill the pipe.
-    child.stderr.resume()
-    child.stderr.on('error', err => reject(err))
+    stderr.resume()
+    stderr.on('error', err => reject(err))
     child.on('error', err => reject(err))
 
     // stdout can end before the shell exits. A valid-looking environment

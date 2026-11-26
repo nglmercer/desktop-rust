@@ -106,6 +106,16 @@ const fake = installFakeRust()
 
 const settle = () => new Promise(resolve => setImmediate(resolve))
 
+describe('child_process output streams', () => {
+  it('exposes resume as an explicit no-op for always-flowing output', () => {
+    const child = spawn('command')
+    assert.equal(typeof child.stdout?.resume, 'function')
+    assert.equal(child.stdout?.resume(), child.stdout)
+    assert.equal(typeof child.stderr?.resume, 'function')
+    assert.equal(child.stderr?.resume(), child.stderr)
+  })
+})
+
 describe('child_process stdin flow control', () => {
   beforeEach(() => {
     fake.reset()
