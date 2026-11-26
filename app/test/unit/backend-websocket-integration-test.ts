@@ -6080,25 +6080,60 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       await bounded(
         client.request('init_repository', { path: secondRepository })
       )
-      await expect(
-        client.repositoryDiscardHistory(firstRepository)
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.undoRepositoryDiscard(firstRepository, undoId)
-      ).rejects.toMatchObject({ code: 'repository_changed', retryable: false })
-      await expect(
-        client.forgetRepositoryDiscard(firstRepository, undoId)
-      ).rejects.toMatchObject({ code: 'repository_changed', retryable: false })
-      await expect(
-        client.repositoryGitIdentityValue(firstRepository, 'user.name', true)
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.setRepositoryGitIdentityValue(
+      // Explicit-path operations name the intended repository in each request;
+      // initializing another repository must not change their routing.
+      expect(await client.repositoryDiscardHistory(firstRepository)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ purpose: 'conflict_choice' }),
+        ])
+      )
+      const undoError = await client
+        .undoRepositoryDiscard(firstRepository, undoId)
+        .then(
+          () => null,
+          error => error
+        )
+      expect(undoError).toBeDefined()
+      expect(undoError).not.toMatchObject({ code: 'repository_changed' })
+      const forgetError = await client
+        .forgetRepositoryDiscard(firstRepository, undoId)
+        .then(
+          () => null,
+          error => error
+        )
+      expect(forgetError).toBeDefined()
+      expect(forgetError).not.toMatchObject({ code: 'repository_changed' })
+      expect(
+        await client.repositoryGitIdentityValue(
           firstRepository,
           'user.name',
-          'Wrong Repository'
+          true
         )
-      ).rejects.toMatchObject({ code: 'repository_changed' })
+      ).toBeNull()
+      await client.setRepositoryGitIdentityValue(
+        firstRepository,
+        'user.name',
+        'Explicit Repository'
+      )
+      expect(
+        await client.repositoryGitIdentityValue(
+          firstRepository,
+          'user.name',
+          true
+        )
+      ).toBe('Explicit Repository')
+      expect(
+        execFileSync(
+          'git',
+          ['-C', firstRepository, 'config', '--local', '--get', 'user.name'],
+          { encoding: 'utf8' }
+        ).trim()
+      ).toBe('Explicit Repository')
+      await client.setRepositoryGitIdentityValue(
+        firstRepository,
+        'user.name',
+        null
+      )
       expect(
         spawnSync('git', [
           '-C',
@@ -6109,36 +6144,54 @@ describe.skipIf(!enabled || process.platform === 'win32')(
           'user.name',
         ]).status
       ).toBe(1)
-      await expect(
-        client.repositoryBranches(firstRepository, ['refs/heads'])
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.repositoryBranches(alias, ['refs/heads'])
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.repositoryStatusContext(firstRepository)
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.detailedRepositoryStatus(firstRepository)
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.repositoryConflictDetails(firstRepository, 'merge')
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.branchesPointingAt(firstRepository, 'HEAD')
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.mergedRepositoryBranches(firstRepository, 'HEAD')
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.repositoryAheadBehind(firstRepository, 'HEAD...HEAD')
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.repositoryRevisionList(firstRepository, 'HEAD')
-      ).rejects.toMatchObject({ code: 'repository_changed' })
-      await expect(
-        client.repositoryHasMergeCommits(firstRepository, 'HEAD')
-      ).rejects.toMatchObject({ code: 'repository_changed' })
+      const explicitBranches = await client.repositoryBranches(
+        firstRepository,
+        ['refs/heads']
+      )
+      expect(explicitBranches.length).toBeGreaterThan(0)
+      expect(explicitBranches.some(branch => branch.current)).toBe(true)
+      expect(await client.repositoryBranches(alias, ['refs/heads'])).toEqual(
+        explicitBranches
+      )
+      expect(
+        await client.repositoryStatusContext(firstRepository)
+      ).toMatchObject({
+        mergeHeadFound: false,
+        squashMsgFound: false,
+        isCherryPickingHeadFound: false,
+      })
+      expect(await client.detailedRepositoryStatus(firstRepository)).toEqual(
+        expect.any(Array)
+      )
+      const mergeConflictError = await client
+        .repositoryConflictDetails(firstRepository, 'merge')
+        .then(
+          () => null,
+          error => error
+        )
+      expect(mergeConflictError).toBeDefined()
+      expect(mergeConflictError).not.toMatchObject({
+        code: 'repository_changed',
+      })
+      expect(String(mergeConflictError?.message)).toContain('MERGE_HEAD')
+      expect(await client.branchesPointingAt(firstRepository, 'HEAD')).toEqual(
+        expect.any(Array)
+      )
+      expect(
+        await client.mergedRepositoryBranches(firstRepository, 'HEAD')
+      ).toEqual(expect.any(Array))
+      expect(
+        await client.repositoryAheadBehind(firstRepository, 'HEAD...HEAD')
+      ).toEqual({ ahead: 0, behind: 0 })
+      expect(
+        await client.repositoryRevisionList(firstRepository, 'HEAD')
+      ).toEqual(expect.any(String))
+      expect(
+        await client.repositoryHasMergeCommits(firstRepository, 'HEAD')
+      ).toEqual(expect.any(Boolean))
+
+      // The raw repositoryId form intentionally retains the old hidden-selection
+      // contract; callers must use explicit-path repository methods instead.
       await expect(
         client.request(
           'branch_enumeration',
