@@ -607,10 +607,6 @@ export default defineConfig({
         ),
       },
       {
-        find: /^app-path$/,
-        replacement: path.resolve(__dirname, 'app/src/web/app-path.ts'),
-      },
-      {
         find: /^registry-js$/,
         replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts'),
       },
