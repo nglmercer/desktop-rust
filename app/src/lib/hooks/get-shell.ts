@@ -1,6 +1,6 @@
 import { pathExists } from '../path-exists'
 import { join } from 'path'
-import which from 'which'
+import { which } from '../executable-path'
 import { bash, cmd, powershell } from './shell-escape'
 import type { SupportedHooksEnvShell } from './config'
 import { assertNever } from '../fatal-error'

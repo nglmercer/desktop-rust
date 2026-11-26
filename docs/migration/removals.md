@@ -122,6 +122,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | imports renderer de `util.stripVTControlCharacters` y `assert` en progreso/log Git | regex terminal local equivalente para parsing y validación explícita; no requieren runtime Node | `app/test/unit/progress/git-test.ts`, `pnpm check:types`, `pnpm lint` |
 | import `net.isIPv4` en validación de URL BYOK | validación IPv4 pública local estricta sin runtime Node; conserva la normalización URL existente | `app/test/unit/copilot-byok-test.ts`, `pnpm check:types`, `pnpm lint` |
 | import `buffer.kStringMaxLength` en el runner legacy Git | límite congelado de la plataforma soportada de 64 bits sin runtime Node; el runner sigue siendo transitorio | `pnpm check:types`, `pnpm lint` |
+| dependencia renderer `which` y tipos raíz asociados | resolución executable local mediante filesystem host-backed, PATH personalizado, bits Unix y PATHEXT Windows | `app/test/unit/executable-path-test.ts`, `app/test/unit/traditional-hook-test.ts`, `pnpm migration:check` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

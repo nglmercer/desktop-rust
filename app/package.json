@@ -59,8 +59,7 @@
     "string-argv": "^0.3.2",
     "textarea-caret": "^3.0.2",
     "tslib": "^2.0.0",
-    "untildify": "^3.0.2",
-    "which": "^5.0.0"
+    "untildify": "^3.0.2"
   },
   "devDependencies": {
     "@testing-library/dom": "8.20.1",
