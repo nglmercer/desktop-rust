@@ -385,63 +385,28 @@ async function ensurePartialDiffIsUntransformed(
   data: Parameters<typeof privateGit>[0],
   path: string
 ): Promise<void> {
-  const attributes = await privateGit(
-    data,
-    ['check-attr', '-z', '--stdin', 'diff'],
-    'assistedCommitCheckDiffDriver',
-    { stdin: `${path}\0` }
+  const result = await backend().repositoryAssistedCommitDiffDriver(
+    data.repository.path,
+    path,
+    data.environment
   )
-  const attribute = attributes.stdout.split('\0')[2]
-  if (
-    attribute !== undefined &&
-    ['set', 'unset', 'unspecified'].includes(attribute)
-  ) {
-    const literal = await privateGit(
-      data,
-      ['config', '--get', `diff.${attribute}.textconv`],
-      'assistedCommitCheckAmbiguousTextconvDriver',
-      { successExitCodes: new Set([0, 1]) }
+  if (result.kind === 'ambiguous-sentinel') {
+    throw new AssistedCommitError(
+      'unsafe-selection',
+      'Ambiguous sentinel-named textconv partial selection cannot be mapped safely'
     )
-    if (literal.exitCode === 0) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        'Ambiguous sentinel-named textconv partial selection cannot be mapped safely'
-      )
-    }
   }
-  const driver =
-    attribute === undefined ||
-    attribute === 'unspecified' ||
-    attribute === 'set'
-      ? 'default'
-      : attribute
-  {
-    const textconv = await privateGit(
-      data,
-      ['config', '--get', `diff.${driver}.textconv`],
-      'assistedCommitCheckTextconv',
-      { successExitCodes: new Set([0, 1]) }
+  if (result.kind === 'textconv') {
+    throw new AssistedCommitError(
+      'unsafe-selection',
+      'Partial selections from text-converted diffs are not supported'
     )
-    if (textconv.exitCode === 0) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        'Partial selections from text-converted diffs are not supported'
-      )
-    }
-    if (driver !== 'default') {
-      const fallback = await privateGit(
-        data,
-        ['config', '--get', 'diff.default.textconv'],
-        'assistedCommitCheckDefaultTextconvFallback',
-        { successExitCodes: new Set([0, 1]) }
-      )
-      if (fallback.exitCode === 0) {
-        throw new AssistedCommitError(
-          'unsafe-selection',
-          'Partial diff-driver fallback cannot be safely mapped with default textconv'
-        )
-      }
-    }
+  }
+  if (result.kind === 'fallback-textconv') {
+    throw new AssistedCommitError(
+      'unsafe-selection',
+      'Partial diff-driver fallback cannot be safely mapped with default textconv'
+    )
   }
 }
 
@@ -613,32 +578,14 @@ export async function captureAssistedCommitSnapshot(
     const files: IFrozenFile[] = []
     const changes: IAssistedCommitChange[] = []
     const scratchIndex = join(temporaryDirectory, 'capture-index')
-    const fileMode = await privateGit(
-      context,
-      ['config', '--bool', '--get', 'core.filemode'],
-      'assistedCommitFileMode',
-      { successExitCodes: new Set([0, 1]) }
+    const captureConfig = await backend().repositoryAssistedCommitCaptureConfig(
+      repository.path,
+      context.environment
     )
-    const trackExecutable =
-      fileMode.exitCode !== 0 ||
-      removeGitLineEnding(fileMode.stdout) !== 'false'
-    const symlinks = await privateGit(
-      context,
-      ['config', '--bool', '--get', 'core.symlinks'],
-      'assistedCommitSymlinks',
-      { successExitCodes: new Set([0, 1]) }
-    )
-    const symlinkPlaceholders =
-      symlinks.exitCode === 0 &&
-      removeGitLineEnding(symlinks.stdout) === 'false'
-    const filterCommands = await privateGit(
-      context,
-      ['config', '--null', '--get-regexp', '^filter\\..*\\.(clean|process)$'],
-      'assistedCommitFreezeCaptureFilters',
-      { successExitCodes: new Set([0, 1]) }
-    )
+    const trackExecutable = captureConfig.filemode !== false
+    const symlinkPlaceholders = captureConfig.symlinks === false
     const filterConfiguration = frozenInputFilterConfiguration(
-      filterCommands.stdout
+      captureConfig.filterOutput
     )
     const captureWorkingTree = join(temporaryDirectory, 'capture-worktree')
     await mkdir(captureWorkingTree)

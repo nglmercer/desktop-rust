@@ -419,6 +419,8 @@ enum ReadMethod {
     AssistedCommitAttributeSource,
     AssistedCommitTreeEntry,
     AssistedCommitBlob,
+    AssistedCommitCaptureConfig,
+    AssistedCommitDiffDriver,
     RendererHooks,
     Worktrees,
     WorktreesFromGitDir,
@@ -1347,10 +1349,13 @@ impl Backend {
                 "variable only applies to assisted attribute source reads".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::AssistedCommitTreeEntry) && request.path.is_some()
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitTreeEntry | ReadMethod::AssistedCommitDiffDriver
+        ) && request.path.is_some()
         {
             return Err(AppError::BadArgs(
-                "path only applies to assisted tree entry reads".into(),
+                "path only applies to assisted tree entry and diff driver reads".into(),
             ));
         }
         if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
@@ -1784,6 +1789,70 @@ impl Backend {
                         variable: request
                             .variable
                             .ok_or_else(|| AppError::BadArgs("variable is required".into()))?,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitCaptureConfig
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitCaptureConfig {
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitDiffDriver
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitDiffDriver {
+                        path: request
+                            .path
+                            .ok_or_else(|| AppError::BadArgs("path is required".into()))?,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -2870,6 +2939,20 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(bytes["bytes_base64"], "Y29udGVudAo=");
+                let diff_driver = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_diff_driver","path":"file"}),
+                    ])
+                    .unwrap();
+                assert_eq!(diff_driver["kind"], "safe");
+                let empty_config = root.join("empty-config");
+                fs::write(&empty_config, "").unwrap();
+                let capture_config = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_capture_config","environment":{"GIT_CONFIG_GLOBAL":empty_config,"GIT_CONFIG_SYSTEM":empty_config,"GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG":null}}),
+                    ])
+                    .unwrap();
+                assert_eq!(capture_config["filter_output"], "");
                 assert!(
                     backend
                         .admit(vec![

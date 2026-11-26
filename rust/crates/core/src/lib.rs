@@ -726,6 +726,12 @@ impl Repository {
             Operation::AssistedCommitBlob { sha, environment } => {
                 return self.assisted_commit_blob(&sha, &environment).await;
             }
+            Operation::AssistedCommitCaptureConfig { environment } => {
+                return self.assisted_commit_capture_config(&environment).await;
+            }
+            Operation::AssistedCommitDiffDriver { path, environment } => {
+                return self.assisted_commit_diff_driver(path, &environment).await;
+            }
             Operation::AssistedCommitPushPaths {
                 branch_ref,
                 environment,
@@ -1583,6 +1589,8 @@ impl Repository {
             | AssistedCommitAttributeSource { .. }
             | AssistedCommitTreeEntry { .. }
             | AssistedCommitBlob { .. }
+            | AssistedCommitDiffDriver { .. }
+            | AssistedCommitCaptureConfig { .. }
             | RendererHooks { .. }
             | AssistedCommitPushPaths { .. }
             | MergeBase { .. }

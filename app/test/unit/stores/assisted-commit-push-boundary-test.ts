@@ -770,6 +770,85 @@ function nodeBackend(t: TestContext) {
             ? result.stdout
             : Buffer.from(result.stdout)
         },
+        repositoryAssistedCommitCaptureConfig: async (
+          path: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const readBoolean = async (key: string) => {
+            const result = (await interceptingGitExec(actualExec)(
+              ['config', '--bool', '--get', key],
+              path,
+              { successExitCodes: new Set([0, 1]), env: environment } as never
+            )) as Dugite.IGitStringResult
+            return result.exitCode === 1
+              ? null
+              : result.stdout.trim() === 'true'
+          }
+          const filters = (await interceptingGitExec(actualExec)(
+            [
+              'config',
+              '--null',
+              '--get-regexp',
+              '^filter\\..*\\.(clean|process)$',
+            ],
+            path,
+            { successExitCodes: new Set([0, 1]), env: environment } as never
+          )) as Dugite.IGitStringResult
+          return {
+            filemode: await readBoolean('core.filemode'),
+            symlinks: await readBoolean('core.symlinks'),
+            filterOutput: filters.stdout,
+          }
+        },
+        repositoryAssistedCommitDiffDriver: async (
+          path: string,
+          entryPath: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const run = async (
+            args: string[],
+            stdin?: string,
+            successExitCodes?: Set<number>
+          ) =>
+            (await interceptingGitExec(actualExec)(args, path, {
+              stdin,
+              successExitCodes,
+              env: environment,
+            } as never)) as Dugite.IGitStringResult
+          const attributes = await run(
+            ['check-attr', '-z', '--stdin', 'diff'],
+            `${entryPath}\0`
+          )
+          const attribute = attributes.stdout.split('\0')[2]
+          const exists = async (driver: string) => {
+            const result = await run(
+              ['config', '--get', `diff.${driver}.textconv`],
+              undefined,
+              new Set([0, 1])
+            )
+            return result.exitCode === 0
+          }
+          if (
+            attribute !== undefined &&
+            ['set', 'unset', 'unspecified'].includes(attribute) &&
+            (await exists(attribute))
+          ) {
+            return { kind: 'ambiguous-sentinel' }
+          }
+          const driver =
+            attribute === undefined ||
+            attribute === 'unspecified' ||
+            attribute === 'set'
+              ? 'default'
+              : attribute
+          if (await exists(driver)) {
+            return { kind: 'textconv' }
+          }
+          if (driver !== 'default' && (await exists('default'))) {
+            return { kind: 'fallback-textconv' }
+          }
+          return { kind: 'safe' }
+        },
         repositoryAssistedCommitPushPaths: async (
           path: string,
           branchRef: string,

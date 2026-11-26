@@ -3615,6 +3615,77 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitCaptureConfig(
+    repositoryPath: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<{
+    readonly filemode: boolean | null
+    readonly symlinks: boolean | null
+    readonly filterOutput: string
+  }> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_capture_config',
+      { environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      (typeof value.filemode === 'boolean' || value.filemode === null) &&
+      (typeof value.symlinks === 'boolean' || value.symlinks === null) &&
+      typeof value.filter_output === 'string' &&
+      value.filter_output.length <= 4 * 1024 * 1024
+    ) {
+      return {
+        filemode: value.filemode,
+        symlinks: value.symlinks,
+        filterOutput: value.filter_output,
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted capture configuration response',
+      retryable: false,
+    })
+  }
+
+  async repositoryAssistedCommitDiffDriver(
+    repositoryPath: string,
+    path: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<
+    | { readonly kind: 'safe' }
+    | { readonly kind: 'ambiguous-sentinel' }
+    | { readonly kind: 'textconv' }
+    | { readonly kind: 'fallback-textconv' }
+  > {
+    if (path.length === 0 || path.length > 65536 || path.includes('\0')) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted diff driver request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_diff_driver',
+      { path, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      (value.kind === 'safe' ||
+        value.kind === 'ambiguous-sentinel' ||
+        value.kind === 'textconv' ||
+        value.kind === 'fallback-textconv')
+    ) {
+      return { kind: value.kind }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted diff driver response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitBlob(
     repositoryPath: string,
     sha: string,
