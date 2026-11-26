@@ -770,6 +770,18 @@ function nodeBackend(t: TestContext) {
             ? result.stdout
             : Buffer.from(result.stdout)
         },
+        repositoryAssistedCommitTreeRevision: async (
+          path: string,
+          revision: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['rev-parse', '--verify', '--end-of-options', `${revision}^{tree}`],
+            path,
+            { env: environment } as never
+          )) as Dugite.IGitStringResult
+          return result.stdout.trim()
+        },
         repositoryAssistedCommitCaptureConfig: async (
           path: string,
           environment?: Record<string, string | undefined>

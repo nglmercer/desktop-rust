@@ -52,6 +52,8 @@ struct ReadRequest {
     #[serde(default)]
     variable: Option<String>,
     #[serde(default)]
+    revision: Option<String>,
+    #[serde(default)]
     environment: Option<std::collections::BTreeMap<String, Option<String>>>,
     #[serde(default)]
     filter: Option<Vec<String>>,
@@ -420,6 +422,7 @@ enum ReadMethod {
     AssistedCommitTreeEntry,
     AssistedCommitBlob,
     AssistedCommitCaptureConfig,
+    AssistedCommitTreeRevision,
     AssistedCommitDiffDriver,
     RendererHooks,
     Worktrees,
@@ -1349,6 +1352,13 @@ impl Backend {
                 "variable only applies to assisted attribute source reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::AssistedCommitTreeRevision)
+            && request.revision.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "revision only applies to assisted tree revision reads".into(),
+            ));
+        }
         if !matches!(
             &request.method,
             ReadMethod::AssistedCommitTreeEntry | ReadMethod::AssistedCommitDiffDriver
@@ -1820,6 +1830,40 @@ impl Backend {
                         && request.expected_value.is_none() =>
                 {
                     Operation::AssistedCommitCaptureConfig {
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitTreeRevision
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitTreeRevision {
+                        revision: request
+                            .revision
+                            .ok_or_else(|| AppError::BadArgs("revision is required".into()))?,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -2953,6 +2997,12 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(capture_config["filter_output"], "");
+                let tree_revision = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_tree_revision","revision":head}),
+                    ])
+                    .unwrap();
+                assert_eq!(tree_revision["tree"], tree);
                 assert!(
                     backend
                         .admit(vec![

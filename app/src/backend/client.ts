@@ -3615,6 +3615,41 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitTreeRevision(
+    repositoryPath: string,
+    revision: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<string> {
+    if (
+      revision.length === 0 ||
+      revision.length > 4096 ||
+      revision.includes('\0')
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted tree revision request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_tree_revision',
+      { revision, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.tree === 'string' &&
+      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.tree)
+    ) {
+      return value.tree
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted tree revision response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitCaptureConfig(
     repositoryPath: string,
     environment?: Record<string, string | undefined>

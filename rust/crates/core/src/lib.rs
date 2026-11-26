@@ -729,6 +729,14 @@ impl Repository {
             Operation::AssistedCommitCaptureConfig { environment } => {
                 return self.assisted_commit_capture_config(&environment).await;
             }
+            Operation::AssistedCommitTreeRevision {
+                revision,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_tree_revision(&revision, &environment)
+                    .await;
+            }
             Operation::AssistedCommitDiffDriver { path, environment } => {
                 return self.assisted_commit_diff_driver(path, &environment).await;
             }
@@ -1591,6 +1599,7 @@ impl Repository {
             | AssistedCommitBlob { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
+            | AssistedCommitTreeRevision { .. }
             | RendererHooks { .. }
             | AssistedCommitPushPaths { .. }
             | MergeBase { .. }

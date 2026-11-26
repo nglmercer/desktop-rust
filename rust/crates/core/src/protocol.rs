@@ -512,6 +512,11 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitTreeRevision {
+        revision: String,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitDiffDriver {
         path: GitPath,
         #[serde(default)]

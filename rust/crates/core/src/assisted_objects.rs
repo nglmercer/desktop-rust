@@ -21,6 +21,18 @@ fn object_id(value: &str, what: &str) -> Result<()> {
     Ok(())
 }
 
+fn output_line(output: &[u8], what: &str) -> Result<String> {
+    anyhow::ensure!(output.len() <= 4096, "{what} exceeds limit");
+    let text = String::from_utf8_lossy(output);
+    let text = text.strip_suffix('\n').unwrap_or(&text);
+    let text = text.strip_suffix('\r').unwrap_or(text);
+    anyhow::ensure!(
+        !text.is_empty() && !text.contains(['\n', '\r', '\0']),
+        "invalid {what}"
+    );
+    Ok(text.to_owned())
+}
+
 fn validate_environment(environment: &BTreeMap<String, Option<String>>) -> Result<()> {
     for key in environment.keys() {
         anyhow::ensure!(
@@ -103,6 +115,37 @@ impl Repository {
             return Ok(unsupported());
         }
         Ok(json!({"kind":"entry","mode":mode,"sha":sha}))
+    }
+
+    /// Resolve a revision to its tree inside the private object view.
+    pub(crate) async fn assisted_commit_tree_revision(
+        &self,
+        revision: &str,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            !revision.is_empty() && revision.len() <= 4096 && !revision.contains('\0'),
+            "invalid assisted tree revision"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_diff_environment_key(key),
+                "unsupported assisted revision environment key"
+            );
+        }
+        let peeled = format!("{revision}^{{tree}}");
+        let output = crate::process::run_git_with_environment(
+            &self.path,
+            &args(&["rev-parse", "--verify", "--end-of-options", &peeled]),
+            None,
+            None,
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot resolve assisted tree revision");
+        let tree = output_line(&output.stdout, "tree object")?;
+        object_id(&tree, "tree object")?;
+        Ok(json!({"tree":tree}))
     }
 
     /// Read the private capture configuration that controls modes, symlinks, and filters.

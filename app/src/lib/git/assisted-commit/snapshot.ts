@@ -509,20 +509,12 @@ export async function captureAssistedCommitSnapshot(
       incomingAttributeSource !== undefined &&
       incomingAttributeSource.length > 0
     ) {
-      environment.GIT_ATTR_SOURCE = removeGitLineEnding(
-        (
-          await privateGit(
-            context,
-            [
-              'rev-parse',
-              '--verify',
-              '--end-of-options',
-              `${incomingAttributeSource}^{tree}`,
-            ],
-            'assistedCommitFreezeInheritedAttributes'
-          )
-        ).stdout
-      )
+      environment.GIT_ATTR_SOURCE =
+        await backend().repositoryAssistedCommitTreeRevision(
+          repository.path,
+          incomingAttributeSource,
+          context.environment
+        )
     } else {
       const attributePaths = new Set<string>()
       for (const file of request.files) {
@@ -560,21 +552,20 @@ export async function captureAssistedCommitSnapshot(
         join(temporaryDirectory, 'attributes-index')
       )
     }
-    const baseTree = removeGitLineEnding(
+    const baseTree =
       head.sha === null
-        ? (
-            await privateGit(context, ['mktree'], 'assistedCommitEmptyTree', {
-              stdin: '',
-            })
-          ).stdout
-        : (
-            await privateGit(
-              context,
-              ['rev-parse', `${head.sha}^{tree}`],
-              'assistedCommitBaseTree'
-            )
-          ).stdout
-    )
+        ? removeGitLineEnding(
+            (
+              await privateGit(context, ['mktree'], 'assistedCommitEmptyTree', {
+                stdin: '',
+              })
+            ).stdout
+          )
+        : await backend().repositoryAssistedCommitTreeRevision(
+            repository.path,
+            head.sha,
+            context.environment
+          )
     const files: IFrozenFile[] = []
     const changes: IAssistedCommitChange[] = []
     const scratchIndex = join(temporaryDirectory, 'capture-index')
