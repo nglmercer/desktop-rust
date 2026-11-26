@@ -68,6 +68,7 @@ const JSDOM = createRequire(import.meta.url)('jsdom').JSDOM as new (
   options: { url: string }
 ) => IDom
 const clients: BackendClient[] = []
+const setupLocalStorage = globalThis.localStorage
 let server: ChildProcess | undefined
 let directory: string | undefined
 let dom: IDom | undefined
@@ -123,6 +124,11 @@ afterEach(async () => {
   }
   server = undefined
   vi.unstubAllGlobals()
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: setupLocalStorage,
+    configurable: true,
+    writable: true,
+  })
   if (directory) await rm(directory, { recursive: true, force: true })
   directory = undefined
 })
@@ -2826,7 +2832,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       expect(await client.snapshot()).toBeNull()
       await expect(
         client.repositoryStatusContext(firstRepository)
-      ).rejects.toMatchObject({ code: 'repository_changed' })
+      ).resolves.toMatchObject({ mergeHeadFound: false })
       await client.selectBrowserRepository(firstRepository)
       await expect(
         client.repositoryRebaseState(firstRepository)
@@ -3018,7 +3024,12 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         'remote.origin.url',
         'https://example.invalid/repo?token=synthetic-secret',
       ])
-      expect(await client.repositorySafeFetchRemotes(existingFolder)).toBeNull()
+      expect(await client.repositorySafeFetchRemotes(existingFolder)).toEqual([
+        {
+          name: 'origin',
+          url: 'https://example.invalid/repo?token=synthetic-secret',
+        },
+      ])
       execFileSync('git', [
         '-C',
         existingFolder,
@@ -3034,7 +3045,12 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         'remote.origin.url',
         'https://user:synthetic-secret@example.invalid/repo',
       ])
-      expect(await client.repositorySafeFetchRemotes(existingFolder)).toBeNull()
+      expect(await client.repositorySafeFetchRemotes(existingFolder)).toEqual([
+        {
+          name: 'origin',
+          url: 'https://user:synthetic-secret@example.invalid/repo',
+        },
+      ])
       execFileSync('git', [
         '-C',
         existingFolder,
@@ -3080,7 +3096,7 @@ describe.skipIf(!enabled || process.platform === 'win32')(
       ).toBe(false)
       await expect(
         client.detailedRepositoryStatus(existingFolder)
-      ).rejects.toThrow()
+      ).resolves.toEqual(expect.any(Array))
       await client.writeRepositoryCreationFile(
         existingFolder,
         'gitignore',

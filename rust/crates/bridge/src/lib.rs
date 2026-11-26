@@ -334,11 +334,8 @@ enum ManagementOperation {
         #[serde(default)]
         limit: Option<u16>,
     },
-    RevealRepository {
-        repository_path: String,
-    },
+    RevealRepository,
     OpenTerminal {
-        repository_path: String,
         name: String,
         directory: String,
     },
@@ -539,12 +536,7 @@ fn retained_staging_path_value(path: &std::path::Path) -> serde_json::Value {
 /// selected repositories, so a concurrent selection cannot change between the
 /// resolution and the execution. `expected_repository`, when present, must match
 /// the resolved repository's id.
-async fn execute_repository_at_path(
-    state: &Bridge,
-    path: String,
-    operation: Operation,
-    expected_repository: Option<String>,
-) -> anyhow::Result<serde_json::Value> {
+async fn repository_at_path(state: &Bridge, path: String) -> anyhow::Result<Repository> {
     let requested = desktop_core::directory_path(desktop_core::GitPath::Text(path))?;
     anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
     let canonical = cancellation::blocking(move || Ok(requested.canonicalize()?)).await?;
@@ -555,17 +547,26 @@ async fn execute_repository_at_path(
             .filter(|repo| repo.path() == canonical)
             .cloned()
     };
-    let repo = match selected {
-        Some(repo) => repo,
+    match selected {
+        Some(repo) => Ok(repo),
         None => {
             let repo = Repository::open(&canonical).await?;
             anyhow::ensure!(
                 repo.path() == canonical,
                 "select a repository root, not a nested path"
             );
-            repo
+            Ok(repo)
         }
-    };
+    }
+}
+
+async fn execute_repository_at_path(
+    state: &Bridge,
+    path: String,
+    operation: Operation,
+    expected_repository: Option<String>,
+) -> anyhow::Result<serde_json::Value> {
+    let repo = repository_at_path(state, path).await?;
     if !matches!(operation, Operation::Snapshot)
         && let Some(expected) = expected_repository
     {
@@ -585,10 +586,73 @@ async fn execute(
 ) -> anyhow::Result<serde_json::Value> {
     use ManagementOperation::*;
     if let Some(path) = repository_path {
-        let ApplicationOperation::Repository(operation) = operation else {
-            anyhow::bail!("A repository path can only accompany a repository operation");
-        };
-        return execute_repository_at_path(state, path, operation, expected_repository).await;
+        match operation {
+            ApplicationOperation::Repository(operation) => {
+                return execute_repository_at_path(state, path, operation, expected_repository)
+                    .await;
+            }
+            ApplicationOperation::Management(RevealRepository) => {
+                anyhow::ensure!(
+                    expected_repository.is_none(),
+                    "explicit file manager requests cannot use a selected-repository binding"
+                );
+                return desktop_core::reveal_registered_repository(
+                    state.registry.clone(),
+                    path.into(),
+                )
+                .await;
+            }
+            ApplicationOperation::Management(OpenTerminal { name, directory }) => {
+                anyhow::ensure!(
+                    expected_repository.is_none(),
+                    "explicit terminal requests cannot use a selected-repository binding"
+                );
+                return desktop_core::open_registered_terminal(
+                    state.registry.clone(),
+                    path.into(),
+                    name,
+                    directory.into(),
+                )
+                .await;
+            }
+            ApplicationOperation::Management(OpenEditor {
+                path: target,
+                editor_name,
+            }) => {
+                let repository = repository_at_path(state, path).await?;
+                if let Some(expected) = expected_repository {
+                    anyhow::ensure!(
+                        repository.id() == expected,
+                        "Repository selection changed; refresh before opening an editor"
+                    );
+                }
+                let editor = if let Some(name) = editor_name {
+                    desktop_core::ExternalEditor::Named { name }
+                } else {
+                    cancellation::blocking({
+                        let registry = state.registry.clone();
+                        move || registry.preferences().read()
+                    })
+                    .await?
+                    .external_editor
+                };
+                return repository.open_editor(target, editor).await;
+            }
+            ApplicationOperation::Management(OpenCustomEditor {
+                path: target,
+                editor,
+            }) => {
+                let repository = repository_at_path(state, path).await?;
+                if let Some(expected) = expected_repository {
+                    anyhow::ensure!(
+                        repository.id() == expected,
+                        "Repository selection changed; refresh before opening an editor"
+                    );
+                }
+                return repository.open_desktop_custom_editor(target, editor).await;
+            }
+            _ => anyhow::bail!("A repository path can only accompany a repository operation"),
+        }
     }
     let registry = state.registry.clone();
     match operation {
@@ -684,29 +748,11 @@ async fn execute(
             );
             desktop_core::release_changelog(channel, limit).await
         }
-        ApplicationOperation::Management(RevealRepository { repository_path }) => {
-            anyhow::ensure!(
-                expected_repository.is_none(),
-                "explicit file manager requests cannot use a selected-repository binding"
-            );
-            desktop_core::reveal_registered_repository(registry, repository_path.into()).await
+        ApplicationOperation::Management(RevealRepository) => {
+            anyhow::bail!("explicit file manager requests require a repository path")
         }
-        ApplicationOperation::Management(OpenTerminal {
-            repository_path,
-            name,
-            directory,
-        }) => {
-            anyhow::ensure!(
-                expected_repository.is_none(),
-                "explicit terminal requests cannot use a selected-repository binding"
-            );
-            desktop_core::open_registered_terminal(
-                registry,
-                repository_path.into(),
-                name,
-                directory.into(),
-            )
-            .await
+        ApplicationOperation::Management(OpenTerminal { .. }) => {
+            anyhow::bail!("explicit terminal requests require a repository path")
         }
         ApplicationOperation::Management(OpenGlobalGitConfigEditor { editor_name }) => {
             desktop_core::open_global_git_config_editor(editor_name).await
@@ -1340,7 +1386,15 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
             .await;
             break;
         }
-        let request = parsed.and_then(|value| serde_json::from_value::<Rpc>(value).ok());
+        // No typed operation accepts a top-level `program` field. Check it
+        // explicitly because internally tagged unit variants otherwise ignore
+        // unexpected keys while serde's untagged operation enum is matched.
+        let request = parsed.and_then(|value| {
+            if value.get("program").is_some() {
+                return None;
+            }
+            serde_json::from_value::<Rpc>(value).ok()
+        });
         let response = match request {
             Some(Rpc {
                 id,

@@ -231,11 +231,9 @@ async fn write(base: &Path, r: &Receipt) -> Result<()> {
 fn endpoint_view(index: usize, e: &Endpoint) -> Value {
     // Preserve a recognizable target while removing URL credentials and query
     // data. Ambiguous Git transport syntax stays opaque and cannot be approved.
-    let destination = if !e.destination.contains(':') {
-        // POSIX filesystem remotes are valid Git configuration, but their
-        // absolute paths can disclose the user's local directory layout.
-        None
-    } else if crate::remote_discovery::safe_url(&e.destination) {
+    // POSIX filesystem remotes have no credentials or URL metadata to redact
+    // and are already exposed exactly in the local repository configuration.
+    let destination = if crate::remote_discovery::safe_url(&e.destination) {
         Some(e.destination.clone())
     } else if let Ok(mut url) = url::Url::parse(&e.destination) {
         if matches!(url.scheme(), "http" | "https" | "ssh" | "git")

@@ -187,6 +187,7 @@ async function openSession(directory: string): Promise<ISession> {
           await bounded(exited, 5_000)
         } catch {
           server.kill('SIGKILL')
+          await bounded(exited, 1_000).catch(() => {})
         }
       }
     },
@@ -211,6 +212,30 @@ export async function startRustBackend(): Promise<IRustBackend> {
   // session's client is installed as `backend()` with the same behavior.
   const handle = active.client
   let selected: string | null = null
+  let restarting: Promise<void> | undefined
+  const restartForChangedGitEnvironment = async (session: ISession) => {
+    // Concurrent in-flight requests must share one restart. Without this,
+    // each request can open its own server and leave all but one unowned.
+    while (gitEnvironmentFingerprint() !== active.fingerprint) {
+      restarting ??= (async () => {
+        const previous = active
+        const next = await openSession(directory)
+        install(next)
+        const installRestarted = [session.client, previous.client].includes(
+          backend() as BackendClient
+        )
+        active = next
+        if (installRestarted) {
+          overrideBackendForTests(active.client)
+        }
+        selected = null
+        await previous.close()
+      })().finally(() => {
+        restarting = undefined
+      })
+      await restarting
+    }
+  }
   const install = (session: ISession) => {
     const original = session.rawRequest
     session.client.request = async (
@@ -219,17 +244,7 @@ export async function startRustBackend(): Promise<IRustBackend> {
       opts?: any
     ) => {
       if (gitEnvironmentFingerprint() !== active.fingerprint) {
-        const previous = active
-        const installRestarted = [session.client, active.client].includes(
-          backend() as BackendClient
-        )
-        active = await openSession(directory)
-        install(active)
-        if (installRestarted) {
-          overrideBackendForTests(active.client)
-        }
-        selected = null
-        await previous.close()
+        await restartForChangedGitEnvironment(session)
         return active.client.request(method, params, opts)
       }
       const target = (params as { path?: unknown } | null)?.path
