@@ -53,7 +53,7 @@ Measured on 2026-11-25 with `pnpm migration:status`:
 | Measure | Current | Done when |
 | --- | --- | --- |
 | Fallback checks (`transportKind`) in renderer | 2 in 2 files | 0 |
-| Legacy Git runner calls (`await git(`) in `lib/git` | 6 in 6 files | 0 |
+| Legacy Git runner calls (`await git(`) in `lib/git` | 5 in 5 files | 0 |
 | Renderer files importing `dugite` | 0 | 0 |
 | Renderer files importing `fs` | 0 | 0 (host operations only) |
 | Renderer files importing `child_process` | 0 | 0 |

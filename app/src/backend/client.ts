@@ -3248,6 +3248,95 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitStagedConfigValues(
+    repositoryPath: string,
+    key: string,
+    input: Buffer,
+    environment?: Record<string, string | undefined>
+  ): Promise<ReadonlyArray<string>> {
+    if (key.length === 0 || key.length > 4096 || key.includes('\0'))
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid configuration key',
+        retryable: false,
+      })
+    if (input.length > 64 * 1024 * 1024)
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Configuration contents exceed the supported size',
+        retryable: false,
+      })
+    const upload = await this.repositoryRendererRequest(
+      repositoryPath,
+      'renderer_resolution_begin',
+      {}
+    )
+    if (
+      !isRecord(upload) ||
+      upload.kind !== 'snapshot' ||
+      upload.size !== 0 ||
+      typeof upload.id !== 'string' ||
+      !/^[0-9a-f-]{36}$/.test(upload.id)
+    )
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid configuration upload',
+        retryable: false,
+      })
+    const uploadId = upload.id
+    try {
+      for (let offset = 0; offset < input.length; ) {
+        const chunk = input.subarray(offset, offset + 24 * 1024)
+        const data = btoa(String.fromCharCode(...chunk))
+        const result = await this.repositoryRendererRequest(
+          repositoryPath,
+          'renderer_resolution_append',
+          { snapshot_id: uploadId, offset, data }
+        )
+        offset += chunk.length
+        if (!isRecord(result) || result.size !== offset)
+          throw new BackendError({
+            code: 'invalid_response',
+            message: 'Invalid configuration upload progress',
+            retryable: false,
+          })
+      }
+      const value = await this.repositoryRead(
+        repositoryPath,
+        'assisted_commit_staged_config_values',
+        {
+          key,
+          snapshot_id: uploadId,
+          size: input.length,
+          environment: serializeGitEnvironment(environment),
+        }
+      )
+      if (
+        isRecord(value) &&
+        Array.isArray(value.values) &&
+        value.values.every(
+          item => typeof item === 'string' && item.length <= 16 * 1024 * 1024
+        )
+      ) {
+        return value.values as string[]
+      }
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid staged configuration values response',
+        retryable: false,
+      })
+    } catch (error) {
+      try {
+        await this.repositoryRendererRequest(
+          repositoryPath,
+          'renderer_compare_diff_release',
+          { snapshot_id: uploadId }
+        )
+      } catch {}
+      throw error
+    }
+  }
+
   async repositoryAssistedCommitRefs(
     repositoryPath: string
   ): Promise<ReadonlyArray<AssistedCommitRef>> {

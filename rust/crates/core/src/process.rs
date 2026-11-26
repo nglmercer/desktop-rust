@@ -234,9 +234,10 @@ pub(crate) async fn run_git_with_environment(
     run_command(path, command, args, input, 2 * 1024 * 1024, None).await
 }
 
-pub(crate) async fn run_without_git_config_with_environment(
+pub(crate) async fn run_without_git_config_with_environment_input(
     path: &Path,
     args: &[OsString],
+    input: Option<Vec<u8>>,
     environment: &std::collections::BTreeMap<String, Option<String>>,
 ) -> Result<RawOutput> {
     anyhow::ensure!(environment.len() <= 256, "Git environment is too large");
@@ -265,11 +266,19 @@ pub(crate) async fn run_without_git_config_with_environment(
         path,
         command,
         args,
-        None,
+        input,
         16 * 1024 * 1024,
         None,
     ))
     .await
+}
+
+pub(crate) async fn run_without_git_config_with_environment(
+    path: &Path,
+    args: &[OsString],
+    environment: &std::collections::BTreeMap<String, Option<String>>,
+) -> Result<RawOutput> {
+    run_without_git_config_with_environment_input(path, args, None, environment).await
 }
 
 pub(crate) async fn run_without_git_config(path: &Path, args: &[OsString]) -> Result<RawOutput> {

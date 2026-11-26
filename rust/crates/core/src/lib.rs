@@ -618,6 +618,16 @@ impl Repository {
                     .assisted_commit_config_path(&variable, &environment)
                     .await;
             }
+            Operation::AssistedCommitStagedConfigValues {
+                key,
+                snapshot_id,
+                size,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_staged_config_values(&key, &snapshot_id, size, &environment)
+                    .await;
+            }
             Operation::AssistedCommitRefFormat { reference } => {
                 return self.assisted_commit_ref_format(&reference).await;
             }
@@ -1460,6 +1470,7 @@ impl Repository {
             | AssistedCommitConfigValues { .. }
             | AssistedCommitRemotePushUrls { .. }
             | AssistedCommitConfigPath { .. }
+            | AssistedCommitStagedConfigValues { .. }
             | AssistedCommitRefFormat { .. }
             | AssistedCommitRefs
             | AssistedCommitIndexEntries

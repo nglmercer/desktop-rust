@@ -183,6 +183,20 @@ fn validate_index_entries(entries: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn parse_config_values(output: &[u8]) -> Result<Vec<Value>> {
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    anyhow::ensure!(
+        output.ends_with(b"\0"),
+        "configuration values are not terminated"
+    );
+    Ok(output[..output.len() - 1]
+        .split(|byte| *byte == 0)
+        .map(|value| json!(String::from_utf8_lossy(value)))
+        .collect())
+}
+
 fn assisted_push_config_environment_key(key: &str) -> bool {
     matches!(
         key,
@@ -266,17 +280,10 @@ impl Repository {
             matches!(output.code, 0 | 1),
             "Cannot read Git configuration values"
         );
-        let values = if output.code == 1 || output.stdout.is_empty() {
+        let values = if output.code == 1 {
             Vec::new()
         } else {
-            anyhow::ensure!(
-                output.stdout.ends_with(b"\0"),
-                "configuration values are not terminated"
-            );
-            output.stdout[..output.stdout.len() - 1]
-                .split(|byte| *byte == 0)
-                .map(|value| json!(String::from_utf8_lossy(value)))
-                .collect()
+            parse_config_values(&output.stdout)?
         };
         Ok(json!({"values":values}))
     }
@@ -357,6 +364,46 @@ impl Repository {
             "Cannot validate reference format"
         );
         Ok(json!({"valid":output.code == 0}))
+    }
+
+    pub(crate) async fn assisted_commit_staged_config_values(
+        &self,
+        key: &str,
+        snapshot_id: &str,
+        size: u64,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            !key.is_empty() && key.len() <= 4096 && !key.contains('\0'),
+            "invalid configuration key"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported push configuration environment key"
+            );
+        }
+        let snapshot_id = uuid::Uuid::parse_str(snapshot_id)?;
+        let (input, _permit) =
+            crate::comparison_snapshots::take_upload(&self.id(), snapshot_id, size)?;
+        let output = crate::process::run_without_git_config_with_environment_input(
+            &self.path,
+            &args(&[
+                "config",
+                "--no-includes",
+                "--null",
+                "--file",
+                "-",
+                "--get-all",
+                "--",
+                key,
+            ]),
+            Some(input),
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot validate staged Git configuration");
+        Ok(json!({"values":parse_config_values(&output.stdout)?}))
     }
 
     pub(crate) async fn assisted_commit_refs(&self) -> Result<Value> {
@@ -780,6 +827,35 @@ mod tests {
                 .unwrap()
                 .contains("unresolved conflicts")
         );
+    }
+
+    #[tokio::test]
+    async fn staged_config_values_use_the_pinned_input() {
+        let fixture = Fixture::new();
+        let repository = Repository::open(&fixture.0).await.unwrap();
+        let owner = crate::comparison_snapshots::Owner::new();
+        crate::comparison_snapshots::scope(owner.clone(), async {
+            let permit = crate::comparison_snapshots::reserve().await.unwrap();
+            let upload =
+                crate::comparison_snapshots::insert_upload(&repository.id(), permit).unwrap();
+            let id = upload["id"].as_str().unwrap().to_owned();
+            let uuid = uuid::Uuid::parse_str(&id).unwrap();
+            let bytes = "[user]\n\temail = test@example.com\n";
+            let input = STANDARD.encode(bytes);
+            crate::comparison_snapshots::append_upload(&repository.id(), uuid, 0, &input).unwrap();
+            let values = repository
+                .assisted_commit_staged_config_values(
+                    "user.email",
+                    &id,
+                    bytes.len() as u64,
+                    &Default::default(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(values["values"][0], "test@example.com");
+        })
+        .await;
+        owner.close();
     }
 
     #[tokio::test]

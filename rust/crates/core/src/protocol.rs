@@ -466,6 +466,13 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitStagedConfigValues {
+        key: String,
+        snapshot_id: String,
+        size: u64,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitRefFormat {
         reference: String,
     },

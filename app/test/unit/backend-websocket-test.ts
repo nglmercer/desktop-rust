@@ -338,6 +338,56 @@ describe('WebSocket backend transport', () => {
     await expect(formatPending).resolves.toBe(true)
   })
 
+  it('uploads staged configuration before reading values', async () => {
+    const { client: value, socket } = await connected()
+    const input = Buffer.from('[user]\n\temail = test@example.com\n')
+    const pending = value.repositoryAssistedCommitStagedConfigValues(
+      '/repo',
+      'user.email',
+      input,
+      { GIT_CONFIG_NOSYSTEM: '1' }
+    )
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'renderer_resolution_begin',
+      repository_path: '/repo',
+    })
+    socket.message({
+      id: 1,
+      result: {
+        kind: 'snapshot',
+        id: '11111111-1111-4111-8111-111111111111',
+        size: 0,
+      },
+    })
+    for (let i = 0; i < 10 && socket.sent.length < 3; i++) {
+      await Promise.resolve()
+    }
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'renderer_resolution_append',
+      repository_path: '/repo',
+      snapshot_id: '11111111-1111-4111-8111-111111111111',
+      offset: 0,
+      data: input.toString('base64'),
+    })
+    socket.message({ id: 2, result: { size: input.length } })
+    for (let i = 0; i < 10 && socket.sent.length < 4; i++) {
+      await Promise.resolve()
+    }
+    expect(socket.sent[3]).toEqual({
+      id: 3,
+      method: 'assisted_commit_staged_config_values',
+      repository_path: '/repo',
+      key: 'user.email',
+      snapshot_id: '11111111-1111-4111-8111-111111111111',
+      size: input.length,
+      environment: { GIT_CONFIG_NOSYSTEM: '1' },
+    })
+    socket.message({ id: 3, result: { values: ['test@example.com'] } })
+    await expect(pending).resolves.toEqual(['test@example.com'])
+  })
+
   it('sends typed assisted-commit refs reads and validates their response', async () => {
     const { client: value, socket } = await connected()
     const pending = value.repositoryAssistedCommitRefs('/repo')

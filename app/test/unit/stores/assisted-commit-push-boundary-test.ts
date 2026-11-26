@@ -526,8 +526,8 @@ function parseDetailedStatusOutput(output: string) {
 }
 
 /**
- * These cases inject faults by patching module objects or Git env vars that the
- * separate Rust process cannot observe. Run only them through the renderer Node
+ * These cases inject filesystem, command-boundary, module-object, or Git env
+ * faults that the separate Rust process cannot observe. Run only them through the renderer Node
  * path; the rest of the suite exercises the real Rust backend.
  */
 function nodeBackend(t: TestContext) {
@@ -728,6 +728,33 @@ function nodeBackend(t: TestContext) {
             { successExitCodes: new Set([0, 1]) } as never
           )) as Dugite.IGitStringResult
           return result.exitCode === 0
+        },
+        repositoryAssistedCommitStagedConfigValues: async (
+          path: string,
+          key: string,
+          input: Buffer,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            [
+              'config',
+              '--no-includes',
+              '--null',
+              '--file',
+              '-',
+              '--get-all',
+              '--',
+              key,
+            ],
+            path,
+            {
+              stdin: input,
+              env: { GIT_CONFIG: undefined, ...environment },
+            } as never
+          )) as Dugite.IGitStringResult
+          return result.stdout.length === 0
+            ? []
+            : result.stdout.split('\0').slice(0, -1)
         },
         repositoryLastFetch: async (path: string) => {
           const gitDirResult = await actualExec(
@@ -2853,6 +2880,7 @@ describe('assisted native push boundary', () => {
     it(`expires a non-directory configuration ancestor only after owned cleanup, fault ${cleanupFault}`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       const parent = join(
@@ -3024,6 +3052,7 @@ describe('assisted native push boundary', () => {
   it('cleans original publication locks before expiring an execution alias held by a foreign lease', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     const foreign = await fixtures.seed(t, { unrelated: 'Foreign checkout\n' })
@@ -4768,6 +4797,7 @@ describe('assisted native push boundary', () => {
     it(`round-trips literal tracking names through native stdin configuration for ${branch}`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       if (branch !== 'master') {
         await fixtures.rawGit(source, ['branch', '--move', branch])
@@ -4931,6 +4961,7 @@ describe('assisted native push boundary', () => {
   it('publishes and retries native configuration without creating or deleting private staging directories', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -5183,6 +5214,7 @@ describe('assisted native push boundary', () => {
     it(`expires post-ACK unsupported includes only after owned cleanup, cleanup fault ${cleanupFault}`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -5269,6 +5301,7 @@ describe('assisted native push boundary', () => {
     it(`retains acknowledged publication for retry after transient ${site} filesystem EIO`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -5692,6 +5725,7 @@ describe('assisted native push boundary', () => {
     } branch during staging`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       const tree = await fixtures.rawGit(source, [
@@ -5774,6 +5808,7 @@ describe('assisted native push boundary', () => {
   it('cleans retained publication resources under frozen admission before expiring broken linked routing', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     const linked = join(await temporary.createTempDirectory(t), 'linked')
@@ -5903,6 +5938,7 @@ describe('assisted native push boundary', () => {
     it(`rejects a publication tracking choice concurrently installed in ${initial} worktree configuration`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       await fixtures.rawGit(source, [
@@ -6078,6 +6114,7 @@ describe('assisted native push boundary', () => {
   it('retains publication cleanup before expiring a stale tracking choice', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -6147,6 +6184,7 @@ describe('assisted native push boundary', () => {
   it('publishes upstream as one owned configuration transaction, excluding an external writer between keys', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -6262,6 +6300,7 @@ describe('assisted native push boundary', () => {
   it('retry refresh completes failed staged upstream setup without a partial installation or another native push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')

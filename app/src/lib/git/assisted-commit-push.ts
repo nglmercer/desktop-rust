@@ -1460,22 +1460,13 @@ export async function completeAssistedCommitPushPublication(
       ),
     ])
     for (const key of missing) {
-      const parsed = await git(
-        [
-          'config',
-          '--no-includes',
-          '--null',
-          '--file',
-          '-',
-          '--get-all',
-          '--',
-          key.name,
-        ],
+      const parsed = await backend().repositoryAssistedCommitStagedConfigValues(
         repository.path,
-        'assistedPublicationUpstream',
-        { stdin: staged, env: nativeConfigurationEnvironment }
+        key.name,
+        staged,
+        assistedPushConfigurationEnvironment()
       )
-      if (parsed.stdout !== `${key.expected}\0`) {
+      if (parsed.length !== 1 || parsed[0] !== key.expected) {
         throw new Error(
           'Git could not validate the original branch tracking configuration'
         )
