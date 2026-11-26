@@ -144,6 +144,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `p-limit` | planificador FIFO local de concurrencia en `app/src/lib/concurrency-limit.ts` | `app/test/unit/concurrency-limit-test.ts`, `ahead-behind-store-test.ts`, `commit-status-store-test.ts` |
 | `memoize-one` + `@types/memoize-one` | memoización local de una sola entrada en `app/src/lib/memoize-one.ts` | `app/test/unit/memoize-one-test.ts`, typecheck/build de consumidores UI/lib |
 | `classnames` | combinación local de clases en `app/src/lib/classnames.ts` | `app/test/unit/classnames-test.ts`, typecheck/build de componentes UI |
+| `string-argv` | parser local compatible para argumentos POSIX de integraciones en `app/src/lib/string-argv.ts` | `app/test/unit/string-argv-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

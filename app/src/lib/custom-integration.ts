@@ -1,4 +1,4 @@
-import stringArgv from 'string-argv'
+import { parseArgsStringToArgv } from './string-argv'
 import { spawn, type ISpawnOptions } from '../web/child_process'
 import { backend } from '../backend/client'
 import type { IChildProcess } from './process/child-process'
@@ -36,7 +36,7 @@ export function parseCustomIntegrationArguments(
       'Windows custom integration arguments must be parsed by the native host'
     )
   }
-  return stringArgv(args)
+  return parseArgsStringToArgv(args)
 }
 
 /** Parse Windows integration arguments on the native host. */
