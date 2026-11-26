@@ -757,18 +757,30 @@ pub(crate) async fn run_bound_remote_pull(
     .map(|(output, _)| output)
 }
 
+pub(crate) struct BoundRemotePushOptions<'a> {
+    pub(crate) report_progress: bool,
+    pub(crate) observe_hooks: bool,
+    pub(crate) hook_proxy: Option<crate::hook_proxy::HookProxy>,
+    pub(crate) proxy: Option<&'a crate::RendererProxy>,
+    pub(crate) hook_environment: Option<&'a crate::RendererHookEnvironment>,
+    pub(crate) operation_config_parameters: Option<&'a str>,
+}
+
 /// Push uses the same bounded output and credential policy as fetch, but may
 /// additionally expose request-owned pre-push hook lifecycle events.
 pub(crate) async fn run_bound_remote_push(
     path: &Path,
     args: &[OsString],
-    report_progress: bool,
-    observe_hooks: bool,
-    hook_proxy: Option<crate::hook_proxy::HookProxy>,
-    proxy: Option<&crate::RendererProxy>,
-    hook_environment: Option<&crate::RendererHookEnvironment>,
-    operation_config_parameters: Option<&str>,
+    options: BoundRemotePushOptions<'_>,
 ) -> Result<(RawOutput, bool)> {
+    let BoundRemotePushOptions {
+        report_progress,
+        observe_hooks,
+        hook_proxy,
+        proxy,
+        hook_environment,
+        operation_config_parameters,
+    } = options;
     run_bound_remote_operation(
         path,
         args,

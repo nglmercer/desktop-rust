@@ -268,10 +268,10 @@ impl Repository {
             .strip_suffix('\n')
             .ok_or_else(|| anyhow::anyhow!("Invalid push destinations"))?;
         let mut lines: Vec<&str> = urls.split('\n').collect();
-        if config_parameters.is_some() {
-            if let Some(reset) = lines.iter().rposition(|line| line.is_empty()) {
-                lines.drain(..=reset);
-            }
+        if config_parameters.is_some()
+            && let Some(reset) = lines.iter().rposition(|line| line.is_empty())
+        {
+            lines.drain(..=reset);
         }
         let urls: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
         ensure!(
@@ -588,15 +588,17 @@ impl Repository {
         let (output, hook_failed) = process::run_bound_remote_push(
             &self.path,
             &command,
-            request.report_progress,
-            trace_hooks,
-            proxy,
-            request.proxy.as_ref(),
-            request.hook_environment.as_ref(),
-            request
-                .assisted
-                .as_ref()
-                .map(|assisted| assisted.config_parameters.as_str()),
+            process::BoundRemotePushOptions {
+                report_progress: request.report_progress,
+                observe_hooks: trace_hooks,
+                hook_proxy: proxy,
+                proxy: request.proxy.as_ref(),
+                hook_environment: request.hook_environment.as_ref(),
+                operation_config_parameters: request
+                    .assisted
+                    .as_ref()
+                    .map(|assisted| assisted.config_parameters.as_str()),
+            },
         )
         .await?;
         Ok(
