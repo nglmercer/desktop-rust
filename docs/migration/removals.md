@@ -121,6 +121,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | dependencias raíz `chalk`, `@playwright/test` y `node-test-github-reporter` sin imports ni scripts consumidores | eliminadas; las integraciones de navegador usan `playwright` directamente | `pnpm check:types`, `pnpm lint` |
 | imports renderer de `util.stripVTControlCharacters` y `assert` en progreso/log Git | regex terminal local equivalente para parsing y validación explícita; no requieren runtime Node | `app/test/unit/progress/git-test.ts`, `pnpm check:types`, `pnpm lint` |
 | import `net.isIPv4` en validación de URL BYOK | validación IPv4 pública local estricta sin runtime Node; conserva la normalización URL existente | `app/test/unit/copilot-byok-test.ts`, `pnpm check:types`, `pnpm lint` |
+| import `buffer.kStringMaxLength` en el runner legacy Git | límite congelado de la plataforma soportada de 64 bits sin runtime Node; el runner sigue siendo transitorio | `pnpm check:types`, `pnpm lint` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

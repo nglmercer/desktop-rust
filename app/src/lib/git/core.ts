@@ -11,7 +11,6 @@ import { assertNever } from '../fatal-error'
 import * as GitPerf from '../../ui/lib/git-perf'
 import { isErrnoException } from '../errno-exception'
 import { withTrampolineEnv } from '../trampoline/trampoline-environment'
-import { kStringMaxLength } from 'buffer'
 import { withHooksEnv } from '../hooks/with-hooks-env'
 import { coerceToString } from './coerce-to-string'
 import { GitErrorKind as DugiteError } from './error-kind'
@@ -25,6 +24,8 @@ import {
   withoutRepositoryGitAccess,
   verifyRepositoryGitSpawnFence,
 } from './repository-operation'
+
+const maxStringLength = 536870888
 
 export const isMaxBufferExceededError = (
   error: unknown
@@ -264,7 +265,7 @@ export async function git(
   const defaultOptions: IGitExecutionOptions = {
     successExitCodes: new Set([0]),
     expectedErrors: new Set(),
-    maxBuffer: options?.encoding === 'buffer' ? Infinity : kStringMaxLength,
+    maxBuffer: options?.encoding === 'buffer' ? Infinity : maxStringLength,
   }
 
   const opts = { ...defaultOptions, ...options }
