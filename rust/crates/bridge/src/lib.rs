@@ -498,6 +498,8 @@ enum ManagementOperation {
         #[serde(default)]
         allow_protocol: Option<String>,
         #[serde(default)]
+        trampoline: Option<Box<desktop_core::RendererCloneTrampoline>>,
+        #[serde(default)]
         account: Option<desktop_core::CloneAccount>,
     },
 }
@@ -1085,6 +1087,7 @@ async fn execute(
             report_retained_staging,
             proxy,
             allow_protocol,
+            trampoline,
             account: Some(account),
         }) => {
             anyhow::ensure!(
@@ -1092,7 +1095,7 @@ async fn execute(
                 "Clone cannot use a selected-repository binding"
             );
             anyhow::ensure!(
-                proxy.is_none() && allow_protocol.is_none(),
+                proxy.is_none() && allow_protocol.is_none() && trampoline.is_none(),
                 "Selected-account clone inspects transport configuration itself"
             );
             let destination = desktop_core::directory_path(path)?;
@@ -1112,6 +1115,7 @@ async fn execute(
                     report_progress,
                     proxy: None,
                     allow_protocol: None,
+                    trampoline: None,
                 },
                 account,
             )
@@ -1160,6 +1164,7 @@ async fn execute(
                     report_retained_staging,
                     proxy,
                     allow_protocol,
+                    trampoline,
                     account,
                 } => {
                     anyhow::ensure!(
@@ -1174,6 +1179,7 @@ async fn execute(
                         report_progress,
                         proxy,
                         allow_protocol,
+                        trampoline: trampoline.map(|value| *value),
                     };
                     if account.is_some() {
                         anyhow::bail!("Selected-account clone is not available yet")

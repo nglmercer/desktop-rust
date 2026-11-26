@@ -149,6 +149,7 @@ enum GitInfoOperation {
         report_progress: bool,
         proxy: Option<desktop_backend::RendererProxy>,
         allow_protocol: Option<String>,
+        trampoline: Option<desktop_backend::RendererCloneTrampoline>,
     },
     ListCloneRecoveries {},
     RecoverClone {
@@ -525,6 +526,7 @@ impl Backend {
                 report_progress: true,
                 proxy: None,
                 allow_protocol: None,
+                trampoline: None,
             },
             account,
         )
@@ -2100,7 +2102,7 @@ impl Backend {
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
                                 repo.open_desktop_custom_editor(path, editor).await
                             }
-                            GitInfoOperation::Clone { url, path, branch, default_branch, recursive, report_progress, proxy, allow_protocol } => {
+                            GitInfoOperation::Clone { url, path, branch, default_branch, recursive, report_progress, proxy, allow_protocol, trampoline } => {
                                 let destination = desktop_backend::directory_path(path).map_err(|error| AppError::msg(error.to_string()))?;
                                 desktop_backend::clone_repository_with_options(&url, &destination, desktop_backend::CloneOptions {
                                     branch,
@@ -2109,6 +2111,7 @@ impl Backend {
                                     report_progress,
                                     proxy,
                                     allow_protocol,
+                                    trampoline,
                                 }).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 return Ok(serde_json::Value::Null);
                             }

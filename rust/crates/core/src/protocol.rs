@@ -1249,6 +1249,74 @@ impl std::fmt::Debug for RendererProxy {
     }
 }
 
+/// Renderer trampoline settings needed for one ordinary clone. The token is a
+/// capability for the renderer-owned credential server, not an account secret;
+/// nevertheless none of these values are safe to include in diagnostics.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererCloneTrampoline {
+    pub desktop_port: u16,
+    pub trampoline_token: String,
+    pub user_agent: String,
+    pub ssh_askpass: String,
+    pub display: String,
+    #[serde(default)]
+    pub git_ssh_command: Option<String>,
+    pub config_parameters: String,
+}
+
+impl RendererCloneTrampoline {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        const CREDENTIAL_SUFFIX: &str = "'credential.helper=' 'credential.helper=desktop'";
+        anyhow::ensure!(self.desktop_port != 0, "Invalid trampoline port");
+        for value in [
+            &self.trampoline_token,
+            &self.user_agent,
+            &self.ssh_askpass,
+            &self.display,
+        ] {
+            anyhow::ensure!(
+                !value.is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control),
+                "Invalid clone trampoline environment"
+            );
+        }
+        if let Some(value) = &self.git_ssh_command {
+            anyhow::ensure!(
+                !value.is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control),
+                "Invalid clone SSH command"
+            );
+        }
+        anyhow::ensure!(
+            self.config_parameters.len() <= 256 * 1024
+                && !self.config_parameters.contains(' ')
+                && (self.config_parameters == CREDENTIAL_SUFFIX
+                    || self
+                        .config_parameters
+                        .ends_with(&format!(" {CREDENTIAL_SUFFIX}"))),
+            "Invalid clone credential configuration"
+        );
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for RendererCloneTrampoline {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RendererCloneTrampoline")
+            .field("desktop_port", &self.desktop_port)
+            .field("trampoline_token", &"<redacted>")
+            .field("user_agent", &"<redacted>")
+            .field("ssh_askpass", &"<redacted>")
+            .field("display", &"<redacted>")
+            .field(
+                "git_ssh_command",
+                &self.git_ssh_command.as_ref().map(|_| "<redacted>"),
+            )
+            .field("config_parameters", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RendererFetchRequest {

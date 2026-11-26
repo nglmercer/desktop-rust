@@ -1756,6 +1756,7 @@ pub struct CloneOptions {
     pub report_progress: bool,
     pub proxy: Option<crate::RendererProxy>,
     pub allow_protocol: Option<String>,
+    pub trampoline: Option<crate::RendererCloneTrampoline>,
 }
 
 /// An explicitly selected stored account; its numeric actor is verified before
@@ -2281,6 +2282,9 @@ pub async fn clone_repository_with_options(
             "invalid Git protocol allowlist"
         );
     }
+    if let Some(trampoline) = &options.trampoline {
+        trampoline.validate()?;
+    }
     if url.is_empty()
         || url.starts_with('-')
         || url.contains(['\0', '\n', '\r'])
@@ -2346,6 +2350,7 @@ pub async fn clone_repository_with_options(
         options.report_progress,
         options.proxy.as_ref(),
         options.allow_protocol.as_deref(),
+        options.trampoline.as_ref(),
     )
     .await?;
     if output.code != 0 {
@@ -2819,6 +2824,7 @@ mod tests {
                 report_progress: false,
                 proxy: None,
                 allow_protocol: None,
+                trampoline: None,
             },
             CloneAccount {
                 host: host.clone(),
@@ -2895,6 +2901,7 @@ mod tests {
                 report_progress: false,
                 proxy: None,
                 allow_protocol: None,
+                trampoline: None,
             },
             CloneAccount {
                 host: host.clone(),
@@ -2987,6 +2994,7 @@ mod tests {
                 report_progress: false,
                 proxy: None,
                 allow_protocol: None,
+                trampoline: None,
             },
             CloneAccount {
                 host,
@@ -3098,6 +3106,7 @@ mod tests {
                 report_progress: false,
                 proxy: None,
                 allow_protocol: Some("file".into()),
+                trampoline: None,
             },
         )
         .await

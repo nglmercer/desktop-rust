@@ -258,16 +258,7 @@ describe('git/clone', () => {
 
           await assert.rejects(
             clone('desktop-clone-test:', destination, {}),
-            (error: unknown) => {
-              assert.ok(isGitError(error))
-              assert.ok(
-                error.result.stderr.includes(
-                  `transport '${protocol}' not allowed`
-                ),
-                error.result.stderr.toString()
-              )
-              return true
-            }
+            error => assertCloneTransportFailure(error, protocol)
           )
         })
       }

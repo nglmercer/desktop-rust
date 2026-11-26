@@ -1,16 +1,12 @@
-import { git, IGitStringExecutionOptions } from './core'
 import { ICloneProgress } from '../../models/progress'
 import { CloneOptions } from '../../models/clone-options'
-import { CloneProgressParser, executionOptionsWithProgress } from '../progress'
+import { CloneProgressParser } from '../progress'
 import type { IGitOutput, IGitProgress } from '../progress/git'
 import { FetchStreamProgressParser } from '../progress/fetch-stream'
-import { backend } from '../../backend/client'
+import { backend, type ICloneTrampolineEnvironment } from '../../backend/client'
 import { getDefaultBranch } from '../helpers/default-branch'
-import {
-  backendRemoteProxy,
-  envForProxy,
-  envForRemoteOperation,
-} from './environment'
+import { backendRemoteProxy, envForProxy } from './environment'
+import { withTrampolineEnv } from '../trampoline/trampoline-environment'
 import { homedir } from '../../web/os'
 import * as Path from 'path'
 import { unescape as decodeFilePath } from 'querystring'
@@ -198,6 +194,33 @@ export async function clone(
   })
 }
 
+function cloneTrampolineEnvironment(
+  environment: object
+): ICloneTrampolineEnvironment {
+  const values = environment as Record<string, unknown>
+  const gitSshCommand = values.GIT_SSH_COMMAND
+  if (
+    typeof values.DESKTOP_PORT !== 'number' ||
+    typeof values.DESKTOP_TRAMPOLINE_TOKEN !== 'string' ||
+    typeof values.GIT_USER_AGENT !== 'string' ||
+    typeof values.SSH_ASKPASS !== 'string' ||
+    typeof values.DISPLAY !== 'string' ||
+    typeof values.GIT_CONFIG_PARAMETERS !== 'string' ||
+    (gitSshCommand !== undefined && typeof gitSshCommand !== 'string')
+  ) {
+    throw new TypeError('Invalid clone trampoline environment')
+  }
+  return {
+    desktop_port: values.DESKTOP_PORT,
+    trampoline_token: values.DESKTOP_TRAMPOLINE_TOKEN,
+    user_agent: values.GIT_USER_AGENT,
+    ssh_askpass: values.SSH_ASKPASS,
+    display: values.DISPLAY,
+    ...(gitSshCommand === undefined ? {} : { git_ssh_command: gitSshCommand }),
+    config_parameters: values.GIT_CONFIG_PARAMETERS,
+  }
+}
+
 async function cloneCore(
   url: string,
   path: string,
@@ -215,100 +238,54 @@ async function cloneCore(
     )
   }
 
-  const inheritedGitConfiguration =
-    process.env.GIT_CONFIG_PARAMETERS !== undefined
-  if (options.fallbackAccount === undefined && !inheritedGitConfiguration) {
-    const parser =
-      progressCallback === undefined
-        ? undefined
-        : new FetchStreamProgressParser(emit, new CloneProgressParser())
-    withoutRepositoryGitAccess(() =>
-      progressCallback?.({ kind, title, value: 0 })
+  const parser =
+    progressCallback === undefined
+      ? undefined
+      : new FetchStreamProgressParser(emit, new CloneProgressParser())
+  withoutRepositoryGitAccess(() =>
+    progressCallback?.({ kind, title, value: 0 })
+  )
+  const proxy = backendRemoteProxy(await envForProxy(url))
+  try {
+    await withTrampolineEnv(
+      async trampolineEnvironment =>
+        backend().cloneRepository(
+          {
+            url,
+            path,
+            default_branch: defaultBranch,
+            ...(options.branch === undefined ? {} : { branch: options.branch }),
+            ...(proxy === undefined ? {} : { proxy }),
+            ...(process.env.GIT_ALLOW_PROTOCOL === undefined
+              ? {}
+              : { allow_protocol: process.env.GIT_ALLOW_PROTOCOL }),
+            trampoline: cloneTrampolineEnvironment(trampolineEnvironment),
+          },
+          {
+            deadlineMs: 3_600_000,
+            ...(progressCallback === undefined
+              ? {}
+              : {
+                  onProgress: chunk => {
+                    try {
+                      parser?.push(chunk)
+                    } catch {
+                      // Progress observers cannot terminate a clone.
+                    }
+                  },
+                }),
+          }
+        ),
+      __dirname,
+      false,
+      undefined,
+      options.fallbackAccount
     )
-    const proxy = backendRemoteProxy(await envForProxy(url))
+  } finally {
     try {
-      await backend().cloneRepository(
-        {
-          url,
-          path,
-          default_branch: defaultBranch,
-          ...(options.branch === undefined ? {} : { branch: options.branch }),
-          ...(proxy === undefined ? {} : { proxy }),
-          ...(process.env.GIT_ALLOW_PROTOCOL === undefined
-            ? {}
-            : { allow_protocol: process.env.GIT_ALLOW_PROTOCOL }),
-        },
-        {
-          deadlineMs: 3_600_000,
-          ...(progressCallback === undefined
-            ? {}
-            : {
-                onProgress: chunk => {
-                  try {
-                    parser?.push(chunk)
-                  } catch {
-                    // Progress observers cannot terminate a clone.
-                  }
-                },
-              }),
-        }
-      )
-    } finally {
-      try {
-        parser?.finish()
-      } catch {
-        // Progress observers cannot invalidate a completed clone.
-      }
+      parser?.finish()
+    } catch {
+      // Progress observers cannot invalidate a completed clone.
     }
-    return
   }
-
-  const env = {
-    ...(await envForRemoteOperation(url)),
-    GIT_CLONE_PROTECTION_ACTIVE: 'false',
-    // Git's environment allowlist takes precedence over protocol configuration.
-    GIT_ALLOW_PROTOCOL: process.env.GIT_ALLOW_PROTOCOL?.split(':')
-      .filter(protocol => !unsupportedCloneProtocols.includes(protocol))
-      .join(':'),
-  }
-
-  const args = [
-    '-c',
-    `init.defaultBranch=${defaultBranch}`,
-    // Apply the same policy after Git expands configured URL rewrites.
-    ...unsupportedCloneProtocols.flatMap(protocol => [
-      '-c',
-      `protocol.${protocol}.allow=never`,
-    ]),
-    'clone',
-    '--recursive',
-  ]
-
-  let opts: IGitStringExecutionOptions = {
-    env,
-    fallbackAccount: options.fallbackAccount,
-  }
-
-  if (progressCallback) {
-    args.push('--progress')
-
-    opts = await executionOptionsWithProgress(
-      { ...opts, trackLFSProgress: true },
-      new CloneProgressParser(),
-      emit
-    )
-
-    // Initial progress
-    withoutRepositoryGitAccess(() =>
-      progressCallback({ kind, title, value: 0 })
-    )
-  }
-
-  if (options.branch) {
-    args.push('-b', options.branch)
-  }
-
-  args.push('--', url, path)
-
-  await git(args, __dirname, 'clone', opts)
 }

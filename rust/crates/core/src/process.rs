@@ -60,7 +60,7 @@ pub(crate) async fn run_clone(
     args: &[OsString],
     report_progress: bool,
 ) -> Result<RawOutput> {
-    run_clone_inner(path, args, report_progress, &[], None, None).await
+    run_clone_inner(path, args, report_progress, &[], None, None, None).await
 }
 
 /// Run clone with explicitly reviewed proxy and protocol environment values.
@@ -70,8 +70,18 @@ pub(crate) async fn run_clone_with_transport(
     report_progress: bool,
     proxy: Option<&crate::RendererProxy>,
     allow_protocol: Option<&str>,
+    trampoline: Option<&crate::RendererCloneTrampoline>,
 ) -> Result<RawOutput> {
-    run_clone_inner(path, args, report_progress, &[], proxy, allow_protocol).await
+    run_clone_inner(
+        path,
+        args,
+        report_progress,
+        &[],
+        proxy,
+        allow_protocol,
+        trampoline,
+    )
+    .await
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -91,7 +101,7 @@ pub(crate) async fn run_clone_with_inherited_fd(
         descriptors.iter().all(|fd| *fd >= 3),
         "Clone directory descriptor overlaps a standard stream"
     );
-    run_clone_inner(path, args, report_progress, &descriptors, None, None).await
+    run_clone_inner(path, args, report_progress, &descriptors, None, None, None).await
 }
 
 async fn run_clone_inner(
@@ -101,6 +111,7 @@ async fn run_clone_inner(
     inherited_fds: &[i32],
     proxy: Option<&crate::RendererProxy>,
     allow_protocol: Option<&str>,
+    trampoline: Option<&crate::RendererCloneTrampoline>,
 ) -> Result<RawOutput> {
     let mut command = git_native_paths(None);
     if let Some(proxy) = proxy {
@@ -160,7 +171,41 @@ async fn run_clone_inner(
     // potentially credential-bearing error output to the caller.
     command
         .env("LC_ALL", "C")
+        .env("TERM", "dumb")
         .env("GIT_CLONE_PROTECTION_ACTIVE", "false");
+    if crate::git_credentials::clone::active() {
+        command.env("GIT_ALLOW_PROTOCOL", "https");
+    } else if let Some(trampoline) = trampoline {
+        command
+            .env("DESKTOP_PORT", trampoline.desktop_port.to_string())
+            .env("DESKTOP_TRAMPOLINE_TOKEN", &trampoline.trampoline_token)
+            .env("GIT_ASKPASS", "")
+            .env("GIT_USER_AGENT", &trampoline.user_agent)
+            .env("SSH_ASKPASS", &trampoline.ssh_askpass)
+            .env("DISPLAY", &trampoline.display)
+            .env("GIT_CONFIG_PARAMETERS", &trampoline.config_parameters)
+            .env("GIT_CONFIG_COUNT", "0");
+        if let Some(command_line) = &trampoline.git_ssh_command {
+            command.env("GIT_SSH_COMMAND", command_line);
+        } else {
+            command.env_remove("GIT_SSH_COMMAND");
+        }
+    } else {
+        for variable in [
+            "DESKTOP_PORT",
+            "DESKTOP_TRAMPOLINE_TOKEN",
+            "GIT_ASKPASS",
+            "GIT_USER_AGENT",
+            "SSH_ASKPASS",
+            "DISPLAY",
+            "GIT_SSH_COMMAND",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG",
+        ] {
+            command.env_remove(variable);
+        }
+        command.env("GIT_CONFIG_COUNT", "0");
+    }
     if crate::git_credentials::clone::active() {
         command.env("GIT_ALLOW_PROTOCOL", "https");
     } else if let Some(value) = allow_protocol {

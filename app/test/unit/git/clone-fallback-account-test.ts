@@ -13,6 +13,7 @@ vi.mock('../../../src/backend/client', () => ({
   backend: () => ({
     canonicalMutationPath: async (path: string) => path,
     cloneRepository: observed.native,
+    gitVersion: async () => '2.50.0',
   }),
 }))
 vi.mock('../../../src/lib/git/core', async importOriginal => ({
@@ -59,26 +60,38 @@ describe('clone fallback account', () => {
     }
   })
 
-  it('passes the fallback account as an execution option', async () => {
+  const assertNativeClone = () => {
+    assert.strictEqual(observed.calls, 0)
+    assert.strictEqual(observed.native.mock.calls.length, 1)
+    const input = observed.native.mock.calls[0][0]
+    assert.strictEqual(input.url, 'https://github.com/owner/repo')
+    assert.strictEqual(input.path, '/tmp/clone-test')
+    assert.strictEqual(input.default_branch, 'main')
+    const trampoline = input.trampoline
+    assert.ok(trampoline !== undefined)
+    assert.ok(Number.isInteger(trampoline.desktop_port))
+    assert.notStrictEqual(trampoline.trampoline_token, '')
+    assert.match(trampoline.user_agent, /^git\//)
+    assert.ok(
+      trampoline.config_parameters.endsWith(
+        `'credential.helper=' 'credential.helper=desktop'`
+      )
+    )
+  }
+
+  it('uses the typed host operation with a fallback account', async () => {
     const account = { endpoint: 'https://api.github.com', login: 'bob' }
     await clone('https://github.com/owner/repo', '/tmp/clone-test', {
       defaultBranch: 'main',
       fallbackAccount: account,
     })
-    assert.strictEqual(observed.calls, 1)
-    assert.deepStrictEqual(observed.executionOptions?.fallbackAccount, account)
+    assertNativeClone()
   })
 
   it('uses the typed host operation for an unassigned clone', async () => {
     await clone('https://github.com/owner/repo', '/tmp/clone-test', {
       defaultBranch: 'main',
     })
-    assert.strictEqual(observed.calls, 0)
-    assert.strictEqual(observed.native.mock.calls.length, 1)
-    assert.deepStrictEqual(observed.native.mock.calls[0][0], {
-      url: 'https://github.com/owner/repo',
-      path: '/tmp/clone-test',
-      default_branch: 'main',
-    })
+    assertNativeClone()
   })
 })

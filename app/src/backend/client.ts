@@ -79,6 +79,56 @@ export type RemoteProxy = {
   readonly https?: string
 }
 
+/** Renderer trampoline state required for one ordinary clone operation. */
+export interface ICloneTrampolineEnvironment {
+  readonly desktop_port: number
+  readonly trampoline_token: string
+  readonly user_agent: string
+  readonly ssh_askpass: string
+  readonly display: string
+  readonly git_ssh_command?: string
+  readonly config_parameters: string
+}
+
+function validateCloneTrampoline(
+  trampoline: ICloneTrampolineEnvironment | undefined
+): void {
+  if (trampoline === undefined) {
+    return
+  }
+  const credentialSuffix = `'credential.helper=' 'credential.helper=desktop'`
+  const controlled = [
+    trampoline.trampoline_token,
+    trampoline.user_agent,
+    trampoline.ssh_askpass,
+    trampoline.display,
+    trampoline.git_ssh_command,
+  ]
+  if (
+    !Number.isInteger(trampoline.desktop_port) ||
+    trampoline.desktop_port < 1 ||
+    trampoline.desktop_port > 65535 ||
+    controlled.some(
+      value =>
+        value !== undefined &&
+        (value.length === 0 ||
+          value.length > 4096 ||
+          [...value].some(character => {
+            const code = character.codePointAt(0) ?? 0
+            return code === 0 || code <= 31 || (code >= 127 && code <= 159)
+          }))
+    ) ||
+    trampoline.config_parameters.length > 256 * 1024 ||
+    trampoline.config_parameters.includes('\0') ||
+    !(
+      trampoline.config_parameters === credentialSuffix ||
+      trampoline.config_parameters.endsWith(` ${credentialSuffix}`)
+    )
+  ) {
+    throw new TypeError('Invalid clone trampoline environment')
+  }
+}
+
 function validateRemoteProxy(
   proxy: RemoteProxy | undefined,
   operation: 'fetch' | 'pull' | 'push' | 'clone'
@@ -3776,10 +3826,12 @@ export class BackendClient {
       readonly default_branch?: string
       readonly proxy?: { readonly http?: string; readonly https?: string }
       readonly allow_protocol?: string
+      readonly trampoline?: ICloneTrampolineEnvironment
     },
     options: BackendRequestOptions = {}
   ): Promise<void> {
     validateRemoteProxy(input.proxy, 'clone')
+    validateCloneTrampoline(input.trampoline)
     if (
       input.allow_protocol !== undefined &&
       (input.allow_protocol.length > 4096 ||
