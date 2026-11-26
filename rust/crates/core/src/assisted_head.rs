@@ -197,7 +197,7 @@ fn parse_config_values(output: &[u8]) -> Result<Vec<Value>> {
         .collect())
 }
 
-fn assisted_push_config_environment_key(key: &str) -> bool {
+pub(crate) fn assisted_push_config_environment_key(key: &str) -> bool {
     matches!(
         key,
         "LOCAL_GIT_DIRECTORY"
@@ -507,9 +507,19 @@ impl Repository {
 
     /// Read HEAD, its optional branch, tip, and absolute Git directory in one
     /// repository operation. Expected unsafe states are data, not transport errors.
-    pub(crate) async fn assisted_commit_head(&self) -> Result<Value> {
+    pub(crate) async fn assisted_commit_head(
+        &self,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported assisted HEAD environment key"
+            );
+        }
+
         let directory = self
-            .run(&args(&["rev-parse", "--absolute-git-dir"]))
+            .run_with_environment(&args(&["rev-parse", "--absolute-git-dir"]), environment)
             .await?;
         anyhow::ensure!(directory.code == 0, "Cannot read the Git directory");
         let git_dir = output_line(&directory.stdout, "Git directory", true)?;
@@ -517,10 +527,14 @@ impl Repository {
             std::path::Path::new(&git_dir).is_absolute(),
             "Git directory must be absolute"
         );
-        let top = self.run(&args(&["rev-parse", "--show-toplevel"])).await?;
+        let top = self
+            .run_with_environment(&args(&["rev-parse", "--show-toplevel"]), environment)
+            .await?;
         anyhow::ensure!(top.code == 0, "Cannot read the worktree root");
         let worktree_root = output_line(&top.stdout, "worktree root", true)?;
-        let format = self.run(&args(&["rev-parse", "--show-ref-format"])).await?;
+        let format = self
+            .run_with_environment(&args(&["rev-parse", "--show-ref-format"]), environment)
+            .await?;
         anyhow::ensure!(format.code == 0, "Cannot read the ref format");
         let ref_format = output_line(&format.stdout, "ref format", false)?;
         match std::fs::symlink_metadata(std::path::Path::new(&git_dir).join("HEAD")) {
@@ -535,7 +549,10 @@ impl Repository {
         }
 
         let symbolic = self
-            .run(&args(&["symbolic-ref", "--quiet", "--no-recurse", "HEAD"]))
+            .run_with_environment(
+                &args(&["symbolic-ref", "--quiet", "--no-recurse", "HEAD"]),
+                environment,
+            )
             .await?;
         anyhow::ensure!(matches!(symbolic.code, 0 | 1), "Cannot read symbolic HEAD");
         let reference = if symbolic.code == 0 {
@@ -550,12 +567,10 @@ impl Repository {
                 ));
             }
             let alias = self
-                .run(&args(&[
-                    "symbolic-ref",
-                    "--quiet",
-                    "--no-recurse",
-                    reference,
-                ]))
+                .run_with_environment(
+                    &args(&["symbolic-ref", "--quiet", "--no-recurse", reference]),
+                    environment,
+                )
                 .await?;
             anyhow::ensure!(
                 matches!(alias.code, 0 | 1),
@@ -569,13 +584,16 @@ impl Repository {
         }
 
         let tip = self
-            .run(&args(&[
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                "--end-of-options",
-                "HEAD^{commit}",
-            ]))
+            .run_with_environment(
+                &args(&[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    "--end-of-options",
+                    "HEAD^{commit}",
+                ]),
+                environment,
+            )
             .await?;
         anyhow::ensure!(matches!(tip.code, 0 | 1), "Cannot read HEAD commit");
         let sha = if tip.code == 0 {
@@ -863,7 +881,10 @@ mod tests {
         let fixture = Fixture::new();
         let head = fixture.commit();
         let repository = Repository::open(&fixture.0).await.unwrap();
-        let attached = repository.assisted_commit_head().await.unwrap();
+        let attached = repository
+            .assisted_commit_head(&Default::default())
+            .await
+            .unwrap();
         assert_eq!(attached["kind"], "ok");
         assert_eq!(attached["ref"], "refs/heads/main");
         assert_eq!(attached["sha"], head);
@@ -875,12 +896,18 @@ mod tests {
         assert_eq!(attached["ref_format"], "files");
 
         fixture.git(&["switch", "-q", "--detach", "HEAD"]);
-        let detached = repository.assisted_commit_head().await.unwrap();
+        let detached = repository
+            .assisted_commit_head(&Default::default())
+            .await
+            .unwrap();
         assert_eq!(detached["ref"], serde_json::Value::Null);
         assert_eq!(detached["sha"], head);
 
         fixture.git(&["switch", "-q", "--orphan", "unborn"]);
-        let unborn = repository.assisted_commit_head().await.unwrap();
+        let unborn = repository
+            .assisted_commit_head(&Default::default())
+            .await
+            .unwrap();
         assert_eq!(unborn["kind"], "ok");
         assert_eq!(unborn["ref"], "refs/heads/unborn");
         assert_eq!(unborn["sha"], serde_json::Value::Null);
@@ -893,7 +920,10 @@ mod tests {
         fixture.git(&["symbolic-ref", "refs/heads/alias", "refs/heads/main"]);
         fixture.git(&["switch", "-q", "alias"]);
         let repository = Repository::open(&fixture.0).await.unwrap();
-        let aliased = repository.assisted_commit_head().await.unwrap();
+        let aliased = repository
+            .assisted_commit_head(&Default::default())
+            .await
+            .unwrap();
         assert_eq!(aliased["kind"], "invalid");
         assert!(
             aliased["message"]
@@ -907,7 +937,10 @@ mod tests {
             "0000000000000000000000000000000000000000\n",
         )
         .unwrap();
-        let unborn_detached = repository.assisted_commit_head().await.unwrap();
+        let unborn_detached = repository
+            .assisted_commit_head(&Default::default())
+            .await
+            .unwrap();
         assert_eq!(unborn_detached["kind"], "invalid");
         assert!(
             unborn_detached["message"]
@@ -928,7 +961,10 @@ mod tests {
             fs::remove_file(&head).unwrap();
             std::os::unix::fs::symlink("refs/heads/main", &head).unwrap();
             let repository = Repository::open(&fixture.0).await.unwrap();
-            let value = repository.assisted_commit_head().await.unwrap();
+            let value = repository
+                .assisted_commit_head(&Default::default())
+                .await
+                .unwrap();
             assert_eq!(value["kind"], "invalid");
             assert!(value["message"].as_str().unwrap().contains("regular HEAD"));
             fs::remove_file(&head).unwrap();

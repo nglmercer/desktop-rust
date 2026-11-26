@@ -536,7 +536,11 @@ fn retained_staging_path_value(path: &std::path::Path) -> serde_json::Value {
 /// selected repositories, so a concurrent selection cannot change between the
 /// resolution and the execution. `expected_repository`, when present, must match
 /// the resolved repository's id.
-async fn repository_at_path(state: &Bridge, path: String) -> anyhow::Result<Repository> {
+async fn repository_at_path(
+    state: &Bridge,
+    path: String,
+    environment: Option<&std::collections::BTreeMap<String, Option<String>>>,
+) -> anyhow::Result<Repository> {
     let requested = desktop_core::directory_path(desktop_core::GitPath::Text(path))?;
     anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
     let canonical = cancellation::blocking(move || Ok(requested.canonicalize()?)).await?;
@@ -550,7 +554,12 @@ async fn repository_at_path(state: &Bridge, path: String) -> anyhow::Result<Repo
     match selected {
         Some(repo) => Ok(repo),
         None => {
-            let repo = Repository::open(&canonical).await?;
+            let repo = match environment {
+                Some(environment) => {
+                    Repository::open_with_environment(&canonical, environment).await?
+                }
+                None => Repository::open(&canonical).await?,
+            };
             anyhow::ensure!(
                 repo.path() == canonical,
                 "select a repository root, not a nested path"
@@ -566,7 +575,12 @@ async fn execute_repository_at_path(
     operation: Operation,
     expected_repository: Option<String>,
 ) -> anyhow::Result<serde_json::Value> {
-    let repo = repository_at_path(state, path).await?;
+    let discovery_environment = match &operation {
+        Operation::RendererUpdateRefTransaction { environment, .. }
+        | Operation::AssistedCommitHead { environment } => Some(environment),
+        _ => None,
+    };
+    let repo = repository_at_path(state, path, discovery_environment).await?;
     if !matches!(operation, Operation::Snapshot)
         && let Some(expected) = expected_repository
     {
@@ -619,7 +633,7 @@ async fn execute(
                 path: target,
                 editor_name,
             }) => {
-                let repository = repository_at_path(state, path).await?;
+                let repository = repository_at_path(state, path, None).await?;
                 if let Some(expected) = expected_repository {
                     anyhow::ensure!(
                         repository.id() == expected,
@@ -642,7 +656,7 @@ async fn execute(
                 path: target,
                 editor,
             }) => {
-                let repository = repository_at_path(state, path).await?;
+                let repository = repository_at_path(state, path, None).await?;
                 if let Some(expected) = expected_repository {
                     anyhow::ensure!(
                         repository.id() == expected,
@@ -1433,7 +1447,7 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
                 let verification_read = active.as_ref().is_some_and(|job| job.verification_reads)
                     && matches!(
                         rpc.operation,
-                        ApplicationOperation::Repository(Operation::AssistedCommitHead)
+                        ApplicationOperation::Repository(Operation::AssistedCommitHead { .. })
                     );
                 if verification_read && verification_reads.len() < 8 {
                     let state = state.clone();

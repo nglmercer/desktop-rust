@@ -1638,7 +1638,9 @@ impl Backend {
                         && request.reference.is_none()
                         && request.expected_value.is_none() =>
                 {
-                    Operation::AssistedCommitHead
+                    Operation::AssistedCommitHead {
+                        environment: request.environment.unwrap_or_default(),
+                    }
                 }
                 ReadMethod::RendererCommit
                     if request.include_untracked.is_none()

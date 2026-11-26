@@ -27,6 +27,7 @@ import {
   IAssistedCommitRecoveryToken,
 } from './error'
 import {
+  assistedCommitGitRoutingEnvironment,
   ensureNoRepositoryOperation,
   gitPath,
   indexStatesEqual,
@@ -366,7 +367,8 @@ async function recover(
         ownedTip,
         data.snapshot.originalHead.sha,
         'rollback: interrupted assisted commits',
-        () => verifyHead(data, ownedTip)
+        () => verifyHead(data, ownedTip),
+        assistedCommitGitRoutingEnvironment()
       )
       await verifyHead(data, data.snapshot.originalHead.sha)
       history = 'restored'
@@ -678,7 +680,8 @@ export async function executeAssistedCommitPlan(
             await verifyIndex(data)
             await verifySelectedFiles(data)
             checkAssistedCommitCancellation(options.signal)
-          }
+          },
+          assistedCommitGitRoutingEnvironment()
         )
       } catch (error) {
         try {

@@ -37,6 +37,49 @@ import {
 } from './state'
 import { backend } from '../../../backend/client'
 
+export const assistedCommitGitRoutingEnvironmentNames = [
+  'LOCAL_GIT_DIRECTORY',
+  'GIT_DIR',
+  'GIT_COMMON_DIR',
+  'GIT_WORK_TREE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_INDEX_FILE',
+  'GIT_SHALLOW_FILE',
+  'GIT_GRAFT_FILE',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_NAMESPACE',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_NOSYSTEM',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+  'HOME',
+  'XDG_CONFIG_HOME',
+] as const
+
+export function assistedCommitGitRoutingEnvironment(): Record<
+  string,
+  string | undefined
+> {
+  const environment: Record<string, string | undefined> = {
+    GIT_CONFIG: undefined,
+  }
+  for (const name of assistedCommitGitRoutingEnvironmentNames) {
+    environment[name] = process.env[name]
+  }
+  for (const [name, value] of Object.entries(process.env)) {
+    if (
+      name.startsWith('GIT_CONFIG_KEY_') ||
+      name.startsWith('GIT_CONFIG_VALUE_')
+    ) {
+      environment[name] = value
+    }
+  }
+  return environment
+}
+
 interface IFileMetadata {
   readonly size: number
   readonly mode: number
@@ -83,7 +126,10 @@ export async function readHeadContext(repository: Repository): Promise<{
   readonly worktreeRoot: string
   readonly refFormat: string
 }> {
-  const context = await backend().repositoryAssistedCommitHead(repository.path)
+  const context = await backend().repositoryAssistedCommitHead(
+    repository.path,
+    assistedCommitGitRoutingEnvironment()
+  )
   if (context.kind === 'invalid') {
     throw new AssistedCommitError('unsafe-selection', context.message)
   }

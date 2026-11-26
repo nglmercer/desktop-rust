@@ -302,14 +302,11 @@ pub(crate) async fn run_git_with_environment(
     run_command(path, command, args, input, 2 * 1024 * 1024, None).await
 }
 
-pub(crate) async fn run_without_git_config_with_environment_input(
-    path: &Path,
-    args: &[OsString],
-    input: Option<Vec<u8>>,
+pub(crate) fn apply_environment(
+    command: &mut Command,
     environment: &std::collections::BTreeMap<String, Option<String>>,
-) -> Result<RawOutput> {
+) -> Result<()> {
     anyhow::ensure!(environment.len() <= 256, "Git environment is too large");
-    let mut command = git_base_without_color(None);
     let mut size = 0usize;
     for (key, value) in environment {
         anyhow::ensure!(
@@ -329,6 +326,17 @@ pub(crate) async fn run_without_git_config_with_environment_input(
             }
         }
     }
+    Ok(())
+}
+
+pub(crate) async fn run_without_git_config_with_environment_input(
+    path: &Path,
+    args: &[OsString],
+    input: Option<Vec<u8>>,
+    environment: &std::collections::BTreeMap<String, Option<String>>,
+) -> Result<RawOutput> {
+    let mut command = git_base_without_color(None);
+    apply_environment(&mut command, environment)?;
     command.env_remove("GIT_CONFIG");
     crate::git_credentials::native_configuration(run_command(
         path,
@@ -980,7 +988,19 @@ pub(crate) async fn run_bound_editor(
 
 /// Discover a repository without inherited command-scoped Git configuration.
 pub(crate) async fn run_bound_discovery(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    run_bound_discovery_with_environment(path, args, &Default::default()).await
+}
+
+pub(crate) async fn run_bound_discovery_with_environment(
+    path: &Path,
+    args: &[OsString],
+    environment: &std::collections::BTreeMap<String, Option<String>>,
+) -> Result<RawOutput> {
     let mut command = bound_git_command();
+    apply_environment(&mut command, environment)?;
+    // Repository discovery must not become a hook or URL-rewrite execution
+    // channel. Routing variables such as object directories still apply, but
+    // renderer-owned configuration fragments do not alter discovery itself.
     command
         .env("GIT_CONFIG_COUNT", "0")
         .env_remove("GIT_CONFIG_PARAMETERS")

@@ -3549,12 +3549,13 @@ export class BackendClient {
 
   /** Read the assisted-commit HEAD identity and Git directory through Rust. */
   async repositoryAssistedCommitHead(
-    repositoryPath: string
+    repositoryPath: string,
+    environment?: Record<string, string | undefined>
   ): Promise<AssistedCommitHeadResult> {
     const value = await this.repositoryRead(
       repositoryPath,
       'assisted_commit_head',
-      {}
+      { environment: serializeGitEnvironment(environment) }
     )
     if (!isRecord(value) || typeof value.kind !== 'string') {
       throw new BackendError({
@@ -6151,6 +6152,7 @@ export class BackendClient {
       readonly old_value: string
       readonly new_value: string | null
       readonly reason?: string
+      readonly environment?: Record<string, string | undefined>
     },
     verify: () => Promise<void>,
     options: BackendRequestOptions = {}
@@ -6237,6 +6239,7 @@ export class BackendClient {
       old_value: input.old_value,
       new_value: input.new_value,
       ...(input.reason === undefined ? {} : { reason: input.reason }),
+      environment: serializeGitEnvironment(input.environment),
     }
     const requestOptions: BackendRequestOptions = {
       ...options,

@@ -32,7 +32,8 @@ export async function updateRefWithVerification(
   oldValue: string,
   newValue: string | null,
   reason: string,
-  verify: () => Promise<void>
+  verify: () => Promise<void>,
+  environment?: Record<string, string | undefined>
 ): Promise<void> {
   return preparedRefTransaction(
     repository,
@@ -40,7 +41,8 @@ export async function updateRefWithVerification(
     oldValue,
     newValue,
     verify,
-    reason
+    reason,
+    environment
   )
 }
 
@@ -134,7 +136,8 @@ async function preparedRefTransaction(
   oldValue: string,
   newValue: string | null,
   action: (lock: IRefLock) => Promise<void>,
-  reason?: string
+  reason?: string,
+  environment?: Record<string, string | undefined>
 ): Promise<void> {
   let active = true
   const controller = new AbortController()
@@ -161,6 +164,7 @@ async function preparedRefTransaction(
             old_value: oldValue,
             new_value: newValue,
             ...(reason === undefined ? {} : { reason }),
+            ...(environment === undefined ? {} : { environment }),
           },
           async () => {
             lock.assertHeld()

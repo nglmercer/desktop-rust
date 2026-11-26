@@ -1728,6 +1728,7 @@ describe('assisted native push boundary', () => {
   it('refuses a same-byte replacement between the final publication stat and descriptor open', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -1883,6 +1884,7 @@ describe('assisted native push boundary', () => {
   it('stops branch-conditional follow-up fetch after a successful hook changes symbolic HEAD', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     await fixtures.rawGit(source, ['branch', '--', 'other', remote.originalTip])
@@ -1966,6 +1968,7 @@ describe('assisted native push boundary', () => {
   it('stops branch-conditional follow-up fetch after a successful hook introduces a symbolic branch alias', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     await fixtures.rawGit(source, ['branch', '--', 'other', remote.originalTip])
@@ -2174,6 +2177,7 @@ describe('assisted native push boundary', () => {
     it(`refuses a retargeted raw ${route} alternate alias after acknowledgement`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const original = await fixtures.seed(t, {
@@ -2284,6 +2288,7 @@ describe('assisted native push boundary', () => {
   it('refuses an alternate pack route changed toward an unadmitted leased store after acknowledgement', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const originalAlternate = await fixtures.seed(t, {
@@ -2443,6 +2448,7 @@ describe('assisted native push boundary', () => {
   it('never prunes through a substituted packed-refs target after acknowledged push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const foreignPath = join(
@@ -2490,6 +2496,7 @@ describe('assisted native push boundary', () => {
     it(`refuses a changed ${route} alternate graph before reading an unadmitted leased object store`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const originalAlternate = await fixtures.seed(t, {
@@ -2586,6 +2593,7 @@ describe('assisted native push boundary', () => {
     it(`refuses introduced ${routing} replacement history after acknowledgement`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -2688,6 +2696,7 @@ describe('assisted native push boundary', () => {
         it(`certifies ${route} ${metadata} metadata before post-ACK History, replacement ${replacement}`, async t => {
           reset()
           t.after(reset)
+          nodeBackend(t)
           const source = await fixtures.seed(t, { file: 'before\n' })
           const remote = await remotes.addBareRemote(t, source)
           const foreign = await fixtures.seed(t, {
@@ -3002,6 +3011,7 @@ describe('assisted native push boundary', () => {
   it('fences an explicit GIT_DIR alias independently of linked commondir and configuration paths', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const foreign = await fixtures.seed(t, { unrelated: 'Foreign checkout\n' })
@@ -3184,6 +3194,7 @@ describe('assisted native push boundary', () => {
   it('never recursively fetches into an unadmitted submodule repository after acknowledged push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const child = await fixtures.seed(t, { child: 'before\n' })
     const childRemote = await remotes.addBareRemote(t, child)
     await childRemote.read(['symbolic-ref', 'HEAD', childRemote.branchRef])
@@ -3362,6 +3373,7 @@ describe('assisted native push boundary', () => {
   it('refuses follow-up fetch through a substituted object-pack directory without writing foreign packs', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -3421,6 +3433,7 @@ describe('assisted native push boundary', () => {
   it('refuses retargeted effective GIT_WORK_TREE routing after acknowledged push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -3474,6 +3487,7 @@ describe('assisted native push boundary', () => {
   it('refuses follow-up fetch through a substituted reflog directory without appending foreign bytes', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     await fixtures.rawGit(source, [
@@ -3538,6 +3552,7 @@ describe('assisted native push boundary', () => {
     it(`refuses post-ACK ${route} symlink routing without foreign writes or Changes`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const replacement = await fixtures.seed(t, {
@@ -3747,6 +3762,7 @@ describe('assisted native push boundary', () => {
   it('never fetches into a substituted object-directory alias after acknowledged push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -4107,6 +4123,7 @@ describe('assisted native push boundary', () => {
   it('never resumes accepted deferred History through a substituted execution alias', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, {
@@ -4373,6 +4390,7 @@ describe('assisted native push boundary', () => {
     it(`refuses changed publication lock contents after awaited close, replacement ${replacement}`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       const configPath = join(source.path, '.git', 'config')
@@ -4420,6 +4438,7 @@ describe('assisted native push boundary', () => {
   it('never refreshes a changed deferred alias while settling push-only retry', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, { foreign: 'before\n' })
@@ -4487,6 +4506,7 @@ describe('assisted native push boundary', () => {
     it(`never adopts or deletes unrelated publication files at staging ${boundary}`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -4532,6 +4552,7 @@ describe('assisted native push boundary', () => {
   it('cannot strand publication recovery through a failed staging marker open', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -4668,6 +4689,7 @@ describe('assisted native push boundary', () => {
   it('refuses configuration-backed worktree redirection after acknowledged push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     const replacement = await fixtures.seed(t, { foreign: 'before\n' })
@@ -4786,6 +4808,7 @@ describe('assisted native push boundary', () => {
   it('never installs tracking into a configuration target retired after path certification', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     const alias = join(source.path, '.git', 'config')
@@ -5088,6 +5111,7 @@ describe('assisted native push boundary', () => {
   it('expires a dangling original configuration target after acknowledgement without restoring it', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     const config = join(source.path, '.git', 'config')
@@ -5139,6 +5163,7 @@ describe('assisted native push boundary', () => {
   it('expires a dangling worktree configuration target before capture can strand publication', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await fixtures.rawGit(source, [
@@ -5197,6 +5222,7 @@ describe('assisted native push boundary', () => {
     it(`expires publication when the acknowledged remote moves to ${scope} scope`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source, { publish: false })
       const config = join(await temporary.createTempDirectory(t), 'config')
@@ -5617,6 +5643,7 @@ describe('assisted native push boundary', () => {
   it('expires unsupported symbolic post-push branch identity without holding publication forever', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -5667,6 +5694,7 @@ describe('assisted native push boundary', () => {
   it('expires an unavailable post-push HEAD after cleanup without restoring deleted metadata', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     const head = await fixtures.rawGit(source, [
@@ -5724,6 +5752,7 @@ describe('assisted native push boundary', () => {
   it('stages publication into the real owned config despite a shadow introduced after native push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -5956,6 +5985,7 @@ describe('assisted native push boundary', () => {
   it('expires missing-remote publication setup after acknowledged push without a permanent refresh lock', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -6295,6 +6325,7 @@ describe('assisted native push boundary', () => {
   it('expires stale publication setup without locking acknowledged history or pushing again', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -6414,6 +6445,7 @@ describe('assisted native push boundary', () => {
   it('keeps every local SHA after an unknown remote response and retries only the same certified push', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')
@@ -6466,6 +6498,7 @@ describe('assisted native push boundary', () => {
   it('never broadens the source to an external commit made after entry and never rolls it back', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')

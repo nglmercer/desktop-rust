@@ -446,7 +446,10 @@ pub enum Operation {
         reference: String,
         expected_value: String,
     },
-    AssistedCommitHead,
+    AssistedCommitHead {
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitSafety,
     AssistedCommitConfig,
     AssistedCommitPushConfig {
@@ -677,6 +680,8 @@ pub enum Operation {
         old_value: String,
         new_value: Option<String>,
         reason: Option<String>,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
     },
     VerifySelectedIndex {
         tree: String,

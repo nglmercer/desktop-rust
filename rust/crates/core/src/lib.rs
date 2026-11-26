@@ -175,11 +175,38 @@ impl Repository {
         Self::open_pinned(&path).await
     }
 
+    /// Resolve the working tree root with the typed routing environment an
+    /// assisted repository operation explicitly carries across the host boundary.
+    pub async fn open_with_environment(
+        path: &Path,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Self> {
+        let path = path.canonicalize().context("resolve repository path")?;
+        Self::open_pinned_with_environment(&path, environment).await
+    }
+
     /// Run Git discovery from the supplied path without resolving it first.
     /// Selected clone uses this only with a held directory descriptor path.
     pub(crate) async fn open_pinned(path: &Path) -> Result<Self> {
-        let output =
-            process::run_bound_discovery(path, &args(&["rev-parse", "--show-toplevel"])).await?;
+        Self::open_pinned_with_environment(path, &Default::default()).await
+    }
+
+    pub(crate) async fn open_pinned_with_environment(
+        path: &Path,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Self> {
+        for key in environment.keys() {
+            anyhow::ensure!(
+                crate::assisted_head::assisted_push_config_environment_key(key),
+                "unsupported repository discovery environment key"
+            );
+        }
+        let output = process::run_bound_discovery_with_environment(
+            path,
+            &args(&["rev-parse", "--show-toplevel"]),
+            environment,
+        )
+        .await?;
         if output.code != 0 {
             bail!("not a working tree: {}", output.text().stderr.trim());
         }
@@ -531,6 +558,7 @@ impl Repository {
                 old_value,
                 new_value,
                 reason,
+                environment,
             } => {
                 return self
                     .renderer_update_ref_transaction(
@@ -538,6 +566,7 @@ impl Repository {
                         &old_value,
                         new_value.as_deref(),
                         reason.as_deref(),
+                        &environment,
                     )
                     .await
                     .map(|()| Value::Null);
@@ -615,8 +644,8 @@ impl Repository {
             } => {
                 return self.ref_lock_context(&reference, &expected_value).await;
             }
-            Operation::AssistedCommitHead => {
-                return self.assisted_commit_head().await;
+            Operation::AssistedCommitHead { environment } => {
+                return self.assisted_commit_head(&environment).await;
             }
             Operation::AssistedCommitSafety => {
                 return self.assisted_commit_safety().await;
@@ -1406,6 +1435,14 @@ impl Repository {
         process::run(&self.path, command).await
     }
 
+    async fn run_with_environment(
+        &self,
+        command: &[OsString],
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<process::RawOutput> {
+        process::run_git_with_environment(&self.path, command, None, None, environment).await
+    }
+
     async fn command(&self, operation: Operation) -> Result<Vec<OsString>> {
         use Operation::*;
         let command = match operation {
@@ -1495,7 +1532,7 @@ impl Repository {
             | RendererTagRefs
             | RendererCommitChanges { .. }
             | RefLockContext { .. }
-            | AssistedCommitHead
+            | AssistedCommitHead { .. }
             | AssistedCommitSafety
             | AssistedCommitConfig
             | AssistedCommitPushConfig { .. }

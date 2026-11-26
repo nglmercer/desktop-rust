@@ -76,9 +76,17 @@ impl Repository {
         old_value: &str,
         new_value: Option<&str>,
         reason: Option<&str>,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
     ) -> Result<()> {
         validate(reference, old_value, new_value, reason)?;
+        for key in environment.keys() {
+            anyhow::ensure!(
+                crate::assisted_head::assisted_push_config_environment_key(key),
+                "unsupported ref transaction environment key"
+            );
+        }
         let mut command = process::git_command(None);
+        process::apply_environment(&mut command, environment)?;
         command.arg("update-ref");
         if let Some(reason) = reason {
             command.arg("-m").arg(reason);

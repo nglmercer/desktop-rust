@@ -22,7 +22,11 @@ import { Repository } from '../../models/repository'
 import { IRemote } from '../../models/remote'
 import { IAssistedCommitHead } from '../../models/assisted-commit'
 import { AssistedCommitError, readAssistedCommitHead } from './assisted-commit'
-import { quoteConfig } from './assisted-commit/git'
+import {
+  assistedCommitGitRoutingEnvironment,
+  assistedCommitGitRoutingEnvironmentNames,
+  quoteConfig,
+} from './assisted-commit/git'
 import { git, isGitError } from './core'
 import { backend } from '../../backend/client'
 import { isErrnoException } from '../errno-exception'
@@ -111,50 +115,6 @@ const originalOwnerProofs = new WeakMap<
     readonly acceptConfiguration: (bytes: Buffer) => void
   }
 >()
-const nativeConfigurationEnvironment = { GIT_CONFIG: undefined }
-const gitRoutingEnvironmentNames = [
-  'LOCAL_GIT_DIRECTORY',
-  'GIT_DIR',
-  'GIT_COMMON_DIR',
-  'GIT_WORK_TREE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-  'GIT_INDEX_FILE',
-  'GIT_SHALLOW_FILE',
-  'GIT_GRAFT_FILE',
-  'GIT_REPLACE_REF_BASE',
-  'GIT_NO_REPLACE_OBJECTS',
-  'GIT_NAMESPACE',
-  'GIT_CONFIG_SYSTEM',
-  'GIT_CONFIG_GLOBAL',
-  'GIT_CONFIG_NOSYSTEM',
-  'GIT_CONFIG_PARAMETERS',
-  'GIT_CONFIG_COUNT',
-  'HOME',
-  'XDG_CONFIG_HOME',
-] as const
-
-function assistedPushConfigurationEnvironment(): Record<
-  string,
-  string | undefined
-> {
-  const environment: Record<string, string | undefined> = {
-    ...nativeConfigurationEnvironment,
-  }
-  for (const name of gitRoutingEnvironmentNames) {
-    environment[name] = process.env[name]
-  }
-  for (const [name, value] of Object.entries(process.env)) {
-    if (
-      name.startsWith('GIT_CONFIG_KEY_') ||
-      name.startsWith('GIT_CONFIG_VALUE_')
-    ) {
-      environment[name] = value
-    }
-  }
-  return environment
-}
-
 /** A changed destination is a local push refusal, never permission to choose another remote. */
 export class AssistedCommitPushError extends Error {
   /** An acknowledged push's obsolete metadata obligation must not lock history. */
@@ -408,7 +368,7 @@ async function readConfiguration(
 ): Promise<ReadonlyArray<IConfigEntry>> {
   return backend().repositoryAssistedCommitPushConfiguration(
     repository.path,
-    assistedPushConfigurationEnvironment()
+    assistedCommitGitRoutingEnvironment()
   )
 }
 
@@ -495,7 +455,7 @@ export function captureAssistedCommitPushEnvironment(
   )
 
   const routing = JSON.stringify(
-    gitRoutingEnvironmentNames
+    assistedCommitGitRoutingEnvironmentNames
       .map(name => [name, variables.find(([key]) => key === name)?.[1]])
       .concat(
         variables
@@ -605,7 +565,7 @@ async function readConfigurationFiles(
         stdout: await backend().repositoryAssistedCommitConfigPath(
           repository.path,
           name,
-          assistedPushConfigurationEnvironment()
+          assistedCommitGitRoutingEnvironment()
         ),
       }
       if (result.stdout.length === 0) {
@@ -678,7 +638,7 @@ async function readConfigValues(
   return backend().repositoryAssistedCommitConfigValues(
     repository.path,
     name,
-    assistedPushConfigurationEnvironment()
+    assistedCommitGitRoutingEnvironment()
   )
 }
 
@@ -787,7 +747,7 @@ async function readAssistedCommitPushDestinationCore(
     repository.path,
     remote.name,
     false,
-    assistedPushConfigurationEnvironment()
+    assistedCommitGitRoutingEnvironment()
   )
   if (url.exitCode === 2) {
     return {
@@ -802,7 +762,7 @@ async function readAssistedCommitPushDestinationCore(
     repository.path,
     remote.name,
     true,
-    assistedPushConfigurationEnvironment()
+    assistedCommitGitRoutingEnvironment()
   )
   if (url.stdout !== urls.stdout || url.stdout.length <= 1) {
     return {
@@ -1327,7 +1287,7 @@ export async function completeAssistedCommitPushPublication(
     repository.path,
     destination.remote.name,
     true,
-    assistedPushConfigurationEnvironment()
+    assistedCommitGitRoutingEnvironment()
   )
   if (url.exitCode === 2) {
     throw new AssistedCommitPushError(
@@ -1464,7 +1424,7 @@ export async function completeAssistedCommitPushPublication(
         repository.path,
         key.name,
         staged,
-        assistedPushConfigurationEnvironment()
+        assistedCommitGitRoutingEnvironment()
       )
       if (parsed.length !== 1 || parsed[0] !== key.expected) {
         throw new Error(
@@ -1658,7 +1618,7 @@ export async function prepareAssistedCommitPushDestination(
     destination.remote.name,
     true,
     {
-      ...assistedPushConfigurationEnvironment(),
+      ...assistedCommitGitRoutingEnvironment(),
       GIT_CONFIG_PARAMETERS: getAssistedCommitPushConfigParameters(
         destination.remote.name,
         destination.rawPushURL,
