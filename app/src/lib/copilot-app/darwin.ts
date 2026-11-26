@@ -1,4 +1,4 @@
-import appPath from 'app-path'
+import { backend } from '../../backend/client'
 import { homedir } from '../../web/os'
 import { isAbsolute, join, normalize } from 'path'
 
@@ -35,10 +35,12 @@ export function getCopilotAppCandidates(
 export async function findCopilotAppCandidates(): Promise<
   ReadonlyArray<string>
 > {
-  const found = await appPath(bundleIdentifier).catch(error => {
-    log.debug('Could not locate GitHub Copilot using Launch Services', error)
-    return null
-  })
+  const found = await backend()
+    .resolveMacOSAppPath(bundleIdentifier)
+    .catch(error => {
+      log.debug('Could not locate GitHub Copilot using Launch Services', error)
+      return null
+    })
 
   return getCopilotAppCandidates(found, homedir())
 }

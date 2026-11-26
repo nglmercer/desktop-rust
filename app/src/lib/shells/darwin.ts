@@ -1,6 +1,6 @@
+import { backend } from '../../backend/client'
 import { spawn } from '../../web/child_process'
 import { assertNever } from '../fatal-error'
-import appPath from 'app-path'
 import { parseEnumValue } from '../enum'
 import type { FoundShell } from './shared'
 import type { IChildProcess } from '../process/child-process'
@@ -66,7 +66,7 @@ async function getShellInfo(
   const bundleIds = getBundleIDs(shell)
   for (const id of bundleIds) {
     try {
-      const path = await appPath(id)
+      const path = await backend().resolveMacOSAppPath(id)
       return { path, bundleID: id }
     } catch (error) {
       log.debug(

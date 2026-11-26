@@ -202,6 +202,45 @@ pub async fn validate_custom_integration_path(path: String) -> Result<Value> {
     Ok(json!({"is_valid": false}))
 }
 
+/// Resolve a macOS application bundle identifier through Launch Services.
+///
+/// AppleScript's `path to application id` is the stable host interface used
+/// here; the bundle identifier is restricted before interpolation into the
+/// script so it cannot alter the fixed expression.
+pub async fn resolve_macos_app_path(bundle_id: String) -> Result<String> {
+    anyhow::ensure!(
+        bundle_id.len() <= 256
+            && !bundle_id.is_empty()
+            && bundle_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-'),
+        "invalid macOS bundle identifier"
+    );
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!("POSIX path of (path to application id \"{bundle_id}\")");
+        let mut command = tokio::process::Command::new("/usr/bin/osascript");
+        command
+            .args(["-e", &script])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let output =
+            tokio::time::timeout(std::time::Duration::from_secs(3), command.output()).await??;
+        anyhow::ensure!(output.status.success(), "could not find the application");
+        anyhow::ensure!(output.stdout.len() <= 4096, "invalid application path");
+        let path = String::from_utf8(output.stdout)?;
+        let path = path.trim_end_matches(['\r', '\n']).trim_end_matches('/');
+        anyhow::ensure!(
+            path.starts_with('/') && path.ends_with(".app") && !path.contains('\0'),
+            "invalid application path"
+        );
+        return Ok(path.to_owned());
+    }
+    #[cfg(not(target_os = "macos"))]
+    anyhow::bail!("macOS application resolution is only available on macOS")
+}
+
 /// Parse a Windows command line using the API used by the legacy native addon.
 pub async fn parse_windows_integration_arguments(arguments: String) -> Result<Vec<String>> {
     anyhow::ensure!(

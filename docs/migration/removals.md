@@ -147,6 +147,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `string-argv` | parser local compatible para argumentos POSIX de integraciones en `app/src/lib/string-argv.ts` | `app/test/unit/string-argv-test.ts` |
 | `deep-equal` + `@types/deep-equal` | igualdad estructural estricta local en `app/src/lib/equality.ts` | `app/test/unit/structural-equality-test.ts` |
 | dependencia directa `prop-types` | se conserva solo como dependencia transitiva de componentes React que la requieren | typecheck/build |
+| `app-path` | resolución tipada de bundles macOS mediante Launch Services en el host Rust | compilación Rust/typecheck; comportamiento macOS cubierto por integración de shells/Copilot |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

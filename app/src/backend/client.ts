@@ -2154,6 +2154,33 @@ export class BackendClient {
     }
   }
 
+  /** Resolve a macOS application bundle identifier through the host. */
+  async resolveMacOSAppPath(bundleID: string): Promise<string> {
+    const value =
+      this.transport === 'wry'
+        ? await this.request('git_info', {
+            operation: { type: 'resolve_macos_app_path', bundle_id: bundleID },
+          })
+        : await this.request('resolve_macos_app_path', {
+            bundle_id: bundleID,
+          })
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      value.length > 4096 ||
+      !value.startsWith('/') ||
+      !value.endsWith('.app') ||
+      value.includes('\0')
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid macOS application path response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
   /** Parse Windows arguments with the same operating-system API used by the previous host. */
   async parseWindowsIntegrationArguments(
     argumentsString: string

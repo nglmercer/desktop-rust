@@ -324,6 +324,9 @@ enum ManagementOperation {
     ParseWindowsIntegrationArguments {
         arguments: String,
     },
+    ResolveMacosAppPath {
+        bundle_id: String,
+    },
     ReleaseChangelog {
         #[serde(default)]
         channel: Option<desktop_core::ReleaseNotesChannel>,
@@ -657,6 +660,9 @@ async fn execute(
         ApplicationOperation::Management(ParseWindowsIntegrationArguments { arguments }) => Ok(
             json!(desktop_core::parse_windows_integration_arguments(arguments).await?),
         ),
+        ApplicationOperation::Management(ResolveMacosAppPath { bundle_id }) => Ok(json!(
+            desktop_core::resolve_macos_app_path(bundle_id).await?
+        )),
         ApplicationOperation::Management(ReleaseChangelog { channel, limit }) => {
             anyhow::ensure!(
                 expected_repository.is_none(),

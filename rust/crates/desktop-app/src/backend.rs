@@ -107,6 +107,9 @@ enum GitInfoOperation {
     ParseWindowsIntegrationArguments {
         arguments: String,
     },
+    ResolveMacosAppPath {
+        bundle_id: String,
+    },
     OpenTerminal {
         repository_path: String,
         name: String,
@@ -2040,6 +2043,7 @@ impl Backend {
                             GitInfoOperation::ValidateCustomIntegration { path } => desktop_backend::validate_custom_integration_path(path).await,
                             GitInfoOperation::CloneDestinationStatus { path } => desktop_backend::clone_destination_status(Path::new(&path)).await.map(|status| serde_json::json!(status)),
                             GitInfoOperation::ParseWindowsIntegrationArguments { arguments } => desktop_backend::parse_windows_integration_arguments(arguments).await.map(|args| serde_json::json!(args)),
+                            GitInfoOperation::ResolveMacosAppPath { bundle_id } => desktop_backend::resolve_macos_app_path(bundle_id).await.map(serde_json::Value::String),
                             GitInfoOperation::OpenTerminal { repository_path, name, directory } => {
                                 let requested = PathBuf::from(repository_path);
                                 let canonical = desktop_backend::cancellation::blocking(move || Ok(requested.canonicalize()?)).await.map_err(|error| AppError::msg(error.to_string()))?;

@@ -166,9 +166,6 @@ importers:
       '@xterm/xterm':
         specifier: ^5.5.0
         version: 5.5.0
-      app-path:
-        specifier: ^3.3.0
-        version: 3.3.0
       codemirror:
         specifier: ^5.65.17
         version: 5.65.21
@@ -1296,10 +1293,6 @@ packages:
   ansi-styles@5.2.0:
     resolution: {integrity: sha512-Cxwpt2SfTzTtXcfOlzGEee8O+c+MmUgGrNiBcXnuWxuFJHe6a5Hz7qwhwe5OgaSYI0IJvkLqWX1ASG+cJOkEiA==}
     engines: {node: '>=10'}
-
-  app-path@3.3.0:
-    resolution: {integrity: sha512-EAgEXkdcxH1cgEePOSsmUtw9ItPl0KTxnh/pj9ZbhvbKbij9x0oX6PWpGnorDr0DS5AosLgoa5n3T/hZmKQpYA==}
-    engines: {node: '>=8'}
 
   argparse@1.0.10:
     resolution: {integrity: sha512-o5Roy6tNG4SL/FOkCAN6RzjiakZS25RLYFrcMttJqbdd8BWrnA+fGz57iN5Pb06pvBGvl5gQ0B48dJlslXvoTg==}
@@ -3825,10 +3818,6 @@ snapshots:
       color-convert: 2.0.1
 
   ansi-styles@5.2.0: {}
-
-  app-path@3.3.0:
-    dependencies:
-      execa: 1.0.0
 
   argparse@1.0.10:
     dependencies:
