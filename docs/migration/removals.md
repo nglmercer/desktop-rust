@@ -168,7 +168,6 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | Pieza | Estado actual | Condición de borrado final |
 |---|---|---|
 | `keytar`, `registry-js`, `fs-admin` | imports dirigidos a shims web o Rust | ningún consumidor ni test dependa del shim |
-| `desktop-notifications` | fuentes vendorizadas/resolución de tipos para consumidores existentes | reemplazo Rust/tipado completo en notificaciones |
 | `desktop-trampoline` | dependencia real en `app/package.json` | entorno Git/SSH/askpass servido completamente por Rust |
 | `printenvz` | helper Rust vendorizado usado por scripts de entorno de hooks | integración de hooks migrada o eliminada |
 | `dugite` | dependencia real para tabla de errores, tests y operaciones Git legacy restantes; ya no hay imports renderer del paquete | operaciones Git legacy migradas a operaciones Rust tipadas y tests sin dependencia directa |
@@ -186,9 +185,9 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | scripts npm residuales de release | publicación/versionado verificados con pnpm/Rust sin npm CLI |
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
-La línea base numérica viva está en `pnpm migration:status` (2 comprobaciones
-`transportKind`, 0 llamadas legacy Git, 0 imports renderer `dugite`, 0 imports `fs`, 0 imports
-`child_process`, 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
+La línea base numérica viva está en `pnpm migration:status` (0 comprobaciones
+operativas `transportKind`, 0 llamadas legacy Git medidas, 0 imports renderer `dugite`,
+0 imports `fs`, 0 imports `child_process`, 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva
 
