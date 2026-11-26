@@ -25,8 +25,10 @@ export function createTestAccountsStore(): AccountsStore {
 /**
  * Creates a fresh RepositoriesStore backed by a test database.
  */
-export function createTestRepositoriesStore(): RepositoriesStore {
-  return new RepositoriesStore(new TestRepositoriesDatabase())
+export function createTestRepositoriesStore(
+  databaseName?: string
+): RepositoriesStore {
+  return new RepositoriesStore(new TestRepositoriesDatabase(databaseName))
 }
 
 /**
@@ -121,10 +123,10 @@ export interface ITestStores {
  * This is the primary entry point for tests that need multiple stores.
  */
 export function createTestStores(
-  accountsStore = createTestAccountsStore()
+  accountsStore = createTestAccountsStore(),
+  repositoriesStore = createTestRepositoriesStore()
 ): ITestStores {
   const statsStore = new TestStatsStore()
-  const repositoriesStore = createTestRepositoriesStore()
   const pullRequestStore = createTestPullRequestStore(repositoriesStore)
   const signInStore = createTestSignInStore(accountsStore)
   const gitHubUserStore = createTestGitHubUserStore()

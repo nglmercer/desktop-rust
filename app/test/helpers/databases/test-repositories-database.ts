@@ -1,8 +1,8 @@
 import { RepositoriesDatabase } from '../../../src/lib/databases'
 
 export class TestRepositoriesDatabase extends RepositoriesDatabase {
-  public constructor() {
-    super('TestRepositoriesDatabase')
+  public constructor(name = 'TestRepositoriesDatabase') {
+    super(name)
   }
 
   public async reset(): Promise<void> {

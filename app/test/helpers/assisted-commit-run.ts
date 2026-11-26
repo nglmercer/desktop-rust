@@ -15,7 +15,10 @@ import { StatsStore } from '../../src/lib/stats'
 import { Repository } from '../../src/models/repository'
 import { ICopilotAssistedCommitRequest } from '../../src/models/copilot-assisted-commit'
 import { DiffSelectionType, DiffType } from '../../src/models/diff'
-import { createTestStores } from './app-store-test-harness'
+import {
+  createTestRepositoriesStore,
+  createTestStores,
+} from './app-store-test-harness'
 import { TestStatsDatabase } from './databases/test-stats-database'
 import { TestActivityMonitor } from './test-activity-monitor'
 import { fakePost } from '../fake-stats-post'
@@ -24,6 +27,8 @@ import {
   makeCopilotAccount,
   wholeSelectionResponse,
 } from './copilot-assisted-commit'
+
+let harnessDatabaseSequence = 0
 
 /** Real AppStore/Dispatcher and Git, with synthetic model/auth and UI clock only. */
 export async function createAssistedCommitRunHarness(
@@ -47,22 +52,28 @@ export async function createAssistedCommitRunHarness(
       process.env.GITHUB_DESKTOP_PREVIEW_FEATURES = previousPreviewFeatures
     }
   })
-  const stores = createTestStores(accountsStore)
+  const databaseSequence = ++harnessDatabaseSequence
+  const stores = createTestStores(
+    accountsStore,
+    createTestRepositoriesStore(
+      `TestRepositoriesDatabase-assisted-${databaseSequence}`
+    )
+  )
   const account = await stores.accountsStore.addAccount(makeCopilotAccount())
   if (account === null) {
     throw new Error('Could not install the synthetic credential session')
   }
   await stores.repositoriesStore['db'].delete()
   await stores.repositoriesStore['db'].open()
-  t.after(() => stores.repositoriesStore['db'].close())
-  const statsDb = new TestStatsDatabase()
+  const statsDb = new TestStatsDatabase(
+    `TestStatsDatabase-assisted-${databaseSequence}`
+  )
   await statsDb.reset()
   const statsStore = new StatsStore(
     statsDb,
     new TestActivityMonitor(),
     fakePost
   )
-  t.after(() => statsDb.close())
   const commits = t.mock.method(statsStore, 'recordCommit')
   const coordinator = new PullRequestCoordinator(
     stores.pullRequestStore,
