@@ -1,13 +1,17 @@
 import { vi } from 'vitest'
 import { writeFile } from 'fs/promises'
 import assert from 'node:assert'
-import { before, describe, it } from 'node:test'
+import { afterEach, before, beforeEach, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import type { CopyOptions } from 'fs'
 import * as Dugite from 'dugite'
 import { basename, join } from 'path'
 import { getProxyCommandPath } from 'process-proxy'
 import type { createAssistedCommitRunHarness } from '../../helpers/assisted-commit-run'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 import { Repository } from '../../../src/models/repository'
 import { GitHubRepository } from '../../../src/models/github-repository'
 import { Owner } from '../../../src/models/owner'
@@ -82,6 +86,9 @@ function resolveHookPopups(
 }
 
 describe('AppStore assisted runs with real hook interception', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   for (const action of ['ignore', 'decline', 'cancel'] as const) {
     it(`${action} settles the native hook failure and never skips later hooks or leaves run commits behind`, async t => {
       const source = await fixtures.seed(t, { one: 'one\n', two: 'two\n' })
@@ -381,6 +388,9 @@ describe('AppStore assisted runs with real hook interception', () => {
 })
 
 describe('assisted and ordinary hook prompt ownership', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   it('queues ordinary hook failures behind an assisted prompt without losing their resolver', async t => {
     const source = await fixtures.seed(t, { file: 'before\n' })
     await writeFile(join(source.path, 'file'), 'after\n')

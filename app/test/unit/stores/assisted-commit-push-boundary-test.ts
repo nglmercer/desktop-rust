@@ -1,6 +1,13 @@
 /* eslint-disable no-sync */
 import assert from 'node:assert'
-import { before, describe, it, type TestContext } from 'node:test'
+import {
+  afterEach,
+  before,
+  beforeEach,
+  describe,
+  it,
+  type TestContext,
+} from 'node:test'
 import { vi } from 'vitest'
 import { backend, overrideBackendForTests } from '../../../src/backend/client'
 import {
@@ -12,6 +19,11 @@ import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
 import type { PathLike } from 'fs'
 import { basename, join, sep } from 'path'
+import {
+  installNodeHostBridge,
+  setNodeHostBridgeReadRegularVerifiedHook,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 let harness: typeof import('../../helpers/assisted-commit-run')
 let fixtures: typeof import('../../helpers/assisted-commit')
@@ -58,7 +70,7 @@ let afterMarkerUnlink: ((path: string) => Promise<void>) | undefined
 let afterPublicationLockClose: ((path: string) => Promise<void>) | undefined
 let afterModeStat: ((path: PathLike) => Promise<void>) | undefined
 let afterFinalPublicationLockStat: ((path: string) => void) | undefined
-const publicationLockReadFlags: number[] = []
+const publicationLockVerifiedReads: string[] = []
 let afterPublicationTrackingProbe: ((path: string) => Promise<void>) | undefined
 let afterAlternateRoutingRead: ((path: string) => Promise<void>) | undefined
 let denyUnlink: ((path: PathLike) => Promise<boolean>) | undefined
@@ -79,7 +91,6 @@ before(async () => {
   const resolvePath = FileSystem.realpath
   const readFile = FileSystem.readFile
   const lstatSync = FileSystemSync.lstatSync
-  const openSync = FileSystemSync.openSync
   const syncExports = {
     ...Object.fromEntries(
       Object.entries(FileSystemSync).filter(([name]) => name !== 'default')
@@ -101,24 +112,47 @@ before(async () => {
       }
       return result
     },
-    openSync: (...args: Parameters<typeof FileSystemSync.openSync>) => {
-      if (
-        capturePushes &&
-        typeof args[0] === 'string' &&
-        basename(args[0]) === 'config.lock'
-      ) {
-        assert.strictEqual(typeof args[1], 'number')
-        if (typeof args[1] === 'number') {
-          publicationLockReadFlags.push(args[1])
-        }
-      }
-      return openSync(...args)
-    },
   }
   vi.doMock('fs', async () => ({
     default: syncExports,
     ...syncExports,
   }))
+  vi.doMock('../../../src/web/fs.ts', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/web/fs')>(
+      '../../../src/web/fs.ts'
+    )
+    return {
+      ...actual,
+      lstatSync: (...args: Parameters<typeof actual.lstatSync>) => {
+        if (denySyncStat?.(args[0] as PathLike)) {
+          denySyncStat = undefined
+          throw syncFailure ?? new Error('Synthetic metadata read failure')
+        }
+        const result = actual.lstatSync(...args)
+        if (
+          typeof args[0] === 'string' &&
+          basename(args[0]) === 'config.lock' &&
+          afterFinalPublicationLockStat !== undefined
+        ) {
+          const mutate = afterFinalPublicationLockStat
+          afterFinalPublicationLockStat = undefined
+          mutate(args[0])
+        }
+        return result
+      },
+      readRegularFileVerifiedSync: (
+        ...args: Parameters<typeof actual.readRegularFileVerifiedSync>
+      ) => {
+        if (
+          typeof args[0] === 'string' &&
+          basename(args[0]) === 'config.lock'
+        ) {
+          publicationLockVerifiedReads.push(args[0])
+        }
+        return actual.readRegularFileVerifiedSync(...args)
+      },
+    }
+  })
   vi.doMock('dugite', async () => ({
     ...Dugite,
     exec: async (
@@ -407,7 +441,7 @@ function reset() {
   afterPublicationLockClose = undefined
   afterModeStat = undefined
   afterFinalPublicationLockStat = undefined
-  publicationLockReadFlags.length = 0
+  publicationLockVerifiedReads.length = 0
   afterPublicationTrackingProbe = undefined
   afterAlternateRoutingRead = undefined
   denyUnlink = undefined
@@ -417,6 +451,51 @@ function reset() {
 }
 
 let rustClient: ReturnType<typeof backend>
+
+function parseDetailedStatusOutput(output: string) {
+  const records = output.split('\0')
+  const result: unknown[] = []
+  const raw = (value: string) => ({ bytes: [...Buffer.from(value)] })
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index]
+    if (record.length === 0) continue
+    if (record.startsWith('# ')) {
+      result.push({ kind: 'header', value: raw(record.slice(2)) })
+      continue
+    }
+    if (record.startsWith('? ')) {
+      result.push({
+        kind: 'entry',
+        entry_kind: '?',
+        status_code: '??',
+        submodule_status_code: '????',
+        path: raw(record.slice(2)),
+        old_path: null,
+        rename_or_copy_score: null,
+      })
+      continue
+    }
+    if (record.startsWith('! ')) continue
+    const kind = record[0]
+    const fields = kind === '1' ? 9 : kind === '2' ? 10 : 11
+    const split = record.split(' ')
+    const parts = [
+      ...split.slice(0, fields - 1),
+      split.slice(fields - 1).join(' '),
+    ]
+    const score = kind === '2' ? Number(parts[8].slice(1)) : null
+    result.push({
+      kind: 'entry',
+      entry_kind: kind,
+      status_code: parts[1],
+      submodule_status_code: parts[2],
+      path: raw(parts[fields - 1]),
+      old_path: kind === '2' ? raw(records[++index]) : null,
+      rename_or_copy_score: score,
+    })
+  }
+  return result
+}
 
 /**
  * These cases inject faults by patching module objects or Git env vars that the
@@ -431,6 +510,31 @@ function nodeBackend(t: TestContext) {
         pathExists: (path: string) => rustClient.pathExists(path),
         directoryExists: (path: string) => rustClient.directoryExists(path),
         repositoryType: (path: string) => rustClient.repositoryType(path),
+        detailedRepositoryStatus: async (
+          path: string,
+          includeUntracked = true,
+          options = {},
+          creation = false
+        ) => {
+          if (statusFailure !== undefined && pushArguments.length > 0) {
+            const failure = statusFailure
+            statusFailure = undefined
+            historyFailure = undefined
+            throw failure
+          }
+          const result = await actualExec(
+            [
+              '--no-optional-locks',
+              'status',
+              '--branch',
+              '--porcelain=2',
+              '-z',
+              ...(includeUntracked ? ['--untracked-files=all'] : []),
+            ],
+            path
+          )
+          return parseDetailedStatusOutput(result.stdout) as never
+        },
         canonicalMutationPath: (path: string) =>
           rustClient.canonicalMutationPath(path),
         repositoryRendererCommit: async (path: string, ref: string) => {
@@ -583,6 +687,10 @@ function nodeBackend(t: TestContext) {
       {
         get(target, prop) {
           if (prop in target) return (target as any)[prop]
+          const fallback = (rustClient as any)[prop]
+          if (typeof fallback === 'function') {
+            return fallback.bind(rustClient)
+          }
           return (...args: unknown[]) => {
             console.error(
               'MISSING BACKEND METHOD',
@@ -599,6 +707,9 @@ function nodeBackend(t: TestContext) {
 }
 
 describe('assisted native push boundary', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   for (const empty of [false, true]) {
     it(`never publishes tracking into configuration covered by a foreign lease, empty ${empty}`, async t => {
       reset()
@@ -775,7 +886,7 @@ describe('assisted native push boundary', () => {
     )
   })
 
-  it('reads final publication bytes through a nonblocking descriptor tied to the owned lock', async t => {
+  it('reads final publication bytes through a pinned host descriptor tied to the owned lock', async t => {
     reset()
     t.after(reset)
     const source = await fixtures.seed(t, { file: 'before\n' })
@@ -791,13 +902,11 @@ describe('assisted native push boundary', () => {
     )
     assert.ok(outcome.kind === 'pushed')
     assert.strictEqual(outcome.refreshError, undefined)
-    assert.ok(publicationLockReadFlags.length > 0)
-    for (const flags of publicationLockReadFlags) {
-      assert.strictEqual(
-        flags & (FileSystemSync.constants.O_NONBLOCK ?? 0),
-        FileSystemSync.constants.O_NONBLOCK ?? 0
+    assert.ok(
+      publicationLockVerifiedReads.some(
+        path => basename(path) === 'config.lock'
       )
-    }
+    )
     assert.strictEqual(await remote.tip(), outcome.result.head.sha)
     assert.strictEqual(await fixtures.count(source), 2)
   })
@@ -815,13 +924,18 @@ describe('assisted native push boundary', () => {
     const original = await FileSystem.readFile(config)
     let lockPath: string | undefined
     let replacement: Buffer | undefined
-    afterFinalPublicationLockStat = path => {
+    setNodeHostBridgeReadRegularVerifiedHook(path => {
+      if (basename(path) !== 'config.lock') {
+        return
+      }
+      setNodeHostBridgeReadRegularVerifiedHook(undefined)
       lockPath = path
       replacement = FileSystemSync.readFileSync(path)
       const mode = FileSystemSync.statSync(path).mode & 0o777
       FileSystemSync.renameSync(path, `${path}-original`)
       FileSystemSync.writeFileSync(path, replacement, { mode })
-    }
+    })
+    t.after(() => setNodeHostBridgeReadRegularVerifiedHook(undefined))
     capturePushes = true
     const outcome = await h.dispatcher.createCopilotAssistedCommits(
       repository,

@@ -850,6 +850,32 @@ export class Dir {
 export const opendirSync = (path: PathLike) =>
   new Dir(toPath(path), callSync('readdir', { path: toPath(path) }))
 
+export interface IVerifiedRegularFileRead {
+  readonly bytes: Buffer
+  readonly physical: string | null
+  readonly stat: Stats
+  readonly target: Stats | null
+  readonly matches: boolean
+}
+
+/** Read a file through one pinned host open while re-certifying its target. */
+export function readRegularFileVerifiedSync(
+  path: PathLike,
+  maxBytes = 64 * 1024 * 1024
+): IVerifiedRegularFileRead {
+  const reply = callSync('read-regular-verified', {
+    path: toPath(path),
+    maxBytes,
+  }) as any
+  return {
+    bytes: Buffer.from(bridge().decodeBase64(reply.data ?? '')),
+    physical: reply.physical ?? null,
+    stat: new Stats(reply.stat),
+    target: reply.target == null ? null : new Stats(reply.target),
+    matches: reply.matches === true,
+  }
+}
+
 // Legacy numeric descriptors are emulated by path. Each one keeps its
 // cursor, and the identity of the file it was opened on: a read after that
 // file was replaced fails instead of returning another file's bytes.
@@ -1288,8 +1314,14 @@ export class WriteStream extends Writable {
     encoding: BufferEncoding,
     callback: (error?: Error | null) => void
   ) {
-    const bytes =
-      chunk instanceof Uint8Array ? chunk : Buffer.from(String(chunk), encoding)
+    const bytes = ArrayBuffer.isView(chunk)
+      ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+      : chunk instanceof ArrayBuffer
+        ? new Uint8Array(chunk)
+        : Buffer.from(
+            String(chunk),
+            (encoding as string) === 'buffer' ? 'utf8' : encoding
+          )
     const data = bridge().encodeBase64(bytes)
     this.pending = this.pending.then(() =>
       call('write-file', {
@@ -1347,6 +1379,7 @@ export default {
   symlinkSync,
   realpathSync,
   opendirSync,
+  readRegularFileVerifiedSync,
   openSync,
   closeSync,
   fstatSync,

@@ -1,7 +1,10 @@
 import { vi } from 'vitest'
 import { spawn as nodeSpawn } from 'node:child_process'
 import {
+  closeSync,
+  fstatSync,
   lstatSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -13,6 +16,14 @@ const LIMITS = {
   block: 64 * 1024,
   inputBudget: 1024 * 1024,
   outputWindow: 256 * 1024,
+}
+
+let readRegularVerifiedHook: ((path: string) => void) | undefined
+
+export function setNodeHostBridgeReadRegularVerifiedHook(
+  hook: ((path: string) => void) | undefined
+) {
+  readRegularVerifiedHook = hook
 }
 
 interface INodeChild {
@@ -506,6 +517,47 @@ export function installNodeHostBridge() {
     invokeSync(channel: string, options: any): unknown {
       if (channel === 'desktop.io.fs-lstat') {
         return statResult(lstatSync(options.path, { bigint: true }))
+      }
+      if (channel === 'desktop.io.fs-stat') {
+        return statResult(statSync(options.path, { bigint: true }))
+      }
+      if (channel === 'desktop.io.fs-read-regular-verified') {
+        const descriptor = openSync(options.path, 'r')
+        try {
+          const held = fstatSync(descriptor, { bigint: true })
+          if (!held.isFile()) {
+            return {
+              data: '',
+              physical: null,
+              stat: statResult(held),
+              target: null,
+              matches: false,
+            }
+          }
+          if (held.size > BigInt(options.maxBytes)) {
+            throw Object.assign(new Error('EFBIG: file too large'), {
+              code: 'EFBIG',
+            })
+          }
+          readRegularVerifiedHook?.(options.path)
+          const physical = realpathSync.native(options.path)
+          const bytes = readFileSync(descriptor)
+          if (bytes.byteLength > options.maxBytes) {
+            throw Object.assign(new Error('EFBIG: file too large'), {
+              code: 'EFBIG',
+            })
+          }
+          const target = lstatSync(physical, { bigint: true })
+          return {
+            data: bytes.toString('base64'),
+            physical,
+            stat: statResult(held),
+            target: statResult(target),
+            matches: target.dev === held.dev && target.ino === held.ino,
+          }
+        } finally {
+          closeSync(descriptor)
+        }
       }
       if (channel === 'desktop.io.fs-realpath') {
         return realpathSync.native(options.path)

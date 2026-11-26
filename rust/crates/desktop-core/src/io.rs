@@ -931,6 +931,70 @@ fn open_options(o: &Value) -> Result<std::fs::OpenOptions> {
     Ok(options)
 }
 
+fn same_file_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        a.dev() == b.dev() && a.ino() == b.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        let a = metadata_json(a);
+        let b = metadata_json(b);
+        a["dev"] == b["dev"] && a["ino"] == b["ino"]
+    }
+}
+
+/// Open, read and re-certify the canonical target of a regular file. The
+/// caller compares the returned versions; performing the sequence inside one
+/// host call preserves the legacy non-yielding fence shape.
+fn read_regular_verified(o: &Value) -> Result<Value> {
+    let target = PathBuf::from(string(o, "path")?);
+    let max_bytes = unsigned(o, "maxBytes")?;
+    let mut file =
+        File::open(&target).map_err(|e| io_error(&e, &format!("open '{}'", target.display())))?;
+    let held = file
+        .metadata()
+        .map_err(|e| io_error(&e, &format!("stat '{}'", target.display())))?;
+    if !held.is_file() {
+        return Ok(json!({
+            "data": "",
+            "physical": Value::Null,
+            "stat": metadata_json(&held),
+            "target": Value::Null,
+            "matches": false,
+        }));
+    }
+    if held.len() > max_bytes {
+        return Err(AppError::Coded {
+            code: "EFBIG".into(),
+            message: format!("EFBIG: file too large, read '{}'", target.display()),
+        });
+    }
+    let physical = std::fs::canonicalize(&target)
+        .map_err(|e| io_error(&e, &format!("realpath '{}'", target.display())))?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| io_error(&e, &format!("read '{}'", target.display())))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(AppError::Coded {
+            code: "EFBIG".into(),
+            message: format!("EFBIG: file too large, read '{}'", target.display()),
+        });
+    }
+    let current = std::fs::symlink_metadata(&physical)
+        .map_err(|e| io_error(&e, &format!("lstat '{}'", physical.display())))?;
+    Ok(json!({
+        "data": base64_encode(&bytes),
+        "physical": physical.to_string_lossy(),
+        "stat": metadata_json(&held),
+        "target": metadata_json(&current),
+        "matches": same_file_identity(&held, &current),
+    }))
+}
+
 fn open_handle(o: &Value) -> Result<Value> {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let target = PathBuf::from(string(o, "path")?);
@@ -962,6 +1026,7 @@ fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
     };
 
     match operation {
+        "read-regular-verified" => read_regular_verified(o),
         "open" => open_handle(o),
         "handle-stat" => {
             let entry = file_handle(o)?;
@@ -1942,6 +2007,37 @@ mod tests {
             b"original bytes"
         );
         fs_invoke("handle-close", &json!({"id": read_id})).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn read_regular_verified_pins_the_open_file_and_reports_its_target() {
+        let dir = temp_dir("read-regular-verified");
+        let file = dir.join("regular");
+        std::fs::write(&file, b"verified bytes").unwrap();
+        let result = fs_invoke(
+            "read-regular-verified",
+            &json!({ "path": file, "maxBytes": 1024u64 }),
+        )
+        .unwrap();
+        assert_eq!(
+            base64_decode(result["data"].as_str().unwrap()).unwrap(),
+            b"verified bytes"
+        );
+        assert_eq!(result["matches"], true);
+        assert!(result["target"].is_object());
+        let physical = result["physical"].as_str().unwrap();
+        assert!(physical.ends_with("regular"));
+
+        let directory = dir.join("directory");
+        std::fs::create_dir(&directory).unwrap();
+        let result = fs_invoke(
+            "read-regular-verified",
+            &json!({ "path": directory, "maxBytes": 1024u64 }),
+        )
+        .unwrap();
+        assert_eq!(result["matches"], false);
+        assert!(result["target"].is_null());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

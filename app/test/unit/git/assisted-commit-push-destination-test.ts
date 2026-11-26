@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'node:test'
 import { cp, mkdir, symlink, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { Repository } from '../../../src/models/repository'
@@ -13,8 +13,15 @@ import { addBareRemote } from '../../helpers/assisted-commit-push'
 import { rawGit, seed, tip } from '../../helpers/assisted-commit'
 import { createTempDirectory } from '../../helpers/temp'
 import { acquireAssistedCommitGitLease } from '../../../src/lib/git/repository-operation'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 describe('frozen assisted push destination inputs', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   it('round-trips Windows-shaped destination paths through native configuration serialization', async t => {
     const source = await seed(t, { file: 'before\n' })
     const target = join(await createTempDirectory(t), 'rewrite-config')

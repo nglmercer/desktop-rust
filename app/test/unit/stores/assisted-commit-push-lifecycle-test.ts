@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'node:test'
 import { cp, rename, rm, symlink, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { Repository } from '../../../src/models/repository'
@@ -7,6 +7,10 @@ import { createAssistedCommitRunHarness } from '../../helpers/assisted-commit-ru
 import { addBareRemote } from '../../helpers/assisted-commit-push'
 import { count, rawGit, seed, tip } from '../../helpers/assisted-commit'
 import { createTempDirectory } from '../../helpers/temp'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 import {
   deferred,
   wholeSelectionResponse,
@@ -19,6 +23,9 @@ import { AccountsStore } from '../../../src/lib/stores/accounts-store'
 import { AsyncInMemoryStore, InMemoryStore } from '../../helpers/stores'
 
 describe('assisted push lifecycle ownership', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   for (const change of ['rotation', 'replacement'] as const) {
     it(`preserves the issuing session across push-only retry after credential ${change}`, async t => {
       let now = Date.now()

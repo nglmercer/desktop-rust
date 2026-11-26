@@ -1,12 +1,16 @@
 import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, describe, it } from 'node:test'
+import { afterEach, before, beforeEach, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import type { CopyOptions } from 'fs'
 import * as Dugite from 'dugite'
 import { basename, join } from 'path'
 import { getProxyCommandPath } from 'process-proxy'
 import type { createAssistedCommitRunHarness } from '../../helpers/assisted-commit-run'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 let harness: typeof import('../../helpers/assisted-commit-run')
 let fixtures: typeof import('../../helpers/assisted-commit')
@@ -69,6 +73,9 @@ function resolveHookPopups(
 }
 
 describe('assisted push with native hook interception', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   it('preserves the configured remote name and exact frozen ref update in native pre-push input', async t => {
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source)

@@ -1,16 +1,13 @@
-import { lstat, open, realpath, rename, stat } from 'fs/promises'
+import { lstat, open, realpath, rename, stat } from '../../web/fs-promises'
 import { homedir } from '../../web/os'
 import {
   constants,
-  closeSync,
-  fstatSync,
   lstatSync,
-  openSync,
-  readFileSync,
+  readRegularFileVerifiedSync,
   readdirSync,
   realpathSync,
   statSync,
-} from 'fs'
+} from '../../web/fs'
 import { GitErrorKind } from './error-kind'
 import {
   basename,
@@ -318,35 +315,16 @@ async function readRegularConfigurationInput(path: string) {
 function readRegularConfigurationInputSync(path: string) {
   try {
     // eslint-disable-next-line no-sync
-    if (!statSync(path).isFile()) {
+    const verified = readRegularFileVerifiedSync(path)
+    if (
+      !verified.stat.isFile() ||
+      verified.target === null ||
+      !verified.target.isFile() ||
+      !verified.matches
+    ) {
       throw new AssistedCommitFileVersionMismatchError(path)
     }
-    // eslint-disable-next-line no-sync
-    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK)
-    try {
-      // eslint-disable-next-line no-sync
-      const held = fstatSync(descriptor)
-      if (!held.isFile()) {
-        throw new AssistedCommitFileVersionMismatchError(path)
-      }
-      // eslint-disable-next-line no-sync
-      const physical = realpathSync.native(path)
-      // eslint-disable-next-line no-sync
-      const bytes = readFileSync(descriptor)
-      // eslint-disable-next-line no-sync
-      const current = lstatSync(physical)
-      if (
-        !current.isFile() ||
-        current.dev !== held.dev ||
-        current.ino !== held.ino
-      ) {
-        throw new AssistedCommitFileVersionMismatchError(path)
-      }
-      return { physical, bytes }
-    } finally {
-      // eslint-disable-next-line no-sync
-      closeSync(descriptor)
-    }
+    return { physical: verified.physical, bytes: verified.bytes }
   } catch (error) {
     if (isErrnoException(error) && error.code === 'ENOENT') {
       let parent = dirname(path)
@@ -553,7 +531,11 @@ async function readPushResources(repository: Repository) {
     await Promise.all(
       resources.map(async path => {
         const stat = await lstat(path, { bigint: true })
-        return [stat.dev, stat.ino, stat.mode & BigInt(0o170000)].join(':')
+        return [
+          stat.dev,
+          stat.ino,
+          (stat.mode as bigint) & BigInt(0o170000),
+        ].join(':')
       })
     )
   )
@@ -588,8 +570,8 @@ async function readAlternateRoutingPaths(
       }
       return text
         .split(/\r?\n/)
-        .filter(path => path.length > 0 && !path.startsWith('#'))
-        .map(path => ({ base: directory, path }))
+        .filter((path: string) => path.length > 0 && !path.startsWith('#'))
+        .map((path: string) => ({ base: directory, path }))
     }),
   ]
   // Native discovery owns the graph. Only retain raw literal edges here;
@@ -1051,7 +1033,9 @@ async function readAssistedCommitPushDestinationCore(
           throw new AssistedCommitFileVersionMismatchError(path)
         }
         // eslint-disable-next-line no-sync
-        pending.push(...readdirSync(path).map(name => join(path, name)))
+        pending.push(
+          ...readdirSync(path).map((name: string) => join(path, name))
+        )
       } catch (error) {
         if (isErrnoException(error) && error.code === 'ENOENT') {
           continue
@@ -1386,7 +1370,7 @@ export async function completeAssistedCommitPushPublication(
       { publicationStale: true }
     )
   }
-  const mode = (await lstat(configPath)).mode & 0o777
+  const mode = Number((await lstat(configPath)).mode) & 0o777
   verifyOriginalOwner()
   let failed = false
   let failure: unknown
@@ -1514,52 +1498,37 @@ export async function completeAssistedCommitPushPublication(
       closedLock.isSymbolicLink() ||
       closedLock.dev !== lock.stat.dev ||
       closedLock.ino !== lock.stat.ino ||
-      (closedLock.mode & 0o777) !== mode
+      (Number(closedLock.mode) & 0o777) !== mode
     ) {
       throw new Error(
         'Publication configuration lock changed before installation'
       )
     }
     // eslint-disable-next-line no-sync
-    const descriptor = openSync(
-      lock.path,
-      constants.O_RDONLY | constants.O_NONBLOCK
-    )
-    try {
-      // eslint-disable-next-line no-sync
-      const reading = fstatSync(descriptor)
-      if (
-        !reading.isFile() ||
-        reading.dev !== lock.stat.dev ||
-        reading.ino !== lock.stat.ino ||
-        (reading.mode & 0o777) !== mode ||
-        reading.size !== staged.length ||
-        // eslint-disable-next-line no-sync
-        !readFileSync(descriptor).equals(staged)
-      ) {
-        throw new Error(
-          'Publication configuration lock changed before installation'
-        )
-      }
-      // eslint-disable-next-line no-sync
-      const current = lstatSync(lock.path)
-      if (
-        !current.isFile() ||
-        current.isSymbolicLink() ||
-        current.dev !== reading.dev ||
-        current.ino !== reading.ino ||
-        current.mode !== reading.mode ||
-        current.size !== reading.size ||
-        current.mtimeMs !== reading.mtimeMs ||
-        current.ctimeMs !== reading.ctimeMs
-      ) {
-        throw new Error(
-          'Publication configuration lock changed before installation'
-        )
-      }
-    } finally {
-      // eslint-disable-next-line no-sync
-      closeSync(descriptor)
+    const verified = readRegularFileVerifiedSync(lock.path)
+    const reading = verified.stat
+    const current = verified.target
+    if (
+      !verified.matches ||
+      current === null ||
+      !reading.isFile() ||
+      reading.dev !== lock.stat.dev ||
+      reading.ino !== lock.stat.ino ||
+      (Number(reading.mode) & 0o777) !== mode ||
+      reading.size !== staged.length ||
+      !verified.bytes.equals(staged) ||
+      !current.isFile() ||
+      current.isSymbolicLink() ||
+      current.dev !== reading.dev ||
+      current.ino !== reading.ino ||
+      current.mode !== reading.mode ||
+      current.size !== reading.size ||
+      current.mtimeMs !== reading.mtimeMs ||
+      current.ctimeMs !== reading.ctimeMs
+    ) {
+      throw new Error(
+        'Publication configuration lock changed before installation'
+      )
     }
     await rename(lock.path, configPath)
     lock.consumed = true
