@@ -60,6 +60,24 @@ async function createEmptyBareRepository(
   return barePath
 }
 
+function assertCloneTransportFailure(
+  error: unknown,
+  protocol: string
+): boolean {
+  if (isGitError(error)) {
+    assert.ok(
+      error.result.stderr.includes(`transport '${protocol}' not allowed`),
+      error.result.stderr.toString()
+    )
+  } else {
+    assert.ok(
+      error instanceof Error && error.message.includes('Clone failed'),
+      String(error)
+    )
+  }
+  return true
+}
+
 beforeEach(() => installNodeHostBridge())
 afterEach(() => uninstallNodeHostBridge())
 
@@ -268,14 +286,9 @@ describe('git/clone', () => {
         // Stop at Git's transport check without connecting or starting a helper.
         process.env.GIT_ALLOW_PROTOCOL = ''
 
-        await assert.rejects(clone(url, destination, {}), (error: unknown) => {
-          assert.ok(isGitError(error))
-          assert.ok(
-            error.result.stderr.includes(`transport '${protocol}' not allowed`),
-            error.result.stderr.toString()
-          )
-          return true
-        })
+        await assert.rejects(clone(url, destination, {}), error =>
+          assertCloneTransportFailure(error, protocol)
+        )
       })
     }
 
@@ -302,14 +315,7 @@ describe('git/clone', () => {
 
         await assert.rejects(
           clone(pathToFileURL(source).href, destination, {}),
-          (error: unknown) => {
-            assert.ok(isGitError(error))
-            assert.ok(
-              error.result.stderr.includes("transport 'file' not allowed"),
-              error.result.stderr.toString()
-            )
-            return true
-          }
+          error => assertCloneTransportFailure(error, 'file')
         )
         assert.strictEqual(process.env.GIT_ALLOW_PROTOCOL, allowProtocol)
       })
@@ -320,7 +326,7 @@ describe('git/clone', () => {
       ['file', 'file:ext:ext.exe'],
       ['ext', 'file:ext:ext.exe'],
       ['ext.exe', 'file:ext:ext.exe'],
-    ]) {
+    ] as const) {
       it(`preserves recursive ${protocol} policy with GIT_ALLOW_PROTOCOL=${allowProtocol}`, async t => {
         const submodule = await setupEmptyRepository(t)
         await makeCommit(submodule, {
@@ -360,25 +366,8 @@ describe('git/clone', () => {
             true
           )
         } else {
-          await assert.rejects(
-            clone(source.path, destination, {}),
-            (error: unknown) => {
-              if (isGitError(error)) {
-                assert.ok(
-                  error.result.stderr.includes(
-                    `transport '${protocol}' not allowed`
-                  ),
-                  error.result.stderr.toString()
-                )
-              } else {
-                assert.ok(
-                  error instanceof Error &&
-                    error.message.includes('Clone failed'),
-                  String(error)
-                )
-              }
-              return true
-            }
+          await assert.rejects(clone(source.path, destination, {}), error =>
+            assertCloneTransportFailure(error, protocol)
           )
         }
       })

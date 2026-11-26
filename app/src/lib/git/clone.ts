@@ -216,7 +216,6 @@ async function cloneCore(
   }
 
   const inheritedGitConfiguration =
-    process.env.GIT_ALLOW_PROTOCOL !== undefined ||
     process.env.GIT_CONFIG_PARAMETERS !== undefined
   if (options.fallbackAccount === undefined && !inheritedGitConfiguration) {
     const parser =
@@ -235,6 +234,9 @@ async function cloneCore(
           default_branch: defaultBranch,
           ...(options.branch === undefined ? {} : { branch: options.branch }),
           ...(proxy === undefined ? {} : { proxy }),
+          ...(process.env.GIT_ALLOW_PROTOCOL === undefined
+            ? {}
+            : { allow_protocol: process.env.GIT_ALLOW_PROTOCOL }),
         },
         {
           deadlineMs: 3_600_000,

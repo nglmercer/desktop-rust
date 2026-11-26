@@ -3775,10 +3775,21 @@ export class BackendClient {
       readonly branch?: string
       readonly default_branch?: string
       readonly proxy?: { readonly http?: string; readonly https?: string }
+      readonly allow_protocol?: string
     },
     options: BackendRequestOptions = {}
   ): Promise<void> {
     validateRemoteProxy(input.proxy, 'clone')
+    if (
+      input.allow_protocol !== undefined &&
+      (input.allow_protocol.length > 4096 ||
+        [...input.allow_protocol].some(character => {
+          const code = character.codePointAt(0) ?? 0
+          return code === 0 || code <= 31 || (code >= 127 && code <= 159)
+        }))
+    ) {
+      throw new TypeError('Invalid clone protocol allowlist')
+    }
     const request = {
       ...input,
       recursive: true,

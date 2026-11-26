@@ -54,22 +54,24 @@ pub(crate) async fn run_resolution_blob(path: &Path, args: &[OsString]) -> Resul
 
 /// Apply Desktop's clone transport policy after URL rewrites, including when
 /// an inherited allowlist would otherwise override Git's protocol settings.
+#[cfg(any(test, not(any(target_os = "linux", target_os = "android"))))]
 pub(crate) async fn run_clone(
     path: &Path,
     args: &[OsString],
     report_progress: bool,
 ) -> Result<RawOutput> {
-    run_clone_inner(path, args, report_progress, &[], None).await
+    run_clone_inner(path, args, report_progress, &[], None, None).await
 }
 
-/// Run clone with explicitly reviewed proxy environment values.
-pub(crate) async fn run_clone_with_proxy(
+/// Run clone with explicitly reviewed proxy and protocol environment values.
+pub(crate) async fn run_clone_with_transport(
     path: &Path,
     args: &[OsString],
     report_progress: bool,
-    proxy: &crate::RendererProxy,
+    proxy: Option<&crate::RendererProxy>,
+    allow_protocol: Option<&str>,
 ) -> Result<RawOutput> {
-    run_clone_inner(path, args, report_progress, &[], Some(proxy)).await
+    run_clone_inner(path, args, report_progress, &[], proxy, allow_protocol).await
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -89,7 +91,7 @@ pub(crate) async fn run_clone_with_inherited_fd(
         descriptors.iter().all(|fd| *fd >= 3),
         "Clone directory descriptor overlaps a standard stream"
     );
-    run_clone_inner(path, args, report_progress, &descriptors, None).await
+    run_clone_inner(path, args, report_progress, &descriptors, None, None).await
 }
 
 async fn run_clone_inner(
@@ -98,6 +100,7 @@ async fn run_clone_inner(
     report_progress: bool,
     inherited_fds: &[i32],
     proxy: Option<&crate::RendererProxy>,
+    allow_protocol: Option<&str>,
 ) -> Result<RawOutput> {
     let mut command = git_native_paths(None);
     if let Some(proxy) = proxy {
@@ -160,10 +163,7 @@ async fn run_clone_inner(
         .env("GIT_CLONE_PROTECTION_ACTIVE", "false");
     if crate::git_credentials::clone::active() {
         command.env("GIT_ALLOW_PROTOCOL", "https");
-    } else if let Some(value) = std::env::var_os("GIT_ALLOW_PROTOCOL") {
-        let value = value
-            .into_string()
-            .map_err(|_| anyhow::anyhow!("Invalid Git protocol allowlist"))?;
+    } else if let Some(value) = allow_protocol {
         let filtered = value
             .split(':')
             .filter(|protocol| {
@@ -172,6 +172,8 @@ async fn run_clone_inner(
             .collect::<Vec<_>>()
             .join(":");
         command.env("GIT_ALLOW_PROTOCOL", filtered);
+    } else {
+        command.env_remove("GIT_ALLOW_PROTOCOL");
     }
     let sender = report_progress.then(crate::hook_progress::sender).flatten();
     let emit_clone_progress = sender.is_some();

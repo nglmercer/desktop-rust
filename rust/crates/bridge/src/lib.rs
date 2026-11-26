@@ -496,6 +496,8 @@ enum ManagementOperation {
         #[serde(default)]
         proxy: Option<desktop_core::RendererProxy>,
         #[serde(default)]
+        allow_protocol: Option<String>,
+        #[serde(default)]
         account: Option<desktop_core::CloneAccount>,
     },
 }
@@ -1082,6 +1084,7 @@ async fn execute(
             report_progress,
             report_retained_staging,
             proxy,
+            allow_protocol,
             account: Some(account),
         }) => {
             anyhow::ensure!(
@@ -1089,7 +1092,7 @@ async fn execute(
                 "Clone cannot use a selected-repository binding"
             );
             anyhow::ensure!(
-                proxy.is_none(),
+                proxy.is_none() && allow_protocol.is_none(),
                 "Selected-account clone inspects transport configuration itself"
             );
             let destination = desktop_core::directory_path(path)?;
@@ -1108,6 +1111,7 @@ async fn execute(
                     recursive,
                     report_progress,
                     proxy: None,
+                    allow_protocol: None,
                 },
                 account,
             )
@@ -1155,6 +1159,7 @@ async fn execute(
                     report_progress,
                     report_retained_staging,
                     proxy,
+                    allow_protocol,
                     account,
                 } => {
                     anyhow::ensure!(
@@ -1168,6 +1173,7 @@ async fn execute(
                         recursive,
                         report_progress,
                         proxy,
+                        allow_protocol,
                     };
                     if account.is_some() {
                         anyhow::bail!("Selected-account clone is not available yet")

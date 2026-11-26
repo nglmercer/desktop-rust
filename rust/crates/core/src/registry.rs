@@ -1755,6 +1755,7 @@ pub struct CloneOptions {
     pub recursive: bool,
     pub report_progress: bool,
     pub proxy: Option<crate::RendererProxy>,
+    pub allow_protocol: Option<String>,
 }
 
 /// An explicitly selected stored account; its numeric actor is verified before
@@ -2271,6 +2272,15 @@ pub async fn clone_repository_with_options(
     if let Some(proxy) = &options.proxy {
         proxy.validate()?;
     }
+    if let Some(allow_protocol) = &options.allow_protocol {
+        anyhow::ensure!(
+            allow_protocol.len() <= 4096
+                && !allow_protocol
+                    .chars()
+                    .any(|character| character == '\0' || character.is_control()),
+            "invalid Git protocol allowlist"
+        );
+    }
     if url.is_empty()
         || url.starts_with('-')
         || url.contains(['\0', '\n', '\r'])
@@ -2330,12 +2340,14 @@ pub async fn clone_repository_with_options(
     }
     command.extend(args(&["--", url]));
     command.push(destination.as_os_str().to_owned());
-    let output = match &options.proxy {
-        Some(proxy) => {
-            process::run_clone_with_proxy(parent, &command, options.report_progress, proxy).await?
-        }
-        None => process::run_clone(parent, &command, options.report_progress).await?,
-    };
+    let output = process::run_clone_with_transport(
+        parent,
+        &command,
+        options.report_progress,
+        options.proxy.as_ref(),
+        options.allow_protocol.as_deref(),
+    )
+    .await?;
     if output.code != 0 {
         bail!("{}", clone_failure_message(&output));
     }
@@ -2806,6 +2818,7 @@ mod tests {
                 recursive: false,
                 report_progress: false,
                 proxy: None,
+                allow_protocol: None,
             },
             CloneAccount {
                 host: host.clone(),
@@ -2881,6 +2894,7 @@ mod tests {
                 recursive: false,
                 report_progress: false,
                 proxy: None,
+                allow_protocol: None,
             },
             CloneAccount {
                 host: host.clone(),
@@ -2972,6 +2986,7 @@ mod tests {
                 recursive: false,
                 report_progress: false,
                 proxy: None,
+                allow_protocol: None,
             },
             CloneAccount {
                 host,
@@ -3082,6 +3097,7 @@ mod tests {
                 recursive: true,
                 report_progress: false,
                 proxy: None,
+                allow_protocol: Some("file".into()),
             },
         )
         .await
@@ -3102,6 +3118,34 @@ mod tests {
             !ordinary.join("nested/file").exists(),
             "legacy endpoint remains non-recursive"
         );
+
+        let file_url = format!("file://{}", source.display());
+        let denied = root.join("denied");
+        assert!(
+            clone_repository_with_options(
+                &file_url,
+                &denied,
+                CloneOptions {
+                    allow_protocol: Some("https".into()),
+                    ..CloneOptions::default()
+                }
+            )
+            .await
+            .is_err()
+        );
+        assert!(!denied.exists());
+        let allowed = root.join("allowed");
+        clone_repository_with_options(
+            &file_url,
+            &allowed,
+            CloneOptions {
+                allow_protocol: Some("ext:file:ext.exe".into()),
+                ..CloneOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(allowed.join(".git").is_dir());
 
         let empty = root.join("empty.git");
         git(&root, &["init", "--bare", "-q", empty.to_str().unwrap()]);

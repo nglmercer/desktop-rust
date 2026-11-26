@@ -134,6 +134,7 @@ describe.skipIf(
         branch: 'feature',
         default_branch: 'fallback',
         recursive: true,
+        allow_protocol: 'file:http',
       }),
       30_000
     )
@@ -143,7 +144,11 @@ describe.skipIf(
     )
     const ordinary = path.join(directory, 'ordinary')
     await bounded(
-      client.request('clone_repository', { url: source, path: ordinary }),
+      client.request('clone_repository', {
+        url: source,
+        path: ordinary,
+        allow_protocol: 'file:http',
+      }),
       30_000
     )
     await expect(
@@ -157,6 +162,7 @@ describe.skipIf(
           url: pathToFileURL(source).href,
           path: path.join(directory, 'progress'),
           report_progress: true,
+          allow_protocol: 'file:http',
         },
         {
           onProgress: chunk =>
