@@ -1,4 +1,3 @@
-import { join } from 'path'
 import {
   IAssistedCommitPlan,
   IAssistedCommitPlanCommit,
@@ -174,8 +173,7 @@ function cumulativeContent(
 
 async function materializeTree(
   data: IAssistedCommitData,
-  selectedIds: ReadonlySet<string>,
-  indexPath: string
+  selectedIds: ReadonlySet<string>
 ): Promise<string> {
   const entries = []
   for (const file of data.files) {
@@ -194,7 +192,7 @@ async function materializeTree(
       entries.push({ path: file.file.path, entry: { ...file.selected, sha } })
     }
   }
-  return writeTree(data, data.baseTree, entries, indexPath)
+  return writeTree(data, data.baseTree, entries)
 }
 
 /**
@@ -261,16 +259,12 @@ export async function validateAssistedCommitPlan(
     const trees: string[] = []
     const selectedIds = new Set<string>()
     let previous = data.baseTree
-    for (const [index, commit] of plan.commits.entries()) {
+    for (const commit of plan.commits) {
       checkAssistedCommitCancellation(options.signal)
       commit.changeIds.forEach(id => selectedIds.add(id))
       let tree: string
       try {
-        tree = await materializeTree(
-          data,
-          selectedIds,
-          join(data.temporaryDirectory, `plan-index-${index}`)
-        )
+        tree = await materializeTree(data, selectedIds)
       } catch (error) {
         if (isGitError(error)) {
           throw new AssistedCommitError(

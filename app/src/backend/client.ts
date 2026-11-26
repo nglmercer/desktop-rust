@@ -3683,6 +3683,87 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitIndexTree(
+    repositoryPath: string,
+    base: string | null,
+    options: {
+      readonly entries?: ReadonlyArray<{
+        readonly path: string
+        readonly entry: { readonly mode: string; readonly sha: string } | null
+      }>
+      readonly indexEntries?: Buffer
+      readonly includeIndex?: boolean
+      readonly useEnvironmentIndex?: boolean
+      readonly environment?: Record<string, string | undefined>
+    } = {}
+  ): Promise<{ readonly tree: string; readonly index: Buffer | null }> {
+    const entries = options.entries ?? []
+    if (
+      (base !== null && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(base)) ||
+      entries.length > 100000 ||
+      (options.indexEntries !== undefined && entries.length > 0) ||
+      (options.indexEntries !== undefined &&
+        options.indexEntries.length > 384 * 1024 * 1024) ||
+      (options.useEnvironmentIndex === true &&
+        (options.includeIndex === true ||
+          typeof options.environment?.GIT_INDEX_FILE !== 'string' ||
+          options.environment.GIT_INDEX_FILE.length === 0)) ||
+      entries.some(
+        entry =>
+          entry.path.length === 0 ||
+          entry.path.length > 65536 ||
+          entry.path.includes('\0') ||
+          (entry.entry === null
+            ? false
+            : !['100644', '100755', '120000'].includes(entry.entry.mode) ||
+              !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(entry.entry.sha))
+      )
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted index tree request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_index_tree',
+      {
+        base,
+        entries: entries.map(entry => ({
+          path: entry.path,
+          mode: entry.entry?.mode ?? null,
+          sha: entry.entry?.sha ?? null,
+        })),
+        index_entries_base64: options.indexEntries?.toString('base64') ?? null,
+        include_index: options.includeIndex === true,
+        use_environment_index: options.useEnvironmentIndex === true,
+        environment: serializeGitEnvironment(options.environment),
+      }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.tree === 'string' &&
+      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.tree) &&
+      (value.index_base64 === null ||
+        (typeof value.index_base64 === 'string' &&
+          value.index_base64.length <= 512 * 1024 * 1024))
+    ) {
+      return {
+        tree: value.tree,
+        index:
+          value.index_base64 === null
+            ? null
+            : Buffer.from(value.index_base64 as string, 'base64'),
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted index tree response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitDiffDriver(
     repositoryPath: string,
     path: string,

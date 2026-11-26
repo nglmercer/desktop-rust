@@ -61,6 +61,7 @@ import {
   validateAssistedCommitPlan,
   withAssistedCommitSnapshot,
 } from '../../../src/lib/git/assisted-commit'
+import { backend } from '../../../src/backend/client'
 import { getSnapshotData } from '../../../src/lib/git/assisted-commit/state'
 import { getWorkingDirectoryDiff } from '../../../src/lib/git/diff'
 import { setHooksEnvEnabled } from '../../../src/lib/hooks/config'
@@ -3391,7 +3392,13 @@ describe('git/assisted-commit', () => {
   })
   it('captures the implicit global attribute source once into private metadata', async t => {
     const repository = await seed(t, { 'a.txt': 'original\n' })
-    const attributes = await rawGit(repository, ['var', 'GIT_ATTR_GLOBAL'])
+    const attributesResult =
+      await backend().repositoryAssistedCommitAttributeSource(
+        repository.path,
+        'GIT_ATTR_GLOBAL'
+      )
+    assert.strictEqual(attributesResult.exitCode, 0)
+    const attributes = attributesResult.stdout.replace(/\r?\n$/, '')
     assert.ok(attributes.length > 0)
     const matchesAttributes = await createPathMatcher(attributes)
     await writeFile(join(repository.path, 'a.txt'), 'SELECTED\r\n')

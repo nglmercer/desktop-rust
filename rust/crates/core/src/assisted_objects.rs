@@ -51,6 +51,42 @@ fn assisted_diff_environment_key(key: &str) -> bool {
     assisted_object_environment_key(key) || matches!(key, "GIT_ATTR_NOSYSTEM" | "GIT_ATTR_SOURCE")
 }
 
+struct TemporaryIndexDirectory {
+    path: std::path::PathBuf,
+}
+
+impl TemporaryIndexDirectory {
+    fn create() -> Result<Self> {
+        let path =
+            std::env::temp_dir().join(format!("desktop-assisted-index-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(Self { path })
+    }
+}
+
+impl Drop for TemporaryIndexDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn validate_index_tree_path(path: &GitPath) -> Result<std::ffi::OsString> {
+    let path = validate_path(path.clone())?;
+    anyhow::ensure!(
+        !Path::new(&path).components().any(|component| component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(".git")),
+        "invalid selected path"
+    );
+    Ok(path)
+}
+
 fn unsupported() -> Value {
     json!({"kind":"unsupported"})
 }
@@ -146,6 +182,152 @@ impl Repository {
         let tree = output_line(&output.stdout, "tree object")?;
         object_id(&tree, "tree object")?;
         Ok(json!({"tree":tree}))
+    }
+
+    /// Construct a tree through a private scratch index, optionally returning
+    /// the resulting index bytes for the transaction's final synchronization
+    /// check. The renderer never controls the scratch index location.
+    pub(crate) async fn assisted_commit_index_tree(
+        &self,
+        base: Option<&str>,
+        entries: &[crate::AssistedCommitIndexTreeEntry],
+        index_entries_base64: Option<&str>,
+        include_index: bool,
+        use_environment_index: bool,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        validate_environment(environment)?;
+        if let Some(base) = base {
+            object_id(base, "base tree object")?;
+        }
+        anyhow::ensure!(entries.len() <= 100_000, "too many assisted index entries");
+        anyhow::ensure!(
+            !(index_entries_base64.is_some() && !entries.is_empty()),
+            "raw and typed assisted index entries cannot be mixed"
+        );
+
+        let mut input = Vec::new();
+        if let Some(encoded) = index_entries_base64 {
+            anyhow::ensure!(
+                encoded.len() <= 512 * 1024 * 1024,
+                "assisted index entries are too large"
+            );
+            input = STANDARD.decode(encoded)?;
+            anyhow::ensure!(
+                input.len() <= 384 * 1024 * 1024,
+                "assisted index entries are too large"
+            );
+            crate::assisted_head::validate_index_entries(&input)?;
+        } else {
+            let zero_length = base.map_or(40, str::len);
+            for entry in entries {
+                let path = validate_index_tree_path(&entry.path)?;
+                input.extend_from_slice(b"0 ");
+                input.extend_from_slice("0".repeat(zero_length).as_bytes());
+                input.push(b'\t');
+                input.extend_from_slice(path.as_encoded_bytes());
+                input.push(0);
+            }
+            for entry in entries {
+                let path = validate_index_tree_path(&entry.path)?;
+                match (&entry.mode, &entry.sha) {
+                    (Some(mode), Some(sha)) => {
+                        anyhow::ensure!(
+                            matches!(mode.as_str(), "100644" | "100755" | "120000"),
+                            "invalid assisted index entry mode"
+                        );
+                        object_id(sha, "assisted index entry object")?;
+                        input.extend_from_slice(mode.as_bytes());
+                        input.push(b' ');
+                        input.extend_from_slice(sha.as_bytes());
+                        input.push(b'\t');
+                        input.extend_from_slice(path.as_encoded_bytes());
+                        input.push(0);
+                    }
+                    (None, None) => {}
+                    _ => anyhow::bail!("assisted index entry mode and object must be paired"),
+                }
+            }
+        }
+        anyhow::ensure!(
+            input.len() <= 384 * 1024 * 1024,
+            "assisted index input is too large"
+        );
+
+        let scratch = TemporaryIndexDirectory::create()?;
+        let index = scratch.path.join("index");
+        let mut hooks_path = std::ffi::OsString::from("core.hooksPath=");
+        hooks_path.push(scratch.path.join("no-hooks"));
+        let mut environment = environment.clone();
+        let environment_index = if use_environment_index {
+            let Some(Some(path)) = environment.get("GIT_INDEX_FILE") else {
+                anyhow::bail!("assisted environment index is unavailable");
+            };
+            anyhow::ensure!(
+                !path.is_empty() && path.len() <= 4096 && Path::new(path).is_absolute(),
+                "invalid assisted environment index"
+            );
+            true
+        } else {
+            environment.remove("GIT_INDEX_FILE");
+            false
+        };
+        let index_override = (!environment_index).then_some(index.as_path());
+        let read_args = match base {
+            Some(base) => args(&["read-tree", base]),
+            None => args(&["read-tree", "--empty"]),
+        };
+        let with_no_hooks = |command: &[std::ffi::OsString]| {
+            let mut result = vec![std::ffi::OsString::from("-c"), hooks_path.clone()];
+            result.extend_from_slice(command);
+            result
+        };
+        let output = crate::process::run_git_with_environment(
+            &self.path,
+            &with_no_hooks(&read_args),
+            None,
+            index_override,
+            &environment,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot initialize assisted scratch index");
+        if !input.is_empty() {
+            let output = crate::process::run_git_with_environment(
+                &self.path,
+                &with_no_hooks(&args(&["update-index", "-z", "--index-info"])),
+                Some(input),
+                index_override,
+                &environment,
+            )
+            .await?;
+            anyhow::ensure!(output.code == 0, "Cannot update assisted scratch index");
+        }
+        let output = crate::process::run_git_with_environment(
+            &self.path,
+            &with_no_hooks(&args(&["write-tree"])),
+            None,
+            index_override,
+            &environment,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot write assisted tree");
+        let tree = output_line(&output.stdout, "written tree object")?;
+        object_id(&tree, "written tree object")?;
+        let index_base64 = if include_index {
+            anyhow::ensure!(
+                !use_environment_index,
+                "environment index bytes are not exported"
+            );
+            let bytes = std::fs::read(&index)?;
+            anyhow::ensure!(
+                bytes.len() <= 384 * 1024 * 1024,
+                "assisted index is too large"
+            );
+            Value::String(STANDARD.encode(bytes))
+        } else {
+            Value::Null
+        };
+        Ok(json!({"tree":tree,"index_base64":index_base64}))
     }
 
     /// Read the private capture configuration that controls modes, symlinks, and filters.

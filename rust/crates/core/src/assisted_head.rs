@@ -152,7 +152,7 @@ fn validate_push_config(output: &[u8]) -> Result<Vec<Value>> {
     Ok(entries)
 }
 
-fn validate_index_entries(entries: &[u8]) -> Result<()> {
+pub(crate) fn validate_index_entries(entries: &[u8]) -> Result<()> {
     if entries.is_empty() {
         return Ok(());
     }

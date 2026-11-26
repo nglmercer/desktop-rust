@@ -43,6 +43,7 @@ import {
   gitPath,
   hashBlob,
   initializePrivateRepository,
+  objectReadEnvironment,
   privateGit,
   readBlob,
   readHeadContext,
@@ -483,28 +484,13 @@ export async function captureAssistedCommitSnapshot(
       '-c',
       `core.hooksPath=${join(temporaryDirectory, 'no-hooks')}`,
     ]
-    await privateGit(
-      context,
-      [...noIndexHooks, 'read-tree', '--empty'],
-      'assistedCommitInitializeAttributesIndex'
-    )
-    if (originalEntries.length > 0) {
-      await privateGit(
-        context,
-        [...noIndexHooks, 'update-index', '-z', '--index-info'],
-        'assistedCommitPopulateAttributesIndex',
-        { stdin: originalEntries }
-      )
-    }
-    const indexedAttributesTree = removeGitLineEnding(
-      (
-        await privateGit(
-          context,
-          [...noIndexHooks, 'write-tree'],
-          'assistedCommitIndexedAttributesTree'
-        )
-      ).stdout
-    )
+    const indexedAttributesTree = (
+      await backend().repositoryAssistedCommitIndexTree(repository.path, null, {
+        indexEntries: originalEntries,
+        useEnvironmentIndex: true,
+        environment: objectReadEnvironment(environment),
+      })
+    ).tree
     if (
       incomingAttributeSource !== undefined &&
       incomingAttributeSource.length > 0
@@ -548,19 +534,18 @@ export async function captureAssistedCommitSnapshot(
       environment.GIT_ATTR_SOURCE = await writeTree(
         context,
         indexedAttributesTree,
-        attributeEntries,
-        join(temporaryDirectory, 'attributes-index')
+        attributeEntries
       )
     }
     const baseTree =
       head.sha === null
-        ? removeGitLineEnding(
-            (
-              await privateGit(context, ['mktree'], 'assistedCommitEmptyTree', {
-                stdin: '',
-              })
-            ).stdout
-          )
+        ? (
+            await backend().repositoryAssistedCommitIndexTree(
+              repository.path,
+              null,
+              { environment: objectReadEnvironment(context.environment) }
+            )
+          ).tree
         : await backend().repositoryAssistedCommitTreeRevision(
             repository.path,
             head.sha,
@@ -568,7 +553,6 @@ export async function captureAssistedCommitSnapshot(
           )
     const files: IFrozenFile[] = []
     const changes: IAssistedCommitChange[] = []
-    const scratchIndex = join(temporaryDirectory, 'capture-index')
     const captureConfig = await backend().repositoryAssistedCommitCaptureConfig(
       repository.path,
       context.environment
@@ -774,12 +758,10 @@ export async function captureAssistedCommitSnapshot(
         full = { path: file.path, mode, sha: nativeEntry.sha }
       }
       const fullBytes = await readBlob(context, full)
-      const fullTree = await writeTree(
-        context,
-        baseTree,
-        [...blockingDeletions, ...fileTreeUpdates({ file, selected: full })],
-        scratchIndex
-      )
+      const fullTree = await writeTree(context, baseTree, [
+        ...blockingDeletions,
+        ...fileTreeUpdates({ file, selected: full }),
+      ])
       const paths =
         renamed || copied ? [file.path, file.status.oldPath] : [file.path]
       const large = baseBytes.length + fullBytes.length > MaximumSplittableBytes
@@ -896,12 +878,10 @@ export async function captureAssistedCommitSnapshot(
           }
         : full
       const selectedTree = partial
-        ? await writeTree(
-            context,
-            baseTree,
-            [...blockingDeletions, ...fileTreeUpdates({ file, selected })],
-            scratchIndex
-          )
+        ? await writeTree(context, baseTree, [
+            ...blockingDeletions,
+            ...fileTreeUpdates({ file, selected }),
+          ])
         : fullTree
       if (selectedTree === baseTree) {
         throw new AssistedCommitError(
@@ -981,8 +961,7 @@ export async function captureAssistedCommitSnapshot(
     const selectedTree = await writeTree(
       context,
       baseTree,
-      files.flatMap(fileTreeUpdates),
-      scratchIndex
+      files.flatMap(fileTreeUpdates)
     )
     const id = randomUUID()
     const snapshot: IAssistedCommitSnapshot = Object.freeze({

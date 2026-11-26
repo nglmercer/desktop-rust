@@ -590,7 +590,7 @@ export function privateGit(
     : git(args, data.repository.path, name, { ...options, env })
 }
 
-function objectReadEnvironment(
+export function objectReadEnvironment(
   environment: Record<string, string | undefined>
 ): Record<string, string | undefined> {
   const result = { ...environment }
@@ -655,54 +655,19 @@ export async function hashBlob(
 }
 
 export async function writeTree(
-  data: Pick<
-    IAssistedCommitData,
-    'repository' | 'environment' | 'temporaryDirectory'
-  >,
+  data: Pick<IAssistedCommitData, 'repository' | 'environment'>,
   base: string,
   entries: ReadonlyArray<{
     readonly path: string
     readonly entry: ITreeEntry | null
-  }>,
-  indexPath: string
+  }>
 ): Promise<string> {
-  const env = { GIT_INDEX_FILE: indexPath }
-  const configuration = [
-    '-c',
-    `core.hooksPath=${join(data.temporaryDirectory, 'no-hooks')}`,
-  ]
-  await privateGit(
-    data,
-    [...configuration, 'read-tree', base],
-    'assistedCommitReadTree',
-    { env }
+  const result = await backend().repositoryAssistedCommitIndexTree(
+    data.repository.path,
+    base,
+    { entries, environment: objectReadEnvironment(data.environment) }
   )
-  const removals = entries
-    .map(x => `0 ${'0'.repeat(base.length)}\t${x.path}\0`)
-    .join('')
-  const additions = entries
-    .flatMap(x =>
-      x.entry === null ? [] : [`${x.entry.mode} ${x.entry.sha}\t${x.path}\0`]
-    )
-    .join('')
-  if (entries.length > 0) {
-    await privateGit(
-      data,
-      [...configuration, 'update-index', '-z', '--index-info'],
-      'assistedCommitWriteIndex',
-      { env, stdin: removals + additions }
-    )
-  }
-  return removeGitLineEnding(
-    (
-      await privateGit(
-        data,
-        [...configuration, 'write-tree'],
-        'assistedCommitWriteTree',
-        { env }
-      )
-    ).stdout
-  )
+  return result.tree
 }
 
 export function fileTreeUpdates(file: {

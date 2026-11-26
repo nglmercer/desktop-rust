@@ -18,6 +18,7 @@ import * as Dugite from 'dugite'
 import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
 import type { PathLike } from 'fs'
+import * as OS from 'os'
 import { basename, join, resolve, sep } from 'path'
 import {
   installNodeHostBridge,
@@ -810,6 +811,95 @@ function nodeBackend(t: TestContext) {
             filemode: await readBoolean('core.filemode'),
             symlinks: await readBoolean('core.symlinks'),
             filterOutput: filters.stdout,
+          }
+        },
+        repositoryAssistedCommitIndexTree: async (
+          path: string,
+          base: string | null,
+          options: {
+            readonly entries?: ReadonlyArray<{
+              readonly path: string
+              readonly entry: {
+                readonly mode: string
+                readonly sha: string
+              } | null
+            }>
+            readonly indexEntries?: Buffer
+            readonly includeIndex?: boolean
+            readonly useEnvironmentIndex?: boolean
+            readonly environment?: Record<string, string | undefined>
+          } = {}
+        ) => {
+          const directory = await FileSystem.mkdtemp(
+            join(OS.tmpdir(), 'assisted-index-tree-test-')
+          )
+          const index = join(directory, 'index')
+          const environment =
+            options.useEnvironmentIndex === true
+              ? { ...options.environment }
+              : { ...options.environment, GIT_INDEX_FILE: index }
+          try {
+            const noHooks = [
+              '-c',
+              `core.hooksPath=${join(directory, 'no-hooks')}`,
+            ]
+            const readArgs =
+              base === null
+                ? [...noHooks, 'read-tree', '--empty']
+                : [...noHooks, 'read-tree', base]
+            const read = (await interceptingGitExec(actualExec)(
+              readArgs,
+              path,
+              { env: environment } as never
+            )) as Dugite.IGitStringResult
+            if (read.exitCode !== 0) {
+              throw new Error('Cannot initialize assisted scratch index')
+            }
+            let input = options.indexEntries ?? Buffer.alloc(0)
+            if (options.indexEntries === undefined) {
+              const parts: Buffer[] = []
+              const zero = '0'.repeat(base?.length ?? 40)
+              for (const entry of options.entries ?? []) {
+                parts.push(Buffer.from(`0 ${zero}\t${entry.path}\0`))
+              }
+              for (const entry of options.entries ?? []) {
+                if (entry.entry !== null) {
+                  parts.push(
+                    Buffer.from(
+                      `${entry.entry.mode} ${entry.entry.sha}\t${entry.path}\0`
+                    )
+                  )
+                }
+              }
+              input = Buffer.concat(parts)
+            }
+            if (input.length > 0) {
+              const update = (await interceptingGitExec(actualExec)(
+                [...noHooks, 'update-index', '-z', '--index-info'],
+                path,
+                { env: environment, stdin: input } as never
+              )) as Dugite.IGitStringResult
+              if (update.exitCode !== 0) {
+                throw new Error('Cannot update assisted scratch index')
+              }
+            }
+            const written = (await interceptingGitExec(actualExec)(
+              [...noHooks, 'write-tree'],
+              path,
+              { env: environment } as never
+            )) as Dugite.IGitStringResult
+            if (written.exitCode !== 0) {
+              throw new Error('Cannot write assisted tree')
+            }
+            return {
+              tree: written.stdout.trim(),
+              index:
+                options.includeIndex === true
+                  ? await FileSystem.readFile(index)
+                  : null,
+            }
+          } finally {
+            await FileSystem.rm(directory, { recursive: true, force: true })
           }
         },
         repositoryAssistedCommitDiffDriver: async (

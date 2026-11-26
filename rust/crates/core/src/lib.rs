@@ -729,6 +729,25 @@ impl Repository {
             Operation::AssistedCommitCaptureConfig { environment } => {
                 return self.assisted_commit_capture_config(&environment).await;
             }
+            Operation::AssistedCommitIndexTree {
+                base,
+                entries,
+                index_entries_base64,
+                include_index,
+                use_environment_index,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_index_tree(
+                        base.as_deref(),
+                        &entries,
+                        index_entries_base64.as_deref(),
+                        include_index,
+                        use_environment_index,
+                        &environment,
+                    )
+                    .await;
+            }
             Operation::AssistedCommitTreeRevision {
                 revision,
                 environment,
@@ -1599,6 +1618,7 @@ impl Repository {
             | AssistedCommitBlob { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
+            | AssistedCommitIndexTree { .. }
             | AssistedCommitTreeRevision { .. }
             | RendererHooks { .. }
             | AssistedCommitPushPaths { .. }

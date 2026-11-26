@@ -104,6 +104,15 @@ pub struct PublishPreviewRequest {
     pub private: bool,
 }
 
+/// One typed addition or deletion in an assisted-commit scratch index.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssistedCommitIndexTreeEntry {
+    pub path: GitPath,
+    pub mode: Option<String>,
+    pub sha: Option<String>,
+}
+
 /// Typed operations shared by the CLI, browser transport, and native shell.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
@@ -509,6 +518,19 @@ pub enum Operation {
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
     AssistedCommitCaptureConfig {
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
+    AssistedCommitIndexTree {
+        base: Option<String>,
+        #[serde(default)]
+        entries: Vec<AssistedCommitIndexTreeEntry>,
+        #[serde(default)]
+        index_entries_base64: Option<String>,
+        #[serde(default)]
+        include_index: bool,
+        #[serde(default)]
+        use_environment_index: bool,
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },

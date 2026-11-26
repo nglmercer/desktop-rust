@@ -76,6 +76,16 @@ struct ReadRequest {
     #[serde(default)]
     expected_value: Option<String>,
     #[serde(default)]
+    base: Option<String>,
+    #[serde(default)]
+    entries: Option<Vec<desktop_backend::AssistedCommitIndexTreeEntry>>,
+    #[serde(default)]
+    index_entries_base64: Option<String>,
+    #[serde(default)]
+    include_index: Option<bool>,
+    #[serde(default)]
+    use_environment_index: Option<bool>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -422,6 +432,7 @@ enum ReadMethod {
     AssistedCommitTreeEntry,
     AssistedCommitBlob,
     AssistedCommitCaptureConfig,
+    AssistedCommitIndexTree,
     AssistedCommitTreeRevision,
     AssistedCommitDiffDriver,
     RendererHooks,
@@ -1359,6 +1370,33 @@ impl Backend {
                 "revision only applies to assisted tree revision reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::AssistedCommitIndexTree) {
+            if request.base.is_some() {
+                return Err(AppError::BadArgs(
+                    "base only applies to assisted index tree reads".into(),
+                ));
+            }
+            if request.entries.is_some() {
+                return Err(AppError::BadArgs(
+                    "entries only apply to assisted index tree reads".into(),
+                ));
+            }
+            if request.index_entries_base64.is_some() {
+                return Err(AppError::BadArgs(
+                    "index_entries_base64 only applies to assisted index tree reads".into(),
+                ));
+            }
+            if request.include_index.is_some() {
+                return Err(AppError::BadArgs(
+                    "include_index only applies to assisted index tree reads".into(),
+                ));
+            }
+            if request.use_environment_index.is_some() {
+                return Err(AppError::BadArgs(
+                    "use_environment_index only applies to assisted index tree reads".into(),
+                ));
+            }
+        }
         if !matches!(
             &request.method,
             ReadMethod::AssistedCommitTreeEntry | ReadMethod::AssistedCommitDiffDriver
@@ -1830,6 +1868,42 @@ impl Backend {
                         && request.expected_value.is_none() =>
                 {
                     Operation::AssistedCommitCaptureConfig {
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitIndexTree
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitIndexTree {
+                        base: request.base,
+                        entries: request.entries.unwrap_or_default(),
+                        index_entries_base64: request.index_entries_base64,
+                        include_index: request.include_index.unwrap_or(false),
+                        use_environment_index: request.use_environment_index.unwrap_or(false),
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -3003,6 +3077,20 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(tree_revision["tree"], tree);
+                let reconstructed = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_index_tree","base":null,"index_entries_base64":encoded,"include_index":true}),
+                    ])
+                    .unwrap();
+                assert_eq!(reconstructed["tree"], tree);
+                assert!(reconstructed["index_base64"].as_str().unwrap().len() > 8);
+                let copied = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_index_tree","base":tree,"entries":[{"path":"copy","mode":"100644","sha":blob}]}),
+                    ])
+                    .unwrap();
+                assert_ne!(copied["tree"], tree);
+                assert!(copied["index_base64"].is_null());
                 assert!(
                     backend
                         .admit(vec![

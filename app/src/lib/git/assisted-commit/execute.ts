@@ -1,10 +1,4 @@
-import {
-  copyFile,
-  mkdir,
-  readFile,
-  rm,
-  writeFile,
-} from '../../../web/fs-promises'
+import { copyFile, mkdir, rm, writeFile } from '../../../web/fs-promises'
 import { lstatSync } from '../../../web/fs'
 import { CommitIdentity } from '../../../models/commit-identity'
 import { join } from 'path'
@@ -13,6 +7,7 @@ import {
   IAssistedCommitSnapshot,
   IValidatedAssistedCommitPlan,
 } from '../../../models/assisted-commit'
+import { backend } from '../../../backend/client'
 import { formatCommitMessage } from '../../format-commit-message'
 import { isErrnoException } from '../../errno-exception'
 import { HookCallbackOptions } from '../core'
@@ -34,6 +29,7 @@ import {
   installIndex,
   IOwnedIndexLock,
   lockIndex,
+  objectReadEnvironment,
   privateGit,
   readHead,
   readIndexState,
@@ -711,28 +707,18 @@ export async function executeAssistedCommitPlan(
       })
       checkAssistedCommitCancellation(options.signal)
     }
-    const finalIndexPath = join(data.temporaryDirectory, 'final-index')
-    const configuration = [
-      '-c',
-      `core.hooksPath=${join(data.temporaryDirectory, 'no-hooks')}`,
-    ]
-    await privateGit(
-      data,
-      [...configuration, 'read-tree', snapshot.selectedTree],
-      'assistedCommitFinalIndex',
+    const finalIndexResult = await backend().repositoryAssistedCommitIndexTree(
+      data.repository.path,
+      snapshot.selectedTree,
       {
-        env: { GIT_INDEX_FILE: finalIndexPath },
+        includeIndex: true,
+        environment: objectReadEnvironment(data.environment),
       }
     )
-    const finalTree = await privateGit(
-      data,
-      [...configuration, 'write-tree'],
-      'assistedCommitCheckFinalIndex',
-      {
-        env: { GIT_INDEX_FILE: finalIndexPath },
-      }
-    )
-    if (removeGitLineEnding(finalTree.stdout) !== snapshot.selectedTree) {
+    if (
+      finalIndexResult.tree !== snapshot.selectedTree ||
+      finalIndexResult.index === null
+    ) {
       throw new AssistedCommitError(
         'commit-failed',
         'A hook changed the final index synchronization tree'
@@ -742,7 +728,7 @@ export async function executeAssistedCommitPlan(
     await verifySelectedFiles(data)
     checkAssistedCommitCancellation(options.signal)
     installedIndex = {
-      bytes: await readFile(finalIndexPath),
+      bytes: finalIndexResult.index,
       mode:
         data.originalIndex.bytes === null
           ? lock.stat.mode & 0o777
