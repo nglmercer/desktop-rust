@@ -595,6 +595,9 @@ impl Repository {
             Operation::AssistedCommitConfig => {
                 return self.assisted_commit_config().await;
             }
+            Operation::AssistedCommitPushConfig { environment } => {
+                return self.assisted_commit_push_config(&environment).await;
+            }
             Operation::AssistedCommitRefs => {
                 return self.assisted_commit_refs().await;
             }
@@ -1430,6 +1433,7 @@ impl Repository {
             | AssistedCommitHead
             | AssistedCommitSafety
             | AssistedCommitConfig
+            | AssistedCommitPushConfig { .. }
             | AssistedCommitRefs
             | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }

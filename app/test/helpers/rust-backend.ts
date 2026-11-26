@@ -7,6 +7,7 @@ import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { afterAll, beforeAll, vi } from 'vitest'
 import {
+  backend,
   BackendClient,
   overrideBackendForTests,
 } from '../../src/backend/client'
@@ -219,9 +220,14 @@ export async function startRustBackend(): Promise<IRustBackend> {
     ) => {
       if (gitEnvironmentFingerprint() !== active.fingerprint) {
         const previous = active
+        const installRestarted = [session.client, active.client].includes(
+          backend() as BackendClient
+        )
         active = await openSession(directory)
         install(active)
-        overrideBackendForTests(active.client)
+        if (installRestarted) {
+          overrideBackendForTests(active.client)
+        }
         selected = null
         await previous.close()
         return active.client.request(method, params, opts)

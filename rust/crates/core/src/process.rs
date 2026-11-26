@@ -234,8 +234,32 @@ pub(crate) async fn run_git_with_environment(
     run_command(path, command, args, input, 2 * 1024 * 1024, None).await
 }
 
-pub(crate) async fn run_without_git_config(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+pub(crate) async fn run_without_git_config_with_environment(
+    path: &Path,
+    args: &[OsString],
+    environment: &std::collections::BTreeMap<String, Option<String>>,
+) -> Result<RawOutput> {
+    anyhow::ensure!(environment.len() <= 256, "Git environment is too large");
     let mut command = git_base_without_color(None);
+    let mut size = 0usize;
+    for (key, value) in environment {
+        anyhow::ensure!(
+            !key.is_empty() && !key.contains(['=', '\0']) && key.len() <= 1024,
+            "invalid Git environment key"
+        );
+        size = size.saturating_add(key.len());
+        match value {
+            Some(value) => {
+                anyhow::ensure!(!value.contains('\0'), "Git environment contains NUL");
+                size = size.saturating_add(value.len());
+                anyhow::ensure!(size <= 256 * 1024, "Git environment is too large");
+                command.env(key, value);
+            }
+            None => {
+                command.env_remove(key);
+            }
+        }
+    }
     command.env_remove("GIT_CONFIG");
     crate::git_credentials::native_configuration(run_command(
         path,
@@ -246,6 +270,10 @@ pub(crate) async fn run_without_git_config(path: &Path, args: &[OsString]) -> Re
         None,
     ))
     .await
+}
+
+pub(crate) async fn run_without_git_config(path: &Path, args: &[OsString]) -> Result<RawOutput> {
+    run_without_git_config_with_environment(path, args, &Default::default()).await
 }
 
 /// Status lists can be much larger than ordinary command responses. Keep a

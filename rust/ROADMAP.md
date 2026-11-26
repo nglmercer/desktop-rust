@@ -10,13 +10,13 @@ if it regresses.
 | Measure | Now | Done when |
 | --- | --- | --- |
 | Fallback checks (`transportKind`) in the renderer | 2 in 2 files | 0 |
-| Legacy Git runner calls (`await git(`) in `lib/git` | 14 in 6 files | 0 |
+| Legacy Git runner calls (`await git(`) in `lib/git` | 13 in 6 files | 0 |
 | Renderer files importing `dugite` | 0 | 0 |
 | Renderer files importing `fs` | 0 | 0 (host operations only) |
 | Renderer files importing `child_process` | 0 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 426 | 0 |
-| Rust code (crates, non-test) | 91,998 lines | — |
+| Rust code (crates, non-test) | 92,158 lines | — |
 
 Completed foundations: Electron, Webpack and esbuild are out of the active build;
 the Tao/Wry shell starts under Linux/Xvfb; the renderer builds with Vite; all

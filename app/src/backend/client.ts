@@ -3087,6 +3087,44 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitPushConfiguration(
+    repositoryPath: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<ReadonlyArray<{ origin: string; key: string; value: string }>> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_push_config',
+      { environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      Array.isArray(value.entries) &&
+      value.entries.every(
+        entry =>
+          isRecord(entry) &&
+          typeof entry.origin === 'string' &&
+          entry.origin.length > 0 &&
+          entry.origin.length <= 16 * 1024 * 1024 &&
+          typeof entry.key === 'string' &&
+          entry.key.length > 0 &&
+          entry.key.length <= 16 * 1024 * 1024 &&
+          typeof entry.value === 'string' &&
+          entry.value.length <= 16 * 1024 * 1024
+      )
+    ) {
+      return value.entries.map(entry => ({
+        origin: entry.origin as string,
+        key: entry.key as string,
+        value: entry.value as string,
+      }))
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted push configuration response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitRefs(
     repositoryPath: string
   ): Promise<ReadonlyArray<AssistedCommitRef>> {

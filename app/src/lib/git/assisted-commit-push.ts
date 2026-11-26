@@ -112,6 +112,48 @@ const originalOwnerProofs = new WeakMap<
   }
 >()
 const nativeConfigurationEnvironment = { GIT_CONFIG: undefined }
+const gitRoutingEnvironmentNames = [
+  'LOCAL_GIT_DIRECTORY',
+  'GIT_DIR',
+  'GIT_COMMON_DIR',
+  'GIT_WORK_TREE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_INDEX_FILE',
+  'GIT_SHALLOW_FILE',
+  'GIT_GRAFT_FILE',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_NAMESPACE',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_NOSYSTEM',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+  'HOME',
+  'XDG_CONFIG_HOME',
+] as const
+
+function assistedPushConfigurationEnvironment(): Record<
+  string,
+  string | undefined
+> {
+  const environment: Record<string, string | undefined> = {
+    ...nativeConfigurationEnvironment,
+  }
+  for (const name of gitRoutingEnvironmentNames) {
+    environment[name] = process.env[name]
+  }
+  for (const [name, value] of Object.entries(process.env)) {
+    if (
+      name.startsWith('GIT_CONFIG_KEY_') ||
+      name.startsWith('GIT_CONFIG_VALUE_')
+    ) {
+      environment[name] = value
+    }
+  }
+  return environment
+}
 
 /** A changed destination is a local push refusal, never permission to choose another remote. */
 export class AssistedCommitPushError extends Error {
@@ -364,27 +406,10 @@ function readRegularConfigurationInputSync(path: string) {
 async function readConfiguration(
   repository: Repository
 ): Promise<ReadonlyArray<IConfigEntry>> {
-  const result = await git(
-    ['config', '--null', '--list', '--show-origin', '--includes'],
+  return backend().repositoryAssistedCommitPushConfiguration(
     repository.path,
-    'assistedPushConfiguration',
-    { env: nativeConfigurationEnvironment }
+    assistedPushConfigurationEnvironment()
   )
-  const fields = result.stdout.split('\0').slice(0, -1)
-  if (fields.length % 2 !== 0) {
-    throw new Error('Git returned incomplete push configuration')
-  }
-  const entries: IConfigEntry[] = []
-  for (let index = 0; index < fields.length; index += 2) {
-    const entry = fields[index + 1]
-    const separator = entry.indexOf('\n')
-    entries.push({
-      origin: fields[index],
-      key: separator === -1 ? entry : entry.slice(0, separator),
-      value: separator === -1 ? '' : entry.slice(separator + 1),
-    })
-  }
-  return entries
 }
 
 function configurationInputs(
@@ -470,27 +495,7 @@ export function captureAssistedCommitPushEnvironment(
   )
 
   const routing = JSON.stringify(
-    [
-      'LOCAL_GIT_DIRECTORY',
-      'GIT_DIR',
-      'GIT_COMMON_DIR',
-      'GIT_WORK_TREE',
-      'GIT_OBJECT_DIRECTORY',
-      'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-      'GIT_INDEX_FILE',
-      'GIT_SHALLOW_FILE',
-      'GIT_GRAFT_FILE',
-      'GIT_REPLACE_REF_BASE',
-      'GIT_NO_REPLACE_OBJECTS',
-      'GIT_NAMESPACE',
-      'GIT_CONFIG_SYSTEM',
-      'GIT_CONFIG_GLOBAL',
-      'GIT_CONFIG_NOSYSTEM',
-      'GIT_CONFIG_PARAMETERS',
-      'GIT_CONFIG_COUNT',
-      'HOME',
-      'XDG_CONFIG_HOME',
-    ]
+    gitRoutingEnvironmentNames
       .map(name => [name, variables.find(([key]) => key === name)?.[1]])
       .concat(
         variables

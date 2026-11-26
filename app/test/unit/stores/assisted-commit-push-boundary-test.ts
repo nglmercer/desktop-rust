@@ -646,6 +646,32 @@ function nodeBackend(t: TestContext) {
           )) as Dugite.IGitStringResult
           return result.stdout.trim()
         },
+        repositoryAssistedCommitPushConfiguration: async (path: string) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['config', '--null', '--list', '--show-origin', '--includes'],
+            path,
+            { env: { GIT_CONFIG: undefined } } as never
+          )) as Dugite.IGitStringResult
+          const fields = result.stdout.split('\0').slice(0, -1)
+          if (fields.length % 2 !== 0) {
+            throw new Error('Git returned incomplete push configuration')
+          }
+          const entries: Array<{
+            origin: string
+            key: string
+            value: string
+          }> = []
+          for (let index = 0; index < fields.length; index += 2) {
+            const entry = fields[index + 1]
+            const separator = entry.indexOf('\n')
+            entries.push({
+              origin: fields[index],
+              key: separator === -1 ? entry : entry.slice(0, separator),
+              value: separator === -1 ? '' : entry.slice(separator + 1),
+            })
+          }
+          return entries
+        },
         repositoryLastFetch: async (path: string) => {
           const gitDirResult = await actualExec(
             ['rev-parse', '--absolute-git-dir'],
@@ -1630,6 +1656,7 @@ describe('assisted native push boundary', () => {
     } execution when optional push configuration graph changes during capture`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const directory = await temporary.createTempDirectory(t)
@@ -5262,6 +5289,7 @@ describe('assisted native push boundary', () => {
     it(`never certifies a stale ${sourceKind} include graph before a late destination rewrite`, async t => {
       reset()
       t.after(reset)
+      nodeBackend(t)
       const source = await fixtures.seed(t, { file: 'before\n' })
       const remote = await remotes.addBareRemote(t, source)
       const replacement = await remotes.addBareRemote(t, source, {
@@ -5355,6 +5383,7 @@ describe('assisted native push boundary', () => {
   it('rejects a newly discovered nested include before installing stale publication tracking', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     const root = join(await temporary.createTempDirectory(t), 'root-config')

@@ -118,6 +118,40 @@ fn validate_snapshot_config(output: &[u8]) -> Result<Vec<Value>> {
     Ok(entries)
 }
 
+fn validate_push_config(output: &[u8]) -> Result<Vec<Value>> {
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    anyhow::ensure!(
+        output.ends_with(b"\0"),
+        "push configuration snapshot is not terminated"
+    );
+    let fields = output[..output.len() - 1]
+        .split(|byte| *byte == 0)
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        fields.len() % 2 == 0,
+        "push configuration snapshot has an incomplete entry"
+    );
+    let mut entries = Vec::new();
+    for index in (0..fields.len()).step_by(2) {
+        let origin = fields[index];
+        let entry = fields[index + 1];
+        anyhow::ensure!(!origin.is_empty(), "push configuration origin is empty");
+        anyhow::ensure!(!entry.is_empty(), "push configuration key is empty");
+        let separator = entry.iter().position(|byte| *byte == b'\n');
+        let key = separator.map_or(entry, |index| &entry[..index]);
+        let value = separator.map_or(&[][..], |index| &entry[index + 1..]);
+        anyhow::ensure!(!key.is_empty(), "push configuration key is empty");
+        entries.push(json!({
+            "origin": String::from_utf8_lossy(origin),
+            "key": String::from_utf8_lossy(key),
+            "value": String::from_utf8_lossy(value),
+        }));
+    }
+    Ok(entries)
+}
+
 fn validate_index_entries(entries: &[u8]) -> Result<()> {
     if entries.is_empty() {
         return Ok(());
@@ -149,6 +183,33 @@ fn validate_index_entries(entries: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn assisted_push_config_environment_key(key: &str) -> bool {
+    matches!(
+        key,
+        "LOCAL_GIT_DIRECTORY"
+            | "GIT_CONFIG"
+            | "GIT_DIR"
+            | "GIT_COMMON_DIR"
+            | "GIT_WORK_TREE"
+            | "GIT_OBJECT_DIRECTORY"
+            | "GIT_ALTERNATE_OBJECT_DIRECTORIES"
+            | "GIT_INDEX_FILE"
+            | "GIT_SHALLOW_FILE"
+            | "GIT_GRAFT_FILE"
+            | "GIT_REPLACE_REF_BASE"
+            | "GIT_NO_REPLACE_OBJECTS"
+            | "GIT_NAMESPACE"
+            | "GIT_CONFIG_SYSTEM"
+            | "GIT_CONFIG_GLOBAL"
+            | "GIT_CONFIG_NOSYSTEM"
+            | "GIT_CONFIG_PARAMETERS"
+            | "GIT_CONFIG_COUNT"
+            | "HOME"
+            | "XDG_CONFIG_HOME"
+    ) || key.starts_with("GIT_CONFIG_KEY_")
+        || key.starts_with("GIT_CONFIG_VALUE_")
+}
+
 impl Repository {
     pub(crate) async fn assisted_commit_config(&self) -> Result<Value> {
         let output = crate::process::run_without_git_config(
@@ -160,7 +221,26 @@ impl Repository {
         Ok(json!({"entries":validate_snapshot_config(&output.stdout)?}))
     }
 
-    /// Capture validated refs for assisted-commit's private reference view.
+    pub(crate) async fn assisted_commit_push_config(
+        &self,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported push configuration environment key"
+            );
+        }
+        let output = crate::process::run_without_git_config_with_environment(
+            &self.path,
+            &args(&["config", "--null", "--list", "--show-origin", "--includes"]),
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot capture Git push configuration");
+        Ok(json!({"entries":validate_push_config(&output.stdout)?}))
+    }
+
     pub(crate) async fn assisted_commit_refs(&self) -> Result<Value> {
         let output = self
             .run(&args(&[
@@ -439,6 +519,50 @@ mod tests {
                 && entry["name"] == "remote"
                 && entry["value"] == "origin"
         }));
+        let push_config = repository
+            .assisted_commit_push_config(&Default::default())
+            .await
+            .unwrap();
+        assert!(
+            push_config["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| {
+                    entry["origin"].as_str().unwrap().starts_with("file:")
+                        && entry["key"] == "branch.main.remote"
+                        && entry["value"] == "origin"
+                })
+        );
+        let global = fixture.0.join("push-global-config");
+        fs::write(&global, "[push]\n\trequiresNative = true\n").unwrap();
+        let environment = std::collections::BTreeMap::from([
+            (
+                "GIT_CONFIG_GLOBAL".to_string(),
+                Some(global.to_string_lossy().into_owned()),
+            ),
+            ("GIT_CONFIG_NOSYSTEM".to_string(), Some("1".to_string())),
+        ]);
+        let scoped = repository
+            .assisted_commit_push_config(&environment)
+            .await
+            .unwrap();
+        assert!(scoped["entries"].as_array().unwrap().iter().any(|entry| {
+            entry["origin"]
+                .as_str()
+                .unwrap()
+                .ends_with("push-global-config")
+                && entry["key"] == "push.requiresnative"
+                && entry["value"] == "true"
+        }));
+        let unsupported =
+            std::collections::BTreeMap::from([("GIT_TRACE".to_string(), Some("1".to_string()))]);
+        assert!(
+            repository
+                .assisted_commit_push_config(&unsupported)
+                .await
+                .is_err()
+        );
         let index = repository.assisted_commit_git_path("index").await.unwrap();
         assert!(index["path"].as_str().unwrap().ends_with(".git/index"));
         assert!(

@@ -446,6 +446,10 @@ pub enum Operation {
     AssistedCommitHead,
     AssistedCommitSafety,
     AssistedCommitConfig,
+    AssistedCommitPushConfig {
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitRefs,
     AssistedCommitIndexEntries,
     AssistedCommitGitPath {
