@@ -452,10 +452,6 @@ export function installNodeHostBridge() {
               (options.env ?? {}) as Record<string, string | null>
             )) {
               if (
-                key === 'DESKTOP_PORT' ||
-                key === 'DESKTOP_TRAMPOLINE_TOKEN' ||
-                key === 'GIT_ASKPASS' ||
-                key === 'SSH_ASKPASS' ||
                 key === 'LOCAL_GIT_DIRECTORY' ||
                 key === 'GIT_EXEC_PATH' ||
                 key === 'GIT_TEMPLATE_DIR'

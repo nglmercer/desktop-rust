@@ -411,12 +411,6 @@ fn unsigned(o: &Value, key: &str) -> Result<u64> {
 // git
 // ---------------------------------------------------------------------------
 
-/// Desktop points git at its credential trampoline through this pair of
-/// config parameters. The trampoline needs a socket server inside the
-/// renderer, which a webview cannot host, so the pair is removed and git
-/// falls back to the user's own credential helpers.
-const TRAMPOLINE_CREDENTIAL_CONFIG: &str = "'credential.helper=' 'credential.helper=desktop'";
-
 /// `dugite.exec`: run git and resolve with its output whatever the exit code.
 ///
 /// Output is read while git runs. `maxBuffer` (per stream, requested by the
@@ -601,18 +595,8 @@ pub(crate) fn git_environment(env: Option<&Value>) -> Vec<(String, Option<String
         };
 
         match key.as_str() {
-            // These only make sense with the trampoline server running.
-            "DESKTOP_PORT" | "DESKTOP_TRAMPOLINE_TOKEN" | "GIT_ASKPASS" | "SSH_ASKPASS" => {}
-            // Bundled-git locations inside the the legacy shell app directory.
+            // Bundled-git locations inside the legacy shell app directory.
             "LOCAL_GIT_DIRECTORY" | "GIT_EXEC_PATH" | "GIT_TEMPLATE_DIR" => {}
-            "GIT_CONFIG_PARAMETERS" => {
-                let cleaned = value
-                    .unwrap_or_default()
-                    .replace(TRAMPOLINE_CREDENTIAL_CONFIG, "")
-                    .trim()
-                    .to_string();
-                out.push((key.clone(), (!cleaned.is_empty()).then_some(cleaned)));
-            }
             _ => out.push((key.clone(), value)),
         }
     }
@@ -1779,9 +1763,9 @@ mod tests {
     }
 
     #[test]
-    fn trampoline_settings_are_removed_from_the_git_environment() {
+    fn trampoline_settings_are_preserved_for_legacy_git_processes() {
         let env = json!({
-            "DESKTOP_PORT": 0,
+            "DESKTOP_PORT": 12345,
             "DESKTOP_TRAMPOLINE_TOKEN": "t",
             "GIT_ASKPASS": "",
             "LOCAL_GIT_DIRECTORY": "/__desktop_app__/git",
@@ -1794,19 +1778,19 @@ mod tests {
         assert_eq!(
             out,
             vec![
+                ("DESKTOP_PORT".to_string(), Some("12345".to_string())),
+                (
+                    "DESKTOP_TRAMPOLINE_TOKEN".to_string(),
+                    Some("t".to_string())
+                ),
+                ("GIT_ASKPASS".to_string(), Some(String::new())),
                 (
                     "GIT_CONFIG_PARAMETERS".to_string(),
-                    Some("'a.b=c'".to_string())
+                    Some("'a.b=c' 'credential.helper=' 'credential.helper=desktop'".to_string())
                 ),
                 ("GIT_EDITOR".to_string(), None),
                 ("TERM".to_string(), Some("dumb".to_string())),
             ]
-        );
-
-        let only_trampoline = json!({ "GIT_CONFIG_PARAMETERS": TRAMPOLINE_CREDENTIAL_CONFIG });
-        assert_eq!(
-            git_environment(Some(&only_trampoline)),
-            vec![("GIT_CONFIG_PARAMETERS".to_string(), None)]
         );
     }
 
