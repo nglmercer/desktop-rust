@@ -258,6 +258,7 @@ export async function push(
                             remote_ref: assisted.remoteRef,
                             raw_push_url: assisted.rawPushURL,
                             push_url_source: assisted.pushURLSource,
+                            configured_url: remote.url,
                             config_parameters: assistedConfigParameters,
                           },
                         }),

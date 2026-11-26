@@ -8715,13 +8715,6 @@ export class BackendClient {
       readonly expected_saml_owner?: string
       readonly proxy?: RemoteProxy
       readonly hook_environment?: IHookEnvironmentRequest
-      readonly assisted?: {
-        readonly expected_tip: string
-        readonly remote_ref: string
-        readonly raw_push_url: string
-        readonly push_url_source: 'push-url' | 'fetch-url'
-        readonly config_parameters: string
-      }
     },
     onProgress?: (chunk: FetchProgressChunk) => void,
     onReviewed?: () => void
@@ -8993,6 +8986,7 @@ export class BackendClient {
         readonly remote_ref: string
         readonly raw_push_url: string
         readonly push_url_source: 'push-url' | 'fetch-url'
+        readonly configured_url: string
         readonly config_parameters: string
       }
     },
@@ -9026,6 +9020,9 @@ export class BackendClient {
         request.assisted.raw_push_url.length === 0 ||
         request.assisted.raw_push_url.length > 16 * 1024 ||
         request.assisted.raw_push_url.includes('\0') ||
+        request.assisted.configured_url.length === 0 ||
+        request.assisted.configured_url.length > 16 * 1024 ||
+        request.assisted.configured_url.includes('\0') ||
         request.assisted.config_parameters.length > 256 * 1024 ||
         request.assisted.config_parameters.includes('\0'))
     ) {

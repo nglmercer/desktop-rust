@@ -1380,6 +1380,9 @@ pub struct RendererAssistedPush {
     pub remote_ref: String,
     pub raw_push_url: String,
     pub push_url_source: String,
+    /// Exact configured fetch URL used to prove the remote identity. The
+    /// request-level expected URL remains the effective push destination.
+    pub configured_url: String,
     /// Renderer-owned inherited configuration plus the exact assisted remote pin.
     pub config_parameters: String,
 }
@@ -1391,6 +1394,7 @@ impl std::fmt::Debug for RendererAssistedPush {
             .field("remote_ref", &self.remote_ref)
             .field("raw_push_url", &"<redacted>")
             .field("push_url_source", &self.push_url_source)
+            .field("configured_url", &"<redacted>")
             .field("config_parameters", &"<redacted>")
             .finish()
     }

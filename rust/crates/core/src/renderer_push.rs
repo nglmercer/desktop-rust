@@ -56,6 +56,12 @@ fn validate_assisted(
         "Invalid assisted push URL"
     );
     anyhow::ensure!(
+        !assisted.configured_url.is_empty()
+            && assisted.configured_url.len() <= 16 * 1024
+            && !assisted.configured_url.contains('\0'),
+        "Invalid assisted remote URL"
+    );
+    anyhow::ensure!(
         assisted.config_parameters.len() <= 256 * 1024
             && !assisted.config_parameters.contains('\0'),
         "Invalid assisted push configuration"
@@ -364,9 +370,14 @@ impl Repository {
                 &request.remote,
             ]))
             .await?;
+        let configured_url = request
+            .assisted
+            .as_ref()
+            .map(|assisted| assisted.configured_url.as_str())
+            .unwrap_or(request.expected_url.as_str());
         ensure!(
             fetch_url.code == 0
-                && fetch_url.stdout.strip_suffix(b"\n") == Some(request.expected_url.as_bytes()),
+                && fetch_url.stdout.strip_suffix(b"\n") == Some(configured_url.as_bytes()),
             "Remote changed; refresh before pushing"
         );
         let destinations = self
