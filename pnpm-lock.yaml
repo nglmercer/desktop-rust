@@ -33,9 +33,6 @@ importers:
       front-matter:
         specifier: ^2.3.0
         version: 2.3.0
-      glob:
-        specifier: ^7.1.2
-        version: 7.2.3
       jsdom:
         specifier: ^26.0.0
         version: 26.1.0
@@ -94,9 +91,6 @@ importers:
       '@types/fuzzaldrin-plus':
         specifier: ^0.0.1
         version: 0.0.1
-      '@types/glob':
-        specifier: ^5.0.35
-        version: 5.0.38
       '@types/jsdom':
         specifier: ^30.0.0
         version: 30.0.0
@@ -1116,9 +1110,6 @@ packages:
   '@types/fuzzaldrin-plus@0.0.1':
     resolution: {integrity: sha512-U3BMknlal5/gNmnyl8ovMywTcInOfOwHBNFTczsYGgWZKIKNxW2J0NuemiYTJV6BbEcAQbDvJWTT+tRphWlzsQ==}
 
-  '@types/glob@5.0.38':
-    resolution: {integrity: sha512-rTtf75rwyP9G2qO5yRpYtdJ6aU1QqEhWbtW55qEgquEDa6bXW0s2TWZfDm02GuppjEozOWG/F2UnPq5hAQb+gw==}
-
   '@types/jsdom@30.0.0':
     resolution: {integrity: sha512-uAHGxujGE0cDaKGdK28zgDotFtNA7MKq5DXl8LrfdxdCI8VHcg15oJz+amHTChPNI5JpgEPQWc2xFdrw3em/nQ==}
 
@@ -1136,9 +1127,6 @@ packages:
 
   '@types/memoize-one@3.1.2':
     resolution: {integrity: sha512-A5ydEHaD2xdUbrXlAjF2TifOkYq7TJXU+5t7rLqBGfispKdJJoZnWwPQPyvjh0exxGTTO1ugLB+5jL9P3DQh5w==}
-
-  '@types/minimatch@3.0.5':
-    resolution: {integrity: sha512-Klz949h02Gz2uZCMGwDUSDS1YBlTdDDgbWHi+81l29tQALUtvz4rAYi5uoVhE5Lagoq6DeqAUlbrHvW/mXDgdQ==}
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
@@ -3814,11 +3802,6 @@ snapshots:
 
   '@types/fuzzaldrin-plus@0.0.1': {}
 
-  '@types/glob@5.0.38':
-    dependencies:
-      '@types/minimatch': 3.0.5
-      '@types/node': 22.10.9
-
   '@types/jsdom@30.0.0':
     dependencies:
       '@types/node': 22.10.9
@@ -3835,8 +3818,6 @@ snapshots:
   '@types/marked@4.3.2': {}
 
   '@types/memoize-one@3.1.2': {}
-
-  '@types/minimatch@3.0.5': {}
 
   '@types/ms@2.1.0': {}
 
