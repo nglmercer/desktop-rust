@@ -75,6 +75,7 @@
     "@floating-ui/core": "^1.8.0",
     "@floating-ui/react-dom": "^2.1.9",
     "@primer/octicons": "^19.28.1",
+    "@typescript/compiler-api": "npm:typescript@6.0.3",
     "@vitejs/plugin-react": "^6.3.0",
     "cross-env": "^7.0.3",
     "fake-indexeddb": "^6.0.0",
@@ -87,7 +88,7 @@
     "rimraf": "^6.0.1",
     "sass": "^1.27.0",
     "semver": "^7.6.3",
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript": "7.0.2",
     "vite": "^8.3.8"
   },
   "devDependencies": {
@@ -117,7 +118,6 @@
     "@types/split2": "^4.2.3",
     "@types/textarea-caret": "^3.0.0",
     "@types/untildify": "^3.0.0",
-    "@typescript/native": "npm:typescript@7.0.2",
     "diff": "^8.0.3",
     "markdownlint-cli": "^0.49.1",
     "oxlint": "1.94.0",

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { build } from 'vite'
-import ts from 'typescript'
+import ts from '@typescript/compiler-api'
 import { matcherSource } from './matcher-source.mts'
 
 const here = path.dirname(fileURLToPath(import.meta.url)),

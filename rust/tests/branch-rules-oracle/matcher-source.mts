@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import ts from 'typescript'
+import ts from '@typescript/compiler-api'
 
 /** Extract the production matcher and operator enum without importing the app. */
 export async function matcherSource(root: string): Promise<string> {

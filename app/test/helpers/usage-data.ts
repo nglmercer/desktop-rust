@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { dirname, resolve } from 'node:path'
-import ts from 'typescript'
+import ts from '@typescript/compiler-api'
 
 import { buildStatsPayload } from '../../src/lib/stats/stats-payload'
 import type { StatsPayload } from '../../src/lib/stats/stats-store'

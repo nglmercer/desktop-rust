@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { resolve } from 'path'
-import ts from 'typescript'
+import ts from '@typescript/compiler-api'
 import notificationsPackage from '../vendor/desktop-notifications/package.json'
 import trampolinePackage from '../vendor/desktop-trampoline/package.json'
 

@@ -111,15 +111,16 @@ specific set of dependencies - this will make reviews easier to perform.
 
 ## TypeScript upgrades
 
-TypeScript 7 is the command-line type checker through the `@typescript/native`
-package alias. TypeScript 6 remains installed as `typescript` only for the
+TypeScript 7 is the canonical `typescript` package and command-line type
+checker. `@typescript/compiler-api` remains installed side-by-side only for the
 legacy compiler API used by `script/ts-register.cjs`, native-module emission
 tests, usage-data introspection, and the branch-rules oracle.
 
 When upgrading either compiler:
 
-- keep the root aliases and the TypeScript-based packages under `vendor/`
-  intentionally aligned with the API they consume;
+- keep the canonical TypeScript 7 package, the compiler-API compatibility
+  alias, and the TypeScript-based packages under `vendor/` intentionally aligned
+  with the API they consume;
 - preserve strictness and library declaration checking;
 - update incompatible dependencies or callers rather than disabling checks;
 - do not add new consumers of the TypeScript 6 compiler API.

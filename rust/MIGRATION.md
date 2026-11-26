@@ -30,9 +30,9 @@ installer.
 
 - pnpm 11.17.0 is the JavaScript package manager; `pnpm-lock.yaml` is
   authoritative for the workspace. Cargo uses the root `Cargo.lock`.
-- TypeScript 7 (through `@typescript/native`) provides the fast `tsc` used by
-  `pnpm check:types` and `pnpm compile:script`.
-- TypeScript 6 remains installed as `typescript` only for compiler-API
+- TypeScript 7 is the canonical `typescript` package and provides the fast
+  `tsc` used by `pnpm check:types` and `pnpm compile:script`.
+- `@typescript/compiler-api` remains installed side-by-side only for compiler-API
   compatibility in `script/ts-register.cjs`, native-module emission tests,
   usage-data introspection and the branch-rules oracle.
 - oxlint is the JavaScript/TypeScript linter. Project rules live in
