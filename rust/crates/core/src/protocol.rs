@@ -672,6 +672,12 @@ pub enum Operation {
     RendererDeleteInitialHead {
         expected_oid: String,
     },
+    RendererUpdateRefTransaction {
+        reference: String,
+        old_value: String,
+        new_value: Option<String>,
+        reason: Option<String>,
+    },
     VerifySelectedIndex {
         tree: String,
         head: Option<String>,

@@ -10,6 +10,7 @@ import {
   uninstallNodeHostBridge,
 } from '../helpers/node-host-bridge'
 import { Repository } from '../../src/models/repository'
+import { backend } from '../../src/backend/client'
 import { updateRefWithVerification } from '../../src/lib/git/update-ref'
 
 describe('interactive host-backed git execution', () => {
@@ -47,7 +48,14 @@ describe('interactive host-backed git execution', () => {
         '0000000000000000000000000000000000000000',
         head,
         'test transaction',
-        async () => {}
+        async () => {
+          const context = await backend().repositoryAssistedCommitHead(path)
+          assert.equal(context.kind, 'ok')
+          if (context.kind === 'ok') {
+            assert.equal(context.sha, head)
+            assert.equal(context.ref, 'refs/heads/main')
+          }
+        }
       )
 
       const created = String(

@@ -297,6 +297,10 @@ enum GitInfoOperation {
         repository_path: String,
         operation: Operation,
     },
+    UpdateRefTransaction {
+        repository_path: String,
+        operation: Operation,
+    },
     ResetSubmodules {
         repository_path: String,
         operation: Operation,
@@ -1083,6 +1087,13 @@ impl Backend {
                 "unsupported initial HEAD deletion".into(),
             ));
         }
+        if let GitInfoOperation::UpdateRefTransaction { operation, .. } = &request.operation
+            && !matches!(operation, Operation::RendererUpdateRefTransaction { .. })
+        {
+            return Err(AppError::BadArgs(
+                "unsupported ref transaction operation".into(),
+            ));
+        }
         if let GitInfoOperation::UpdateIndex { operation, .. } = &request.operation
             && !matches!(operation, Operation::RendererUpdateIndex { .. })
         {
@@ -1856,7 +1867,9 @@ impl Backend {
                     | Operation::RendererPush { .. },
                 ..
             }) | BackendOperation::GitInfo(
-                GitInfoOperation::Clone { .. } | GitInfoOperation::CloneSelected { .. }
+                GitInfoOperation::Clone { .. }
+                    | GitInfoOperation::CloneSelected { .. }
+                    | GitInfoOperation::UpdateRefTransaction { .. }
             )
         ) {
             progress
@@ -1924,6 +1937,7 @@ impl Backend {
             job.operation,
             BackendOperation::GitInfo(
                 GitInfoOperation::AbortGitOperation { .. }
+                    | GitInfoOperation::UpdateRefTransaction { .. }
                     | GitInfoOperation::FinishMergeCommit { .. }
                     | GitInfoOperation::ContinueCherryPick {
                         operation: Operation::RendererCherryPickContinue { .. },
@@ -2348,6 +2362,13 @@ impl Backend {
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::DeleteInitialHead { repository_path, operation } => {
+                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
+                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                repo.execute(operation).await
+                            }
+                            GitInfoOperation::UpdateRefTransaction { repository_path, operation } => {
                                 let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
                                 let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }

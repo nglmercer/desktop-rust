@@ -657,19 +657,28 @@ class WryTransport {
         (params.operation.type === 'clone' ||
           params.operation.type === 'clone_selected' ||
           params.operation.type === 'recover_clone')
+      const refTransactionMutation =
+        method === 'git_info' &&
+        isRecord(params) &&
+        isRecord(params.operation) &&
+        params.operation.type === 'update_ref_transaction'
       const maximum =
         fetchMutation || cloneMutation
           ? 3_600_000
-          : method === 'copilot'
-            ? 330_000
-            : 60_000
+          : refTransactionMutation
+            ? 125_000
+            : method === 'copilot'
+              ? 330_000
+              : 60_000
       const deadline =
         opts.deadlineMs ??
         (fetchMutation || cloneMutation
           ? 3_600_000
-          : method === 'copilot'
-            ? 170_000
-            : 60_000)
+          : refTransactionMutation
+            ? 125_000
+            : method === 'copilot'
+              ? 170_000
+              : 60_000)
       if (!Number.isInteger(deadline) || deadline < 1 || deadline > maximum) {
         throw new BackendError({
           code: 'invalid_request',
@@ -6030,6 +6039,153 @@ export class BackendClient {
 
   async repositoryRemoveIndexAll(repositoryPath: string): Promise<void> {
     return this.repositoryClearIndex(repositoryPath, true)
+  }
+
+  /** Run a prepared ref transaction while the owning renderer verifies state. */
+  async repositoryUpdateRefWithVerification(
+    repositoryPath: string,
+    input: {
+      readonly reference: string
+      readonly old_value: string
+      readonly new_value: string | null
+      readonly reason?: string
+    },
+    verify: () => Promise<void>,
+    options: BackendRequestOptions = {}
+  ): Promise<void> {
+    const validOid = (value: string) =>
+      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)
+    const validReference = (value: string) =>
+      value === 'HEAD' ||
+      (value.startsWith('refs/') &&
+        value.length <= 4096 &&
+        value.split('/').every(
+          part =>
+            part.length > 0 &&
+            !part.startsWith('.') &&
+            !part.endsWith('.') &&
+            !part.endsWith('.lock') &&
+            !part.includes('..') &&
+            [...part].every(character => {
+              const code = character.charCodeAt(0)
+              return (
+                code > 0x20 && code !== 0x7f && !'~^:?*[\\'.includes(character)
+              )
+            })
+        ))
+    if (
+      !validReference(input.reference) ||
+      !validOid(input.old_value) ||
+      (input.new_value !== null && !validOid(input.new_value)) ||
+      (input.reason !== undefined &&
+        (input.reason.length === 0 ||
+          input.reason.length > 4096 ||
+          [...input.reason].some(
+            character =>
+              character.charCodeAt(0) < 0x20 || character.charCodeAt(0) === 0x7f
+          )))
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid guarded ref transaction',
+        retryable: false,
+      })
+    }
+
+    let verification: Promise<void> | undefined
+    let verificationError: unknown
+    let verificationFailed = false
+    const onCommitEvent = (event: unknown) => {
+      if (
+        !isRecord(event) ||
+        event.event !== 'hook_decision' ||
+        typeof event.decision_id !== 'string' ||
+        !/^[0-9a-f-]{36}$/.test(event.decision_id)
+      ) {
+        return
+      }
+      const decisionId = event.decision_id
+      const requestId = event.request_id
+      const respond = (verified: boolean) => {
+        if (this.transport === 'wry') {
+          this.wry!.hookDecision(decisionId, verified)
+        } else if (this.transport === 'ws' && typeof requestId === 'number') {
+          this.ws!.hookDecision(requestId, decisionId, verified)
+        }
+      }
+      if (verification !== undefined) {
+        respond(false)
+        return
+      }
+      verification = (async () => {
+        try {
+          await verify()
+          respond(true)
+        } catch (error) {
+          verificationError = error
+          verificationFailed = true
+          respond(false)
+        }
+      })()
+    }
+
+    const operation = {
+      method: 'renderer_update_ref_transaction',
+      reference: input.reference,
+      old_value: input.old_value,
+      new_value: input.new_value,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    }
+    const requestOptions: BackendRequestOptions = {
+      ...options,
+      deadlineMs: 125_000,
+      onCommitEvent,
+    }
+    let operationError: unknown
+    try {
+      if (this.transport === 'wry') {
+        await this.request(
+          'git_info',
+          {
+            operation: {
+              type: 'update_ref_transaction',
+              repository_path: repositoryPath,
+              operation,
+            },
+          },
+          requestOptions
+        )
+      } else {
+        await this.repositoryRead(
+          repositoryPath,
+          operation.method,
+          operation,
+          requestOptions
+        )
+      }
+    } catch (error) {
+      operationError = toBackendError(error)
+    }
+    await verification
+    if (operationError !== undefined) {
+      if (verificationFailed) {
+        throw new AggregateError(
+          [operationError, verificationError],
+          'Git ref guard and guarded work failed'
+        )
+      }
+      throw operationError
+    }
+    if (verificationFailed) {
+      throw verificationError
+    }
+    if (verification === undefined) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Git ref transaction did not prepare',
+        retryable: false,
+      })
+    }
   }
 
   async repositoryDeleteInitialHead(

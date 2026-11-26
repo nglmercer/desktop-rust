@@ -955,7 +955,7 @@ fn git_native_paths(index: Option<&Path>) -> Command {
     command
 }
 
-fn git_command(index: Option<&Path>) -> Command {
+pub(crate) fn git_command(index: Option<&Path>) -> Command {
     let mut command = git_base(index);
     command.arg("--literal-pathspecs");
     command
@@ -1382,7 +1382,7 @@ impl ProcessGroup {
             self.pid = None;
         }
     }
-    fn interrupt(&self) {
+    pub(crate) fn interrupt(&self) {
         #[cfg(unix)]
         if let Some(pid) = self.pid {
             // SAFETY: this process group was created specifically for the command.
@@ -1391,7 +1391,7 @@ impl ProcessGroup {
             }
         }
     }
-    fn terminate(&mut self) {
+    pub(crate) fn terminate(&mut self) {
         #[cfg(unix)]
         if let Some(pid) = self.pid.take() {
             // SAFETY: spawn used process_group(0); only this child's group is targeted.

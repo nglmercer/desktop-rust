@@ -369,6 +369,7 @@ fn needs_credentials(operation: &Operation) -> bool {
             | Operation::RendererUnstageAll
             | Operation::RendererRemoveIndexAll
             | Operation::RendererDeleteInitialHead { .. }
+            | Operation::RendererUpdateRefTransaction { .. }
             | Operation::VerifySelectedIndex { .. }
             | Operation::RendererResetSubmodules { .. }
             | Operation::RendererUpdateSubmodules { .. }

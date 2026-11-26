@@ -23,6 +23,7 @@ use std::{collections::VecDeque, future::Future, pin::Pin, sync::Arc, time::Dura
 use tokio::{
     net::TcpListener,
     sync::{Mutex, Semaphore, mpsc, watch},
+    task::JoinSet,
 };
 
 struct Bridge {
@@ -543,16 +544,23 @@ async fn execute_repository_at_path(
     let requested = desktop_core::directory_path(desktop_core::GitPath::Text(path))?;
     anyhow::ensure!(requested.is_absolute(), "repository path must be absolute");
     let canonical = cancellation::blocking(move || Ok(requested.canonicalize()?)).await?;
-    let current = cancellation::wait(state.repo.lock()).await?;
-    let repo = if let Some(repo) = current.as_ref().filter(|repo| repo.path() == canonical) {
-        repo.clone()
-    } else {
-        let repo = Repository::open(&canonical).await?;
-        anyhow::ensure!(
-            repo.path() == canonical,
-            "select a repository root, not a nested path"
-        );
-        repo
+    let selected = {
+        let current = cancellation::wait(state.repo.lock()).await?;
+        current
+            .as_ref()
+            .filter(|repo| repo.path() == canonical)
+            .cloned()
+    };
+    let repo = match selected {
+        Some(repo) => repo,
+        None => {
+            let repo = Repository::open(&canonical).await?;
+            anyhow::ensure!(
+                repo.path() == canonical,
+                "select a repository root, not a nested path"
+            );
+            repo
+        }
     };
     if !matches!(operation, Operation::Snapshot)
         && let Some(expected) = expected_repository
@@ -1246,6 +1254,7 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
     let comparison_owner = ComparisonSession(desktop_core::comparison_snapshots::Owner::new());
     let (hook_events, mut hook_events_rx) =
         mpsc::channel::<(u64, desktop_core::hook_progress::CommitEvent)>(64);
+    let mut verification_reads = JoinSet::<serde_json::Value>::new();
     let mut queue = VecDeque::<Rpc>::new();
     'session: loop {
         if active.is_none()
@@ -1276,6 +1285,11 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
             },
             Some((request_id, event)) = hook_events_rx.recv() => {
                 if !send(&mut socket, commit_event_value(request_id, event), &state).await { break; }
+                continue;
+            },
+            Some(result) = verification_reads.join_next(), if !verification_reads.is_empty() => {
+                let response = result.unwrap_or_else(|_| json!({"id":null,"error":"verification read task failed"}));
+                if !send(&mut socket, response, &state).await { break; }
                 continue;
             },
             message = socket.recv() => match message { Some(Ok(message)) => message, _ => break },
@@ -1350,6 +1364,35 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
                 json!({"id":id,"result":{"request_id":request_id,"status":status}})
             }
             Some(rpc) => {
+                let verification_read = active.as_ref().is_some_and(|job| job.verification_reads)
+                    && matches!(
+                        rpc.operation,
+                        ApplicationOperation::Repository(Operation::AssistedCommitHead)
+                    );
+                if verification_read && verification_reads.len() < 8 {
+                    let state = state.clone();
+                    let cancellation = active.as_ref().map(|job| job.cancellation.clone());
+                    verification_reads.spawn(async move {
+                        let work = async move {
+                            match execute(
+                                &state,
+                                rpc.operation,
+                                rpc.repository_id,
+                                rpc.repository_path,
+                            )
+                            .await
+                            {
+                                Ok(result) => json!({"id":rpc.id,"result":result}),
+                                Err(error) => json!({"id":rpc.id,"error":error.to_string()}),
+                            }
+                        };
+                        match cancellation {
+                            Some(cancellation) => cancellation.scope(work).await,
+                            None => work.await,
+                        }
+                    });
+                    continue;
+                }
                 if queue.len() + usize::from(active.is_some()) < 32 {
                     queue.push_back(rpc);
                     continue;
@@ -1362,6 +1405,8 @@ async fn session(mut socket: WebSocket, state: Arc<Bridge>) {
             break;
         }
     }
+    verification_reads.abort_all();
+    while verification_reads.join_next().await.is_some() {}
     if let Some(mut job) = active.take() {
         job.cancellation.cancel();
         if job.clone_write {
@@ -1420,6 +1465,7 @@ fn commit_event_value(
 struct Active {
     id: u64,
     clone_write: bool,
+    verification_reads: bool,
     cancellation: Cancellation,
     future: Pin<Box<dyn Future<Output = serde_json::Value> + Send>>,
 }
@@ -1436,6 +1482,10 @@ impl Active {
                 ManagementOperation::CloneRepository { .. }
                     | ManagementOperation::RecoverClone { .. }
             )
+        );
+        let verification_reads = matches!(
+            &rpc.operation,
+            ApplicationOperation::Repository(Operation::RendererUpdateRefTransaction { .. })
         );
         let cancellation = Cancellation::default();
         let request_cancellation = cancellation.clone();
@@ -1473,6 +1523,7 @@ impl Active {
         Self {
             id: rpc.id,
             clone_write,
+            verification_reads,
             cancellation,
             future,
         }

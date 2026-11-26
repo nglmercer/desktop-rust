@@ -86,6 +86,7 @@ mod renderer_push;
 mod renderer_rebase;
 mod renderer_reset;
 mod renderer_revert;
+mod renderer_update_ref;
 mod renderer_working_file;
 pub mod renderer_worktree;
 mod resolution_diff;
@@ -320,6 +321,18 @@ impl Repository {
 
     /// Serialize operations across sessions sharing this repository handle.
     pub async fn execute(&self, operation: Operation) -> Result<Value> {
+        // A prepared ref transaction waits for renderer verification while Git
+        // already holds its ref locks. Holding this handle's gate across that
+        // round trip would deadlock the verification reads; Git's locks and the
+        // compare-and-swap provide the mutation boundary instead.
+        if matches!(operation, Operation::RendererUpdateRefTransaction { .. }) {
+            return git_credentials::scope(
+                self,
+                &operation,
+                Box::pin(self.execute_inner(operation.clone())),
+            )
+            .await;
+        }
         let _guard = cancellation::wait(self.gate.lock()).await?;
         cancellation::Cancellation::current().check()?;
         if let Operation::ManageRemote { action } = &operation
@@ -512,6 +525,22 @@ impl Repository {
             }
             Operation::RendererDeleteInitialHead { expected_oid } => {
                 return self.renderer_delete_initial_head(&expected_oid).await;
+            }
+            Operation::RendererUpdateRefTransaction {
+                reference,
+                old_value,
+                new_value,
+                reason,
+            } => {
+                return self
+                    .renderer_update_ref_transaction(
+                        &reference,
+                        &old_value,
+                        new_value.as_deref(),
+                        reason.as_deref(),
+                    )
+                    .await
+                    .map(|()| Value::Null);
             }
             Operation::VerifySelectedIndex { tree, head, branch } => {
                 return self
@@ -1515,6 +1544,7 @@ impl Repository {
             | RendererUnstageAll
             | RendererRemoveIndexAll
             | RendererDeleteInitialHead { .. }
+            | RendererUpdateRefTransaction { .. }
             | VerifySelectedIndex { .. }
             | RendererSubmoduleStatus
             | RendererResetSubmodules { .. }

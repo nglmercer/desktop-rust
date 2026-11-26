@@ -1,6 +1,4 @@
-import { git } from './core'
 import { Repository } from '../../models/repository'
-import type { IChildProcess } from '../process/child-process'
 import { mkdir } from '../../web/fs-promises'
 import { dirname } from 'path'
 import { backend } from '../../backend/client'
@@ -36,11 +34,14 @@ export async function updateRefWithVerification(
   reason: string,
   verify: () => Promise<void>
 ): Promise<void> {
-  const command =
-    newValue === null
-      ? `delete ${ref}\0${oldValue}\0`
-      : `update ${ref}\0${newValue}\0${oldValue}\0`
-  return preparedRefTransaction(repository, command, verify, 'commit', reason)
+  return preparedRefTransaction(
+    repository,
+    ref,
+    oldValue,
+    newValue,
+    verify,
+    reason
+  )
 }
 
 /**
@@ -129,111 +130,51 @@ export async function withRefLock(
 
 async function preparedRefTransaction(
   repository: Repository,
-  command: string,
+  ref: string,
+  oldValue: string,
+  newValue: string | null,
   action: (lock: IRefLock) => Promise<void>,
-  completion: 'commit' | 'abort',
   reason?: string
 ): Promise<void> {
-  let verification: Promise<void> | undefined
-  let verificationError: unknown
-  let verificationFailed = false
-  let prepared = false
-  let protocol = ''
-  let child: IChildProcess | undefined
-  let completionRequested = false
+  let active = true
   const controller = new AbortController()
   const lock: IRefLock = {
     signal: controller.signal,
     assertHeld: () => {
-      if (
-        controller.signal.aborted ||
-        !prepared ||
-        child === undefined ||
-        child.exitCode !== null ||
-        child.signalCode !== null
-      ) {
+      if (!active || controller.signal.aborted) {
         throw new Error('Git ref guard was lost during guarded work', {
           cause: controller.signal.reason,
         })
       }
     },
   }
-  let gitError: unknown
-  let gitFailed = false
 
-  // -z avoids quoting or interpreting ref names. Options apply to the next
-  // ref command only. no-deref protects against a concurrent symbolic alias.
   try {
-    await git(
-      [
-        'update-ref',
-        ...(reason === undefined ? [] : ['-m', reason]),
-        '--stdin',
-        '-z',
-      ],
+    await withRepositoryGitOperation(
       repository.path,
-      'updateRefWithVerification',
-      {
-        processCallback: process => {
-          child = process
-          process.once('exit', () => {
-            if (!completionRequested) {
-              controller.abort(
-                new Error('Git exited before guarded work settled')
-              )
-            }
-          })
-          const input = process.stdin
-          if (input === null) {
-            verificationError = new Error('Git ref transaction has no stdin')
-            verificationFailed = true
-            return
+      'mutation',
+      () =>
+        backend().repositoryUpdateRefWithVerification(
+          repository.path,
+          {
+            reference: ref,
+            old_value: oldValue,
+            new_value: newValue,
+            ...(reason === undefined ? {} : { reason }),
+          },
+          async () => {
+            lock.assertHeld()
+            await action(lock)
+            lock.assertHeld()
           }
-
-          process.stdout?.on('data', (chunk: Buffer) => {
-            protocol += chunk.toString('utf8')
-            if (!prepared && /(?:^|\n)prepare: ok\r?\n/.test(protocol)) {
-              prepared = true
-              verification = (async () => {
-                try {
-                  lock.assertHeld()
-                  await action(lock)
-                  lock.assertHeld()
-                } catch (error) {
-                  verificationError = error
-                  verificationFailed = true
-                }
-                completionRequested = true
-                if (process.exitCode === null && process.signalCode === null) {
-                  input.end(`${verificationFailed ? 'abort' : completion}\0`)
-                }
-              })()
-            }
-          })
-          input.write(`start\0option no-deref\0${command}prepare\0`)
-        },
-      }
+        ),
+      true
     )
   } catch (error) {
-    gitError = error
-    gitFailed = true
     controller.abort(error)
-  }
-
-  await verification
-  if (gitFailed) {
-    throw verificationFailed
-      ? new AggregateError(
-          [gitError, verificationError],
-          'Git ref guard and guarded work failed'
-        )
-      : gitError
-  }
-  if (verificationFailed) {
-    throw verificationError
-  }
-  if (!prepared) {
-    throw new Error('Git ref transaction did not prepare')
+    throw error
+  } finally {
+    active = false
   }
 }
 
