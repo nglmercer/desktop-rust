@@ -16,7 +16,6 @@ minimumReleaseAgeExclude:
   - '@biomejs/cli-win32-arm64@2.6.7'
   - '@biomejs/cli-win32-x64@2.6.7'
 overrides:
-  '@types/glob>@types/minimatch': 3.0.5
   '@types/react': 16.14.70
 
 # Optional peers (esbuild, tsx, terser...) must not be installed implicitly.
