@@ -133,7 +133,7 @@ describe('git/remote discovery', () => {
   })
 
   for (const rewritten of [false, true]) {
-    it(`rejects credential-bearing remotes without changing transfer policy (rewritten=${rewritten})`, async t => {
+    it(`preserves credential-bearing remotes without changing transfer policy (rewritten=${rewritten})`, async t => {
       const repository = await setupEmptyRepository(t)
       const originURL = 'https://example.invalid/healthy.git'
       const unusedURL =
@@ -155,10 +155,10 @@ describe('git/remote discovery', () => {
       // Keep the test offline even if credential validation stops rejecting.
       await setConfigValue(repository, 'protocol.allow', 'never')
 
-      await assert.rejects(
-        getRemotes(repository),
-        /cannot be safely represented by the native backend/
-      )
+      assert.deepStrictEqual(await getRemotes(repository), [
+        { name: 'origin', url: originURL },
+        { name: 'unused', url: unusedURL },
+      ])
       assert.strictEqual(
         (
           await git(

@@ -298,11 +298,11 @@ fn remote_names(data: &[u8]) -> Result<Option<RemoteNames>> {
 
 /// Preserve the exact configured URL for editable settings and display. This
 /// representation check does not approve the URL for transport: control
-/// characters are rejected because they cannot be represented safely, while
-/// credentials, queries, fragments, local paths and SCP-style forms are kept
-/// byte-for-byte as the legacy renderer contract requires.
+/// NUL is rejected because it cannot be represented in Git configuration,
+/// while credentials, queries, fragments, whitespace, local paths and
+/// SCP-style forms are kept byte-for-byte as the legacy renderer contract requires.
 pub(crate) fn exact_remote_url(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 16384 && !value.chars().any(char::is_control)
+    !value.is_empty() && value.len() <= 16384 && !value.contains('\0')
 }
 
 /// Review whether a URL may be contacted by a typed transport operation.
@@ -749,7 +749,10 @@ mod tests {
         ] {
             assert!(super::exact_remote_url(value), "{value}");
         }
-        for value in ["", "https://host/repo\nsecret", &"x".repeat(16385)] {
+        for value in ["https://host/repo\nsecret", " \t/path/with spaces\t \r\n"] {
+            assert!(super::exact_remote_url(value), "{value}");
+        }
+        for value in ["", "https://host/repo\0secret", &"x".repeat(16385)] {
             assert!(!super::exact_remote_url(value), "{value}");
         }
     }
