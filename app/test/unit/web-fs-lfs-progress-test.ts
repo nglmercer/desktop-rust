@@ -23,7 +23,11 @@ function installBridge() {
       if (channel === 'desktop.io.fs-open') {
         openings.push({ path: options.path, flags: options.flags })
         try {
-          const handle = openSync(options.path, options.flags ?? 'wx', options.mode)
+          const handle = openSync(
+            options.path,
+            options.flags ?? 'wx',
+            options.mode
+          )
           const id = nextHandle++
           handles.set(id, handle)
           return Promise.resolve({ id })
