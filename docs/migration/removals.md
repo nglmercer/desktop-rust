@@ -156,6 +156,8 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `tsconfig.runner.json` y overrides/metadata `@types/glob` | configuración huérfana tras eliminar el runner TypeScript 6 y `glob`; lockfile podado de transitivos viejos de `app-path` | `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm compile:script` |
 | import directo `dugite` del runner legacy renderer | `app/src/web/dugite.ts` ejecuta comandos no interactivos por `desktop.io.git-exec` y callbacks/progreso por procesos streaming host-owned con entorno Git filtrado, `maxBuffer`, stdin, señales y grupo de proceso | `app/test/unit/web-dugite-interactive-test.ts`, `app/test/unit/web-child-process-test.ts`, `app/test/unit/git/rebase-full-test.ts`, `app/test/unit/git/clone-test.ts`, `cargo test -p desktop-shell-core-legacy io::process` |
 | rebase interactivo renderer con archivos todo/mensaje temporales y `sequence.editor` shell | operación tipada `renderer_rebase_interactive`; el host Rust valida todo/programa y object IDs, crea los archivos temporales, fija editores host-generated y devuelve outcome/stdout/stderr acotados | `app/test/unit/git/squash-test.ts`, `app/test/unit/git/reorder-test.ts`, `pnpm check:types`, `pnpm migration:check`, clippy Rust |
+| ejecución legacy de clone ordinario y credenciales trampoline renderer | operación tipada `clone_repository` con puerto/token, user-agent, SSH/askpass y parámetros Git validados/redactados en el host; `GIT_ALLOW_PROTOCOL` viaja explícitamente y `ext`/`ext.exe` siguen filtrados | `app/test/unit/git/clone-test.ts`, `app/test/unit/git/clone-fallback-account-test.ts`, `app/test/unit/clone-options-bridge-integration-test.ts` |
+| entorno de hooks de pull ejecutado solo por el runner legacy | contrato tipado `hook_environment` con proceso proxy loopback efímero; el host fusiona la configuración de hooks con la política de credenciales en lugar de reemplazarla | `app/test/unit/rust-pull-routing-test.ts`, suites enfocadas de pull/progreso |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -184,7 +186,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (2 comprobaciones
-`transportKind`, 14 llamadas legacy Git, 0 imports renderer `dugite`, 0 imports `fs`, 0 imports
+`transportKind`, 2 llamadas legacy Git, 0 imports renderer `dugite`, 0 imports `fs`, 0 imports
 `child_process`, 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva
