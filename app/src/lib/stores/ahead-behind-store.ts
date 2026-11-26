@@ -1,5 +1,5 @@
 import pLimit from 'p-limit'
-import QuickLRU from 'quick-lru'
+import { LruCache } from '../memoize'
 import { Disposable } from 'event-kit'
 import { IAheadBehind } from '../../models/branch'
 import { revSymmetricDifference, getAheadBehind } from '../git'
@@ -29,7 +29,7 @@ export class AheadBehindStore {
    * This map also functions as a least recently used cache and will evict the
    * least recently used comparisons to ensure the cache won't grow unbounded
    */
-  private readonly cache = new QuickLRU<string, IAheadBehind | null>({
+  private readonly cache = new LruCache<string, IAheadBehind | null>({
     maxSize: 2500,
   })
 

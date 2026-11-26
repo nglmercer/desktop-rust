@@ -1,5 +1,5 @@
 import pLimit from 'p-limit'
-import QuickLRU from 'quick-lru'
+import { LruCache } from '../memoize'
 
 import { Disposable } from 'event-kit'
 import xor from 'lodash/xor'
@@ -145,7 +145,7 @@ export class CommitStatusStore {
    * the least recently used commit statuses to ensure the cache won't
    * grow unbounded
    */
-  private readonly cache = new QuickLRU<string, ICommitStatusCacheEntry>({
+  private readonly cache = new LruCache<string, ICommitStatusCacheEntry>({
     maxSize: 250,
   })
 

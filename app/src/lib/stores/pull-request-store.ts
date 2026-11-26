@@ -1,4 +1,4 @@
-import mem from 'mem'
+import { memoize } from '../memoize'
 
 import {
   PullRequestDatabase,
@@ -172,7 +172,7 @@ export class PullRequestStore {
     // a repository with a huge number of open PRs from forks) this
     // will reduce the N+2 to N+1.
     const store = this.repositoryStore
-    const getRepo = mem(store.findGitHubRepositoryByID.bind(store))
+    const getRepo = memoize(store.findGitHubRepositoryByID.bind(store))
 
     for (const record of records) {
       const headRepository = await getRepo(record.head.repoId)
@@ -251,7 +251,7 @@ export class PullRequestStore {
     // to use the upsert just to ensure that the repo exists in the database
     // and reuse the same object without going to the database for all that
     // follow.
-    const upsertRepo = mem(
+    const upsertRepo = memoize(
       store.upsertGitHubRepositoryLightForRepository.bind(store),
       {
         // The first argument is the account-qualified repository context,

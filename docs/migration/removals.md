@@ -140,6 +140,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | entrada directa `@testing-library/dom` | dependencia transitiva exacta declarada por `@testing-library/react` | `pnpm install --frozen-lockfile --ignore-scripts`, pruebas UI enfocadas |
 | `split2` y `@types/split2` en el paquete renderer | `forEachNullRecord` en `app/src/lib/line-stream.ts`; el vendor trampoline conserva su propia dependencia | `app/test/unit/line-stream-test.ts`, `git/refreshable-credentials-test.ts` |
 | `untildify` y `@types/untildify` | expansión local exacta de `~` con el home inyectado por el host en `app/src/lib/untildify.ts` | `app/test/unit/untildify-test.ts` |
+| `mem` y `quick-lru` | `LruCache` y `memoize` locales en `app/src/lib/memoize.ts`, incluyendo expulsión LRU y no retención de promesas rechazadas | `app/test/unit/memoize-test.ts`, `ahead-behind-store-test.ts`, `commit-status-store-test.ts`, `ui/relative-time-test.tsx`, `notifications-store-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

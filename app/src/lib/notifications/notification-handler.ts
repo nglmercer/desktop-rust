@@ -1,9 +1,9 @@
-import QuickLRU from 'quick-lru'
+import { LruCache } from '../memoize'
 import * as ipcRenderer from '../ipc-renderer'
 import { focusWindow } from '../../ui/main-process-proxy'
 import type { NotificationsStore } from '../stores/notifications-store'
 
-export const notificationCallbacks = new QuickLRU<string, () => void>({
+export const notificationCallbacks = new LruCache<string, () => void>({
   maxSize: 200,
 })
 
