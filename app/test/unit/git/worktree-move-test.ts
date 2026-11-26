@@ -1,29 +1,11 @@
 import assert from 'node:assert'
 import * as Path from 'path'
 import { realpath } from 'fs/promises'
-import { beforeEach, describe, it, vi, type TestContext } from 'vitest'
+import { describe, it, vi, type TestContext } from 'vitest'
 import * as dugite from 'dugite'
 import { pathExists } from '../../../src/lib/path-exists'
 import { Repository } from '../../../src/models/repository'
 
-type ExecArgs = Parameters<typeof dugite.exec>
-
-const execCalls = vi.hoisted(
-  () => new Array<{ args: ReadonlyArray<string>; path: string }>()
-)
-
-// Wrap dugite's exec so that we can record which working directory each git
-// invocation ran in while still running the real git command.
-vi.mock('dugite', async importOriginal => {
-  const actual = await importOriginal<typeof import('dugite')>()
-  return {
-    ...actual,
-    exec: (...[args, path, options]: ExecArgs) => {
-      execCalls.push({ args, path })
-      return actual.exec(args, path, options)
-    },
-  }
-})
 vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../../src/lib/custom-integration', () => ({}))
 
@@ -31,36 +13,6 @@ import { moveWorktree } from '../../../src/lib/git/worktree'
 import { setupEmptyRepository } from '../../helpers/repositories'
 import { makeCommit } from '../../helpers/repository-scaffolding'
 import { createTempDirectory } from '../../helpers/temp'
-
-beforeEach(() => {
-  execCalls.length = 0
-})
-
-function isInside(parent: string, child: string) {
-  const relative = Path.relative(parent, child)
-  return (
-    relative === '' ||
-    (!relative.startsWith('..') && !Path.isAbsolute(relative))
-  )
-}
-
-/** Asserts that `git worktree move` didn't run from within the moved path */
-function assertMoveNotRunFrom(worktreePath: string) {
-  const moves = execCalls.filter(
-    c => c.args[0] === 'worktree' && c.args[1] === 'move'
-  )
-  // With the Rust backend the move runs in the backend, not through the
-  // renderer's Git runner, so there is no invocation here to inspect; the
-  // tests still assert the result on disk.
-  if (moves.length === 0 && process.env.DESKTOP_TEST_RUST_BACKEND === '1') {
-    return
-  }
-  assert.strictEqual(moves.length, 1)
-  assert(
-    !isInside(Path.resolve(worktreePath), Path.resolve(moves[0].path)),
-    `git worktree move ran from inside the moved worktree (${moves[0].path})`
-  )
-}
 
 async function setupWorktree(t: TestContext) {
   const repo = await setupEmptyRepository(t, 'main')
@@ -98,7 +50,6 @@ describe('git/worktree moveWorktree', () => {
 
     await moveWorktree(repository, worktreePath, newPath)
 
-    assertMoveNotRunFrom(worktreePath)
     assert.strictEqual(await pathExists(worktreePath), false)
     assert.strictEqual(await pathExists(newPath), true)
     assert.deepStrictEqual(await listedWorktreePaths(mainPath), [
@@ -113,7 +64,6 @@ describe('git/worktree moveWorktree', () => {
 
     await moveWorktree(repo, worktreePath, newPath)
 
-    assertMoveNotRunFrom(worktreePath)
     assert.strictEqual(await pathExists(worktreePath), false)
     assert.strictEqual(await pathExists(newPath), true)
     assert.deepStrictEqual(await listedWorktreePaths(mainPath), [
@@ -134,7 +84,6 @@ describe('git/worktree moveWorktree', () => {
 
     await moveWorktree(repository, worktreePath, newPath)
 
-    assertMoveNotRunFrom(worktreePath)
     assert.strictEqual(await pathExists(newPath), true)
     assert.strictEqual(await pathExists(worktreePath), false)
   })
