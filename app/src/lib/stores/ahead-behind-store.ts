@@ -1,4 +1,4 @@
-import pLimit from 'p-limit'
+import { limitConcurrency } from '../concurrency-limit'
 import { LruCache } from '../memoize'
 import { Disposable } from 'event-kit'
 import { IAheadBehind } from '../../models/branch'
@@ -40,7 +40,7 @@ export class AheadBehindStore {
    * A concurrency limiter which ensures that we only run `MaxConcurrent`
    * ahead/behind calculations concurrently
    */
-  private readonly limit = pLimit(MaxConcurrent)
+  private readonly limit = limitConcurrency(MaxConcurrent)
 
   /**
    * Attempt to _synchronously_ retrieve an ahead behind status for a particular

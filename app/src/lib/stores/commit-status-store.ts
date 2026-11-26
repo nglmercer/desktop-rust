@@ -1,4 +1,4 @@
-import pLimit from 'p-limit'
+import { limitConcurrency } from '../concurrency-limit'
 import { LruCache } from '../memoize'
 
 import { Disposable } from 'event-kit'
@@ -159,7 +159,7 @@ export class CommitStatusStore {
    * A concurrency limiter which ensures that we only run `MaxConcurrentFetches`
    * API requests simultaneously.
    */
-  private readonly limit = pLimit(MaxConcurrentFetches)
+  private readonly limit = limitConcurrency(MaxConcurrentFetches)
 
   public constructor(accountsStore: AccountsStore) {
     accountsStore.getAll().then(this.onAccountsUpdated)
