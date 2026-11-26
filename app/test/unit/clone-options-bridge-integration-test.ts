@@ -178,6 +178,36 @@ describe.skipIf(
       progress.some(line => parser.parse(line.trimEnd()).kind === 'progress')
     ).toBe(true)
 
+    const proxyRequests: string[] = []
+    const cloningProxy = createServer((request, response) => {
+      proxyRequests.push(request.url ?? '')
+      response.writeHead(502)
+      response.end()
+    })
+    await new Promise<void>(resolve =>
+      cloningProxy.listen(0, '127.0.0.1', resolve)
+    )
+    try {
+      const address = cloningProxy.address()
+      if (!address || typeof address === 'string')
+        throw new Error('missing test proxy address')
+      await expect(
+        client.cloneRepository({
+          url: 'http://proxy-target.invalid/repo',
+          path: path.join(directory, 'proxied'),
+          proxy: { http: `http://127.0.0.1:${address.port}` },
+        })
+      ).rejects.toThrow()
+      expect(
+        proxyRequests.some(url =>
+          url.startsWith('http://proxy-target.invalid/repo/info/refs')
+        )
+      ).toBe(true)
+    } finally {
+      cloningProxy.closeAllConnections()
+      await new Promise<void>(resolve => cloningProxy.close(() => resolve()))
+    }
+
     let received!: () => void
     const receivedRequest = new Promise<void>(resolve => {
       received = resolve

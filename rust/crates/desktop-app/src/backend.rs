@@ -140,6 +140,15 @@ enum GitInfoOperation {
         default_branch: Option<String>,
         account: desktop_backend::CloneAccount,
     },
+    Clone {
+        url: String,
+        path: desktop_backend::GitPath,
+        branch: Option<String>,
+        default_branch: Option<String>,
+        recursive: bool,
+        report_progress: bool,
+        proxy: Option<desktop_backend::RendererProxy>,
+    },
     ListCloneRecoveries {},
     RecoverClone {
         recovery_id: String,
@@ -509,6 +518,7 @@ impl Backend {
                 default_branch,
                 recursive: false,
                 report_progress: true,
+                proxy: None,
             },
             account,
         )
@@ -1845,7 +1855,9 @@ impl Backend {
                     | Operation::RendererPull { .. }
                     | Operation::RendererPush { .. },
                 ..
-            }) | BackendOperation::GitInfo(GitInfoOperation::CloneSelected { .. })
+            }) | BackendOperation::GitInfo(
+                GitInfoOperation::Clone { .. } | GitInfoOperation::CloneSelected { .. }
+            )
         ) {
             progress
         } else {
@@ -2009,7 +2021,9 @@ impl Backend {
         let clone_write = matches!(
             job.operation,
             BackendOperation::GitInfo(
-                GitInfoOperation::CloneSelected { .. } | GitInfoOperation::RecoverClone { .. }
+                GitInfoOperation::Clone { .. }
+                    | GitInfoOperation::CloneSelected { .. }
+                    | GitInfoOperation::RecoverClone { .. }
             )
         );
         let lfs_write = matches!(
@@ -2069,6 +2083,17 @@ impl Backend {
                                 let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
                                 if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
                                 repo.open_desktop_custom_editor(path, editor).await
+                            }
+                            GitInfoOperation::Clone { url, path, branch, default_branch, recursive, report_progress, proxy } => {
+                                let destination = desktop_backend::directory_path(path).map_err(|error| AppError::msg(error.to_string()))?;
+                                desktop_backend::clone_repository_with_options(&url, &destination, desktop_backend::CloneOptions {
+                                    branch,
+                                    default_branch,
+                                    recursive,
+                                    report_progress,
+                                    proxy,
+                                }).await.map_err(|error| AppError::msg(error.to_string()))?;
+                                return Ok(serde_json::Value::Null);
                             }
                             GitInfoOperation::CloneSelected { url, path, default_branch, account } => {
                                 return self.clone_selected(url, path, default_branch, account).await;

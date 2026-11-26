@@ -59,7 +59,17 @@ pub(crate) async fn run_clone(
     args: &[OsString],
     report_progress: bool,
 ) -> Result<RawOutput> {
-    run_clone_inner(path, args, report_progress, &[]).await
+    run_clone_inner(path, args, report_progress, &[], None).await
+}
+
+/// Run clone with explicitly reviewed proxy environment values.
+pub(crate) async fn run_clone_with_proxy(
+    path: &Path,
+    args: &[OsString],
+    report_progress: bool,
+    proxy: &crate::RendererProxy,
+) -> Result<RawOutput> {
+    run_clone_inner(path, args, report_progress, &[], Some(proxy)).await
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -79,7 +89,7 @@ pub(crate) async fn run_clone_with_inherited_fd(
         descriptors.iter().all(|fd| *fd >= 3),
         "Clone directory descriptor overlaps a standard stream"
     );
-    run_clone_inner(path, args, report_progress, &descriptors).await
+    run_clone_inner(path, args, report_progress, &descriptors, None).await
 }
 
 async fn run_clone_inner(
@@ -87,8 +97,17 @@ async fn run_clone_inner(
     args: &[OsString],
     report_progress: bool,
     inherited_fds: &[i32],
+    proxy: Option<&crate::RendererProxy>,
 ) -> Result<RawOutput> {
     let mut command = git_native_paths(None);
+    if let Some(proxy) = proxy {
+        if let Some(value) = &proxy.http {
+            command.env("http_proxy", value);
+        }
+        if let Some(value) = &proxy.https {
+            command.env("https_proxy", value);
+        }
+    }
     #[cfg(unix)]
     if !inherited_fds.is_empty() {
         #[cfg(test)]
@@ -136,7 +155,9 @@ async fn run_clone_inner(
     let _ = inherited_fds;
     // Fixed diagnostics allow safe classification without forwarding Git's
     // potentially credential-bearing error output to the caller.
-    command.env("LC_ALL", "C");
+    command
+        .env("LC_ALL", "C")
+        .env("GIT_CLONE_PROTECTION_ACTIVE", "false");
     if crate::git_credentials::clone::active() {
         command.env("GIT_ALLOW_PROTOCOL", "https");
     } else if let Some(value) = std::env::var_os("GIT_ALLOW_PROTOCOL") {

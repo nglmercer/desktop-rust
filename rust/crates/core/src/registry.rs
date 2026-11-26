@@ -1754,6 +1754,7 @@ pub struct CloneOptions {
     pub default_branch: Option<String>,
     pub recursive: bool,
     pub report_progress: bool,
+    pub proxy: Option<crate::RendererProxy>,
 }
 
 /// An explicitly selected stored account; its numeric actor is verified before
@@ -2267,6 +2268,9 @@ pub async fn clone_repository_with_options(
     path: &Path,
     options: CloneOptions,
 ) -> Result<Repository> {
+    if let Some(proxy) = &options.proxy {
+        proxy.validate()?;
+    }
     if url.is_empty()
         || url.starts_with('-')
         || url.contains(['\0', '\n', '\r'])
@@ -2326,7 +2330,12 @@ pub async fn clone_repository_with_options(
     }
     command.extend(args(&["--", url]));
     command.push(destination.as_os_str().to_owned());
-    let output = process::run_clone(parent, &command, options.report_progress).await?;
+    let output = match &options.proxy {
+        Some(proxy) => {
+            process::run_clone_with_proxy(parent, &command, options.report_progress, proxy).await?
+        }
+        None => process::run_clone(parent, &command, options.report_progress).await?,
+    };
     if output.code != 0 {
         bail!("{}", clone_failure_message(&output));
     }
@@ -2796,6 +2805,7 @@ mod tests {
                 default_branch: Some("main".into()),
                 recursive: false,
                 report_progress: false,
+                proxy: None,
             },
             CloneAccount {
                 host: host.clone(),
@@ -2870,6 +2880,7 @@ mod tests {
                 default_branch: Some("main".into()),
                 recursive: false,
                 report_progress: false,
+                proxy: None,
             },
             CloneAccount {
                 host: host.clone(),
@@ -2960,6 +2971,7 @@ mod tests {
                 default_branch: Some("main".into()),
                 recursive: false,
                 report_progress: false,
+                proxy: None,
             },
             CloneAccount {
                 host,
@@ -3069,6 +3081,7 @@ mod tests {
                 default_branch: Some("fallback".into()),
                 recursive: true,
                 report_progress: false,
+                proxy: None,
             },
         )
         .await

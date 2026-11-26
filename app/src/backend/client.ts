@@ -81,7 +81,7 @@ export type RemoteProxy = {
 
 function validateRemoteProxy(
   proxy: RemoteProxy | undefined,
-  operation: 'fetch' | 'pull' | 'push'
+  operation: 'fetch' | 'pull' | 'push' | 'clone'
 ): void {
   if (
     proxy !== undefined &&
@@ -654,7 +654,8 @@ class WryTransport {
         method === 'git_info' &&
         isRecord(params) &&
         isRecord(params.operation) &&
-        (params.operation.type === 'clone_selected' ||
+        (params.operation.type === 'clone' ||
+          params.operation.type === 'clone_selected' ||
           params.operation.type === 'recover_clone')
       const maximum =
         fetchMutation || cloneMutation
@@ -3755,6 +3756,34 @@ export class BackendClient {
         recoverable: record.recoverable,
       }
     })
+  }
+
+  /** Clone without a renderer-mediated account through the typed host operation. */
+  async cloneRepository(
+    input: {
+      readonly url: string
+      readonly path: string
+      readonly branch?: string
+      readonly default_branch?: string
+      readonly proxy?: { readonly http?: string; readonly https?: string }
+    },
+    options: BackendRequestOptions = {}
+  ): Promise<void> {
+    validateRemoteProxy(input.proxy, 'clone')
+    const request = {
+      ...input,
+      recursive: true,
+      report_progress: options.onProgress !== undefined,
+    }
+    if (this.transport === 'wry') {
+      await this.request(
+        'git_info',
+        { operation: { type: 'clone', ...request } },
+        options
+      )
+      return
+    }
+    await this.request('clone_repository', request, options)
   }
 
   /** Clone into an unselected destination with the explicitly selected account. */
