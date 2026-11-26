@@ -22,7 +22,6 @@ on:
       - 'app/test/unit/**'
       - 'app/test/helpers/usage-data.ts'
       - 'app/test/vitest-setup.ts'
-      - 'app/test/backend-transport-tsconfig.json'
       - 'script/test.mts'
       - 'script/**'
       - 'script/test-discovery.mts'
@@ -74,7 +73,6 @@ on:
       - 'app/test/unit/**'
       - 'app/test/helpers/usage-data.ts'
       - 'app/test/vitest-setup.ts'
-      - 'app/test/backend-transport-tsconfig.json'
       - 'script/test.mts'
       - 'script/**'
       - 'script/test-discovery.mts'
@@ -147,7 +145,6 @@ jobs:
           npm ci --prefix vendor/desktop-trampoline --no-audit --no-fund
           npm run lint --prefix vendor/desktop-trampoline
           npm test --prefix vendor/desktop-trampoline
-          pnpm exec tsc -p app/test/backend-transport-tsconfig.json
           pnpm exec tsc -p rust/tests/tsconfig.json
           node node_modules/vitest/vitest.mjs run --config vitest.config.ts
           npm ci --prefix rust/tests/branch-rules-oracle --ignore-scripts --no-audit --no-fund
