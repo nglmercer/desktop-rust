@@ -3157,6 +3157,44 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitRemotePushUrls(
+    repositoryPath: string,
+    remote: string,
+    all: boolean,
+    environment?: Record<string, string | undefined>
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    if (remote.length === 0 || remote.length > 4096 || remote.includes('\0'))
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid remote name',
+        retryable: false,
+      })
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_remote_push_urls',
+      { remote, all, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      (value.exit_code === 0 || value.exit_code === 2) &&
+      typeof value.stdout === 'string' &&
+      value.stdout.length <= 16 * 1024 * 1024 &&
+      typeof value.stderr === 'string' &&
+      value.stderr.length <= 16 * 1024 * 1024
+    ) {
+      return {
+        exitCode: value.exit_code,
+        stdout: value.stdout,
+        stderr: value.stderr,
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid remote push URL response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitRefs(
     repositoryPath: string
   ): Promise<ReadonlyArray<AssistedCommitRef>> {

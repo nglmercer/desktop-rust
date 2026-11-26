@@ -281,6 +281,42 @@ impl Repository {
         Ok(json!({"values":values}))
     }
 
+    pub(crate) async fn assisted_commit_remote_push_urls(
+        &self,
+        remote: &str,
+        all: bool,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            !remote.is_empty() && remote.len() <= 4096 && !remote.contains('\0'),
+            "invalid remote name"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported push configuration environment key"
+            );
+        }
+        let mut command_args = vec!["remote", "get-url", "--push"];
+        if all {
+            command_args.push("--all");
+        }
+        command_args.push("--");
+        command_args.push(remote);
+        let output = crate::process::run_without_git_config_with_environment(
+            &self.path,
+            &args(&command_args),
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(matches!(output.code, 0 | 2), "Cannot read remote push URL");
+        Ok(json!({
+            "exit_code": output.code,
+            "stdout": String::from_utf8_lossy(&output.stdout),
+            "stderr": String::from_utf8_lossy(&output.stderr),
+        }))
+    }
+
     pub(crate) async fn assisted_commit_refs(&self) -> Result<Value> {
         let output = self
             .run(&args(&[
@@ -552,6 +588,12 @@ mod tests {
                 && reference["target"].is_null()
         }));
         fixture.git(&["config", "branch.main.remote", "origin"]);
+        fixture.git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/repo.git",
+        ]);
         let config = repository.assisted_commit_config().await.unwrap();
         assert!(config["entries"].as_array().unwrap().iter().any(|entry| {
             entry["section"] == "branch"
@@ -603,6 +645,17 @@ mod tests {
                 .await
                 .is_err()
         );
+        let push_url = repository
+            .assisted_commit_remote_push_urls("origin", false, &Default::default())
+            .await
+            .unwrap();
+        assert_eq!(push_url["exit_code"], 0);
+        assert_eq!(push_url["stdout"], "https://example.invalid/repo.git\n");
+        let push_urls = repository
+            .assisted_commit_remote_push_urls("origin", true, &Default::default())
+            .await
+            .unwrap();
+        assert_eq!(push_urls["stdout"], push_url["stdout"]);
         let values = repository
             .assisted_commit_config_values("branch.main.remote", &Default::default())
             .await

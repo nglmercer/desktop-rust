@@ -688,6 +688,25 @@ function nodeBackend(t: TestContext) {
             ? []
             : result.stdout.split('\0').slice(0, -1)
         },
+        repositoryAssistedCommitRemotePushUrls: async (
+          path: string,
+          remote: string,
+          all: boolean,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const args = ['remote', 'get-url', '--push']
+          if (all) args.push('--all')
+          args.push('--', remote)
+          const result = (await interceptingGitExec(actualExec)(args, path, {
+            successExitCodes: new Set([0, 2]),
+            env: { GIT_CONFIG: undefined, ...environment },
+          } as never)) as Dugite.IGitStringResult
+          return {
+            exitCode: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr,
+          }
+        },
         repositoryLastFetch: async (path: string) => {
           const gitDirResult = await actualExec(
             ['rev-parse', '--absolute-git-dir'],

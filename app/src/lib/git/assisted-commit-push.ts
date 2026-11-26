@@ -783,11 +783,11 @@ async function readAssistedCommitPushDestinationCore(
       ),
     }
   }
-  const url = await git(
-    ['remote', 'get-url', '--push', '--', remote.name],
+  const url = await backend().repositoryAssistedCommitRemotePushUrls(
     repository.path,
-    'assistedPushURL',
-    { successExitCodes: new Set([0, 2]) }
+    remote.name,
+    false,
+    assistedPushConfigurationEnvironment()
   )
   if (url.exitCode === 2) {
     return {
@@ -798,10 +798,11 @@ async function readAssistedCommitPushDestinationCore(
       ),
     }
   }
-  const urls = await git(
-    ['remote', 'get-url', '--push', '--all', '--', remote.name],
+  const urls = await backend().repositoryAssistedCommitRemotePushUrls(
     repository.path,
-    'assistedPushURLs'
+    remote.name,
+    true,
+    assistedPushConfigurationEnvironment()
   )
   if (url.stdout !== urls.stdout || url.stdout.length <= 1) {
     return {
@@ -1322,11 +1323,11 @@ export async function completeAssistedCommitPushPublication(
       { publicationStale: true }
     )
   }
-  const url = await git(
-    ['remote', 'get-url', '--push', '--all', '--', destination.remote.name],
+  const url = await backend().repositoryAssistedCommitRemotePushUrls(
     repository.path,
-    'assistedPublicationURL',
-    { successExitCodes: new Set([0, 2]) }
+    destination.remote.name,
+    true,
+    assistedPushConfigurationEnvironment()
   )
   if (url.exitCode === 2) {
     throw new AssistedCommitPushError(
@@ -1661,18 +1662,17 @@ export async function prepareAssistedCommitPushDestination(
       'The original branch, commit, repository, or push destination changed. Local commits were kept. Review the repository and use the normal Push action.'
     )
   }
-  const pinned = await git(
-    ['remote', 'get-url', '--push', '--all', '--', destination.remote.name],
+  const pinned = await backend().repositoryAssistedCommitRemotePushUrls(
     repository.path,
-    'assistedPushPinnedURL',
+    destination.remote.name,
+    true,
     {
-      env: {
-        GIT_CONFIG_PARAMETERS: getAssistedCommitPushConfigParameters(
-          destination.remote.name,
-          destination.rawPushURL,
-          destination.pushURLSource
-        ),
-      },
+      ...assistedPushConfigurationEnvironment(),
+      GIT_CONFIG_PARAMETERS: getAssistedCommitPushConfigParameters(
+        destination.remote.name,
+        destination.rawPushURL,
+        destination.pushURLSource
+      ),
     }
   )
   // Git lists a URL reset (an empty value) as a blank line in `--all` output on

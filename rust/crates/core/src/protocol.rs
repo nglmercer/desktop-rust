@@ -455,6 +455,12 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitRemotePushUrls {
+        remote: String,
+        all: bool,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitRefs,
     AssistedCommitIndexEntries,
     AssistedCommitGitPath {
