@@ -673,16 +673,11 @@ async function readConfigValues(
   repository: Repository,
   name: string
 ): Promise<ReadonlyArray<string>> {
-  const result = await git(
-    ['config', '--null', '--get-all', '--', name],
+  return backend().repositoryAssistedCommitConfigValues(
     repository.path,
-    'assistedPushConfigValues',
-    {
-      successExitCodes: new Set([0, 1]),
-      env: nativeConfigurationEnvironment,
-    }
+    name,
+    assistedPushConfigurationEnvironment()
   )
-  return result.exitCode === 1 ? [] : result.stdout.split('\0').slice(0, -1)
 }
 
 /** Resolve the original branch's configured upstream, or Desktop's normal default remote. */

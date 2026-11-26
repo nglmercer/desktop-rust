@@ -3125,6 +3125,38 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitConfigValues(
+    repositoryPath: string,
+    key: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<ReadonlyArray<string>> {
+    if (key.length === 0 || key.length > 4096 || key.includes('\0'))
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid configuration key',
+        retryable: false,
+      })
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_config_values',
+      { key, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      Array.isArray(value.values) &&
+      value.values.every(
+        item => typeof item === 'string' && item.length <= 16 * 1024 * 1024
+      )
+    ) {
+      return value.values as string[]
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted configuration values response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitRefs(
     repositoryPath: string
   ): Promise<ReadonlyArray<AssistedCommitRef>> {

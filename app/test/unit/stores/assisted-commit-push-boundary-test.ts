@@ -672,6 +672,22 @@ function nodeBackend(t: TestContext) {
           }
           return entries
         },
+        repositoryAssistedCommitConfigValues: async (
+          path: string,
+          key: string
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['config', '--null', '--get-all', '--', key],
+            path,
+            {
+              successExitCodes: new Set([0, 1]),
+              env: { GIT_CONFIG: undefined },
+            } as never
+          )) as Dugite.IGitStringResult
+          return result.exitCode === 1
+            ? []
+            : result.stdout.split('\0').slice(0, -1)
+        },
         repositoryLastFetch: async (path: string) => {
           const gitDirResult = await actualExec(
             ['rev-parse', '--absolute-git-dir'],
@@ -1522,6 +1538,7 @@ describe('assisted native push boundary', () => {
   it('rejects configuration staging through a nonregular replacement after tracking probes and releases its lock', async t => {
     reset()
     t.after(reset)
+    nodeBackend(t)
     const source = await fixtures.seed(t, { file: 'before\n' })
     const remote = await remotes.addBareRemote(t, source, { publish: false })
     await FileSystem.writeFile(join(source.path, 'file'), 'after\n')

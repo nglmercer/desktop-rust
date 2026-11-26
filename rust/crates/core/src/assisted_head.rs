@@ -241,6 +241,46 @@ impl Repository {
         Ok(json!({"entries":validate_push_config(&output.stdout)?}))
     }
 
+    pub(crate) async fn assisted_commit_config_values(
+        &self,
+        key: &str,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            !key.is_empty() && key.len() <= 4096 && !key.contains('\0'),
+            "invalid configuration key"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported push configuration environment key"
+            );
+        }
+        let output = crate::process::run_without_git_config_with_environment(
+            &self.path,
+            &args(&["config", "--null", "--get-all", "--", key]),
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(
+            matches!(output.code, 0 | 1),
+            "Cannot read Git configuration values"
+        );
+        let values = if output.code == 1 || output.stdout.is_empty() {
+            Vec::new()
+        } else {
+            anyhow::ensure!(
+                output.stdout.ends_with(b"\0"),
+                "configuration values are not terminated"
+            );
+            output.stdout[..output.stdout.len() - 1]
+                .split(|byte| *byte == 0)
+                .map(|value| json!(String::from_utf8_lossy(value)))
+                .collect()
+        };
+        Ok(json!({"values":values}))
+    }
+
     pub(crate) async fn assisted_commit_refs(&self) -> Result<Value> {
         let output = self
             .run(&args(&[
@@ -563,6 +603,16 @@ mod tests {
                 .await
                 .is_err()
         );
+        let values = repository
+            .assisted_commit_config_values("branch.main.remote", &Default::default())
+            .await
+            .unwrap();
+        assert_eq!(values["values"][0], "origin");
+        let missing = repository
+            .assisted_commit_config_values("branch.main.missing", &Default::default())
+            .await
+            .unwrap();
+        assert!(missing["values"].as_array().unwrap().is_empty());
         let index = repository.assisted_commit_git_path("index").await.unwrap();
         assert!(index["path"].as_str().unwrap().ends_with(".git/index"));
         assert!(
