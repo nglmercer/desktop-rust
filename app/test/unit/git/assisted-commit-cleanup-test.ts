@@ -64,6 +64,10 @@ import {
   tip,
 } from '../../helpers/assisted-commit'
 import { createTempDirectory } from '../../helpers/temp'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 interface ICleanupFaultState {
   directory: string
@@ -200,13 +204,17 @@ describe('git/assisted-commit cleanup-only retry', () => {
   })
 
   beforeEach(() => {
+    installNodeHostBridge()
     setHooksEnvEnabled(false)
     fsSpies.mkdtemp.mockReset().mockImplementation(realFs.mkdtemp)
     fsSpies.writeFile.mockReset().mockImplementation(realFs.writeFile)
     fsSpies.rm.mockReset().mockImplementation(realFs.rm)
     fsSpies.lstat.mockReset().mockImplementation(realFs.lstat)
   })
-  afterEach(() => localStorage.removeItem('git-hooks-env-enabled'))
+  afterEach(() => {
+    uninstallNodeHostBridge()
+    localStorage.removeItem('git-hooks-env-enabled')
+  })
 
   for (const failure of ['capture', 'capture-cancellation']) {
     it(`retains owned cleanup before a snapshot or callback exists (${failure})`, async t => {

@@ -6,8 +6,13 @@ import type { CopyOptions } from 'fs'
 import * as Dugite from 'dugite'
 import { basename, join } from 'path'
 import { getProxyCommandPath } from 'process-proxy'
+import { backend } from '../../../src/backend/client'
 import type { HookProgress } from '../../../src/lib/git/core'
 import { DiffSelection, DiffSelectionType } from '../../../src/models/diff'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 let engine: typeof import('../../../src/lib/git/assisted-commit')
 let fixtures: typeof import('../../helpers/assisted-commit')
@@ -74,8 +79,12 @@ before(async () => {
 })
 
 describe('git/assisted-commit real hook interception', () => {
-  beforeEach(() => config.setHooksEnvEnabled(true))
+  beforeEach(() => {
+    installNodeHostBridge()
+    config.setHooksEnvEnabled(true)
+  })
   afterEach(() => {
+    uninstallNodeHostBridge()
     nativeExecFault = undefined
     loginGitParameters = undefined
     localStorage.removeItem('git-hooks-env-enabled')
@@ -505,26 +514,26 @@ describe('git/assisted-commit real hook interception', () => {
       ].join('\n')
     )
     let injected = false
-    nativeExecFault = (args, cwd, options) => {
-      if (
-        !injected &&
-        cwd === repository.path &&
-        options?.env?.GIT_DIR === undefined &&
-        args[0] === 'symbolic-ref' &&
-        args.at(-1) === 'HEAD'
-      ) {
-        return FileSystem.access(
-          join(repository.path, 'publish-observation-fault')
-        ).then(
-          () => {
+    const readHead = backend().repositoryAssistedCommitHead
+    const headSpy = vi
+      .spyOn(backend(), 'repositoryAssistedCommitHead')
+      .mockImplementation(async path => {
+        if (!injected && path === repository.path) {
+          try {
+            await FileSystem.access(
+              join(repository.path, 'publish-observation-fault')
+            )
             injected = true
             throw new Error('Injected one-shot HEAD observation failure')
-          },
-          () => nativeExec(args, cwd, options)
-        )
-      }
-      return undefined
-    }
+          } catch (error) {
+            if (injected) {
+              throw error
+            }
+          }
+        }
+        return readHead.call(backend(), path)
+      })
+    t.after(() => headSpy.mockRestore())
     await assert.rejects(
       fixtures.single(repository, input),
       error =>
@@ -606,26 +615,26 @@ describe('git/assisted-commit real hook interception', () => {
       ].join('\n')
     )
     let injected = false
-    nativeExecFault = (args, cwd, options) => {
-      if (
-        !injected &&
-        cwd === repository.path &&
-        options?.env?.GIT_DIR === undefined &&
-        args[0] === 'symbolic-ref' &&
-        args.at(-1) === 'HEAD'
-      ) {
-        return FileSystem.access(
-          join(repository.path, 'rejected-observation-fault')
-        ).then(
-          () => {
+    const readHead = backend().repositoryAssistedCommitHead
+    const headSpy = vi
+      .spyOn(backend(), 'repositoryAssistedCommitHead')
+      .mockImplementation(async path => {
+        if (!injected && path === repository.path) {
+          try {
+            await FileSystem.access(
+              join(repository.path, 'rejected-observation-fault')
+            )
             injected = true
             throw new Error('Injected failed-publication observation')
-          },
-          () => nativeExec(args, cwd, options)
-        )
-      }
-      return undefined
-    }
+          } catch (error) {
+            if (injected) {
+              throw error
+            }
+          }
+        }
+        return readHead.call(backend(), path)
+      })
+    t.after(() => headSpy.mockRestore())
     await assert.rejects(
       engine.withAssistedCommitSnapshot(repository, input, async snapshot => {
         const checked = await engine.validateAssistedCommitPlan(

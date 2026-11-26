@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, describe, it } from 'node:test'
+import { afterEach, before, beforeEach, describe, it } from 'node:test'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {
@@ -9,6 +9,10 @@ import {
   DiffType,
 } from '../../../src/models/diff'
 import { WorkingDirectoryFileChange } from '../../../src/models/status'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 let engine: typeof import('../../../src/lib/git/assisted-commit')
 let fixtures: typeof import('../../helpers/assisted-commit')
@@ -35,6 +39,9 @@ before(async () => {
 })
 
 describe('git/assisted-commit snapshot tree reuse', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   for (const partialCount of [0, 1, 3]) {
     it(`materializes each whole-file tree once with ${partialCount} partial selections`, async t => {
       config.setHooksEnvEnabled(false)

@@ -1,5 +1,10 @@
 import assert from 'node:assert'
-import { describe, it } from '../../helpers/node-test-compat'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+} from '../../helpers/node-test-compat'
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {
@@ -39,8 +44,15 @@ import {
   wholeSelectionResponse,
 } from '../../helpers/copilot-assisted-commit'
 import { CopilotError } from '../../../src/lib/copilot-error'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 describe('snapshot-only assisted commit planning', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   it('passes selected-only partial hunks and mixed atomic units, preserving all real state until later execution', async t => {
     const base = Array.from({ length: 40 }, (_, i) => `line ${i + 1}\n`)
     const repository = await seed(t, {

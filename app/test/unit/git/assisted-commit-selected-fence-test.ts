@@ -1,8 +1,12 @@
 import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, describe, it } from 'node:test'
+import { afterEach, before, beforeEach, describe, it } from 'node:test'
 import * as FileSystem from 'fs/promises'
 import { join } from 'path'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 let transactions: typeof import('../../../src/lib/git/assisted-commit')
 let fixtures: typeof import('../../helpers/assisted-commit')
@@ -36,6 +40,9 @@ before(async () => {
 })
 
 describe('assisted selected-file completion fence', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   it('rejects an earlier selected file changed while a later file is being verified', async t => {
     const repository = await fixtures.seed(t, {
       a: 'before a\n',

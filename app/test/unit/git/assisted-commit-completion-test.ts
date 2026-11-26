@@ -1,6 +1,6 @@
 /* eslint-disable no-sync */
 import assert from 'node:assert'
-import { describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import { existsSync } from 'fs'
 import { readFile, rename, stat, symlink, utimes, writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -18,8 +18,15 @@ import {
   count,
 } from '../../helpers/assisted-commit'
 import { createTempDirectory } from '../../helpers/temp'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 describe('assisted local completion fence', () => {
+  beforeEach(() => installNodeHostBridge())
+  afterEach(() => uninstallNodeHostBridge())
+
   it('restores the original index timestamp so native racy-stat entries cannot become falsely clean', async t => {
     const repository = await seed(t, { selected: 'before\n' })
     await writeFile(join(repository.path, 'selected'), 'AFTER!\n')

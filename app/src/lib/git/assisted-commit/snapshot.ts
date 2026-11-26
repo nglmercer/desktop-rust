@@ -1,5 +1,5 @@
 import { randomUUID } from '../../../web/random-uuid'
-import { Stats } from 'fs'
+import { Stats } from '../../../web/fs'
 import {
   chmod,
   lstat,
@@ -9,7 +9,7 @@ import {
   realpath,
   rm,
   writeFile,
-} from 'fs/promises'
+} from '../../../web/fs-promises'
 import { tmpdir } from '../../../web/os'
 import { dirname, join } from 'path'
 import {

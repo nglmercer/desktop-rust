@@ -100,6 +100,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | streams de archivo escritos como builtin `fs` en el proxy de hooks | frontera explícita `web/fs`; stdin buffered usa WriteStream host-backed y lectura por rangos | `app/test/unit/traditional-hook-test.ts` |
 | escritura/borrado temporal de reorder/squash como builtin `fs/promises` | frontera explícita `web/fs-promises`; las pruebas comparten un bridge Node mínimo de filesystem | `app/test/unit/git/reorder-test.ts`, `app/test/unit/git/squash-test.ts` |
 | watcher/stat/read streams directos del tailer de progreso | frontera explícita `web/fs` con watcher host-backed por sondeo, stat y lecturas por rangos; `ReadStream` expone `readable` para consumo por `byline` | `app/test/unit/tailer-test.ts`, `app/test/unit/tailer-web-fs-test.ts` |
+| metadata, lectura, escritura, canonicalización y limpieza directa del filesystem en snapshots assisted-commit | frontera explícita `web/fs`/`web/fs-promises`; las pruebas ejercitan el adaptador mediante el bridge Node compartido y conservan inyección de fallos | `app/test/unit/git/assisted-commit-snapshot-test.ts`, `app/test/unit/git/assisted-commit-cleanup-test.ts`, `app/test/unit/git/assisted-commit-hooks-test.ts` |
 | creación directa de directorios padre de locks de refs en update-ref | frontera explícita `web/fs-promises`; las suites usan el bridge Node de host compartido sin cambiar el orden de locking | `app/test/unit/git/assisted-commit-test.ts` |
 | lanzamiento de terminales macOS mediante `child_process` | spawn host-backed `web/child_process`; la interfaz estructural se conserva porque el consumo es error/exit/stderr | `pnpm check:types`, `pnpm vite:build` |
 | lanzamiento de terminales Windows mediante `child_process` y `shell: true` sin soporte host | spawn host-backed `web/child_process`; el host implementa unión de línea y `/bin/sh -c`/cmd según plataforma | `app/test/unit/cygwin-test.ts`, `cargo test -p desktop-shell-core-legacy io::process::tests::shell_commands_join_the_command_line_like_node` |
@@ -138,7 +139,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (3 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 2 imports `dugite`, 6 imports `fs`, 1 import `child_process`,
+`transportKind`, 18 llamadas legacy Git, 2 imports `dugite`, 5 imports `fs`, 1 import `child_process`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

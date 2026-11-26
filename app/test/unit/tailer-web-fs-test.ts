@@ -42,6 +42,7 @@ describe('tailByLine through the host-backed filesystem', () => {
     const lines: string[] = []
     const disposable = tailByLine(path, line => lines.push(line))
     try {
+      await new Promise(resolve => setTimeout(resolve, 1000))
       appendFileSync(path, 'first\n')
       await waitFor(() => expect(lines).toEqual(['first']))
 
