@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest'
 import assert from 'node:assert'
-import { GitError } from 'dugite'
+import { GitErrorKind } from '../../../src/lib/git/error-kind'
 import { git } from '../../../src/lib/git'
 import { setupFixtureRepository } from '../../helpers/repositories'
 
@@ -11,9 +11,9 @@ describe('git/core', () => {
 
       const args = ['rev-list', '--left-right', '--count', 'some-ref', '--']
       const result = await git(args, testRepoPath, 'test', {
-        expectedErrors: new Set([GitError.BadRevision]),
+        expectedErrors: new Set([GitErrorKind.BadRevision]),
       })
-      assert.equal(result.gitError, GitError.BadRevision)
+      assert.equal(result.gitError, GitErrorKind.BadRevision)
     })
 
     it('throws for errors that were not expected', async t => {
@@ -22,7 +22,7 @@ describe('git/core', () => {
       const args = ['rev-list', '--left-right', '--count', 'some-ref', '--']
       await assert.rejects(
         git(args, testRepoPath, 'test', {
-          expectedErrors: new Set([GitError.SSHKeyAuditUnverified]),
+          expectedErrors: new Set([GitErrorKind.SSHKeyAuditUnverified]),
         })
       )
     })

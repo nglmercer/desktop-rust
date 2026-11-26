@@ -94,6 +94,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | lanzamiento de integraciones personalizadas importando directamente `child_process` | spawn host-backed `web/child_process` con stdio ignorado; el host preserva procesos detached en sesión propia y fuera del apagado del renderer, y la interfaz de shells consume la abstracción estructural `IChildProcess` | `app/test/unit/native-custom-integration-test.ts`, `cargo test -p desktop-shell-core-legacy io::process::tests` |
 | creación y limpieza de archivos de progreso LFS mediante imports directos `fs` | operaciones host-backed `web/fs`/`web/fs-promises`; la creación conserva exclusividad `wx` | `app/test/unit/web-fs-lfs-progress-test.ts` |
 | imports dispersos del enum `GitError` de dugite en consumidores renderer | vocabulario centralizado en `app/src/lib/git/error-kind.ts`; quedan imports directos solo en la frontera del vocabulario y el legacy runner | `pnpm check:types`, `app/test/unit/rust-fetch-error-test.ts`, routing fetch/pull/push |
+| reexportación del enum `GitError` desde dugite | vocabulario numérico congelado en `app/src/lib/git/error-kind.ts` con paridad verificada; solo el legacy runner importa dugite | `app/test/unit/git-error-kind-test.ts`, `app/test/unit/git/core-test.ts`, `app/test/unit/rust-fetch-error-test.ts` |
 | resolución dugite del binario Git para hooks y tabla vacía de señales del shim `os` | ejecución mediante `git` resuelto por el host/PATH, como ya ocurría en el bundle web; códigos de salida por señal POSIX conservados | `app/test/unit/traditional-hook-test.ts` |
 | imports directos `dugite` en hooks/credenciales | frontera explícita host-backed `app/src/web/dugite.ts`; los tests inyectan un bridge Node solo para ejercitar la superficie web | `app/test/unit/hooks-discovery-test.ts`, `app/test/unit/git/credential-test.ts` |
 | `fs.createWriteStream` ausente en el shim host usado para stdin de hooks | stream Writable real con creación/truncado inicial y appends chunked por el host; conserva destinos vacíos | `app/test/unit/web-fs-write-stream-test.ts` |
@@ -140,7 +141,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (2 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 2 imports `dugite`, 5 imports `fs`, 1 import `child_process`,
+`transportKind`, 18 llamadas legacy Git, 1 import `dugite`, 5 imports `fs`, 1 import `child_process`,
 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

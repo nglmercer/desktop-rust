@@ -371,9 +371,13 @@ export async function git(
               ? opts.successExitCodes.has(exitCode)
               : false
             if (!acceptableExitCode) {
-              gitError = parseError(coerceToString(result.stderr))
+              gitError = parseError(
+                coerceToString(result.stderr)
+              ) as DugiteError | null
               if (gitError === null) {
-                gitError = parseError(coerceToString(result.stdout))
+                gitError = parseError(
+                  coerceToString(result.stdout)
+                ) as DugiteError | null
               }
             }
 

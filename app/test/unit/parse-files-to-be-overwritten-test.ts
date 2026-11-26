@@ -5,7 +5,7 @@ import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { git } from '../../src/lib/git'
 import { cloneLocalRepository } from '../helpers/repository-scaffolding'
-import { GitError as DugiteError } from 'dugite'
+import { GitErrorKind } from '../../src/lib/git/error-kind'
 import { parseFilesToBeOverwritten } from '../../src/ui/lib/parse-files-to-be-overwritten'
 
 describe('parseFilesToBeOverwritten', () => {
@@ -24,10 +24,10 @@ describe('parseFilesToBeOverwritten', () => {
     const fork = await cloneLocalRepository(t, parent)
     await git(['reset', 'HEAD^'], fork.path, 'reset')
     const result = await git(['pull'], fork.path, 'pull', {
-      expectedErrors: new Set([DugiteError.MergeWithLocalChanges]),
+      expectedErrors: new Set([GitErrorKind.MergeWithLocalChanges]),
     })
 
-    assert.equal(result.gitError, DugiteError.MergeWithLocalChanges)
+    assert.equal(result.gitError, GitErrorKind.MergeWithLocalChanges)
     assert.deepStrictEqual(parseFilesToBeOverwritten(result.stderr), ['a', 'b'])
   })
 
@@ -46,10 +46,10 @@ describe('parseFilesToBeOverwritten', () => {
     const fork = await cloneLocalRepository(t, parent)
     await git(['reset', 'HEAD^'], fork.path, 'reset')
     const result = await git(['pull', '--rebase'], fork.path, 'pull', {
-      expectedErrors: new Set([DugiteError.RebaseWithLocalChanges]),
+      expectedErrors: new Set([GitErrorKind.RebaseWithLocalChanges]),
     })
 
-    assert.equal(result.gitError, DugiteError.RebaseWithLocalChanges)
+    assert.equal(result.gitError, GitErrorKind.RebaseWithLocalChanges)
     assert.deepStrictEqual(parseFilesToBeOverwritten(result.stderr), [])
   })
 
@@ -67,10 +67,10 @@ describe('parseFilesToBeOverwritten', () => {
 
     await git(['reset', 'HEAD^'], repo.path, 'reset')
     const result = await git(['merge', 'HEAD@{1}'], repo.path, 'merge', {
-      expectedErrors: new Set([DugiteError.MergeWithLocalChanges]),
+      expectedErrors: new Set([GitErrorKind.MergeWithLocalChanges]),
     })
 
-    assert.equal(result.gitError, DugiteError.MergeWithLocalChanges)
+    assert.equal(result.gitError, GitErrorKind.MergeWithLocalChanges)
     assert.deepStrictEqual(parseFilesToBeOverwritten(result.stderr), ['a', 'b'])
   })
 
@@ -94,10 +94,10 @@ describe('parseFilesToBeOverwritten', () => {
     await writeFile(join(repo.path, 'b'), '6')
 
     const result = await git(['checkout', 'master'], repo.path, 'checkout', {
-      expectedErrors: new Set([DugiteError.LocalChangesOverwritten]),
+      expectedErrors: new Set([GitErrorKind.LocalChangesOverwritten]),
     })
 
-    assert.equal(result.gitError, DugiteError.LocalChangesOverwritten)
+    assert.equal(result.gitError, GitErrorKind.LocalChangesOverwritten)
     assert.deepStrictEqual(parseFilesToBeOverwritten(result.stderr), ['a', 'b'])
   })
 })

@@ -11,11 +11,11 @@ if it regresses.
 | --- | --- | --- |
 | Fallback checks (`transportKind`) in the renderer | 2 in 2 files | 0 |
 | Legacy Git runner calls (`await git(`) in `lib/git` | 18 in 8 files | 0 |
-| Renderer files importing `dugite` | 2 | 0 |
+| Renderer files importing `dugite` | 1 | 0 |
 | Renderer files importing `fs` | 5 | 0 (host operations only) |
 | Renderer files importing `child_process` | 1 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
-| Unit test files on the Node runner | 0 of 410 | 0 |
+| Unit test files on the Node runner | 0 of 411 | 0 |
 | Rust code (crates, non-test) | 91,295 lines | — |
 
 Completed foundations: Electron, Webpack and esbuild are out of the active build;
