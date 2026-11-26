@@ -1288,7 +1288,7 @@ impl RendererCloneTrampoline {
         }
         anyhow::ensure!(
             self.config_parameters.len() <= 256 * 1024
-                && !self.config_parameters.contains(' ')
+                && !self.config_parameters.contains('\0')
                 && (self.config_parameters == CREDENTIAL_SUFFIX
                     || self
                         .config_parameters
@@ -1319,7 +1319,7 @@ impl RendererHookEnvironment {
             "Invalid hook proxy token"
         );
         anyhow::ensure!(
-            self.config_parameters.len() <= 256 * 1024 && !self.config_parameters.contains(' '),
+            self.config_parameters.len() <= 256 * 1024 && !self.config_parameters.contains('\0'),
             "Invalid hook Git configuration"
         );
         Ok(())
@@ -1389,6 +1389,8 @@ pub struct RendererPushRequest {
     pub interactive_hook_decision: bool,
     #[serde(default)]
     pub proxy: Option<RendererProxy>,
+    #[serde(default)]
+    pub hook_environment: Option<RendererHookEnvironment>,
 }
 
 impl std::fmt::Debug for RendererPushRequest {
@@ -1406,6 +1408,7 @@ impl std::fmt::Debug for RendererPushRequest {
             .field("require_hook_callbacks", &self.require_hook_callbacks)
             .field("interactive_hook_decision", &self.interactive_hook_decision)
             .field("proxy", &self.proxy)
+            .field("hook_environment", &self.hook_environment)
             .finish()
     }
 }

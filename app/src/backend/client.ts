@@ -8980,6 +8980,7 @@ export class BackendClient {
       readonly require_hook_callbacks: boolean
       readonly interactive_hook_decision?: boolean
       readonly proxy?: RemoteProxy
+      readonly hook_environment?: IHookEnvironmentRequest
     },
     onProgress?: (chunk: FetchProgressChunk) => void,
     checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>,
@@ -8999,6 +9000,7 @@ export class BackendClient {
       })
     }
     validateRemoteProxy(request.proxy, 'push')
+    validateHookEnvironment(request.hook_environment)
     const call = (
       method: 'renderer_push_preview' | 'renderer_push',
       extra: Record<string, unknown> = {}

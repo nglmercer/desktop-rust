@@ -26,7 +26,7 @@ import {
 import { fetchFailureToGitError } from './fetch-error'
 import { pushTerminalChunk } from './push-terminal-chunk'
 import { getDescriptionForError, GitError } from './core'
-import { withHooksEnv } from '../hooks/with-hooks-env'
+import { rendererHookEnvironment, withHooksEnv } from '../hooks/with-hooks-env'
 
 const pullInterceptHooks = [
   'pre-merge-commit',
@@ -37,37 +37,6 @@ const pullInterceptHooks = [
   'pre-commit',
   'post-rewrite',
 ]
-
-type RendererHookEnvironment = {
-  readonly config_parameters: string
-  readonly process_proxy_port: number
-  readonly process_proxy_token: string
-}
-
-function rendererHookEnvironment(
-  environment: Record<string, string | undefined> | undefined
-): RendererHookEnvironment | undefined {
-  const token = environment?.PROCESS_PROXY_TOKEN
-  const rawPort = environment?.PROCESS_PROXY_PORT
-  if (token === undefined && rawPort === undefined) {
-    return undefined
-  }
-  const port = Number(rawPort)
-  if (
-    token === undefined ||
-    token.length === 0 ||
-    !Number.isInteger(port) ||
-    port < 1 ||
-    port > 65535
-  ) {
-    throw new TypeError('Invalid hook interception environment')
-  }
-  return {
-    config_parameters: environment?.GIT_CONFIG_PARAMETERS ?? '',
-    process_proxy_port: port,
-    process_proxy_token: token,
-  }
-}
 
 /**
  * Pull from the specified remote.

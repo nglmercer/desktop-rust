@@ -201,6 +201,13 @@ impl Repository {
         if let Some(proxy) = &request.proxy {
             proxy.validate()?;
         }
+        if let Some(hooks) = &request.hook_environment {
+            hooks.validate()?;
+            ensure!(
+                !request.require_hook_callbacks && !request.interactive_hook_decision,
+                "Renderer hook interception replaces native hook callbacks"
+            );
+        }
         for variable in [
             "GIT_DIR",
             "GIT_WORK_TREE",
@@ -411,6 +418,7 @@ impl Repository {
             trace_hooks,
             proxy,
             request.proxy.as_ref(),
+            request.hook_environment.as_ref(),
         )
         .await?;
         Ok(
@@ -471,6 +479,7 @@ mod tests {
                 require_hook_callbacks: false,
                 interactive_hook_decision: false,
                 proxy: None,
+                hook_environment: None,
             };
             (Self(root), request)
         }

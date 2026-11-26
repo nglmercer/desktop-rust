@@ -27,6 +27,38 @@ const memoizedGetShellEnv = memoizeOne(
   }
 )
 
+export type RendererHookEnvironment = {
+  readonly config_parameters: string
+  readonly process_proxy_port: number
+  readonly process_proxy_token: string
+}
+
+/** Convert the ephemeral process-proxy environment into the typed host contract. */
+export function rendererHookEnvironment(
+  environment: Record<string, string | undefined> | undefined
+): RendererHookEnvironment | undefined {
+  const token = environment?.PROCESS_PROXY_TOKEN
+  const rawPort = environment?.PROCESS_PROXY_PORT
+  if (token === undefined && rawPort === undefined) {
+    return undefined
+  }
+  const port = Number(rawPort)
+  if (
+    token === undefined ||
+    token.length === 0 ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  ) {
+    throw new TypeError('Invalid hook interception environment')
+  }
+  return {
+    config_parameters: environment?.GIT_CONFIG_PARAMETERS ?? '',
+    process_proxy_port: port,
+    process_proxy_token: token,
+  }
+}
+
 export async function withHooksEnv<T>(
   fn: (env: Record<string, string | undefined> | undefined) => Promise<T>,
   path: string,

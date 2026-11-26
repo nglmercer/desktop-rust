@@ -31,6 +31,7 @@ import { FetchStreamProgressParser } from '../progress/fetch-stream'
 import { fetchFailureToGitError } from './fetch-error'
 import { pushTerminalChunk } from './push-terminal-chunk'
 import { GitErrorKind } from './error-kind'
+import { rendererHookEnvironment, withHooksEnv } from '../hooks/with-hooks-env'
 
 const uncertainPushes = new WeakSet<Error>()
 
@@ -211,91 +212,114 @@ export async function push(
           repository.path,
           'mutation',
           () =>
-            backend().pushRepositoryRemote(
-              repository.path,
-              {
-                remote: remote.name,
-                expected_url: remote.url,
-                local_branch: localBranch,
-                remote_branch: remoteBranch,
-                tags: tagsToPush ?? [],
-                force_with_lease: options?.forceWithLease ?? false,
-                no_verify: options?.noVerify ?? false,
-                report_progress: needsStreaming,
-                require_hook_callbacks:
-                  options?.onHookProgress !== undefined ||
-                  options?.onHookFailure !== undefined ||
-                  options?.onTerminalOutputAvailable !== undefined,
-                interactive_hook_decision: options?.onHookFailure !== undefined,
-                ...(proxy === undefined ? {} : { proxy }),
-              },
-              !needsStreaming
-                ? undefined
-                : chunk => {
-                    try {
-                      parser?.push(chunk)
-                    } catch {
-                      /* Progress observers cannot terminate a push. */
-                    }
-                    if (chunk.stream === 'lfs') return
-                    const bytes = Uint8Array.from(atob(chunk.data), character =>
-                      character.charCodeAt(0)
-                    )
-                    const text = decoders[chunk.stream].decode(bytes, {
-                      stream: true,
-                    })
-                    notifyTerminal(text)
+            withHooksEnv(
+              hookEnvironment => {
+                const hooks = rendererHookEnvironment(hookEnvironment)
+                const useNativeHookCallbacks = hooks === undefined
+                return backend().pushRepositoryRemote(
+                  repository.path,
+                  {
+                    remote: remote.name,
+                    expected_url: remote.url,
+                    local_branch: localBranch,
+                    remote_branch: remoteBranch,
+                    tags: tagsToPush ?? [],
+                    force_with_lease: options?.forceWithLease ?? false,
+                    no_verify: options?.noVerify ?? false,
+                    report_progress: needsStreaming,
+                    require_hook_callbacks:
+                      useNativeHookCallbacks &&
+                      (options?.onHookProgress !== undefined ||
+                        options?.onHookFailure !== undefined ||
+                        options?.onTerminalOutputAvailable !== undefined),
+                    interactive_hook_decision:
+                      useNativeHookCallbacks &&
+                      options?.onHookFailure !== undefined,
+                    ...(proxy === undefined ? {} : { proxy }),
+                    ...(hooks === undefined ? {} : { hook_environment: hooks }),
                   },
-              options?.onTerminalOutputAvailable !== undefined
-                ? async () => {
+                  !needsStreaming
+                    ? undefined
+                    : chunk => {
+                        try {
+                          parser?.push(chunk)
+                        } catch {
+                          /* Progress observers cannot terminate a push. */
+                        }
+                        if (chunk.stream === 'lfs') return
+                        const bytes = Uint8Array.from(
+                          atob(chunk.data),
+                          character => character.charCodeAt(0)
+                        )
+                        const text = decoders[chunk.stream].decode(bytes, {
+                          stream: true,
+                        })
+                        notifyTerminal(text)
+                      },
+                  options?.onTerminalOutputAvailable !== undefined
+                    ? async () => {
+                        try {
+                          withoutRepositoryGitAccess(() =>
+                            options?.onTerminalOutputAvailable?.(listener => {
+                              for (const chunk of terminalChunks) {
+                                try {
+                                  withoutRepositoryGitAccess(() =>
+                                    listener(chunk)
+                                  )
+                                } catch {
+                                  /* Observers cannot terminate a push. */
+                                }
+                              }
+                              listeners.add(listener)
+                              return {
+                                unsubscribe: () => listeners.delete(listener),
+                              }
+                            })
+                          )
+                        } catch {
+                          /* Observer setup must not trigger fallback or terminate a push. */
+                        }
+                      }
+                    : undefined,
+                  event => {
+                    if (event.status === 'failed') failedHook = true
                     try {
                       withoutRepositoryGitAccess(() =>
-                        options?.onTerminalOutputAvailable?.(listener => {
-                          for (const chunk of terminalChunks) {
-                            try {
-                              withoutRepositoryGitAccess(() => listener(chunk))
-                            } catch {
-                              /* Observers cannot terminate a push. */
-                            }
-                          }
-                          listeners.add(listener)
-                          return {
-                            unsubscribe: () => listeners.delete(listener),
-                          }
-                        })
+                        options?.onHookProgress?.(
+                          event.status === 'started'
+                            ? {
+                                hookName: event.hookName,
+                                status: 'started',
+                                abort: () => controller.abort(),
+                              }
+                            : { hookName: event.hookName, status: event.status }
+                        )
                       )
                     } catch {
-                      /* Observer setup must not trigger fallback or terminate a push. */
+                      /* Hook observers cannot affect an active Git operation. */
                     }
-                  }
-                : undefined,
-              event => {
-                if (event.status === 'failed') failedHook = true
-                try {
-                  withoutRepositoryGitAccess(() =>
-                    options?.onHookProgress?.(
-                      event.status === 'started'
-                        ? {
-                            hookName: event.hookName,
-                            status: 'started',
-                            abort: () => controller.abort(),
-                          }
-                        : { hookName: event.hookName, status: event.status }
-                    )
-                  )
-                } catch {
-                  /* Hook observers cannot affect an active Git operation. */
-                }
+                  },
+                  options?.onHookProgress === undefined
+                    ? undefined
+                    : controller.signal,
+                  options?.onHookFailure === undefined
+                    ? undefined
+                    : output =>
+                        withoutRepositoryGitAccess(() =>
+                          options.onHookFailure!(
+                            'pre-push',
+                            Buffer.from(output)
+                          )
+                        )
+                )
               },
-              options?.onHookProgress === undefined
-                ? undefined
-                : controller.signal,
-              options?.onHookFailure === undefined
-                ? undefined
-                : output =>
-                    withoutRepositoryGitAccess(() =>
-                      options.onHookFailure!('pre-push', Buffer.from(output))
-                    )
+              repository.path,
+              {
+                env: {},
+                interceptHooks: ['pre-push'],
+                onHookProgress: options?.onHookProgress,
+                onHookFailure: options?.onHookFailure,
+              }
             ),
           true
         )

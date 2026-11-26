@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
     }
   }),
   environment: vi.fn(async () => ({})),
+  hooksEnabled: false,
+  withHooksEnv: vi.fn(),
   proxy: vi.fn(
     async (): Promise<Record<string, string> | undefined> => undefined
   ),
@@ -81,6 +83,19 @@ vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
   withoutRepositoryGitAccess: mocks.without,
 }))
+vi.mock('../../src/lib/hooks/with-hooks-env', () => ({
+  rendererHookEnvironment: (
+    environment: Record<string, string | undefined> | undefined
+  ) =>
+    environment?.PROCESS_PROXY_TOKEN === undefined
+      ? undefined
+      : {
+          config_parameters: environment.GIT_CONFIG_PARAMETERS ?? '',
+          process_proxy_port: Number(environment.PROCESS_PROXY_PORT),
+          process_proxy_token: environment.PROCESS_PROXY_TOKEN,
+        },
+  withHooksEnv: mocks.withHooksEnv,
+}))
 
 import {
   isNativePushOutcomeUncertain,
@@ -112,6 +127,18 @@ describe('Rust push routing', () => {
     mocks.push.mockReset().mockResolvedValue(undefined)
     mocks.proxy.mockReset().mockResolvedValue(undefined)
     mocks.git.mockResolvedValue(undefined)
+    mocks.hooksEnabled = false
+    mocks.withHooksEnv.mockReset().mockImplementation(async run =>
+      run(
+        mocks.hooksEnabled
+          ? {
+              GIT_CONFIG_PARAMETERS: `'core.hooksPath=/tmp/hooks'`,
+              PROCESS_PROXY_PORT: '4321',
+              PROCESS_PROXY_TOKEN: 'hook-token',
+            }
+          : undefined
+      )
+    )
   })
   afterEach(() => {
     vi.unstubAllEnvs()
@@ -198,6 +225,36 @@ describe('Rust push routing', () => {
       expect(mocks.git).not.toHaveBeenCalled()
     }
   )
+
+  it('forwards renderer hook interception through the native push contract', async () => {
+    mocks.hooksEnabled = true
+    await push(repository, remote, 'main', 'main', [], {
+      onHookFailure: async () => 'abort',
+    })
+    expect(mocks.git).not.toHaveBeenCalled()
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/repo',
+      expect.objectContaining({
+        require_hook_callbacks: false,
+        interactive_hook_decision: false,
+        hook_environment: {
+          config_parameters: `'core.hooksPath=/tmp/hooks'`,
+          process_proxy_port: 4321,
+          process_proxy_token: 'hook-token',
+        },
+      }),
+      undefined,
+      undefined,
+      expect.any(Function),
+      undefined,
+      expect.any(Function)
+    )
+    expect(mocks.withHooksEnv).toHaveBeenCalledWith(
+      expect.any(Function),
+      '/repo',
+      expect.objectContaining({ interceptHooks: ['pre-push'] })
+    )
+  })
 
   it('forwards an explicitly resolved proxy through the native push contract', async () => {
     mocks.transport = 'wry'
