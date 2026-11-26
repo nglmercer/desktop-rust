@@ -118,6 +118,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | dependencias renderer `chalk`, `minimist`, `p-memoize`, `triple-beam`, `winston` y `winston-transport`, junto a tipos raíz sin consumidores | eliminadas del manifiesto y lockfile; `prop-types` se conserva porque es peer runtime de `focus-trap-react` y `tslib` porque `importHelpers` lo emite | `pnpm check:types`, `pnpm lint`, `pnpm migration:check`, `pnpm vite:build`, tests DOM/Copilot enfocados |
 | fachada `backend/index.ts` y proyecciones experimentales `backend/projections.ts` sin consumidores | eliminadas; los consumidores reales importan `backend/client`, contratos o selección directamente y no usan la capa de RevisionTracker | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
 | paquetes `@types/express`, `@types/klaw-sync`, `@types/plist`, `@types/strip-ansi`, `@types/to-camel-case` y `@types/ua-parser-js` sin paquetes ni imports correspondientes | eliminados del manifiesto raíz y lockfile | `pnpm check:types`, `pnpm lint` |
+| dependencias raíz `chalk`, `@playwright/test` y `node-test-github-reporter` sin imports ni scripts consumidores | eliminadas; las integraciones de navegador usan `playwright` directamente | `pnpm check:types`, `pnpm lint` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
