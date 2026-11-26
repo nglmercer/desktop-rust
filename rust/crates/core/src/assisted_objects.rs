@@ -184,6 +184,52 @@ impl Repository {
         Ok(json!({"tree":tree}))
     }
 
+    /// Write one blob through the private object view, applying exactly the
+    /// frozen path filters when the renderer supplies a repository-relative path.
+    pub(crate) async fn assisted_commit_hash_blob(
+        &self,
+        bytes_base64: &str,
+        path: Option<GitPath>,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_diff_environment_key(key),
+                "unsupported assisted hash environment key"
+            );
+        }
+        anyhow::ensure!(
+            bytes_base64.len() <= 768 * 1024 * 1024,
+            "assisted blob input is too large"
+        );
+        let bytes = STANDARD.decode(bytes_base64)?;
+        anyhow::ensure!(
+            bytes.len() <= MAX_BLOB_BYTES as usize,
+            "assisted blob input is too large"
+        );
+        let mut command = args(&["hash-object", "-w", "--stdin"]);
+        if let Some(path) = path {
+            let path = validate_index_tree_path(&path)?;
+            let mut argument = std::ffi::OsString::from("--path=");
+            argument.push(path);
+            command.push(argument);
+        } else {
+            command.push("--no-filters".into());
+        }
+        let output = crate::process::run_git_with_environment(
+            &self.path,
+            &command,
+            Some(bytes),
+            None,
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot write assisted blob");
+        let sha = output_line(&output.stdout, "written blob object")?;
+        object_id(&sha, "written blob object")?;
+        Ok(json!({"sha":sha}))
+    }
+
     /// Construct a tree through a private scratch index, optionally returning
     /// the resulting index bytes for the transaction's final synchronization
     /// check. The renderer never controls the scratch index location.

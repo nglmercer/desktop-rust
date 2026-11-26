@@ -813,6 +813,29 @@ function nodeBackend(t: TestContext) {
             filterOutput: filters.stdout,
           }
         },
+        repositoryAssistedCommitHashBlob: async (
+          path: string,
+          bytes: Buffer,
+          entryPath: string | undefined,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            [
+              'hash-object',
+              '-w',
+              '--stdin',
+              ...(entryPath === undefined
+                ? ['--no-filters']
+                : [`--path=${entryPath}`]),
+            ],
+            path,
+            { env: environment, stdin: bytes } as never
+          )) as Dugite.IGitStringResult
+          if (result.exitCode !== 0) {
+            throw new Error('Cannot write assisted blob')
+          }
+          return result.stdout.trim()
+        },
         repositoryAssistedCommitIndexTree: async (
           path: string,
           base: string | null,

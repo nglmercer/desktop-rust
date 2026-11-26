@@ -726,6 +726,15 @@ impl Repository {
             Operation::AssistedCommitBlob { sha, environment } => {
                 return self.assisted_commit_blob(&sha, &environment).await;
             }
+            Operation::AssistedCommitHashBlob {
+                bytes_base64,
+                path,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_hash_blob(&bytes_base64, path, &environment)
+                    .await;
+            }
             Operation::AssistedCommitCaptureConfig { environment } => {
                 return self.assisted_commit_capture_config(&environment).await;
             }
@@ -1616,6 +1625,7 @@ impl Repository {
             | AssistedCommitAttributeSource { .. }
             | AssistedCommitTreeEntry { .. }
             | AssistedCommitBlob { .. }
+            | AssistedCommitHashBlob { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
             | AssistedCommitIndexTree { .. }

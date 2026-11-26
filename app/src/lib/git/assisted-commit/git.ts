@@ -640,18 +640,12 @@ export async function hashBlob(
   bytes: Buffer,
   path?: string
 ): Promise<string> {
-  const result = await privateGit(
-    data,
-    [
-      'hash-object',
-      '-w',
-      '--stdin',
-      ...(path === undefined ? ['--no-filters'] : [`--path=${path}`]),
-    ],
-    'assistedCommitHashBlob',
-    { stdin: bytes }
+  return backend().repositoryAssistedCommitHashBlob(
+    data.repository.path,
+    bytes,
+    path,
+    data.environment
   )
-  return removeGitLineEnding(result.stdout)
 }
 
 export async function writeTree(

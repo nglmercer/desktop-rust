@@ -517,6 +517,13 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitHashBlob {
+        bytes_base64: String,
+        #[serde(default)]
+        path: Option<GitPath>,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitCaptureConfig {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,

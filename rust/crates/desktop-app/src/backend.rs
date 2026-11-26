@@ -78,6 +78,8 @@ struct ReadRequest {
     #[serde(default)]
     base: Option<String>,
     #[serde(default)]
+    bytes_base64: Option<String>,
+    #[serde(default)]
     entries: Option<Vec<desktop_backend::AssistedCommitIndexTreeEntry>>,
     #[serde(default)]
     index_entries_base64: Option<String>,
@@ -431,6 +433,7 @@ enum ReadMethod {
     AssistedCommitAttributeSource,
     AssistedCommitTreeEntry,
     AssistedCommitBlob,
+    AssistedCommitHashBlob,
     AssistedCommitCaptureConfig,
     AssistedCommitIndexTree,
     AssistedCommitTreeRevision,
@@ -1399,11 +1402,20 @@ impl Backend {
         }
         if !matches!(
             &request.method,
-            ReadMethod::AssistedCommitTreeEntry | ReadMethod::AssistedCommitDiffDriver
+            ReadMethod::AssistedCommitTreeEntry
+                | ReadMethod::AssistedCommitDiffDriver
+                | ReadMethod::AssistedCommitHashBlob
         ) && request.path.is_some()
         {
             return Err(AppError::BadArgs(
                 "path only applies to assisted tree entry and diff driver reads".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::AssistedCommitHashBlob)
+            && request.bytes_base64.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "bytes_base64 only applies to assisted blob writes".into(),
             ));
         }
         if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
@@ -1837,6 +1849,40 @@ impl Backend {
                         variable: request
                             .variable
                             .ok_or_else(|| AppError::BadArgs("variable is required".into()))?,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitHashBlob
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitHashBlob {
+                        bytes_base64: request
+                            .bytes_base64
+                            .ok_or_else(|| AppError::BadArgs("bytes_base64 is required".into()))?,
+                        path: request.path,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -3057,6 +3103,15 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(bytes["bytes_base64"], "Y29udGVudAo=");
+                let hashed = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_hash_blob","bytes_base64":"aGVsbG8="}),
+                    ])
+                    .unwrap();
+                assert_eq!(
+                    hashed["sha"],
+                    "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0"
+                );
                 let diff_driver = backend
                     .read_args(vec![
                         json!({"repository_path":root,"method":"assisted_commit_diff_driver","path":"file"}),

@@ -3836,6 +3836,46 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitHashBlob(
+    repositoryPath: string,
+    bytes: Buffer,
+    path: string | undefined,
+    environment?: Record<string, string | undefined>
+  ): Promise<string> {
+    if (
+      bytes.length > 512 * 1024 * 1024 ||
+      (path !== undefined &&
+        (path.length === 0 || path.length > 65536 || path.includes('\0')))
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted hash blob request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_hash_blob',
+      {
+        bytes_base64: bytes.toString('base64'),
+        path: path ?? null,
+        environment: serializeGitEnvironment(environment),
+      }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.sha === 'string' &&
+      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.sha)
+    ) {
+      return value.sha
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted hash blob response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string
