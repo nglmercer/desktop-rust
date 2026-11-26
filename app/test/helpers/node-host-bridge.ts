@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import { spawn as nodeSpawn } from 'node:child_process'
-import { readFileSync, statSync } from 'node:fs'
+import { lstatSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const LIMITS = {
@@ -301,6 +301,30 @@ export function installNodeHostBridge() {
       }
     })
 
+  const statResult = (value: {
+    size: number
+    mode: number
+    dev: number | bigint
+    ino: number | bigint
+    mtimeMs: number
+    atimeMs: number
+    birthtimeMs: number
+    ctimeMs: number
+    isFile(): boolean
+    isDirectory(): boolean
+    isSymbolicLink(): boolean
+  }) => ({
+    ...metadata(value),
+    size: value.size,
+    mode: value.mode,
+    dev: value.dev,
+    ino: String(value.ino),
+    mtimeMs: value.mtimeMs,
+    atimeMs: value.atimeMs,
+    birthtimeMs: value.birthtimeMs,
+    ctimeMs: value.ctimeMs,
+  })
+
   const bridge = {
     invoke(channel: string, options: any): Promise<unknown> {
       if (channel.startsWith('desktop.io.fs-')) {
@@ -416,8 +440,11 @@ export function installNodeHostBridge() {
           return Promise.reject(new Error(`unexpected ${channel}`))
       }
     },
-    invokeSync: () => {
-      throw new Error('synchronous host bridge is unavailable in this test')
+    invokeSync(channel: string, options: any): unknown {
+      if (channel === 'desktop.io.fs-lstat') {
+        return statResult(lstatSync(options.path))
+      }
+      throw new Error(`unexpected sync ${channel}`)
     },
     send: () => {},
     on(channel: string, listener: (event: unknown, message: any) => void) {

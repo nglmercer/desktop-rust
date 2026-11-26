@@ -5,7 +5,7 @@ import {
   rm,
   writeFile,
 } from '../../../web/fs-promises'
-import { lstatSync } from 'fs'
+import { lstatSync } from '../../../web/fs'
 import { CommitIdentity } from '../../../models/commit-identity'
 import { join } from 'path'
 import {

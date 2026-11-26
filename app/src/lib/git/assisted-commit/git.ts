@@ -1,4 +1,4 @@
-import { lstatSync } from 'fs'
+import { lstatSync } from '../../../web/fs'
 import {
   lstat,
   mkdir,
