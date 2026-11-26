@@ -8,8 +8,9 @@ import { withRepositoryGitOperation } from './repository-operation'
 /**
  * List the remotes, sorted alphabetically by `name`, for a repository.
  *
- * The reviewed backend returns exact URLs only when they can be represented
- * without exposing credentials or ambiguous remote syntax through IPC.
+ * The reviewed backend preserves configured URLs exactly for display and
+ * editing. Typed transport operations separately decide whether those URLs
+ * may be contacted.
  */
 export async function getRemotes(
   repository: Repository

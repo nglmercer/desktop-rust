@@ -1,4 +1,5 @@
-//! Discover fetch remotes without returning credential-bearing URLs.
+//! Discover fetch remotes while preserving their configured URLs exactly.
+//! Transport operations separately review whether a URL is safe to contact.
 use crate::{Repository, args, process};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -53,7 +54,7 @@ impl ManagedRemoteAction {
             Self::Add { name, url } | Self::SetUrl { name, url } => (name, Some(url)),
             Self::Remove { name } => (name, None),
         };
-        validate_managed_remote_name(name) && url.is_none_or(|value| safe_url(value))
+        validate_managed_remote_name(name) && url.is_none_or(|value| exact_remote_url(value))
     }
 }
 
@@ -126,7 +127,7 @@ pub async fn safe_fetch_remotes(path: &Path) -> Result<Value> {
         let Ok(url) = std::str::from_utf8(bytes) else {
             return Ok(Value::Null);
         };
-        if !safe_url(url) {
+        if !exact_remote_url(url) {
             return Ok(Value::Null);
         }
         remotes.push(json!({"name":name,"url":url}));
@@ -225,7 +226,7 @@ pub async fn safe_remote_url(path: &Path, name: &str) -> Result<Value> {
     let Ok(url) = std::str::from_utf8(bytes) else {
         return Ok(json!({"kind":"unsupported"}));
     };
-    if !safe_url(url) {
+    if !exact_remote_url(url) {
         return Ok(json!({"kind":"unsupported"}));
     }
     Ok(json!({"kind":"resolved","url":url}))
@@ -295,8 +296,18 @@ fn remote_names(data: &[u8]) -> Result<Option<RemoteNames>> {
     Ok(Some(RemoteNames { active, cleared }))
 }
 
-/// Preserve the exact URL for editable settings. Ambiguous URL forms stay on
-/// the old path rather than exposing a secret or silently changing the URL.
+/// Preserve the exact configured URL for editable settings and display. This
+/// representation check does not approve the URL for transport: control
+/// characters are rejected because they cannot be represented safely, while
+/// credentials, queries, fragments, local paths and SCP-style forms are kept
+/// byte-for-byte as the legacy renderer contract requires.
+pub(crate) fn exact_remote_url(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 16384 && !value.chars().any(char::is_control)
+}
+
+/// Review whether a URL may be contacted by a typed transport operation.
+/// Ambiguous or credential-bearing forms remain unsupported there even though
+/// remote discovery preserves them exactly for display and editing.
 pub(crate) fn safe_url(value: &str) -> bool {
     if value.is_empty() || value.len() > 16384 {
         return false;
@@ -403,7 +414,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsupported_url_is_rejected_before_account_or_git_mutation() {
+    async fn credential_bearing_remote_url_is_preserved_exactly() {
         let root =
             std::env::temp_dir().join(format!("desktop-remote-preflight-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
@@ -415,12 +426,7 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        let registry = root.join("invalid-registry.json");
-        std::fs::write(&registry, "not valid json").unwrap();
-        let repository = crate::Repository::open(&root)
-            .await
-            .unwrap()
-            .with_registry(crate::Registry::new(registry));
+        let repository = crate::Repository::open(&root).await.unwrap();
         let value = repository
             .execute(crate::Operation::ManageRemote {
                 action: ManagedRemoteAction::Add {
@@ -430,14 +436,18 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(value, serde_json::json!({"kind":"unsupported"}));
+        assert_eq!(value, serde_json::json!({"kind":"updated"}));
         let output = std::process::Command::new("git")
             .arg("-C")
             .arg(&root)
             .args(["config", "--local", "--get", "remote.origin.url"])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim_end(),
+            "https://user:synthetic-secret@example.invalid/repo"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -721,6 +731,27 @@ mod tests {
             expected
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_remote_representation_preserves_legacy_urls() {
+        for value in [
+            "https://user:secret@host/repo",
+            "https://host/repo?token=secret",
+            "https://host/repo#secret",
+            "ssh://token@host/repo",
+            "token@host:repo",
+            "token@[::1]:repo",
+            "ext::command",
+            "-host:repo",
+            "host:repo?token=secret",
+            "C:project",
+        ] {
+            assert!(super::exact_remote_url(value), "{value}");
+        }
+        for value in ["", "https://host/repo\nsecret", &"x".repeat(16385)] {
+            assert!(!super::exact_remote_url(value), "{value}");
+        }
     }
 
     #[test]
