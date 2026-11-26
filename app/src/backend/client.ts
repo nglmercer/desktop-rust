@@ -3526,6 +3526,94 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitTreeEntry(
+    repositoryPath: string,
+    tree: string,
+    path: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<
+    | { readonly kind: 'missing' }
+    | { readonly kind: 'unsupported' }
+    | { readonly kind: 'entry'; readonly mode: string; readonly sha: string }
+  > {
+    if (
+      !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(tree) ||
+      path.length === 0 ||
+      path.length > 65536 ||
+      path.includes('\0')
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted tree entry request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_tree_entry',
+      {
+        tree,
+        path,
+        environment: serializeGitEnvironment(environment),
+      }
+    )
+    if (isRecord(value) && value.kind === 'missing') {
+      return { kind: 'missing' }
+    }
+    if (isRecord(value) && value.kind === 'unsupported') {
+      return { kind: 'unsupported' }
+    }
+    if (
+      isRecord(value) &&
+      value.kind === 'entry' &&
+      typeof value.mode === 'string' &&
+      /^[0-7]{6}$/.test(value.mode) &&
+      typeof value.sha === 'string' &&
+      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.sha)
+    ) {
+      return { kind: 'entry', mode: value.mode, sha: value.sha }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted tree entry response',
+      retryable: false,
+    })
+  }
+
+  async repositoryAssistedCommitBlob(
+    repositoryPath: string,
+    sha: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<Buffer> {
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted blob request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_blob',
+      { sha, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.bytes_base64 === 'string' &&
+      value.bytes_base64.length <= 768 * 1024 * 1024
+    ) {
+      const bytes = Buffer.from(value.bytes_base64, 'base64')
+      if (bytes.length <= 512 * 1024 * 1024) {
+        return bytes
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted blob response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

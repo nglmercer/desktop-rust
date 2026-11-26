@@ -702,6 +702,74 @@ function nodeBackend(t: TestContext) {
           )) as Dugite.IGitStringResult
           return result.stdout.trim()
         },
+        repositoryAssistedCommitTreeEntry: async (
+          path: string,
+          tree: string,
+          entryPath: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['ls-tree', '-z', '--full-tree', tree, '--', entryPath],
+            path,
+            { encoding: 'buffer', env: environment } as never
+          )) as Dugite.IGitBufferResult
+          if (result.exitCode !== 0) {
+            throw new Error('Cannot read assisted tree entry')
+          }
+          const stdout = Buffer.isBuffer(result.stdout)
+            ? result.stdout
+            : Buffer.from(result.stdout)
+          const records: Buffer[] = []
+          let start = 0
+          for (let index = 0; index < stdout.length; index++) {
+            if (stdout[index] === 0) {
+              if (index > start) {
+                records.push(stdout.subarray(start, index))
+              }
+              start = index + 1
+            }
+          }
+          if (start < stdout.length) {
+            records.push(stdout.subarray(start))
+          }
+          if (records.length === 0) {
+            return { kind: 'missing' }
+          }
+          if (records.length !== 1) {
+            return { kind: 'unsupported' }
+          }
+          const tab = records[0].indexOf(0x09)
+          const fields = records[0]
+            .subarray(0, tab === -1 ? 0 : tab)
+            .toString('ascii')
+            .split(' ')
+          if (
+            tab === -1 ||
+            !records[0].subarray(tab + 1).equals(Buffer.from(entryPath)) ||
+            fields.length !== 3 ||
+            fields[1] !== 'blob'
+          ) {
+            return { kind: 'unsupported' }
+          }
+          return { kind: 'entry', mode: fields[0], sha: fields[2] }
+        },
+        repositoryAssistedCommitBlob: async (
+          path: string,
+          sha: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['cat-file', 'blob', sha],
+            path,
+            { encoding: 'buffer', env: environment } as never
+          )) as Dugite.IGitBufferResult
+          if (result.exitCode !== 0) {
+            throw new Error('Cannot read assisted blob')
+          }
+          return Buffer.isBuffer(result.stdout)
+            ? result.stdout
+            : Buffer.from(result.stdout)
+        },
         repositoryAssistedCommitPushPaths: async (
           path: string,
           branchRef: string,

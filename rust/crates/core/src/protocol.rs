@@ -492,6 +492,17 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitTreeEntry {
+        tree: String,
+        path: GitPath,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
+    AssistedCommitBlob {
+        sha: String,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitPushPaths {
         branch_ref: String,
         #[serde(default)]

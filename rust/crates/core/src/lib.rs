@@ -23,6 +23,7 @@ mod branch_policy;
 mod terminals;
 pub use terminals::{available_terminals, open_registered_terminal};
 mod assisted_head;
+mod assisted_objects;
 mod file_manager;
 mod release_notes;
 pub use file_manager::reveal_registered_repository;
@@ -704,6 +705,18 @@ impl Repository {
                 environment,
             } => {
                 return self.renderer_hooks(&filter, &environment).await;
+            }
+            Operation::AssistedCommitTreeEntry {
+                tree,
+                path,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_tree_entry(&tree, path, &environment)
+                    .await;
+            }
+            Operation::AssistedCommitBlob { sha, environment } => {
+                return self.assisted_commit_blob(&sha, &environment).await;
             }
             Operation::AssistedCommitPushPaths {
                 branch_ref,
@@ -1559,6 +1572,8 @@ impl Repository {
             | AssistedCommitRefs
             | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }
+            | AssistedCommitTreeEntry { .. }
+            | AssistedCommitBlob { .. }
             | RendererHooks { .. }
             | AssistedCommitPushPaths { .. }
             | MergeBase { .. }

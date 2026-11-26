@@ -1,0 +1,127 @@
+//! Typed read-only object access for the assisted-commit private object view.
+use crate::{
+    GitPath, Repository, args, assisted_head::assisted_push_config_environment_key, validate_path,
+};
+use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use std::path::Path;
+
+const MAX_BLOB_BYTES: u64 = 512 * 1024 * 1024;
+
+fn object_id(value: &str, what: &str) -> Result<()> {
+    anyhow::ensure!(
+        matches!(value.len(), 40 | 64)
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+        "invalid {what}"
+    );
+    Ok(())
+}
+
+fn validate_environment(environment: &BTreeMap<String, Option<String>>) -> Result<()> {
+    for key in environment.keys() {
+        anyhow::ensure!(
+            assisted_object_environment_key(key),
+            "unsupported assisted object environment key"
+        );
+    }
+    Ok(())
+}
+
+fn assisted_object_environment_key(key: &str) -> bool {
+    assisted_push_config_environment_key(key) || key == "GIT_LITERAL_PATHSPECS"
+}
+
+fn unsupported() -> Value {
+    json!({"kind":"unsupported"})
+}
+
+impl Repository {
+    /// Read one exact blob entry from a private tree. The host parses Git's
+    /// NUL-terminated record and the renderer retains the legacy product error
+    /// for trees, submodules, or unexpected records.
+    pub(crate) async fn assisted_commit_tree_entry(
+        &self,
+        tree: &str,
+        path: GitPath,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        object_id(tree, "tree object")?;
+        validate_environment(environment)?;
+        let path = validate_path(path)?;
+        anyhow::ensure!(
+            !Path::new(&path).components().any(|component| component
+                .as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(".git")),
+            "invalid selected path"
+        );
+        let mut command = args(&["ls-tree", "-z", "--full-tree", tree, "--"]);
+        command.push(path.clone());
+        let output = self.run_with_environment(&command, environment).await?;
+        anyhow::ensure!(output.code == 0, "Cannot read assisted tree entry");
+        let records = output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty())
+            .collect::<Vec<_>>();
+        if records.is_empty() {
+            return Ok(json!({"kind":"missing"}));
+        }
+        if records.len() != 1 {
+            return Ok(unsupported());
+        }
+        let record = records[0];
+        let Some(tab) = record.iter().position(|byte| *byte == b'\t') else {
+            return Ok(unsupported());
+        };
+        if &record[tab + 1..] != path.as_encoded_bytes() {
+            return Ok(unsupported());
+        }
+        let fields = record[..tab]
+            .split(|byte| *byte == b' ')
+            .collect::<Vec<_>>();
+        if fields.len() != 3 || fields[1] != b"blob" {
+            return Ok(unsupported());
+        }
+        let mode = std::str::from_utf8(fields[0]);
+        let sha = std::str::from_utf8(fields[2]);
+        let (Ok(mode), Ok(sha)) = (mode, sha) else {
+            return Ok(unsupported());
+        };
+        if mode.len() != 6
+            || !mode.bytes().all(|byte| matches!(byte, b'0'..=b'7'))
+            || object_id(sha, "blob object").is_err()
+        {
+            return Ok(unsupported());
+        }
+        Ok(json!({"kind":"entry","mode":mode,"sha":sha}))
+    }
+
+    /// Read an exact blob from the private object view. Blob bytes stay inside
+    /// the typed host boundary and are returned as bounded base64 because the
+    /// legacy renderer consumes the complete byte string for comparison and
+    /// index reconstruction.
+    pub(crate) async fn assisted_commit_blob(
+        &self,
+        sha: &str,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        object_id(sha, "blob object")?;
+        validate_environment(environment)?;
+        let output = crate::process::run_git_with_environment_limit(
+            &self.path,
+            &args(&["cat-file", "blob", sha]),
+            None,
+            None,
+            environment,
+            MAX_BLOB_BYTES,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot read assisted blob");
+        Ok(json!({"bytes_base64":STANDARD.encode(output.stdout)}))
+    }
+}

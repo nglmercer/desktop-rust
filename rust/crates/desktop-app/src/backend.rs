@@ -54,6 +54,12 @@ struct ReadRequest {
     #[serde(default)]
     filter: Option<Vec<String>>,
     #[serde(default)]
+    tree: Option<String>,
+    #[serde(default)]
+    sha: Option<String>,
+    #[serde(default)]
+    path: Option<desktop_backend::GitPath>,
+    #[serde(default)]
     git_path: Option<String>,
     #[serde(default)]
     paths: Option<Vec<desktop_backend::GitPath>>,
@@ -408,6 +414,8 @@ enum ReadMethod {
     AssistedCommitRefs,
     AssistedCommitIndexEntries,
     AssistedCommitGitPath,
+    AssistedCommitTreeEntry,
+    AssistedCommitBlob,
     RendererHooks,
     Worktrees,
     WorktreesFromGitDir,
@@ -1318,6 +1326,23 @@ impl Backend {
                 "filter only applies to renderer hook discovery".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::AssistedCommitTreeEntry) && request.tree.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "tree only applies to assisted tree entry reads".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::AssistedCommitBlob) && request.sha.is_some() {
+            return Err(AppError::BadArgs(
+                "sha only applies to assisted blob reads".into(),
+            ));
+        }
+        if !matches!(&request.method, ReadMethod::AssistedCommitTreeEntry) && request.path.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "path only applies to assisted tree entry reads".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
             return Err(AppError::BadArgs(
                 "paths only apply to file-tracking reads".into(),
@@ -1647,6 +1672,74 @@ impl Backend {
                         && request.expected_value.is_none() =>
                 {
                     Operation::AssistedCommitHead {
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitTreeEntry
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.sha.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitTreeEntry {
+                        tree: request
+                            .tree
+                            .ok_or_else(|| AppError::BadArgs("tree is required".into()))?,
+                        path: request
+                            .path
+                            .ok_or_else(|| AppError::BadArgs("path is required".into()))?,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitBlob
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitBlob {
+                        sha: request
+                            .sha
+                            .ok_or_else(|| AppError::BadArgs("sha is required".into()))?,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -2711,6 +2804,28 @@ mod tests {
                     ])
                     .unwrap();
                 assert!(index["path"].as_str().unwrap().ends_with(".git/index"));
+                let tree = git(&["rev-parse", "HEAD^{tree}"]);
+                let blob = git(&["rev-parse", "HEAD:file"]);
+                let entry = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_tree_entry","tree":tree,"path":"file"}),
+                    ])
+                    .unwrap();
+                assert_eq!(entry["kind"], "entry");
+                assert_eq!(entry["mode"], "100644");
+                assert_eq!(entry["sha"], blob);
+                let missing = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_tree_entry","tree":tree,"path":"missing"}),
+                    ])
+                    .unwrap();
+                assert_eq!(missing["kind"], "missing");
+                let bytes = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_blob","sha":blob}),
+                    ])
+                    .unwrap();
+                assert_eq!(bytes["bytes_base64"], "Y29udGVudAo=");
                 assert!(
                     backend
                         .admit(vec![

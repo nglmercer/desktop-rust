@@ -589,34 +589,36 @@ export function privateGit(
     : git(args, data.repository.path, name, { ...options, env })
 }
 
+function objectReadEnvironment(
+  environment: Record<string, string | undefined>
+): Record<string, string | undefined> {
+  const result = { ...environment }
+  delete result.GIT_ATTR_NOSYSTEM
+  delete result.GIT_ATTR_SOURCE
+  return result
+}
+
 export async function readTreeEntry(
   data: Pick<IAssistedCommitData, 'repository' | 'environment'>,
   tree: string,
   path: string
 ): Promise<ITreeEntry | null> {
-  const result = await privateGit(
-    data,
-    ['ls-tree', '-z', '--full-tree', tree, '--', path],
-    'assistedCommitReadTreeEntry'
+  const result = await backend().repositoryAssistedCommitTreeEntry(
+    data.repository.path,
+    tree,
+    path,
+    objectReadEnvironment(data.environment)
   )
-  if (result.stdout.length === 0) {
+  if (result.kind === 'missing') {
     return null
   }
-  const records = result.stdout.split('\0').filter(x => x.length !== 0)
-  const tab = records[0].indexOf('\t')
-  const [mode, type, sha] = records[0].slice(0, tab).split(' ')
-  if (
-    records.length !== 1 ||
-    tab === -1 ||
-    records[0].slice(tab + 1) !== path ||
-    type !== 'blob'
-  ) {
+  if (result.kind === 'unsupported') {
     throw new AssistedCommitError(
       'unsafe-selection',
       `Selected trees or submodules are not supported: ${JSON.stringify(path)}`
     )
   }
-  return { path, mode, sha }
+  return { path, mode: result.mode, sha: result.sha }
 }
 
 export async function readBlob(
@@ -625,16 +627,11 @@ export async function readBlob(
 ): Promise<Buffer> {
   return entry === null
     ? Buffer.alloc(0)
-    : (
-        await privateGit(
-          data,
-          ['cat-file', 'blob', entry.sha],
-          'assistedCommitReadBlob',
-          {
-            encoding: 'buffer',
-          }
-        )
-      ).stdout
+    : backend().repositoryAssistedCommitBlob(
+        data.repository.path,
+        entry.sha,
+        objectReadEnvironment(data.environment)
+      )
 }
 
 export async function hashBlob(

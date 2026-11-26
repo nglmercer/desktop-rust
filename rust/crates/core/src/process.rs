@@ -278,28 +278,21 @@ pub(crate) async fn run_git_with_environment(
     index: Option<&Path>,
     environment: &std::collections::BTreeMap<String, Option<String>>,
 ) -> Result<RawOutput> {
-    anyhow::ensure!(environment.len() <= 256, "Git environment is too large");
+    run_git_with_environment_limit(path, args, input, index, environment, 2 * 1024 * 1024).await
+}
+
+/// Run Git with a typed environment and an operation-specific output bound.
+pub(crate) async fn run_git_with_environment_limit(
+    path: &Path,
+    args: &[OsString],
+    input: Option<Vec<u8>>,
+    index: Option<&Path>,
+    environment: &std::collections::BTreeMap<String, Option<String>>,
+    output_limit: u64,
+) -> Result<RawOutput> {
     let mut command = git_command(index);
-    let mut size = 0usize;
-    for (key, value) in environment {
-        anyhow::ensure!(
-            !key.is_empty() && !key.contains(['=', '\0']) && key.len() <= 1024,
-            "invalid Git environment key"
-        );
-        size = size.saturating_add(key.len());
-        match value {
-            Some(value) => {
-                anyhow::ensure!(!value.contains('\0'), "Git environment contains NUL");
-                size = size.saturating_add(value.len());
-                anyhow::ensure!(size <= 256 * 1024, "Git environment is too large");
-                command.env(key, value);
-            }
-            None => {
-                command.env_remove(key);
-            }
-        }
-    }
-    run_command(path, command, args, input, 2 * 1024 * 1024, None).await
+    apply_environment(&mut command, environment)?;
+    run_command(path, command, args, input, output_limit, None).await
 }
 
 pub(crate) fn apply_environment(
