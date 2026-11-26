@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createUniqueId, releaseUniqueId } from './id-pool'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 interface ISelectProps {
   /** The label for the select control. */

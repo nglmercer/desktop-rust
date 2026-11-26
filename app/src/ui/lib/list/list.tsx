@@ -23,7 +23,7 @@ import { DragData, DragType } from '../../../models/drag-drop'
 import { memoizeOne } from '../../../lib/memoize-one'
 import { RowIndexPath } from './list-row-index-path'
 import { sendNonFatalException } from '../../../lib/helpers/non-fatal-exception'
-import classNames from 'classnames'
+import { classNames } from '../../../lib/classnames'
 
 /**
  * Describe the first argument given to the cellRenderer,

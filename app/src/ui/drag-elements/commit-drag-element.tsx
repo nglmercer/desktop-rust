@@ -1,4 +1,4 @@
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { Disposable } from 'event-kit'
 import * as React from 'react'
 import { dragAndDropManager } from '../../lib/drag-and-drop-manager'

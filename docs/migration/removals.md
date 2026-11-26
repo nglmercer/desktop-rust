@@ -143,6 +143,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `mem` y `quick-lru` | `LruCache` y `memoize` locales en `app/src/lib/memoize.ts`, incluyendo expulsión LRU y no retención de promesas rechazadas | `app/test/unit/memoize-test.ts`, `ahead-behind-store-test.ts`, `commit-status-store-test.ts`, `ui/relative-time-test.tsx`, `notifications-store-test.ts` |
 | `p-limit` | planificador FIFO local de concurrencia en `app/src/lib/concurrency-limit.ts` | `app/test/unit/concurrency-limit-test.ts`, `ahead-behind-store-test.ts`, `commit-status-store-test.ts` |
 | `memoize-one` + `@types/memoize-one` | memoización local de una sola entrada en `app/src/lib/memoize-one.ts` | `app/test/unit/memoize-one-test.ts`, typecheck/build de consumidores UI/lib |
+| `classnames` | combinación local de clases en `app/src/lib/classnames.ts` | `app/test/unit/classnames-test.ts`, typecheck/build de componentes UI |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

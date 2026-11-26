@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { Tooltip, TooltipDirection } from './tooltip'
 import { createObservableRef } from './observable-ref'
 import { AriaHasPopupType } from './aria-types'

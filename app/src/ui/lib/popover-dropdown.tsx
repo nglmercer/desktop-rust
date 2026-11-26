@@ -3,7 +3,7 @@ import { Button } from './button'
 import { Popover, PopoverAnchorPosition, PopoverDecoration } from './popover'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { createUniqueId, releaseUniqueId } from './id-pool'
 
 const maxPopoverContentHeight = 500

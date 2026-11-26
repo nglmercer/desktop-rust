@@ -9,7 +9,7 @@ import {
   isRowChanged,
 } from './diff-helpers'
 import { ILineTokens } from '../../lib/highlighter/types'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { Octicon, OcticonSymbolVariant } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { shallowEquals, structuralEquals } from '../../lib/equality'

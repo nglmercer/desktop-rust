@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Row } from './row'
 import { Button } from './button'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 interface ICallToActionProps {
   /** The action title. */

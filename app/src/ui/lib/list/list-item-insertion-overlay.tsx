@@ -3,7 +3,7 @@
  * facilitating our drag and drop functionality for reordering
  */
 /* eslint-disable jsx-a11y/no-static-element-interactions */
-import classNames from 'classnames'
+import { classNames } from '../../../lib/classnames'
 import { Disposable } from 'event-kit'
 import * as React from 'react'
 import { dragAndDropManager } from '../../../lib/drag-and-drop-manager'

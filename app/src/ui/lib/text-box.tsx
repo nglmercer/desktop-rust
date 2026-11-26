@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { createUniqueId, releaseUniqueId } from './id-pool'
 import { showContextualMenu } from '../../lib/menu-item'
 import { Octicon } from '../octicons'

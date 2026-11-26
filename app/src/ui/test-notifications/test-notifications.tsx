@@ -1,4 +1,4 @@
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import React from 'react'
 import { getHTMLURL, IAPIComment } from '../../lib/api'
 import { assertNever } from '../../lib/fatal-error'

@@ -14,7 +14,7 @@ import { IFileListFilterState } from '../../lib/app-state'
 import { Checkbox, CheckboxValue } from '../lib/checkbox'
 import { memoizeOne } from '../../lib/memoize-one'
 import { Button } from '../lib/button'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { IChangesListItem } from './filter-changes-list'
 import { WorkingDirectoryStatus } from '../../models/status'
 

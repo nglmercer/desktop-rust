@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 interface IErrorsProps {
   /** The class name for the internal element. */

@@ -1,4 +1,4 @@
-import classNames from 'classnames'
+import { classNames } from '../../../lib/classnames'
 import React from 'react'
 import { Author, isKnownAuthor } from '../../../models/author'
 import { Octicon, syncClockwise } from '../../octicons'

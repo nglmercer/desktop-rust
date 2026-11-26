@@ -20,7 +20,7 @@ import {
   assertNonNullable,
   forceUnwrap,
 } from '../../lib/fatal-error'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import {
   List,
   AutoSizer,

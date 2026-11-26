@@ -8,7 +8,7 @@ import {
 } from '../../lib/ci-checks/ci-checks'
 import { CICheckRunListItem } from './ci-check-run-list-item'
 import { FocusContainer } from '../lib/focus-container'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 interface ICICheckRunListProps {
   /** List of check runs to display */

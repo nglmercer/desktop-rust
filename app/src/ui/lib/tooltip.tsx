@@ -2,7 +2,7 @@ import * as React from 'react'
 import * as ReactDOM from 'react-dom'
 import { ObservableRef } from './observable-ref'
 import { createUniqueId, releaseUniqueId } from './id-pool'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { assertNever } from '../../lib/fatal-error'
 import { rectEquals, rectContains, offsetRect } from './rect'
 

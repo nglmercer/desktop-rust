@@ -1,6 +1,6 @@
 import * as React from 'react'
 import FocusTrap from 'focus-trap-react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import {
   ComputePositionReturn,
   autoUpdate,

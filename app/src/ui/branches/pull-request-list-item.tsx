@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { CIStatus } from './ci-status'

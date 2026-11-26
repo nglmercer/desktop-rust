@@ -18,7 +18,7 @@ import * as octicons from '../octicons/octicons.generated'
 import { RelativeTime } from '../relative-time'
 
 import { ToolbarButton, ToolbarButtonStyle } from './button'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import {
   type DropdownState,
   type IToolbarDropdownProps,

@@ -38,7 +38,7 @@ import {
 } from '../../lib/feature-flag'
 import { PullRequestQuickView } from '../pull-request-quick-view'
 import type { Emoji } from '../../lib/emoji'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 interface IBranchesContainerProps {
   readonly dispatcher: Dispatcher

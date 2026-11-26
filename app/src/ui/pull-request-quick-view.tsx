@@ -8,7 +8,7 @@ import { Button } from './lib/button'
 import { SandboxedMarkdown } from './lib/sandboxed-markdown'
 import { Octicon } from './octicons'
 import * as octicons from './octicons/octicons.generated'
-import classNames from 'classnames'
+import { classNames } from '../lib/classnames'
 import { Emoji } from '../lib/emoji'
 
 /**

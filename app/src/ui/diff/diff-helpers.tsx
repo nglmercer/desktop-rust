@@ -1,7 +1,7 @@
 import * as React from 'react'
 
 import { ILineTokens } from '../../lib/highlighter/types'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { relativeChanges } from './changed-range'
 import { mapKeysEqual } from '../../lib/equality'
 import {

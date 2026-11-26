@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 interface IFocusContainerProps {
   readonly className?: string

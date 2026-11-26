@@ -1,7 +1,7 @@
 import type { HostIpcEvent } from '../../lib/host-types'
 import * as React from 'react'
 import { WindowState } from '../../lib/window-state'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import {
   closeWindow,
   getCurrentWindowState,

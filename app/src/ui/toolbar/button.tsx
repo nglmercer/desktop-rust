@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Octicon, type OcticonSymbol } from '../octicons'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { assertNever } from '../../lib/fatal-error'
 import { Button } from '../lib/button'
 import { clamp } from '../../lib/clamp'

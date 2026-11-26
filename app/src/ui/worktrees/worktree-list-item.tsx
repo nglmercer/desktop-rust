@@ -8,7 +8,7 @@ import type { IMatches } from '../../lib/fuzzy-find'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { HighlightText } from '../lib/highlight-text'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { TooltippedContent } from '../lib/tooltipped-content'
 import { enableAccessibleListToolTips } from '../../lib/feature-flag'
 

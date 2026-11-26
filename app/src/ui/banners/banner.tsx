@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 interface IBannerProps {
   readonly id?: string

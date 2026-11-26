@@ -21,7 +21,7 @@ import {
   DropTargetSelector,
   DropTargetType,
 } from '../../models/drag-drop'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { Account } from '../../models/account'
 import { Emoji } from '../../lib/emoji'
 import { enableAccessibleListToolTips } from '../../lib/feature-flag'

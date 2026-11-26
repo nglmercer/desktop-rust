@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 
 import { Dispatcher } from '../dispatcher'
 import { encodePathAsUrl } from '../../lib/path'

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { ITooltipProps, Tooltip } from './tooltip'
 import { createObservableRef } from './observable-ref'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import { AriaLiveContainer } from '../accessibility/aria-live-container'
 
 /**

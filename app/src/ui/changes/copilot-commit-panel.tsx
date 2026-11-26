@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import type { CopilotAnimationKind } from '../copilot-animation/copilot-animation'
 import { lazyComponent } from '../lib/lazy-component'
 

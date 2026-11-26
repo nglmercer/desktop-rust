@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classnames from 'classnames'
+import { classNames as classnames } from '../../lib/classnames'
 
 import {
   List,

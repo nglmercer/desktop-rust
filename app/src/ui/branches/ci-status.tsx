@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Octicon, type OcticonSymbol } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
-import classNames from 'classnames'
+import { classNames } from '../../lib/classnames'
 import type { GitHubRepository } from '../../models/github-repository'
 import type { Repository } from '../../models/repository'
 import type { Disposable } from 'event-kit'

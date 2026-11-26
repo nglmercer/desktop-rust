@@ -1,5 +1,5 @@
 import * as React from 'react'
-import classNames from 'classnames'
+import { classNames } from '../../../lib/classnames'
 import { RowIndexPath } from './list-row-index-path'
 import { Tooltip } from '../tooltip'
 import { createObservableRef, ObservableRef } from '../observable-ref'
