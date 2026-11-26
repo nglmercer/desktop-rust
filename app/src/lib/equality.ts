@@ -1,10 +1,102 @@
-import deepEquals from 'deep-equal'
-
 export function structuralEquals<T extends object>(
   actual: T,
   expected: T
 ): boolean {
-  return deepEquals(actual, expected, { strict: true })
+  return strictDeepEquals(actual, expected)
+}
+
+function strictDeepEquals(actual: unknown, expected: unknown): boolean {
+  if (Object.is(actual, expected)) {
+    return true
+  }
+  if (
+    actual === null ||
+    actual === undefined ||
+    expected === null ||
+    expected === undefined ||
+    (typeof actual !== 'object' && typeof expected !== 'object')
+  ) {
+    return Object.is(actual, expected)
+  }
+  if (typeof actual !== typeof expected) {
+    return false
+  }
+
+  const left = actual as Record<string, unknown>
+  const right = expected as Record<string, unknown>
+  if (left.prototype !== right.prototype) {
+    return false
+  }
+  if (isArgumentsObject(left) !== isArgumentsObject(right)) {
+    return false
+  }
+  if (left instanceof RegExp || right instanceof RegExp) {
+    return (
+      left instanceof RegExp &&
+      right instanceof RegExp &&
+      left.source === right.source &&
+      left.flags === right.flags
+    )
+  }
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() === right.getTime()
+  }
+
+  const leftBuffer = isBufferLike(left)
+  const rightBuffer = isBufferLike(right)
+  if (leftBuffer !== rightBuffer) {
+    return false
+  }
+  if (leftBuffer) {
+    if (left.length !== right.length) {
+      return false
+    }
+    for (let index = 0; index < (left.length as number); index++) {
+      if (left[index] !== right[index]) {
+        return false
+      }
+    }
+    return true
+  }
+
+  let leftKeys: Array<string>
+  let rightKeys: Array<string>
+  try {
+    leftKeys = Object.keys(left)
+    rightKeys = Object.keys(right)
+  } catch {
+    return false
+  }
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+  leftKeys.sort()
+  rightKeys.sort()
+  for (let index = 0; index < leftKeys.length; index++) {
+    if (leftKeys[index] !== rightKeys[index]) {
+      return false
+    }
+  }
+  for (const key of leftKeys) {
+    if (!strictDeepEquals(left[key], right[key])) {
+      return false
+    }
+  }
+  return true
+}
+
+function isArgumentsObject(value: unknown): boolean {
+  return Object.prototype.toString.call(value) === '[object Arguments]'
+}
+
+function isBufferLike(value: Record<string, unknown>): boolean {
+  if (typeof value.length !== 'number') {
+    return false
+  }
+  if (typeof value.copy !== 'function' || typeof value.slice !== 'function') {
+    return false
+  }
+  return value.length === 0 || typeof value[0] === 'number'
 }
 
 /**

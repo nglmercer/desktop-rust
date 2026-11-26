@@ -145,6 +145,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `memoize-one` + `@types/memoize-one` | memoización local de una sola entrada en `app/src/lib/memoize-one.ts` | `app/test/unit/memoize-one-test.ts`, typecheck/build de consumidores UI/lib |
 | `classnames` | combinación local de clases en `app/src/lib/classnames.ts` | `app/test/unit/classnames-test.ts`, typecheck/build de componentes UI |
 | `string-argv` | parser local compatible para argumentos POSIX de integraciones en `app/src/lib/string-argv.ts` | `app/test/unit/string-argv-test.ts` |
+| `deep-equal` + `@types/deep-equal` | igualdad estructural estricta local en `app/src/lib/equality.ts` | `app/test/unit/structural-equality-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
