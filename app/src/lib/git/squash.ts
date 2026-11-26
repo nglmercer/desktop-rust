@@ -1,10 +1,8 @@
-import { appendFile, rm, writeFile } from '../../web/fs-promises'
 import { getCommits, revRange } from '.'
 import { Commit } from '../../models/commit'
 import { MultiCommitOperationKind } from '../../models/multi-commit-operation'
 import { IMultiCommitOperationProgress } from '../../models/progress'
 import { Repository } from '../../models/repository'
-import { getTempFilePath } from '../file-system'
 import { rebaseInteractive, RebaseResult } from './rebase'
 
 /**
@@ -38,9 +36,6 @@ export async function squash(
   commitMessage: string,
   progressCallback?: (progress: IMultiCommitOperationProgress) => void
 ): Promise<RebaseResult> {
-  let messagePath, todoPath
-  let result: RebaseResult
-
   try {
     if (toSquash.length === 0) {
       throw new Error('[squash] No commits provided to squash.')
@@ -66,7 +61,7 @@ export async function squash(
       )
     }
 
-    todoPath = await getTempFilePath('squashTodo')
+    let todo = ''
     let foundSquashOntoCommitInLog = false
     const toReplayAtSquash = []
     const toReplayAfterSquash = []
@@ -77,7 +72,7 @@ export async function squash(
         // If it is toSquash commit and we have found the squashOnto commit, we
         // can go ahead and squash them (as we will hold any picks till after)
         if (foundSquashOntoCommitInLog) {
-          await appendFile(todoPath, `squash ${commit.sha} ${commit.summary}\n`)
+          todo += `squash ${commit.sha} ${commit.summary}\n`
         } else {
           // However, if we have not found the squashOnto commit yet we want to
           // keep track of them in the order of the log. Thus, we use a new
@@ -97,10 +92,7 @@ export async function squash(
 
         for (let j = 0; j < toReplayAtSquash.length; j++) {
           const action = j === 0 ? 'pick' : 'squash'
-          await appendFile(
-            todoPath,
-            `${action} ${toReplayAtSquash[j].sha} ${toReplayAtSquash[j].summary}\n`
-          )
+          todo += `${action} ${toReplayAtSquash[j].sha} ${toReplayAtSquash[j].summary}\n`
         }
 
         continue
@@ -118,15 +110,12 @@ export async function squash(
       // If it is not one toSquash nor the squashOnto and have not found the
       // squashOnto commit, we simply record it is an unchanged pick (before the
       // squash)
-      await appendFile(todoPath, `pick ${commit.sha} ${commit.summary}\n`)
+      todo += `pick ${commit.sha} ${commit.summary}\n`
     }
 
     if (toReplayAfterSquash.length > 0) {
       for (let i = 0; i < toReplayAfterSquash.length; i++) {
-        await appendFile(
-          todoPath,
-          `pick ${toReplayAfterSquash[i].sha} ${toReplayAfterSquash[i].summary}\n`
-        )
+        todo += `pick ${toReplayAfterSquash[i].sha} ${toReplayAfterSquash[i].summary}\n`
       }
     }
 
@@ -136,38 +125,14 @@ export async function squash(
       )
     }
 
-    if (commitMessage.trim() !== '') {
-      messagePath = await getTempFilePath('squashCommitMessage')
-      await writeFile(messagePath, commitMessage)
-    }
-
-    // if no commit message provided, accept default editor
-    const gitEditor =
-      messagePath !== undefined ? `cat "${messagePath}" >` : undefined
-
-    result = await rebaseInteractive(
-      repository,
-      todoPath,
-      lastRetainedCommitRef,
-      {
-        action: MultiCommitOperationKind.Squash,
-        gitEditor,
-        progressCallback,
-        commits: [...toSquash, squashOnto],
-      }
-    )
+    return await rebaseInteractive(repository, todo, lastRetainedCommitRef, {
+      action: MultiCommitOperationKind.Squash,
+      commitMessage: commitMessage.trim() === '' ? undefined : commitMessage,
+      progressCallback,
+      commits: [...toSquash, squashOnto],
+    })
   } catch (e) {
     log.error(e)
     return RebaseResult.Error
-  } finally {
-    if (todoPath !== undefined) {
-      await rm(todoPath, { recursive: true, force: true })
-    }
-
-    if (messagePath !== undefined) {
-      await rm(messagePath, { recursive: true, force: true })
-    }
   }
-
-  return result
 }

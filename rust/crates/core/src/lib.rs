@@ -966,6 +966,9 @@ impl Repository {
             Operation::RendererRebaseStart { request, basis } => {
                 return self.renderer_rebase_start(&request, &basis).await;
             }
+            Operation::RendererRebaseInteractive { request } => {
+                return self.renderer_rebase_interactive(&request).await;
+            }
             Operation::RendererRebaseContinue {
                 expected,
                 basis,
@@ -1662,6 +1665,7 @@ impl Repository {
             | RendererMixedReset { .. }
             | RendererMergeStart { .. }
             | RendererRebaseStart { .. }
+            | RendererRebaseInteractive { .. }
             | RendererRebaseContinue { .. }
             | CheckoutHistory
             | AcknowledgeCheckout { .. } => unreachable!("handled by execute"),

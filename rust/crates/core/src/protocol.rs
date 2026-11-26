@@ -373,6 +373,9 @@ pub enum Operation {
         request: RendererRebaseStartRequest,
         basis: String,
     },
+    RendererRebaseInteractive {
+        request: RendererInteractiveRebaseRequest,
+    },
     RendererRebaseContinue {
         expected: String,
         basis: String,
@@ -1159,6 +1162,17 @@ pub struct RendererRebaseStartRequest {
     pub target_head: String,
     pub current_head: String,
     pub current_branch: Option<String>,
+}
+
+/// A renderer-generated interactive rebase program. The host owns the temporary
+/// editor files so shell editor strings and renderer temporary paths leave the wire.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererInteractiveRebaseRequest {
+    pub todo: String,
+    pub retained_commit: Option<String>,
+    pub no_verify: bool,
+    pub commit_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

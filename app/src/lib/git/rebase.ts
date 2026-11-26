@@ -1,9 +1,5 @@
-import type { IChildProcess } from '../process/child-process'
-import { GitErrorKind } from './error-kind'
-import { forEachLine } from '../line-stream'
-
 import { Repository } from '../../models/repository'
-import { RebaseInternalState, RebaseProgressOptions } from '../../models/rebase'
+import { RebaseInternalState } from '../../models/rebase'
 import { IMultiCommitOperationProgress } from '../../models/progress'
 import {
   WorkingDirectoryFileChange,
@@ -12,16 +8,9 @@ import {
 import { ManualConflictResolution } from '../../models/manual-conflict-resolution'
 import { Commit, CommitOneLine } from '../../models/commit'
 
-import { merge } from '../merge'
 import { formatRebaseValue } from '../rebase'
 
-import {
-  git,
-  IGitExecutionOptions,
-  IGitStringExecutionOptions,
-  IGitStringResult,
-  HookCallbackOptions,
-} from './core'
+import type { HookCallbackOptions } from './core'
 import { stageManualConflictResolution } from './stage'
 import { stageFiles } from './update-index'
 import { getStatus } from './status'
@@ -238,36 +227,6 @@ class GitRebaseParser {
   }
 }
 
-function configureOptionsForRebase<T extends IGitExecutionOptions>(
-  options: T,
-  progress?: RebaseProgressOptions
-) {
-  if (progress === undefined) {
-    return options
-  }
-
-  const { commits, progressCallback } = progress
-
-  return merge(options, {
-    processCallback: (process: IChildProcess) => {
-      // If Node.js encounters a synchronous runtime error while spawning
-      // `stderr` will be undefined and the error will be emitted asynchronously
-      if (process.stderr === null) {
-        return
-      }
-      const parser = new GitRebaseParser(commits)
-
-      forEachLine(process.stderr, line => {
-        const progress = parser.parse(line)
-
-        if (progress != null) {
-          progressCallback(progress)
-        }
-      })
-    },
-  })
-}
-
 /**
  * A stub function to use for initiating rebase in the app.
  *
@@ -344,26 +303,6 @@ export async function abortRebase(repository: Repository) {
     () => backend().abortRepositoryGitOperation(repository.path, 'rebase'),
     true
   )
-}
-
-function parseRebaseResult(result: IGitStringResult): RebaseResult {
-  if (result.exitCode === 0) {
-    if (result.stdout.trim().match(/^Current branch [^ ]+ is up to date.$/i)) {
-      return RebaseResult.AlreadyUpToDate
-    }
-
-    return RebaseResult.CompletedWithoutError
-  }
-
-  if (result.gitError === GitErrorKind.RebaseConflicts) {
-    return RebaseResult.ConflictsEncountered
-  }
-
-  if (result.gitError === GitErrorKind.UnresolvedConflicts) {
-    return RebaseResult.OutstandingFilesNotStaged
-  }
-
-  throw new Error(`Unhandled result found: '${JSON.stringify(result)}'`)
 }
 
 /**
@@ -521,59 +460,50 @@ export type RebaseInteractiveOptions = {
  */
 export async function rebaseInteractive(
   repository: Repository,
-  pathOfGeneratedTodo: string,
+  todo: string,
   lastRetainedCommitRef: string | null,
-  opts?: RebaseInteractiveOptions
+  opts?: RebaseInteractiveOptions & { readonly commitMessage?: string }
 ): Promise<RebaseResult> {
-  const baseOptions: IGitStringExecutionOptions = {
-    expectedErrors: new Set([GitErrorKind.RebaseConflicts]),
-    env: {
-      GIT_SEQUENCE_EDITOR: undefined,
-      GIT_EDITOR: opts?.gitEditor ?? ':',
-    },
-  }
-
-  let options = baseOptions
-
   const { progressCallback, commits } = opts ?? {}
-
-  if (progressCallback) {
-    if (!commits) {
-      log.warn(`Unable to interactively rebase if no commits`)
-      return RebaseResult.Error
-    }
-
-    options = configureOptionsForRebase(baseOptions, {
-      commits,
-      progressCallback,
-    })
+  if (progressCallback && !commits) {
+    log.warn(`Unable to interactively rebase if no commits`)
+    return RebaseResult.Error
   }
 
-  options = {
-    ...options,
-    onHookProgress: opts?.onHookProgress,
-    onHookFailure: opts?.onHookFailure,
-    onTerminalOutputAvailable: opts?.onTerminalOutputAvailable,
-  }
-
-  /* If the commit is the first commit in the branch, we cannot reference it
-  using the sha thus if lastRetainedCommitRef is null (we couldn't define it),
-  we must use the --root flag */
-  const ref = lastRetainedCommitRef == null ? '--root' : lastRetainedCommitRef
-  const result = await git(
-    [
-      '-c',
-      // This replaces interactive todo with contents of file at pathOfGeneratedTodo
-      `sequence.editor=cat "${pathOfGeneratedTodo}" >`,
-      'rebase',
-      ...(opts?.noVerify ? ['--no-verify'] : []),
-      '-i',
-      ref,
-    ],
+  const result = await withRepositoryGitOperation(
     repository.path,
-    opts?.action ?? 'Interactive rebase',
-    options
+    'mutation',
+    () =>
+      backend().repositoryRebaseInteractive(repository.path, {
+        todo,
+        retained_commit: lastRetainedCommitRef,
+        no_verify: opts?.noVerify === true,
+        commit_message: opts?.commitMessage ?? null,
+      }),
+    true
   )
 
-  return parseRebaseResult(result)
+  // The native operation is bounded rather than streaming. Replay the captured
+  // progress and terminal output in order so observers retain the same events.
+  if (opts?.onTerminalOutputAvailable !== undefined) {
+    opts.onTerminalOutputAvailable(callback => {
+      if (result.stdout.length > 0) callback(result.stdout)
+      if (result.stderr.length > 0) callback(result.stderr)
+      return { unsubscribe: () => {} }
+    })
+  }
+  if (progressCallback && commits) {
+    const parser = new GitRebaseParser(commits)
+    for (const line of result.stderr.split(/\r\n|\n|\r/)) {
+      const progress = parser.parse(line)
+      if (progress !== null) progressCallback(progress)
+    }
+  }
+
+  if (result.outcome === 'complete') return RebaseResult.CompletedWithoutError
+  if (result.outcome === 'up_to_date') return RebaseResult.AlreadyUpToDate
+  if (result.outcome === 'conflict') return RebaseResult.ConflictsEncountered
+  throw new Error(
+    `Interactive rebase failed: ${result.stderr || result.stdout || 'unknown Git failure'}`
+  )
 }

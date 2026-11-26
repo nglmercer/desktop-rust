@@ -1,12 +1,146 @@
 //! Reviewed continuation of a conflicted rebase.
 //!
 //! External Git writers can still race between review and Git taking locks.
-use crate::{GitPath, RendererRebaseStartRequest, Repository, args, process};
+use crate::{
+    GitPath, RendererInteractiveRebaseRequest, RendererRebaseStartRequest, Repository, args,
+    process,
+};
 use anyhow::Result;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 impl Repository {
+    /// Run a renderer-generated interactive rebase program without exposing a
+    /// shell editor string or renderer temporary path across the host boundary.
+    pub(crate) async fn renderer_rebase_interactive(
+        &self,
+        request: &RendererInteractiveRebaseRequest,
+    ) -> Result<Value> {
+        for variable in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_NAMESPACE",
+            "GIT_SHALLOW_FILE",
+        ] {
+            anyhow::ensure!(
+                std::env::var_os(variable).is_none(),
+                "Cannot run interactive rebase with {variable} set"
+            );
+        }
+        let oid = |value: &str| {
+            matches!(value.len(), 40 | 64)
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        if let Some(retained) = &request.retained_commit {
+            anyhow::ensure!(oid(retained), "Invalid retained commit object ID");
+        }
+        anyhow::ensure!(
+            !request.todo.is_empty()
+                && request.todo.len() <= 1024 * 1024
+                && request.todo.ends_with('\n')
+                && request.todo.lines().count() <= 10_000,
+            "Invalid interactive rebase todo"
+        );
+        for line in request.todo.lines() {
+            let mut fields = line.splitn(3, ' ');
+            let action = fields.next().unwrap_or_default();
+            let commit = fields.next().unwrap_or_default();
+            anyhow::ensure!(
+                matches!(action, "pick" | "squash") && oid(commit) && !line.contains(['\0', '\r']),
+                "Unsupported interactive rebase todo entry"
+            );
+        }
+        if let Some(message) = &request.commit_message {
+            anyhow::ensure!(
+                message.len() <= 1024 * 1024 && !message.contains('\0'),
+                "Invalid interactive rebase commit message"
+            );
+        }
+        anyhow::ensure!(
+            self.operation_state().await?.is_none(),
+            "Finish or abort the current Git operation first"
+        );
+
+        struct TemporaryRebaseFiles(std::path::PathBuf);
+        impl Drop for TemporaryRebaseFiles {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let directory = std::env::temp_dir().join(format!(
+            "desktop-interactive-rebase-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory)?;
+        let _temporary = TemporaryRebaseFiles(directory.clone());
+        let todo_path = directory.join("todo");
+        std::fs::write(&todo_path, request.todo.as_bytes())?;
+        let editor_command = |path: &std::path::Path| -> Result<String> {
+            let path = path
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("Temporary rebase path is not UTF-8"))?;
+            anyhow::ensure!(
+                !path.contains(['"', '\r', '\n', '\0']),
+                "Temporary rebase path cannot be represented safely"
+            );
+            Ok(format!("cat \"{path}\" >"))
+        };
+        let sequence_editor = editor_command(&todo_path)?;
+        let editor = match &request.commit_message {
+            Some(message) => {
+                let message_path = directory.join("message");
+                std::fs::write(&message_path, message.as_bytes())?;
+                editor_command(&message_path)?
+            }
+            None => ":".into(),
+        };
+
+        let mut command = vec![
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from(format!("sequence.editor={sequence_editor}")),
+            std::ffi::OsString::from("rebase"),
+        ];
+        if request.no_verify {
+            command.push(std::ffi::OsString::from("--no-verify"));
+        }
+        command.push(std::ffi::OsString::from("-i"));
+        command.push(std::ffi::OsString::from(
+            request.retained_commit.as_deref().unwrap_or("--root"),
+        ));
+        let output = process::run_bound_editor(&self.path, &command, &editor).await?;
+        let unmerged = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
+        anyhow::ensure!(unmerged.code == 0, "Cannot inspect rebase outcome");
+        let state = self.renderer_rebase_state().await?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let outcome = if output.code == 0
+            && stdout
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("current branch ")
+            && stdout
+                .trim()
+                .to_ascii_lowercase()
+                .ends_with(" is up to date.")
+        {
+            "up_to_date"
+        } else if output.code == 0 {
+            "complete"
+        } else if !unmerged.stdout.is_empty() && !state.is_null() {
+            "conflict"
+        } else {
+            "failed"
+        };
+        Ok(
+            json!({"outcome":outcome,"code":output.code,"stdout":stdout,"stderr":String::from_utf8_lossy(&output.stderr)}),
+        )
+    }
+
     async fn renderer_rebase_start_review(
         &self,
         request: &RendererRebaseStartRequest,

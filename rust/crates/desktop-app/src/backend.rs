@@ -921,6 +921,7 @@ impl Backend {
                 operation,
                 Operation::RendererRebaseStartPreview { .. }
                     | Operation::RendererRebaseStart { .. }
+                    | Operation::RendererRebaseInteractive { .. }
             )
         {
             return Err(AppError::BadArgs(

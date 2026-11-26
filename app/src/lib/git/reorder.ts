@@ -1,10 +1,8 @@
-import { appendFile, rm } from '../../web/fs-promises'
 import { getCommits, revRange } from '.'
 import { Commit } from '../../models/commit'
 import { MultiCommitOperationKind } from '../../models/multi-commit-operation'
 import { IMultiCommitOperationProgress } from '../../models/progress'
 import { Repository } from '../../models/repository'
-import { getTempFilePath } from '../file-system'
 import { rebaseInteractive, RebaseResult } from './rebase'
 
 /**
@@ -32,9 +30,6 @@ export async function reorder(
   lastRetainedCommitRef: string | null,
   progressCallback?: (progress: IMultiCommitOperationProgress) => void
 ): Promise<RebaseResult> {
-  let todoPath
-  let result: RebaseResult
-
   try {
     if (toMove.length === 0) {
       throw new Error('[reorder] No commits provided to reorder.')
@@ -55,7 +50,7 @@ export async function reorder(
       )
     }
 
-    todoPath = await getTempFilePath('reorderTodo')
+    let todo = ''
     let foundBaseCommitInLog = false
     const toReplayBeforeBaseCommit = []
     const toReplayAfterReorder = []
@@ -67,7 +62,7 @@ export async function reorder(
         // If it is toMove commit and we have found the base commit, we
         // can go ahead and insert them (as we will hold any picks till after)
         if (foundBaseCommitInLog) {
-          await appendFile(todoPath, `pick ${commit.sha} ${commit.summary}\n`)
+          todo += `pick ${commit.sha} ${commit.summary}\n`
         } else {
           // However, if we have not found the base commit yet we want to
           // keep track of them in the order of the log. Thus, we use a new
@@ -86,10 +81,7 @@ export async function reorder(
         toReplayAfterReorder.push(commit)
 
         for (let j = 0; j < toReplayBeforeBaseCommit.length; j++) {
-          await appendFile(
-            todoPath,
-            `pick ${toReplayBeforeBaseCommit[j].sha} ${toReplayBeforeBaseCommit[j].summary}\n`
-          )
+          todo += `pick ${toReplayBeforeBaseCommit[j].sha} ${toReplayBeforeBaseCommit[j].summary}\n`
         }
 
         continue
@@ -105,24 +97,18 @@ export async function reorder(
 
       // If it is not one toMove nor the base commit and have not found the base
       // commit, we simply record it is an unchanged pick (before the base commit)
-      await appendFile(todoPath, `pick ${commit.sha} ${commit.summary}\n`)
+      todo += `pick ${commit.sha} ${commit.summary}\n`
     }
 
     if (toReplayAfterReorder.length > 0) {
       for (let i = 0; i < toReplayAfterReorder.length; i++) {
-        await appendFile(
-          todoPath,
-          `pick ${toReplayAfterReorder[i].sha} ${toReplayAfterReorder[i].summary}\n`
-        )
+        todo += `pick ${toReplayAfterReorder[i].sha} ${toReplayAfterReorder[i].summary}\n`
       }
     }
 
     if (beforeCommit === null) {
       for (let i = 0; i < toReplayBeforeBaseCommit.length; i++) {
-        await appendFile(
-          todoPath,
-          `pick ${toReplayBeforeBaseCommit[i].sha} ${toReplayBeforeBaseCommit[i].summary}\n`
-        )
+        todo += `pick ${toReplayBeforeBaseCommit[i].sha} ${toReplayBeforeBaseCommit[i].summary}\n`
       }
     } else if (!foundBaseCommitInLog) {
       throw new Error(
@@ -130,24 +116,13 @@ export async function reorder(
       )
     }
 
-    result = await rebaseInteractive(
-      repository,
-      todoPath,
-      lastRetainedCommitRef,
-      {
-        action: MultiCommitOperationKind.Reorder,
-        progressCallback,
-        commits,
-      }
-    )
+    return await rebaseInteractive(repository, todo, lastRetainedCommitRef, {
+      action: MultiCommitOperationKind.Reorder,
+      progressCallback,
+      commits,
+    })
   } catch (e) {
     log.error(e)
     return RebaseResult.Error
-  } finally {
-    if (todoPath !== undefined) {
-      await rm(todoPath, { recursive: true, force: true })
-    }
   }
-
-  return result
 }

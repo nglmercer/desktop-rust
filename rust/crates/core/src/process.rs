@@ -841,6 +841,20 @@ pub(crate) async fn run_bound_noninteractive(path: &Path, args: &[OsString]) -> 
     run_command(path, command, args, None, 2 * 1024 * 1024, None).await
 }
 
+/// Run a local operation with a host-generated editor command.
+pub(crate) async fn run_bound_editor(
+    path: &Path,
+    args: &[OsString],
+    editor: &str,
+) -> Result<RawOutput> {
+    let mut command = bound_git_command();
+    command
+        .env("GIT_EDITOR", editor)
+        .env_remove("GIT_SEQUENCE_EDITOR")
+        .env("TERM", "dumb");
+    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+}
+
 /// Discover a repository without inherited command-scoped Git configuration.
 pub(crate) async fn run_bound_discovery(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     let mut command = bound_git_command();

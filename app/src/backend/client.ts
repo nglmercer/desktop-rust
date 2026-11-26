@@ -9263,6 +9263,83 @@ export class BackendClient {
     })
   }
 
+  /** Run a renderer-generated interactive rebase program on the host. */
+  async repositoryRebaseInteractive(
+    repositoryPath: string,
+    request: {
+      readonly todo: string
+      readonly retained_commit: string | null
+      readonly no_verify: boolean
+      readonly commit_message: string | null
+    }
+  ): Promise<{
+    readonly outcome: 'complete' | 'conflict' | 'up_to_date' | 'failed'
+    readonly code: number
+    readonly stdout: string
+    readonly stderr: string
+  }> {
+    const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
+    if (
+      request.todo.length === 0 ||
+      request.todo.length > 1024 * 1024 ||
+      !request.todo.endsWith('\n') ||
+      (request.retained_commit !== null &&
+        !oid.test(request.retained_commit)) ||
+      (request.commit_message !== null &&
+        (request.commit_message.length > 1024 * 1024 ||
+          request.commit_message.includes('\0')))
+    )
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid interactive rebase request',
+        retryable: false,
+      })
+    const value =
+      this.transport === 'wry'
+        ? await this.request('git_info', {
+            operation: {
+              type: 'start_rebase',
+              repository_path: repositoryPath,
+              operation: {
+                method: 'renderer_rebase_interactive',
+                request,
+              },
+            },
+          })
+        : await this.repositoryRead(
+            repositoryPath,
+            'renderer_rebase_interactive',
+            {
+              request,
+            }
+          )
+    if (
+      !isRecord(value) ||
+      !Number.isSafeInteger(value.code) ||
+      typeof value.stdout !== 'string' ||
+      typeof value.stderr !== 'string' ||
+      !['complete', 'conflict', 'up_to_date', 'failed'].includes(
+        String(value.outcome)
+      )
+    )
+      throw new BackendError({
+        code: 'invalid_response',
+        message:
+          'Interactive rebase outcome is uncertain; inspect the repository',
+        retryable: false,
+      })
+    return {
+      outcome: value.outcome as
+        | 'complete'
+        | 'conflict'
+        | 'up_to_date'
+        | 'failed',
+      code: value.code as number,
+      stdout: value.stdout,
+      stderr: value.stderr,
+    }
+  }
+
   /** Start a reviewed rebase without replaying an uncertain result. */
   async startRepositoryRebase(
     repositoryPath: string,
