@@ -6,7 +6,6 @@ import { cp, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import { describe, it } from 'vitest'
-import notificationsPackage from '../vendor/desktop-notifications/package.json'
 import trampolinePackage from '../vendor/desktop-trampoline/package.json'
 
 const tsc = resolve(__dirname, '../node_modules/typescript/lib/tsc.js')
@@ -34,10 +33,6 @@ function runTypeScriptCompiler(packageRoot: string): Promise<void> {
 
 describe('native module TypeScript output', () => {
   for (const { name, main, additionalFiles } of [
-    {
-      ...notificationsPackage,
-      additionalFiles: ['dist/notification-callback.d.ts'],
-    },
     { ...trampolinePackage, additionalFiles: [] },
   ]) {
     it(`emits the published entry points for ${name}`, async () => {

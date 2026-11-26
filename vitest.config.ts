@@ -44,10 +44,7 @@ export default defineConfig({
       {
         find: /^desktop-notifications$/,
         replacement: fileURLToPath(
-          new URL(
-            './vendor/desktop-notifications/lib/index.ts',
-            import.meta.url
-          )
+          new URL('./app/src/web/desktop-notifications.ts', import.meta.url)
         ),
       },
     ],

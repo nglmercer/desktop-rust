@@ -1,5 +1,4 @@
 {
-  "extends": "./tsconfig.notifications.json",
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -19,7 +18,12 @@
     "outDir": "./out",
     "useUnknownInCatchVariables": false,
     "lib": ["ES2023", "DOM", "DOM.Iterable", "ESNext.Array"],
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "desktop-notifications": ["./app/src/web/desktop-notifications.ts"],
+      "registry-js": ["./app/src/web/registry-js.ts"],
+      "keytar": ["./app/src/web/keytar.ts"]
+    }
   },
   "include": ["app/**/*.ts", "app/**/*.tsx", "app/**/*.d.tsx"],
   "exclude": [

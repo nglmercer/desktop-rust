@@ -50,6 +50,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | fallback shell para eliminar HEAD inicial en revert del primer commit | eliminación revisada Rust obligatoria | `app/test/unit/rust-first-undo-routing-test.ts` |
 | inicialización renderer de `LOCAL_GIT_DIRECTORY`/`GIT_EXEC_PATH` para dugite | el host Rust posee la ubicación de Git y filtra esas variables heredadas | `pnpm vite:build`, `pnpm check:types` |
 | `script/setup-macos-keychain` de firma Electron/Travis | empaquetado Rust actual; no hay consumidor ni flujo de firma activo que use ese keychain | `pnpm compile:script`, `pnpm lint` |
+| `vendor/desktop-notifications` y `tsconfig.notifications.json` | shim web tipado usado por build y tests; rutas de módulos integradas en `tsconfig.json` | `pnpm check:types`, tests de notificaciones y build Vite |
 | comprobación duplicada de capacidad de progreso de commit en `createCommit` | validación única en el cliente backend tipado | `app/test/unit/git/commit-test.ts`, `app/test/unit/rust-native-commit-routing-test.ts` |
 | wrapper TypeScript sin consumidores para `diff-index`/estado del índice | operaciones de índice Rust usadas por flujos vivos; constante null-tree local a `diff.ts` | `app/test/unit/git/diff-test.ts` |
 | wrappers TypeScript sin consumidores para `checkoutIndex`, `resetPaths` y `resetSubmodulePaths` | operaciones Rust internas de descarte/checkout/staging ya revisadas; batching compartido conservado | `app/test/unit/git/reset-test.ts`, `app/test/unit/git/submodule-test.ts`, `app/test/unit/rust-submodule-routing-test.ts` |
