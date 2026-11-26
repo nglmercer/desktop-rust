@@ -9,7 +9,7 @@ if it regresses.
 
 | Measure | Now | Done when |
 | --- | --- | --- |
-| Fallback checks (`transportKind`) in the renderer | 3 in 2 files | 0 |
+| Fallback checks (`transportKind`) in the renderer | 2 in 2 files | 0 |
 | Legacy Git runner calls (`await git(`) in `lib/git` | 18 in 8 files | 0 |
 | Renderer files importing `dugite` | 2 | 0 |
 | Renderer files importing `fs` | 5 | 0 (host operations only) |

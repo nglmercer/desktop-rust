@@ -9755,10 +9755,7 @@ export class BackendClient {
     opts: ICopilotCommitOptions = {},
     backendOpts: BackendRequestOptions = {}
   ): Promise<{ summary: string; description: string; basis: string }> {
-    const requestOptions =
-      this.transportKind === 'ws'
-        ? copilotDeadline(opts.timeout_ms, backendOpts)
-        : backendOpts
+    const requestOptions = copilotDeadline(opts.timeout_ms, backendOpts)
     return this.request(
       'copilot_generate_commit_message',
       {
