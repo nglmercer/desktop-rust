@@ -11,7 +11,7 @@ import { PopupType } from '../../models/popup'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 import { FoldoutType } from '../../lib/app-state'
 
-import untildify from 'untildify'
+import { untildify } from '../../lib/untildify'
 import { showOpenDialog } from '../main-process-proxy'
 import { Ref } from '../lib/ref'
 import { InputError } from '../lib/input-description/input-error'

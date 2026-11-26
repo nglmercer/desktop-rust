@@ -133,9 +133,6 @@ importers:
       '@types/textarea-caret':
         specifier: ^3.0.0
         version: 3.0.4
-      '@types/untildify':
-        specifier: ^3.0.0
-        version: 3.0.0
       diff:
         specifier: ^8.0.3
         version: 8.0.4
@@ -274,9 +271,6 @@ importers:
       tslib:
         specifier: ^2.0.0
         version: 2.9.1
-      untildify:
-        specifier: ^3.0.2
-        version: 3.0.3
     devDependencies:
       '@testing-library/react':
         specifier: 12.1.5
@@ -1165,8 +1159,6 @@ packages:
   '@types/unist@2.0.11':
     resolution: {integrity: sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA==}
 
-  '@types/untildify@3.0.0':
-    resolution: {integrity: sha512-FTktI3Y1h+gP9GTjTvXBP5v8xpH4RU6uS9POoBcGy4XkS2Np6LNtnP1eiNNth4S7P+qw2c/rugkwBasSHFzJEg==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -2973,8 +2965,6 @@ packages:
   undici-types@8.13.1:
     resolution: {integrity: sha512-wEtfquPVc1e9umZh73XVwnPauVuGQp20M/u/4ENuWMRkZ8NZx0ut6q3HLLdMUb9awNlxxHcsaGVhaerZu/2SSw==}
 
-  untildify@3.0.3:
-    resolution: {integrity: sha512-iSk/J8efr8uPT/Z4eSUywnqyrQU7DSdMfdqK4iWEaUVVmcP5JcnpRqmVMwcwcnmI1ATFNgC5V90u09tBynNFKA==}
     engines: {node: '>=4'}
 
   url@0.11.4:
@@ -3832,8 +3822,6 @@ snapshots:
   '@types/trusted-types@2.0.7': {}
 
   '@types/unist@2.0.11': {}
-
-  '@types/untildify@3.0.0': {}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -5861,8 +5849,6 @@ snapshots:
   undici-types@6.20.0: {}
 
   undici-types@8.13.1: {}
-
-  untildify@3.0.3: {}
 
   url@0.11.4:
     dependencies:
