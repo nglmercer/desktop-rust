@@ -2,8 +2,15 @@ import { git, IGitStringExecutionOptions } from './core'
 import { ICloneProgress } from '../../models/progress'
 import { CloneOptions } from '../../models/clone-options'
 import { CloneProgressParser, executionOptionsWithProgress } from '../progress'
+import type { IGitOutput, IGitProgress } from '../progress/git'
+import { FetchStreamProgressParser } from '../progress/fetch-stream'
+import { backend } from '../../backend/client'
 import { getDefaultBranch } from '../helpers/default-branch'
-import { envForRemoteOperation } from './environment'
+import {
+  backendRemoteProxy,
+  envForProxy,
+  envForRemoteOperation,
+} from './environment'
 import { homedir } from '../../web/os'
 import * as Path from 'path'
 import { unescape as decodeFilePath } from 'querystring'
@@ -197,6 +204,63 @@ async function cloneCore(
   options: CloneOptions,
   progressCallback?: (progress: ICloneProgress) => void
 ): Promise<void> {
+  const defaultBranch = options.defaultBranch ?? (await getDefaultBranch())
+  const title = `Cloning into ${path}`
+  const kind = 'clone'
+  const emit = (progress: IGitProgress | IGitOutput) => {
+    const description =
+      progress.kind === 'progress' ? progress.details.text : progress.text
+    withoutRepositoryGitAccess(() =>
+      progressCallback?.({ kind, title, description, value: progress.percent })
+    )
+  }
+
+  const inheritedGitConfiguration =
+    process.env.GIT_ALLOW_PROTOCOL !== undefined ||
+    process.env.GIT_CONFIG_PARAMETERS !== undefined
+  if (options.fallbackAccount === undefined && !inheritedGitConfiguration) {
+    const parser =
+      progressCallback === undefined
+        ? undefined
+        : new FetchStreamProgressParser(emit, new CloneProgressParser())
+    withoutRepositoryGitAccess(() =>
+      progressCallback?.({ kind, title, value: 0 })
+    )
+    const proxy = backendRemoteProxy(await envForProxy(url))
+    try {
+      await backend().cloneRepository(
+        {
+          url,
+          path,
+          default_branch: defaultBranch,
+          ...(options.branch === undefined ? {} : { branch: options.branch }),
+          ...(proxy === undefined ? {} : { proxy }),
+        },
+        {
+          deadlineMs: 3_600_000,
+          ...(progressCallback === undefined
+            ? {}
+            : {
+                onProgress: chunk => {
+                  try {
+                    parser?.push(chunk)
+                  } catch {
+                    // Progress observers cannot terminate a clone.
+                  }
+                },
+              }),
+        }
+      )
+    } finally {
+      try {
+        parser?.finish()
+      } catch {
+        // Progress observers cannot invalidate a completed clone.
+      }
+    }
+    return
+  }
+
   const env = {
     ...(await envForRemoteOperation(url)),
     GIT_CLONE_PROTECTION_ACTIVE: 'false',
@@ -205,8 +269,6 @@ async function cloneCore(
       .filter(protocol => !unsupportedCloneProtocols.includes(protocol))
       .join(':'),
   }
-
-  const defaultBranch = options.defaultBranch ?? (await getDefaultBranch())
 
   const args = [
     '-c',
@@ -228,21 +290,10 @@ async function cloneCore(
   if (progressCallback) {
     args.push('--progress')
 
-    const title = `Cloning into ${path}`
-    const kind = 'clone'
-
     opts = await executionOptionsWithProgress(
       { ...opts, trackLFSProgress: true },
       new CloneProgressParser(),
-      progress => {
-        const description =
-          progress.kind === 'progress' ? progress.details.text : progress.text
-        const value = progress.percent
-
-        withoutRepositoryGitAccess(() =>
-          progressCallback({ kind, title, description, value })
-        )
-      }
+      emit
     )
 
     // Initial progress

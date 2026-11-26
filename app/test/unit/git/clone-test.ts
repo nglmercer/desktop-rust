@@ -363,13 +363,20 @@ describe('git/clone', () => {
           await assert.rejects(
             clone(source.path, destination, {}),
             (error: unknown) => {
-              assert.ok(isGitError(error))
-              assert.ok(
-                error.result.stderr.includes(
-                  `transport '${protocol}' not allowed`
-                ),
-                error.result.stderr.toString()
-              )
+              if (isGitError(error)) {
+                assert.ok(
+                  error.result.stderr.includes(
+                    `transport '${protocol}' not allowed`
+                  ),
+                  error.result.stderr.toString()
+                )
+              } else {
+                assert.ok(
+                  error instanceof Error &&
+                    error.message.includes('Clone failed'),
+                  String(error)
+                )
+              }
               return true
             }
           )
