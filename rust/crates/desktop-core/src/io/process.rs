@@ -480,11 +480,11 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
         child_command.current_dir(cwd);
     }
     if let Some(env) = o.get("env").and_then(Value::as_object) {
+        child_command.env_clear();
         for (key, value) in env {
-            match value.as_str() {
-                Some(value) => child_command.env(key, value),
-                None => child_command.env_remove(key),
-            };
+            if let Some(value) = value.as_str() {
+                child_command.env(key, value);
+            }
         }
     }
     child_command
@@ -1121,6 +1121,31 @@ mod tests {
             "shell printf",
         );
         assert_eq!(output_of(&recorder, id, "stdout"), b"shelltest");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_environment_replaces_the_inherited_environment() {
+        let recorder = Arc::new(Recorder::default());
+        let app = app(&recorder);
+        let spawned = spawn(
+            &app,
+            &json!({
+                "command": "/usr/bin/env",
+                "args": [],
+                "env": { "HOST_TEST_ONLY": "yes", "REMOVED": null },
+                "stdio": ["pipe", "pipe", "pipe"]
+            }),
+        )
+        .unwrap();
+        let id = spawned["id"].as_u64().unwrap();
+        wait_for(
+            &recorder,
+            id,
+            Instant::now() + Duration::from_secs(10),
+            "environment probe",
+        );
+        assert_eq!(output_of(&recorder, id, "stdout"), b"HOST_TEST_ONLY=yes\n");
     }
 
     #[test]
