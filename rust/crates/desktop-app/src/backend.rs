@@ -50,6 +50,8 @@ struct ReadRequest {
     #[serde(default)]
     canonical_bool: Option<bool>,
     #[serde(default)]
+    variable: Option<String>,
+    #[serde(default)]
     environment: Option<std::collections::BTreeMap<String, Option<String>>>,
     #[serde(default)]
     filter: Option<Vec<String>>,
@@ -414,6 +416,7 @@ enum ReadMethod {
     AssistedCommitRefs,
     AssistedCommitIndexEntries,
     AssistedCommitGitPath,
+    AssistedCommitAttributeSource,
     AssistedCommitTreeEntry,
     AssistedCommitBlob,
     RendererHooks,
@@ -1337,6 +1340,13 @@ impl Backend {
                 "sha only applies to assisted blob reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::AssistedCommitAttributeSource)
+            && request.variable.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "variable only applies to assisted attribute source reads".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::AssistedCommitTreeEntry) && request.path.is_some()
         {
             return Err(AppError::BadArgs(
@@ -1740,6 +1750,40 @@ impl Backend {
                         sha: request
                             .sha
                             .ok_or_else(|| AppError::BadArgs("sha is required".into()))?,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitAttributeSource
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitAttributeSource {
+                        variable: request
+                            .variable
+                            .ok_or_else(|| AppError::BadArgs("variable is required".into()))?,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }

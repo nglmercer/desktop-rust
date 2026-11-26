@@ -522,12 +522,13 @@ export async function initializePrivateRepository(
     GIT_GRAFT_FILE: join(directory, 'info', 'grafts'),
   }
   const externalAttributes: Buffer[] = []
-  for (const source of ['GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL']) {
-    const result = await privateGit(
-      { repository, environment },
-      ['var', source],
-      'assistedCommitAttributeSource',
-      { successExitCodes: new Set([0, 1]) }
+  const sourceEnvironment = objectReadEnvironment(environment)
+  delete sourceEnvironment.GIT_LITERAL_PATHSPECS
+  for (const source of ['GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL'] as const) {
+    const result = await backend().repositoryAssistedCommitAttributeSource(
+      repository.path,
+      source,
+      sourceEnvironment
     )
     // Git reports a disabled or absent attribute source with empty exit 1.
     if (result.exitCode === 1) {

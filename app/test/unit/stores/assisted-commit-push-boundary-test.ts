@@ -878,6 +878,25 @@ function nodeBackend(t: TestContext) {
             stderr: result.stderr,
           }
         },
+        repositoryAssistedCommitAttributeSource: async (
+          path: string,
+          variable: 'GIT_ATTR_SYSTEM' | 'GIT_ATTR_GLOBAL',
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['var', variable],
+            path,
+            {
+              successExitCodes: new Set([0, 1]),
+              env: { GIT_CONFIG: undefined, ...environment },
+            } as never
+          )) as Dugite.IGitStringResult
+          return {
+            exitCode: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr,
+          }
+        },
         repositoryAssistedCommitConfigPath: async (
           path: string,
           variable: 'GIT_CONFIG_SYSTEM' | 'GIT_CONFIG_GLOBAL'

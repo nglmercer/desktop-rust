@@ -3294,6 +3294,41 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitAttributeSource(
+    repositoryPath: string,
+    variable: 'GIT_ATTR_SYSTEM' | 'GIT_ATTR_GLOBAL',
+    environment?: Record<string, string | undefined>
+  ): Promise<{
+    readonly exitCode: number
+    readonly stdout: string
+    readonly stderr: string
+  }> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_attribute_source',
+      { variable, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      (value.exit_code === 0 || value.exit_code === 1) &&
+      typeof value.stdout === 'string' &&
+      value.stdout.length <= 65536 &&
+      typeof value.stderr === 'string' &&
+      value.stderr.length <= 65536
+    ) {
+      return {
+        exitCode: value.exit_code,
+        stdout: value.stdout,
+        stderr: value.stderr,
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid attribute source response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitConfigPath(
     repositoryPath: string,
     variable: 'GIT_CONFIG_SYSTEM' | 'GIT_CONFIG_GLOBAL',

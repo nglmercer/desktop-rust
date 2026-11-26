@@ -324,6 +324,42 @@ impl Repository {
         }))
     }
 
+    pub(crate) async fn assisted_commit_attribute_source(
+        &self,
+        variable: &str,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            matches!(variable, "GIT_ATTR_SYSTEM" | "GIT_ATTR_GLOBAL"),
+            "unsupported attribute source variable"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported attribute source environment key"
+            );
+        }
+        let output = crate::process::run_without_git_config_with_environment(
+            &self.path,
+            &args(&["var", variable]),
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(
+            matches!(output.code, 0 | 1),
+            "Cannot read Git attribute source"
+        );
+        anyhow::ensure!(
+            output.stdout.len() <= 65536 && output.stderr.len() <= 65536,
+            "Git attribute source output exceeds limit"
+        );
+        Ok(json!({
+            "exit_code": output.code,
+            "stdout": String::from_utf8_lossy(&output.stdout),
+            "stderr": String::from_utf8_lossy(&output.stderr),
+        }))
+    }
+
     pub(crate) async fn assisted_commit_config_path(
         &self,
         variable: &str,

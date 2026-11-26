@@ -678,6 +678,14 @@ impl Repository {
                     .assisted_commit_config_path(&variable, &environment)
                     .await;
             }
+            Operation::AssistedCommitAttributeSource {
+                variable,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_attribute_source(&variable, &environment)
+                    .await;
+            }
             Operation::AssistedCommitStagedConfigValues {
                 key,
                 snapshot_id,
@@ -1572,6 +1580,7 @@ impl Repository {
             | AssistedCommitRefs
             | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }
+            | AssistedCommitAttributeSource { .. }
             | AssistedCommitTreeEntry { .. }
             | AssistedCommitBlob { .. }
             | RendererHooks { .. }
