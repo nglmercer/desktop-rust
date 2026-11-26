@@ -88,7 +88,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | puerta `transportKind` de selección de repositorio browser en `AppStore` | flujo tipado `selectBrowserRepositoryAtPath` que clasifica la ruta y limpia la selección cuando no es un working tree regular | `app/test/unit/backend-client-session-test.ts`, `app/test/unit/browser-repository-selection-test.ts` |
 | fallback legacy de `fetch`/`fetchRefspec` y resolución proxy incompatible con IPC | fetch revisado Rust obligatorio; proxies explícitos pasan por contrato tipado y se redactan en diagnósticos | `app/test/unit/rust-fetch-routing-test.ts`, `app/test/unit/git/fetch-test.ts`, tests Rust `renderer_fetch`/`process` |
 | fallback proxy/inherited-proxy de push nativo | proxies explícitos pasan por el mismo contrato tipado que fetch; proxies heredados permanecen confinados al entorno del proceso host y ambos se redactan en diagnósticos | `app/test/unit/rust-push-routing-test.ts`, `app/test/unit/git/environment-test.ts`, test Rust `renderer_proxy_validation_and_debug_protect_credentials` |
-| ramas `transportKind` de capacidad/progreso/proxy en push nativo | intento nativo uniforme; solo errores tipados explícitamente pre-mutación (`unsupported`, `no_transport`, URL o hooks no soportados) pueden usar el fallback legacy | `app/test/unit/rust-push-routing-test.ts` |
+| ejecución legacy `git push` y fallback pre-mutation del renderer | push revisado Rust obligatorio; los errores pre-mutación se propagan sin reintento y los outcomes inciertos suprimen acciones de retry inseguras | `app/test/unit/rust-push-routing-test.ts`, `app/test/unit/stores/assisted-commit-push-boundary-test.ts` |
 | rama `transportKind` al aplicar deadline de generación Copilot | deadline uniforme calculado una vez; la shell Tao/Wry sigue exigiendo la operación Copilot repository-scoped antes de evaluar opciones | `app/test/unit/backend-websocket-test.ts` |
 | fallback proxy/inherited-proxy de pull nativo | proxies explícitos pasan por contrato tipado al igual que fetch/push; el helper fetch sin proxy quedó retirado porque todas las operaciones usan la forma explícita | `app/test/unit/rust-pull-routing-test.ts`, `app/test/unit/rust-pull-progress-ownership-test.ts` |
 | fallbacks shell de descubrimiento/alta/borrado/URL/HEAD de remotes | descubrimiento seguro y mutaciones revisadas Rust obligatorias; URLs ambiguas o con credenciales se rechazan explícitamente | `app/test/unit/rust-remote-presence-test.ts`, `app/test/unit/git/remote-discovery-test.ts`, `app/test/unit/git/remote-management-test.ts` |
@@ -187,7 +187,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (2 comprobaciones
-`transportKind`, 1 llamada legacy Git, 0 imports renderer `dugite`, 0 imports `fs`, 0 imports
+`transportKind`, 0 llamadas legacy Git, 0 imports renderer `dugite`, 0 imports `fs`, 0 imports
 `child_process`, 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva

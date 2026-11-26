@@ -60,18 +60,6 @@ export async function pull(
     throw new Error("Cannot pull from a remote whose name starts with '-'.")
   }
 
-  const transport =
-    typeof window === 'undefined' ? 'none' : backend().transportKind
-  if (transport !== 'ws' && transport !== 'wry') {
-    throw new Error('Pull requires the Rust backend')
-  }
-  if (
-    transport === 'wry' &&
-    options?.progressCallback &&
-    typeof (window as any).__desktop?.invokeWithProgress !== 'function'
-  ) {
-    throw new Error('Pull progress requires the Rust backend progress channel')
-  }
   const title = `Pulling ${remote.name}`
   const callback = options?.progressCallback
   const observe = (progress: IPullProgress) => {

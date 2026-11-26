@@ -1,26 +1,14 @@
-import {
-  git,
-  GitError,
-  HookCallbackOptions,
-  IGitStringExecutionOptions,
-  TerminalOutput,
-} from './core'
+import { GitError, HookCallbackOptions, TerminalOutput } from './core'
 import { Repository } from '../../models/repository'
 import { IPushProgress } from '../../models/progress'
-import { PushProgressParser, executionOptionsWithProgress } from '../progress'
+import { PushProgressParser } from '../progress'
 import { IRemote } from '../../models/remote'
-import {
-  backendRemoteProxy,
-  envForProxy,
-  envForRemoteOperation,
-} from './environment'
+import { backendRemoteProxy, envForProxy } from './environment'
 import { Branch } from '../../models/branch'
 import {
   backend,
   BackendError,
   FetchErrorKind,
-  FetchPreviewUnsupported,
-  NativePushHooksUnsupported,
   PushErrorKind,
 } from '../../backend/client'
 import {
@@ -167,350 +155,250 @@ export async function push(
           assisted.pushURLSource
         )
 
-  if (typeof window !== 'undefined') {
-    const needsStreaming =
-      progressCallback !== undefined ||
-      options?.onTerminalOutputAvailable !== undefined
-    {
-      const controller = new AbortController()
-      let failedHook = false
-      const listeners = new Set<(chunk: TerminalOutput) => void>()
-      const terminalChunks: string[] = []
-      const notifyTerminal = (text: string) => {
-        if (!text) return
-        pushTerminalChunk(terminalChunks, 256 * 1024, text)
-        for (const listener of listeners) {
-          try {
-            withoutRepositoryGitAccess(() => listener(text))
-          } catch {
-            /* Observers cannot terminate a push. */
-          }
-        }
-      }
-      const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() }
-      const parser =
-        progressCallback === undefined
-          ? undefined
-          : new FetchStreamProgressParser(progress => {
-              const description =
-                progress.kind === 'progress'
-                  ? progress.details.text
-                  : progress.text
-              withoutRepositoryGitAccess(() =>
-                progressCallback({
-                  kind: 'push',
-                  title: `Pushing to ${remote.name}`,
-                  description,
-                  value: progress.percent,
-                  remote: remote.name,
-                  branch: localBranch,
-                })
-              )
-            }, new PushProgressParser())
-      progressCallback?.({
-        kind: 'push',
-        title: `Pushing to ${remote.name}`,
-        value: 0,
-        remote: remote.name,
-        branch: localBranch,
-      })
-      const proxy = backendRemoteProxy(await envForProxy(remote.url))
-      try {
-        const failure = await withRepositoryGitOperation(
-          repository.path,
-          'mutation',
-          async () => {
-            const verifyAssistedSpawn =
-              assisted === undefined
-                ? undefined
-                : await assisted.prepareForSpawn()
-            return withHooksEnv(
-              hookEnvironment => {
-                const hooks = rendererHookEnvironment(hookEnvironment)
-                const useNativeHookCallbacks = hooks === undefined
-                return backend().pushRepositoryRemote(
-                  repository.path,
-                  {
-                    remote: remote.name,
-                    expected_url: assisted?.pushURL ?? remote.url,
-                    local_branch: localBranch,
-                    remote_branch: remoteBranch,
-                    tags: tagsToPush ?? [],
-                    force_with_lease: options?.forceWithLease ?? false,
-                    no_verify: options?.noVerify ?? false,
-                    report_progress: needsStreaming,
-                    require_hook_callbacks:
-                      useNativeHookCallbacks &&
-                      (options?.onHookProgress !== undefined ||
-                        options?.onHookFailure !== undefined ||
-                        options?.onTerminalOutputAvailable !== undefined),
-                    interactive_hook_decision:
-                      useNativeHookCallbacks &&
-                      options?.onHookFailure !== undefined,
-                    ...(proxy === undefined ? {} : { proxy }),
-                    ...(hooks === undefined ? {} : { hook_environment: hooks }),
-                    ...(assisted === undefined ||
-                    assistedConfigParameters === undefined
-                      ? {}
-                      : {
-                          assisted: {
-                            expected_tip: assisted.expectedTip,
-                            remote_ref: assisted.remoteRef,
-                            raw_push_url: assisted.rawPushURL,
-                            push_url_source: assisted.pushURLSource,
-                            configured_url: remote.url,
-                            config_parameters: assistedConfigParameters,
-                          },
-                        }),
-                  },
-                  !needsStreaming
-                    ? undefined
-                    : chunk => {
-                        try {
-                          parser?.push(chunk)
-                        } catch {
-                          /* Progress observers cannot terminate a push. */
-                        }
-                        if (chunk.stream === 'lfs') return
-                        const bytes = Uint8Array.from(
-                          atob(chunk.data),
-                          character => character.charCodeAt(0)
-                        )
-                        const text = decoders[chunk.stream].decode(bytes, {
-                          stream: true,
-                        })
-                        notifyTerminal(text)
-                      },
-                  options?.onTerminalOutputAvailable !== undefined
-                    ? async () => {
-                        try {
-                          withoutRepositoryGitAccess(() =>
-                            options?.onTerminalOutputAvailable?.(listener => {
-                              for (const chunk of terminalChunks) {
-                                try {
-                                  withoutRepositoryGitAccess(() =>
-                                    listener(chunk)
-                                  )
-                                } catch {
-                                  /* Observers cannot terminate a push. */
-                                }
-                              }
-                              listeners.add(listener)
-                              return {
-                                unsubscribe: () => listeners.delete(listener),
-                              }
-                            })
-                          )
-                        } catch {
-                          /* Observer setup must not trigger fallback or terminate a push. */
-                        }
-                      }
-                    : undefined,
-                  event => {
-                    if (event.status === 'failed') failedHook = true
-                    try {
-                      withoutRepositoryGitAccess(() =>
-                        options?.onHookProgress?.(
-                          event.status === 'started'
-                            ? {
-                                hookName: event.hookName,
-                                status: 'started',
-                                abort: () => controller.abort(),
-                              }
-                            : { hookName: event.hookName, status: event.status }
-                        )
-                      )
-                    } catch {
-                      /* Hook observers cannot affect an active Git operation. */
-                    }
-                  },
-                  options?.onHookProgress === undefined
-                    ? undefined
-                    : controller.signal,
-                  options?.onHookFailure === undefined
-                    ? undefined
-                    : output =>
-                        withoutRepositoryGitAccess(() =>
-                          options.onHookFailure!(
-                            'pre-push',
-                            Buffer.from(output)
-                          )
-                        ),
-                  assisted === undefined
-                    ? undefined
-                    : async () => verifyAssistedSpawn?.()
-                )
-              },
-              repository.path,
-              {
-                env:
-                  assistedConfigParameters === undefined
-                    ? {}
-                    : { GIT_CONFIG_PARAMETERS: assistedConfigParameters },
-                interceptHooks: ['pre-push'],
-                onHookProgress: options?.onHookProgress,
-                onHookFailure: options?.onHookFailure,
-              }
-            )
-          },
-          true
-        )
-        if (failure !== undefined) {
-          const notice =
-            'Push failed or was rejected. Some destinations or tags may have been updated; inspect the remote before retrying.'
-          let error: GitError
-          if (isPushErrorKind(failure.errorKind)) {
-            const kind = failure.errorKind
-            const gitError =
-              kind === 'push_protection' ? null : pushErrors[kind]
-            const description =
-              kind === 'push_protection'
-                ? ' Push protection rejected the update; inspect the remote for details.'
-                : ''
-            error = new GitError(
-              {
-                exitCode: failure.exitCode,
-                stdout: '',
-                stderr: '',
-                path: repository.path,
-                gitError,
-                gitErrorDescription: `${notice}${description}`,
-              },
-              ['push', '--', remote.name],
-              ''
-            )
-          } else {
-            error = fetchFailureToGitError(
-              { exitCode: failure.exitCode, errorKind: failure.errorKind },
-              repository.path,
-              remote.name
-            )
-            error.message = `${notice} ${error.message}`
-          }
-          if (failedHook || failure.hookFailed) {
-            error.message +=
-              ' The pre-push hook failed. Ignoring an individual failed hook is not supported by the native backend.'
-          }
-          uncertainPushes.add(error)
-          throw error
-        }
-        return
-      } catch (error) {
-        if (
-          error instanceof BackendError &&
-          error.code === 'push_outcome_uncertain'
-        )
-          uncertainPushes.add(error)
-        const unsupportedBeforeMutation =
-          error instanceof FetchPreviewUnsupported ||
-          error instanceof NativePushHooksUnsupported ||
-          (error instanceof BackendError &&
-            (error.code === 'unsupported' || error.code === 'no_transport'))
-        if (!unsupportedBeforeMutation) throw error
-      } finally {
+  if (typeof window === 'undefined') {
+    throw new Error('Push requires the Rust backend')
+  }
+  const needsStreaming =
+    progressCallback !== undefined ||
+    options?.onTerminalOutputAvailable !== undefined
+  {
+    const controller = new AbortController()
+    let failedHook = false
+    const listeners = new Set<(chunk: TerminalOutput) => void>()
+    const terminalChunks: string[] = []
+    const notifyTerminal = (text: string) => {
+      if (!text) return
+      pushTerminalChunk(terminalChunks, 256 * 1024, text)
+      for (const listener of listeners) {
         try {
-          parser?.finish()
+          withoutRepositoryGitAccess(() => listener(text))
         } catch {
-          /* Progress observers cannot invalidate a completed push. */
+          /* Observers cannot terminate a push. */
         }
-        for (const decoder of Object.values(decoders)) {
-          const text = decoder.decode()
-          notifyTerminal(text)
-        }
-        listeners.clear()
       }
     }
-  }
-
-  const args = ['push']
-
-  if (assisted !== undefined) {
-    args.push(
-      '--no-force',
-      '--no-mirror',
-      '--no-follow-tags',
-      '--recurse-submodules=no'
-    )
-  } else if (!remoteBranch) {
-    args.push('--set-upstream')
-  } else if (options?.forceWithLease) {
-    args.push('--force-with-lease')
-  }
-
-  if (options?.noVerify) {
-    args.push('--no-verify')
-  }
-
-  const remoteEnv = await envForRemoteOperation(assisted?.pushURL ?? remote.url)
-  const pushParameters =
-    assisted === undefined
-      ? undefined
-      : getAssistedCommitPushConfigParameters(
-          remote.name,
-          assisted.rawPushURL,
-          assisted.pushURLSource
-        )
-  let opts: IGitStringExecutionOptions = {
-    env: {
-      ...remoteEnv,
-      ...(pushParameters === undefined
-        ? {}
-        : { GIT_CONFIG_PARAMETERS: pushParameters }),
-    },
-    interceptHooks: ['pre-push'],
-    onHookProgress: options?.onHookProgress,
-    onHookFailure: options?.onHookFailure,
-    onTerminalOutputAvailable: options?.onTerminalOutputAvailable,
-    prepareForSpawn: assisted?.prepareForSpawn,
-  }
-
-  if (progressCallback) {
-    args.push('--progress')
-    const title = `Pushing to ${remote.name}`
-    const kind = 'push'
-
-    opts = await executionOptionsWithProgress(
-      { ...opts, trackLFSProgress: true },
-      new PushProgressParser(),
-      progress => {
-        const description =
-          progress.kind === 'progress' ? progress.details.text : progress.text
-        const value = progress.percent
-
-        progressCallback({
-          kind,
-          title,
-          description,
-          value,
-          remote: remote.name,
-          branch: localBranch,
-        })
-      }
-    )
-
-    // Initial progress
-    progressCallback({
+    const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() }
+    const parser =
+      progressCallback === undefined
+        ? undefined
+        : new FetchStreamProgressParser(progress => {
+            const description =
+              progress.kind === 'progress'
+                ? progress.details.text
+                : progress.text
+            withoutRepositoryGitAccess(() =>
+              progressCallback({
+                kind: 'push',
+                title: `Pushing to ${remote.name}`,
+                description,
+                value: progress.percent,
+                remote: remote.name,
+                branch: localBranch,
+              })
+            )
+          }, new PushProgressParser())
+    progressCallback?.({
       kind: 'push',
-      title,
+      title: `Pushing to ${remote.name}`,
       value: 0,
       remote: remote.name,
       branch: localBranch,
     })
+    const proxy = backendRemoteProxy(await envForProxy(remote.url))
+    try {
+      const failure = await withRepositoryGitOperation(
+        repository.path,
+        'mutation',
+        async () => {
+          const verifyAssistedSpawn =
+            assisted === undefined
+              ? undefined
+              : await assisted.prepareForSpawn()
+          return withHooksEnv(
+            hookEnvironment => {
+              const hooks = rendererHookEnvironment(hookEnvironment)
+              const useNativeHookCallbacks = hooks === undefined
+              return backend().pushRepositoryRemote(
+                repository.path,
+                {
+                  remote: remote.name,
+                  expected_url: assisted?.pushURL ?? remote.url,
+                  local_branch: localBranch,
+                  remote_branch: remoteBranch,
+                  tags: tagsToPush ?? [],
+                  force_with_lease: options?.forceWithLease ?? false,
+                  no_verify: options?.noVerify ?? false,
+                  report_progress: needsStreaming,
+                  require_hook_callbacks:
+                    useNativeHookCallbacks &&
+                    (options?.onHookProgress !== undefined ||
+                      options?.onHookFailure !== undefined ||
+                      options?.onTerminalOutputAvailable !== undefined),
+                  interactive_hook_decision:
+                    useNativeHookCallbacks &&
+                    options?.onHookFailure !== undefined,
+                  ...(proxy === undefined ? {} : { proxy }),
+                  ...(hooks === undefined ? {} : { hook_environment: hooks }),
+                  ...(assisted === undefined ||
+                  assistedConfigParameters === undefined
+                    ? {}
+                    : {
+                        assisted: {
+                          expected_tip: assisted.expectedTip,
+                          remote_ref: assisted.remoteRef,
+                          raw_push_url: assisted.rawPushURL,
+                          push_url_source: assisted.pushURLSource,
+                          configured_url: remote.url,
+                          config_parameters: assistedConfigParameters,
+                        },
+                      }),
+                },
+                !needsStreaming
+                  ? undefined
+                  : chunk => {
+                      try {
+                        parser?.push(chunk)
+                      } catch {
+                        /* Progress observers cannot terminate a push. */
+                      }
+                      if (chunk.stream === 'lfs') return
+                      const bytes = Uint8Array.from(
+                        atob(chunk.data),
+                        character => character.charCodeAt(0)
+                      )
+                      const text = decoders[chunk.stream].decode(bytes, {
+                        stream: true,
+                      })
+                      notifyTerminal(text)
+                    },
+                options?.onTerminalOutputAvailable !== undefined
+                  ? async () => {
+                      try {
+                        withoutRepositoryGitAccess(() =>
+                          options?.onTerminalOutputAvailable?.(listener => {
+                            for (const chunk of terminalChunks) {
+                              try {
+                                withoutRepositoryGitAccess(() =>
+                                  listener(chunk)
+                                )
+                              } catch {
+                                /* Observers cannot terminate a push. */
+                              }
+                            }
+                            listeners.add(listener)
+                            return {
+                              unsubscribe: () => listeners.delete(listener),
+                            }
+                          })
+                        )
+                      } catch {
+                        /* Observer setup must not terminate a push. */
+                      }
+                    }
+                  : undefined,
+                event => {
+                  if (event.status === 'failed') failedHook = true
+                  try {
+                    withoutRepositoryGitAccess(() =>
+                      options?.onHookProgress?.(
+                        event.status === 'started'
+                          ? {
+                              hookName: event.hookName,
+                              status: 'started',
+                              abort: () => controller.abort(),
+                            }
+                          : { hookName: event.hookName, status: event.status }
+                      )
+                    )
+                  } catch {
+                    /* Hook observers cannot affect an active Git operation. */
+                  }
+                },
+                options?.onHookProgress === undefined
+                  ? undefined
+                  : controller.signal,
+                options?.onHookFailure === undefined
+                  ? undefined
+                  : output =>
+                      withoutRepositoryGitAccess(() =>
+                        options.onHookFailure!('pre-push', Buffer.from(output))
+                      ),
+                assisted === undefined
+                  ? undefined
+                  : async () => verifyAssistedSpawn?.()
+              )
+            },
+            repository.path,
+            {
+              env:
+                assistedConfigParameters === undefined
+                  ? {}
+                  : { GIT_CONFIG_PARAMETERS: assistedConfigParameters },
+              interceptHooks: ['pre-push'],
+              onHookProgress: options?.onHookProgress,
+              onHookFailure: options?.onHookFailure,
+            }
+          )
+        },
+        true
+      )
+      if (failure !== undefined) {
+        const notice =
+          'Push failed or was rejected. Some destinations or tags may have been updated; inspect the remote before retrying.'
+        let error: GitError
+        if (isPushErrorKind(failure.errorKind)) {
+          const kind = failure.errorKind
+          const gitError = kind === 'push_protection' ? null : pushErrors[kind]
+          const description =
+            kind === 'push_protection'
+              ? ' Push protection rejected the update; inspect the remote for details.'
+              : ''
+          error = new GitError(
+            {
+              exitCode: failure.exitCode,
+              stdout: '',
+              stderr: '',
+              path: repository.path,
+              gitError,
+              gitErrorDescription: `${notice}${description}`,
+            },
+            ['push', '--', remote.name],
+            ''
+          )
+        } else {
+          error = fetchFailureToGitError(
+            { exitCode: failure.exitCode, errorKind: failure.errorKind },
+            repository.path,
+            remote.name
+          )
+          error.message = `${notice} ${error.message}`
+        }
+        if (failedHook || failure.hookFailed) {
+          error.message +=
+            ' The pre-push hook failed. Ignoring an individual failed hook is not supported by the native backend.'
+        }
+        uncertainPushes.add(error)
+        throw error
+      }
+      return
+    } catch (error) {
+      if (
+        error instanceof BackendError &&
+        error.code === 'push_outcome_uncertain'
+      )
+        uncertainPushes.add(error)
+      throw error
+    } finally {
+      try {
+        parser?.finish()
+      } catch {
+        /* Progress observers cannot invalidate a completed push. */
+      }
+      for (const decoder of Object.values(decoders)) {
+        const text = decoder.decode()
+        notifyTerminal(text)
+      }
+      listeners.clear()
+    }
   }
-
-  args.push(
-    '--',
-    remote.name,
-    assisted !== undefined
-      ? `${assisted.expectedTip}:${assisted.remoteRef}`
-      : remoteBranch
-        ? `${localBranch}:${remoteBranch}`
-        : localBranch
-  )
-
-  if (assisted === undefined && tagsToPush !== null) {
-    args.push(...tagsToPush)
-  }
-
-  await git(args, repository.path, 'push', opts)
 }
