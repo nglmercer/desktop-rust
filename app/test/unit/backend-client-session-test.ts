@@ -3865,6 +3865,24 @@ describe('backend Copilot session cleanup', () => {
         }),
       })
     )
+    await client.repositoryInterpretTrailers(
+      '/repo',
+      'Summary\n',
+      [],
+      false,
+      false,
+      { GIT_CONFIG_GLOBAL: '/isolated', GIT_CONFIG: undefined }
+    )
+    expect(invoke).toHaveBeenLastCalledWith(
+      'desktop.backend.git_info',
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          operation: expect.objectContaining({
+            environment: { GIT_CONFIG_GLOBAL: '/isolated', GIT_CONFIG: null },
+          }),
+        }),
+      })
+    )
     invoke.mockResolvedValueOnce({ output: 'bad' })
     await expect(
       client.repositoryInterpretTrailers('/repo', 'Summary\n', [], true, false)

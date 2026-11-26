@@ -390,6 +390,8 @@ enum ManagementOperation {
     GitRepositoryEffectiveIdentity {
         path: desktop_core::GitPath,
         role: desktop_core::GitIdentityRole,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
     },
     RepositorySafeFetchRemotes {
         path: desktop_core::GitPath,
@@ -942,9 +944,11 @@ async fn execute(
                         canonical_bool,
                     },
                 ),
-                GitRepositoryEffectiveIdentity { path, role } => {
-                    (path, Operation::GitEffectiveIdentity { role })
-                }
+                GitRepositoryEffectiveIdentity {
+                    path,
+                    role,
+                    environment,
+                } => (path, Operation::GitEffectiveIdentity { role, environment }),
                 ManageRepositoryRemote { path, action } => {
                     (path, Operation::ManageRemote { action })
                 }

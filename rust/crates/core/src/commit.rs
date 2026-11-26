@@ -498,7 +498,13 @@ mod trailer_tests {
         .await
         .unwrap();
         let actual = repo
-            .interpret_trailers(message.into(), false, true, vec![trailer()])
+            .interpret_trailers(
+                message.into(),
+                false,
+                true,
+                vec![trailer()],
+                &Default::default(),
+            )
             .await
             .unwrap();
         assert_eq!(actual.as_str().unwrap().as_bytes(), expected.stdout);
@@ -511,19 +517,31 @@ mod trailer_tests {
         .await
         .unwrap();
         let actual = repo
-            .interpret_trailers(message.into(), true, false, vec![])
+            .interpret_trailers(message.into(), true, false, vec![], &Default::default())
             .await
             .unwrap();
         assert_eq!(actual.as_str().unwrap().as_bytes(), expected.stdout);
         assert!(
-            repo.interpret_trailers(message.into(), true, false, vec![trailer()])
-                .await
-                .is_err()
+            repo.interpret_trailers(
+                message.into(),
+                true,
+                false,
+                vec![trailer()],
+                &Default::default()
+            )
+            .await
+            .is_err()
         );
         assert!(
-            repo.interpret_trailers("bad\0message".into(), false, false, vec![])
-                .await
-                .is_err()
+            repo.interpret_trailers(
+                "bad\0message".into(),
+                false,
+                false,
+                vec![],
+                &Default::default()
+            )
+            .await
+            .is_err()
         );
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -707,6 +725,7 @@ impl Repository {
         parse: bool,
         unfold: bool,
         trailers: Vec<crate::CommitTrailer>,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
     ) -> Result<Value> {
         anyhow::ensure!(
             !message.contains('\0') && message.len() <= 1024 * 1024,
@@ -741,7 +760,14 @@ impl Repository {
             }
         }
         let output = checked(
-            process::run_git(&self.path, &command, Some(message.into_bytes()), None).await?,
+            process::run_git_with_environment(
+                &self.path,
+                &command,
+                Some(message.into_bytes()),
+                None,
+                environment,
+            )
+            .await?,
         )?;
         Ok(json!(String::from_utf8_lossy(&output.stdout)))
     }

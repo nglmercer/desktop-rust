@@ -1,4 +1,4 @@
-import { git, IGitExecutionOptions } from './core'
+import { IGitExecutionOptions } from './core'
 import { Repository } from '../../models/repository'
 import { getConfigValue } from './config'
 import { backend } from '../../backend/client'
@@ -161,38 +161,26 @@ export async function mergeTrailers(
   unfold: boolean = false,
   options?: Pick<IGitExecutionOptions, 'env'>
 ) {
-  if (options?.env === undefined) {
-    return withRepositoryGitOperation(
-      repository.path,
-      'mutation',
-      () =>
-        backend().repositoryInterpretTrailers(
-          repository.path,
-          commitMessage,
-          trailers,
-          false,
-          unfold
-        ),
-      true
-    )
-  }
-  const args = ['interpret-trailers']
-
-  // See https://github.com/git/git/blob/ebf3c04b262aa/Documentation/git-interpret-trailers.txt#L129-L132
-  args.push('--no-divider')
-
-  if (unfold) {
-    args.push('--unfold')
-  }
-
-  for (const trailer of trailers) {
-    args.push('--trailer', `${trailer.token}=${trailer.value}`)
-  }
-
-  const result = await git(args, repository.path, 'mergeTrailers', {
-    ...options,
-    stdin: commitMessage,
-  })
-
-  return result.stdout
+  return withRepositoryGitOperation(
+    repository.path,
+    'mutation',
+    () =>
+      options?.env === undefined
+        ? backend().repositoryInterpretTrailers(
+            repository.path,
+            commitMessage,
+            trailers,
+            false,
+            unfold
+          )
+        : backend().repositoryInterpretTrailers(
+            repository.path,
+            commitMessage,
+            trailers,
+            false,
+            unfold,
+            options.env
+          ),
+    true
+  )
 }

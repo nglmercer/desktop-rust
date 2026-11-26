@@ -50,6 +50,8 @@ struct ReadRequest {
     #[serde(default)]
     canonical_bool: Option<bool>,
     #[serde(default)]
+    environment: Option<std::collections::BTreeMap<String, Option<String>>>,
+    #[serde(default)]
     git_path: Option<String>,
     #[serde(default)]
     paths: Option<Vec<desktop_backend::GitPath>>,
@@ -1370,6 +1372,7 @@ impl Backend {
                             }
                             _ => unreachable!(),
                         },
+                        environment: request.environment.unwrap_or_default(),
                     }
                 }
                 ReadMethod::SubmoduleDisplayUrl

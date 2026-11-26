@@ -1613,6 +1613,17 @@ class WebSocketTransport {
 // Client facade — picks transport, exposes typed calls
 // ---------------------------------------------------------------------------
 
+function serializeGitEnvironment(
+  environment: Record<string, string | undefined> | undefined
+): Record<string, string | null> | undefined {
+  if (environment === undefined) {
+    return undefined
+  }
+  return Object.fromEntries(
+    Object.entries(environment).map(([key, value]) => [key, value ?? null])
+  )
+}
+
 export class BackendClient {
   private wry: WryTransport | null = null
   private ws: WebSocketTransport | null = null
@@ -2780,8 +2791,10 @@ export class BackendClient {
   /** Resolve the author or committer identity Git would use. */
   async repositoryEffectiveGitIdentity(
     repositoryPath: string,
-    role: 'author' | 'committer'
+    role: 'author' | 'committer',
+    environment?: Record<string, string | undefined>
   ): Promise<string | null> {
+    const serializedEnvironment = serializeGitEnvironment(environment)
     const value =
       this.transport === 'wry'
         ? await this.repositoryRead(
@@ -2789,11 +2802,12 @@ export class BackendClient {
             role === 'author'
               ? 'git_author_identity'
               : 'git_committer_identity',
-            {}
+            { environment: serializedEnvironment }
           )
         : await this.request('git_repository_effective_identity', {
             path: repositoryPath,
             role,
+            environment: serializedEnvironment,
           })
     if (value !== null && (typeof value !== 'string' || value.length > 65536)) {
       throw new BackendError({
@@ -5568,7 +5582,8 @@ export class BackendClient {
     message: string,
     trailers: ReadonlyArray<{ readonly token: string; readonly value: string }>,
     parse: boolean,
-    unfold: boolean
+    unfold: boolean,
+    environment?: Record<string, string | undefined>
   ): Promise<string> {
     const operation = {
       method: 'interpret_trailers',
@@ -5576,6 +5591,7 @@ export class BackendClient {
       trailers,
       parse,
       unfold,
+      environment: serializeGitEnvironment(environment),
     }
     const size = new TextEncoder().encode(
       JSON.stringify({

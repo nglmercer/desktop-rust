@@ -3180,6 +3180,13 @@ describe.skipIf(!enabled || process.platform === 'win32')(
         await client.repositoryEffectiveGitIdentity(existingFolder, 'committer')
       ).toMatch(/^Creation Test <creation@example\.invalid> \d+ /)
       await expect(
+        client.repositoryEffectiveGitIdentity(existingFolder, 'author', {
+          GIT_AUTHOR_NAME: 'Overlay Author',
+          GIT_AUTHOR_EMAIL: 'overlay@example.invalid',
+          GIT_CONFIG_GLOBAL: undefined,
+        })
+      ).resolves.toMatch(/^Overlay Author <overlay@example\.invalid> \d+ /)
+      await expect(
         client.repositoryEffectiveGitIdentity(nestedCreation, 'author')
       ).rejects.toThrow()
       await expect(

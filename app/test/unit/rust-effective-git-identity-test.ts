@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   transport: 'ws',
   identity: vi.fn(),
-  git: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
@@ -11,7 +10,6 @@ vi.mock('../../src/backend/client', () => ({
     repositoryEffectiveGitIdentity: mocks.identity,
   }),
 }))
-vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
 
 import { getAuthorIdentity, getCommitterIdentity } from '../../src/lib/git/var'
 import type { Repository } from '../../src/models/repository'
@@ -43,7 +41,7 @@ describe('effective Git identity', () => {
         ['/new/repository', 'author'],
         ['/new/repository', 'committer'],
       ])
-      expect(mocks.git).not.toHaveBeenCalled()
+      expect(mocks.identity).toHaveBeenCalled()
     }
   )
 
@@ -55,24 +53,22 @@ describe('effective Git identity', () => {
     await expect(getAuthorIdentity(repository)).resolves.toBeNull()
     await expect(getAuthorIdentity(repository)).resolves.toBeNull()
     await expect(getAuthorIdentity(repository)).rejects.toThrow('disconnected')
-    expect(mocks.git).not.toHaveBeenCalled()
   })
 
-  it('retains the existing path for explicit environment overrides', async () => {
-    mocks.git.mockResolvedValue({
-      exitCode: 0,
-      stdout: 'Custom <custom@example.test> 1700000000 +0000\n',
-    })
+  it('forwards explicit environment overrides to the host operation', async () => {
+    mocks.identity.mockResolvedValue(
+      'Custom <custom@example.test> 1700000000 +0000\n'
+    )
     const result = await getCommitterIdentity(repository, {
       env: { GIT_COMMITTER_NAME: 'Custom' },
     })
     expect(result?.name).toBe('Custom')
-    expect(mocks.git).toHaveBeenCalledWith(
-      ['var', 'GIT_COMMITTER_IDENT'],
+    expect(mocks.identity).toHaveBeenCalledWith(
       '/new/repository',
-      'getCommitterIdentity',
-      expect.objectContaining({ env: { GIT_COMMITTER_NAME: 'Custom' } })
+      'committer',
+      {
+        GIT_COMMITTER_NAME: 'Custom',
+      }
     )
-    expect(mocks.identity).not.toHaveBeenCalled()
   })
 })

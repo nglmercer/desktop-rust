@@ -410,6 +410,8 @@ pub enum Operation {
     },
     GitEffectiveIdentity {
         role: GitIdentityRole,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
     },
     GitDescription,
     IndexChanges,
@@ -465,6 +467,8 @@ pub enum Operation {
         unfold: bool,
         #[serde(default)]
         trailers: Vec<CommitTrailer>,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
     },
     RendererCommitDiff {
         revision: String,

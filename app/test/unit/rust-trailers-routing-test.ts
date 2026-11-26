@@ -5,7 +5,6 @@ const calls = vi.hoisted(() => ({
   transport: 'ws',
   trailers: vi.fn(),
   config: vi.fn(),
-  git: vi.fn(),
 }))
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({
@@ -14,7 +13,6 @@ vi.mock('../../src/backend/client', () => ({
   }),
 }))
 vi.mock('../../src/lib/git/config', () => ({ getConfigValue: calls.config }))
-vi.mock('../../src/lib/git/core', () => ({ git: calls.git }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: async (
     _path: string,
@@ -62,16 +60,23 @@ describe.each(['ws', 'wry'])('Rust trailer handling via %s', transport => {
       true,
       false
     )
-    expect(calls.git).not.toHaveBeenCalled()
+    expect(calls.trailers).toHaveBeenCalled()
   })
-  it('preserves the isolated environment fallback and propagates backend failures', async () => {
-    calls.git.mockResolvedValue({ stdout: 'isolated' })
+  it('forwards isolated environments and propagates backend failures', async () => {
+    calls.trailers.mockResolvedValueOnce('isolated')
     await expect(
       mergeTrailers(repository, 'message', [], true, {
         env: { GIT_CONFIG_GLOBAL: '/isolated' },
       })
     ).resolves.toBe('isolated')
-    expect(calls.git).toHaveBeenCalled()
+    expect(calls.trailers).toHaveBeenCalledWith(
+      '/repo',
+      'message',
+      [],
+      false,
+      true,
+      { GIT_CONFIG_GLOBAL: '/isolated' }
+    )
     calls.trailers.mockRejectedValue(new Error('trailer command failed'))
     await expect(mergeTrailers(repository, 'message', [])).rejects.toThrow(
       'trailer command failed'

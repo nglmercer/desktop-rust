@@ -77,12 +77,15 @@ pub(crate) async fn git_identity_value(path: &Path, key: &str, only_local: bool)
 pub(crate) async fn git_effective_identity(
     path: &Path,
     role: crate::GitIdentityRole,
+    environment: &std::collections::BTreeMap<String, Option<String>>,
 ) -> Result<Value> {
     let variable = match role {
         crate::GitIdentityRole::Author => "GIT_AUTHOR_IDENT",
         crate::GitIdentityRole::Committer => "GIT_COMMITTER_IDENT",
     };
-    let output = process::run(path, &args(&["var", variable])).await?;
+    let output =
+        process::run_git_with_environment(path, &args(&["var", variable]), None, None, environment)
+            .await?;
     if output.code == 128 {
         return Ok(Value::Null);
     }

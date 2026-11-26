@@ -366,9 +366,10 @@ impl Repository {
                 parse,
                 unfold,
                 trailers,
+                environment,
             } => {
                 return self
-                    .interpret_trailers(message, parse, unfold, trailers)
+                    .interpret_trailers(message, parse, unfold, trailers, &environment)
                     .await;
             }
             Operation::SelectedCommitPreview {
@@ -776,8 +777,8 @@ impl Repository {
             Operation::GitIdentityValue { key, only_local } => {
                 return settings::git_identity_value(&self.path, &key, only_local).await;
             }
-            Operation::GitEffectiveIdentity { role } => {
-                return settings::git_effective_identity(&self.path, role).await;
+            Operation::GitEffectiveIdentity { role, environment } => {
+                return settings::git_effective_identity(&self.path, role, &environment).await;
             }
             Operation::SetGitSetting { scope, key, value } => {
                 return set_git_setting(&self.path, scope, &key, value).await;
