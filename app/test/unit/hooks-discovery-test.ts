@@ -1,11 +1,6 @@
 // @vitest-environment node
 import { execFileSync } from 'node:child_process'
 import {
-  access as accessAsync,
-  readdir as readdirAsync,
-  stat as statAsync,
-} from 'node:fs/promises'
-import {
   chmodSync,
   mkdtempSync,
   mkdirSync,
@@ -15,92 +10,74 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
-function fsBridge(operation: string, options: any): Promise<unknown> {
-  const metadata = (value: {
-    isFile(): boolean
-    isDirectory(): boolean
-    isSymbolicLink(): boolean
-  }) => ({
-    isFile: value.isFile(),
-    isDirectory: value.isDirectory(),
-    isSymbolicLink: value.isSymbolicLink(),
-  })
-  switch (operation) {
-    case 'access':
-      return accessAsync(options.path, options.mode).then(() => null)
-    case 'stat':
-      return statAsync(options.path).then(value => ({
-        ...metadata(value),
-        size: value.size,
-        mode: value.mode,
-        dev: value.dev,
-        ino: String(value.ino),
-        mtimeMs: value.mtimeMs,
-        atimeMs: value.atimeMs,
-        birthtimeMs: value.birthtimeMs,
-        ctimeMs: value.ctimeMs,
-      }))
-    case 'readdir':
-      return readdirAsync(options.path, { withFileTypes: true }).then(entries =>
-        entries.map(entry => ({ name: entry.name, ...metadata(entry) }))
-      )
-    default:
-      return Promise.reject(new Error(`unexpected fs ${operation}`))
-  }
-}
-
-function installGitBridge() {
-  vi.stubGlobal('__desktop', {
-    invoke: (channel: string, options: any): Promise<unknown> => {
-      if (channel.startsWith('desktop.io.fs-')) {
-        return fsBridge(channel.slice('desktop.io.fs-'.length), options)
-      }
-      if (channel !== 'desktop.io.git-exec') {
-        return Promise.reject(new Error(`unexpected ${channel}`))
-      }
-      try {
-        return Promise.resolve({
-          exitCode: 0,
-          stdout: execFileSync('git', options.args, {
-            cwd: options.cwd,
-            encoding: 'utf8',
-          }),
-          stderr: '',
-        })
-      } catch (error) {
-        const result = error as {
-          status?: number
-          stdout?: string
-          stderr?: string
-        }
-        return Promise.resolve({
-          exitCode: result.status ?? 1,
-          stdout: result.stdout ?? '',
-          stderr: result.stderr ?? '',
-        })
-      }
-    },
-    invokeSync: () => {
-      throw new Error('unexpected synchronous call')
-    },
-    encodeBase64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
-    decodeBase64: (text: string) => new Uint8Array(Buffer.from(text, 'base64')),
-  })
-}
-
-import { getRepoHooks } from '../../src/lib/hooks/get-repo-hooks'
+import {
+  getRepoHooks,
+  getRepoHooksPath,
+} from '../../src/lib/hooks/get-repo-hooks'
+import { quoteGitConfigParameter } from '../../src/lib/hooks/git-config-parameters'
 
 describe.skipIf(process.platform === 'win32')('Git hook discovery', () => {
   let root: string | undefined
-  beforeEach(() => {
-    installGitBridge()
-  })
   afterEach(() => {
-    vi.unstubAllGlobals()
     if (root !== undefined) rmSync(root, { recursive: true, force: true })
     root = undefined
+  })
+
+  it('resolves configured relative hook paths and honors the last value', async () => {
+    root = mkdtempSync(join(tmpdir(), 'desktop-hooks-config-'))
+    execFileSync('git', ['init', '-q', root])
+    const hooks = join(root, 'custom-hooks')
+    mkdirSync(hooks)
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(hooks, 'pre-commit'), 0o755)
+    execFileSync('git', ['config', '--add', 'core.hooksPath', 'missing'], {
+      cwd: root,
+    })
+    execFileSync('git', ['config', '--add', 'core.hooksPath', 'custom-hooks'], {
+      cwd: root,
+    })
+    expect(await getRepoHooksPath(root)).toBe(hooks)
+    expect(await Array.fromAsync(getRepoHooks(root))).toEqual(['pre-commit'])
+  })
+
+  it('preserves an empty configured hooks path as the repository root', async () => {
+    root = mkdtempSync(join(tmpdir(), 'desktop-hooks-empty-'))
+    execFileSync('git', ['init', '-q', root])
+    execFileSync('git', ['config', 'core.hooksPath', ''], { cwd: root })
+    expect(await getRepoHooksPath(root)).toBe(root)
+    expect(await Array.fromAsync(getRepoHooks(root))).toEqual([])
+  })
+
+  it('uses hook path configuration supplied through the operation environment', async () => {
+    root = mkdtempSync(join(tmpdir(), 'desktop-hooks-env-'))
+    execFileSync('git', ['init', '-q', root])
+    const hooks = join(root, 'environment-hooks')
+    mkdirSync(hooks)
+    writeFileSync(join(hooks, 'commit-msg'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(hooks, 'commit-msg'), 0o755)
+    const env = {
+      GIT_CONFIG_PARAMETERS: quoteGitConfigParameter(`core.hooksPath=${hooks}`),
+    }
+    expect(await getRepoHooksPath(root, env)).toBe(hooks)
+    expect(await Array.fromAsync(getRepoHooks(root, undefined, env))).toEqual([
+      'commit-msg',
+    ])
+  })
+
+  it('skips non-executable files, unknown names, and empty filters', async () => {
+    root = mkdtempSync(join(tmpdir(), 'desktop-hooks-filter-'))
+    execFileSync('git', ['init', '-q', root])
+    const hooks = join(root, '.git', 'hooks')
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(hooks, 'pre-commit'), 0o644)
+    writeFileSync(join(hooks, 'not-a-hook'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(hooks, 'not-a-hook'), 0o755)
+    writeFileSync(join(hooks, 'post-merge.exe'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(hooks, 'post-merge.exe'), 0o755)
+    expect(await Array.fromAsync(getRepoHooks(root, []))).toEqual([])
+    expect(await Array.fromAsync(getRepoHooks(root))).toEqual(['post-merge'])
   })
 
   it('finds executable symlinked hooks but skips missing and directory targets', async () => {

@@ -1,89 +1,56 @@
-import { exec } from '../../web/dugite'
-import { access, constants, readdir, stat } from '../../web/fs-promises'
-import { basename, join, resolve } from 'path'
+import { backend } from '../../backend/client'
 
-const isExecutable = (path: string) =>
-  access(path, constants.X_OK)
-    .then(() => true)
-    .catch(() => false)
+const hookDiscoveryEnvironmentNames = new Set([
+  'LOCAL_GIT_DIRECTORY',
+  'GIT_CONFIG',
+  'GIT_DIR',
+  'GIT_COMMON_DIR',
+  'GIT_WORK_TREE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_INDEX_FILE',
+  'GIT_SHALLOW_FILE',
+  'GIT_GRAFT_FILE',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_NAMESPACE',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_NOSYSTEM',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+  'HOME',
+  'XDG_CONFIG_HOME',
+])
 
-const knownHooks = [
-  'applypatch-msg',
-  'pre-applypatch',
-  'post-applypatch',
-  'pre-commit',
-  'pre-merge-commit',
-  'prepare-commit-msg',
-  'commit-msg',
-  'post-commit',
-  'pre-rebase',
-  'post-checkout',
-  'post-merge',
-  'pre-push',
-  'pre-receive',
-  'update',
-  'proc-receive',
-  'post-receive',
-  'post-update',
-  'reference-transaction',
-  'push-to-checkout',
-  'pre-auto-gc',
-  'post-rewrite',
-  'sendemail-validate',
-  'fsmonitor-watchman',
-  'p4-changelist',
-  'p4-prepare-changelist',
-  'p4-post-changelist',
-  'p4-pre-submit',
-  'post-index-change',
-]
-
-// getRepoHooks is used by withHooksEnv which is used by git in core.ts so we
-// have to be careful to not accidentally run into a circular dependency here
-// where we invoke git which calls us which calls git which calls us, etc. To
-// avoid that we call dugite directly here.
-const git = (
-  args: string[],
-  path: string,
-  env?: Record<string, string | undefined>
-) =>
-  exec(args, path, { env }).then(({ exitCode, stdout, stderr }) => {
-    return exitCode === 0
-      ? stdout
-      : Promise.reject(
-          new Error(`Git command failed with exit code ${exitCode}: ${stderr}`)
-        )
-  })
-
-const getHooksPath = async (
-  path: string,
-  env?: Record<string, string | undefined>
-) =>
-  resolve(
-    path,
-    (await git(['rev-parse', '--git-path', 'hooks'], path, env)).replace(
-      /\r?\n$/,
-      ''
+function hookDiscoveryEnvironment(
+  environment: Record<string, string | undefined> | undefined
+): Record<string, string | undefined> | undefined {
+  if (environment === undefined) {
+    return undefined
+  }
+  return Object.fromEntries(
+    Object.entries(environment).filter(
+      ([key]) =>
+        hookDiscoveryEnvironmentNames.has(key) ||
+        key.startsWith('GIT_CONFIG_KEY_') ||
+        key.startsWith('GIT_CONFIG_VALUE_')
     )
   )
-
-const getConfigValue = (
-  path: string,
-  key: string,
-  env?: Record<string, string | undefined>
-) => git(['config', '-z', '--get', key], path, env).then(x => x.split('\0')[0])
+}
 
 /** Resolve the same traditional hook directory used for discovery. */
 export const getRepoHooksPath = async (
   path: string,
   env?: Record<string, string | undefined>
 ) =>
-  resolve(
-    path,
-    await getConfigValue(path, 'core.hooksPath', env).catch(() =>
-      getHooksPath(path, env)
+  (
+    await backend().repositoryRendererHooks(
+      path,
+      undefined,
+      hookDiscoveryEnvironment(env)
     )
-  )
+  ).path
 
 /**
  * Returns the names of executable Git hooks found in the given repository.
@@ -99,43 +66,10 @@ export async function* getRepoHooks(
   filter?: string[],
   env?: Record<string, string | undefined>
 ) {
-  const hooksPath = await getRepoHooksPath(path, env)
-
-  const files = await readdir(hooksPath, { withFileTypes: true })
-    .then(entries =>
-      entries.filter(x => x.isFile() || (!__WIN32__ && x.isSymbolicLink()))
-    )
-    .catch(() => [])
-
-  const matchAll = filter?.includes('*')
-
-  for (const file of files) {
-    const hookName = basename(file.name, '.exe')
-
-    if (!matchAll && filter?.includes(hookName) === false) {
-      continue
-    }
-
-    if (!knownHooks.includes(hookName)) {
-      continue
-    }
-
-    if (
-      file.isSymbolicLink() &&
-      !(await stat(join(file.parentPath, file.name))
-        .then(x => x.isFile())
-        .catch(() => false))
-    ) {
-      continue
-    }
-
-    if (__WIN32__) {
-      // On Windows we have to assume that any valid hook name is executable
-      // because the executable bit is not used there. Git looks for a shebang
-      // but that seems expensive to check here :shrug:
-      yield hookName
-    } else if (await isExecutable(join(file.parentPath, file.name))) {
-      yield hookName
-    }
-  }
+  const { hooks } = await backend().repositoryRendererHooks(
+    path,
+    filter,
+    hookDiscoveryEnvironment(env)
+  )
+  yield* hooks
 }

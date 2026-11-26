@@ -3496,6 +3496,36 @@ export class BackendClient {
     })
   }
 
+  async repositoryRendererHooks(
+    repositoryPath: string,
+    filter: ReadonlyArray<string> | undefined,
+    environment?: Record<string, string | undefined>
+  ): Promise<{ readonly path: string; readonly hooks: ReadonlyArray<string> }> {
+    const value = await this.repositoryRead(repositoryPath, 'renderer_hooks', {
+      filter: filter ?? null,
+      environment: serializeGitEnvironment(environment),
+    })
+    if (
+      isRecord(value) &&
+      typeof value.path === 'string' &&
+      value.path.length > 0 &&
+      value.path.length <= 65536 &&
+      Array.isArray(value.hooks) &&
+      value.hooks.length <= 64 &&
+      value.hooks.every(
+        hook =>
+          typeof hook === 'string' && hook.length > 0 && hook.length <= 256
+      )
+    ) {
+      return { path: value.path, hooks: value.hooks }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid renderer hooks response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

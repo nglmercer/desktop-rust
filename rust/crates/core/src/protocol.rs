@@ -487,6 +487,11 @@ pub enum Operation {
     AssistedCommitGitPath {
         git_path: String,
     },
+    RendererHooks {
+        filter: Option<Vec<String>>,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitPushPaths {
         branch_ref: String,
         #[serde(default)]

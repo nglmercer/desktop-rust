@@ -10,13 +10,13 @@ if it regresses.
 | Measure | Now | Done when |
 | --- | --- | --- |
 | Fallback checks (`transportKind`) in the renderer | 0 in 0 files | 0 |
-| Renderer-driven Git command sites | 41 in 6 files | 0 |
+| Renderer-driven Git command sites | 39 in 5 files | 0 |
 | Renderer files importing `dugite` | 0 | 0 |
 | Renderer files importing `fs` | 0 | 0 (host operations only) |
 | Renderer files importing `child_process` | 0 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 426 | 0 |
-| Rust code (crates, non-test) | 93,990 lines | — |
+| Rust code (crates, non-test) | 94,243 lines | — |
 
 The command-site count includes indirect assisted-commit `privateGit` operations,
 credential-helper execution, hook discovery, and the tutorial push; the earlier

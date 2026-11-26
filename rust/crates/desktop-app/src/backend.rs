@@ -52,6 +52,8 @@ struct ReadRequest {
     #[serde(default)]
     environment: Option<std::collections::BTreeMap<String, Option<String>>>,
     #[serde(default)]
+    filter: Option<Vec<String>>,
+    #[serde(default)]
     git_path: Option<String>,
     #[serde(default)]
     paths: Option<Vec<desktop_backend::GitPath>>,
@@ -406,6 +408,7 @@ enum ReadMethod {
     AssistedCommitRefs,
     AssistedCommitIndexEntries,
     AssistedCommitGitPath,
+    RendererHooks,
     Worktrees,
     WorktreesFromGitDir,
     ProtectedResources,
@@ -1310,6 +1313,11 @@ impl Backend {
                 "git_path only applies to assisted-commit Git path reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::RendererHooks) && request.filter.is_some() {
+            return Err(AppError::BadArgs(
+                "filter only applies to renderer hook discovery".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
             return Err(AppError::BadArgs(
                 "paths only apply to file-tracking reads".into(),
@@ -1639,6 +1647,34 @@ impl Backend {
                         && request.expected_value.is_none() =>
                 {
                     Operation::AssistedCommitHead {
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::RendererHooks
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::RendererHooks {
+                        filter: request.filter,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }

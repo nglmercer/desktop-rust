@@ -44,6 +44,7 @@ mod hook_proxy {
 }
 #[cfg(unix)]
 mod hook_trace;
+mod hooks;
 pub use branch_policy::{BranchPermissions, BranchPolicy, DefaultBranch};
 mod commit;
 mod commit_checkpoint;
@@ -697,6 +698,12 @@ impl Repository {
             }
             Operation::AssistedCommitGitPath { git_path } => {
                 return self.assisted_commit_git_path(&git_path).await;
+            }
+            Operation::RendererHooks {
+                filter,
+                environment,
+            } => {
+                return self.renderer_hooks(&filter, &environment).await;
             }
             Operation::AssistedCommitPushPaths {
                 branch_ref,
@@ -1552,6 +1559,7 @@ impl Repository {
             | AssistedCommitRefs
             | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }
+            | RendererHooks { .. }
             | AssistedCommitPushPaths { .. }
             | MergeBase { .. }
             | MergeTreePreview { .. }
