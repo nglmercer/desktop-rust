@@ -25,7 +25,6 @@
     "@xterm/xterm": "^5.5.0",
     "app-path": "^3.3.0",
     "byline": "^5.0.0",
-    "chalk": "^2.3.0",
     "classnames": "^2.2.5",
     "codemirror": "^5.65.17",
     "codemirror-mode-elixir": "^1.1.2",
@@ -45,9 +44,7 @@
     "marked": "^4.0.10",
     "mem": "^4.3.0",
     "memoize-one": "^4.0.3",
-    "minimist": "^1.2.8",
     "p-limit": "^2.2.0",
-    "p-memoize": "^7.1.1",
     "primer-support": "^4.0.0",
     "prop-types": "^15.7.2",
     "quick-lru": "^3.0.0",
@@ -61,12 +58,9 @@
     "split2": "^4.2.0",
     "string-argv": "^0.3.2",
     "textarea-caret": "^3.0.2",
-    "triple-beam": "^1.3.0",
     "tslib": "^2.0.0",
     "untildify": "^3.0.2",
-    "which": "^5.0.0",
-    "winston": "^3.6.0",
-    "winston-transport": "^4.9.0"
+    "which": "^5.0.0"
   },
   "devDependencies": {
     "@testing-library/dom": "8.20.1",

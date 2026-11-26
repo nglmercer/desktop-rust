@@ -115,6 +115,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | componente legacy `MergeCallToAction`, estilo `merge-message-legacy` y símbolo duplicado `octicons/diff-check.ts` | eliminados; la acción activa usa `MergeCallToActionWithConflicts` y los checkmarks usan `octicons/diff.ts` | `app/test/unit/ui/dropdown-select-button-test.tsx`, `app/test/unit/ui/side-by-side-diff-row-test.tsx`, `pnpm vite:build` |
 | loader legacy `app/test/globals.cjs` y subprocess del test de ciclo Git | eliminado; Vitest importa directamente el grafo ESM real y verifica identidad GitError | `app/test/unit/git-core-import-cycle-test.ts` |
 | dependencias raíz `preact` y `global-jsdom` sin imports ni consumidores | eliminadas del manifiesto y lockfile; Vitest usa `jsdom` directamente y ningún bundle usa Preact | `pnpm check:types`, `pnpm lint`, `pnpm vite:build`, tests DOM/database enfocados |
+| dependencias renderer `chalk`, `minimist`, `p-memoize`, `triple-beam`, `winston` y `winston-transport`, junto a tipos raíz sin consumidores | eliminadas del manifiesto y lockfile; `prop-types` se conserva porque es peer runtime de `focus-trap-react` y `tslib` porque `importHelpers` lo emite | `pnpm check:types`, `pnpm lint`, `pnpm migration:check`, `pnpm vite:build`, tests DOM/Copilot enfocados |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
