@@ -148,6 +148,8 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `deep-equal` + `@types/deep-equal` | igualdad estructural estricta local en `app/src/lib/equality.ts` | `app/test/unit/structural-equality-test.ts` |
 | dependencia directa `prop-types` | se conserva solo como dependencia transitiva de componentes React que la requieren | typecheck/build |
 | `app-path` | resolución tipada de bundles macOS mediante Launch Services en el host Rust | compilación Rust/typecheck; comportamiento macOS cubierto por integración de shells/Copilot |
+| shim `app/src/web/app-path.ts` y alias Vite `app-path` | retirados tras migrar sus dos consumidores macOS a `resolve_macos_app_path` | `pnpm check:types`, `pnpm lint:oxlint`, `pnpm vite:build` |
+| `tsconfig.runner.json` y overrides/metadata `@types/glob` | configuración huérfana tras eliminar el runner TypeScript 6 y `glob`; lockfile podado de transitivos viejos de `app-path` | `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm compile:script` |
 | import directo `dugite` del runner legacy renderer | `app/src/web/dugite.ts` ejecuta comandos no interactivos por `desktop.io.git-exec` y callbacks/progreso por procesos streaming host-owned con entorno Git filtrado, `maxBuffer`, stdin, señales y grupo de proceso | `app/test/unit/web-dugite-interactive-test.ts`, `app/test/unit/web-child-process-test.ts`, `app/test/unit/git/rebase-full-test.ts`, `app/test/unit/git/clone-test.ts`, `cargo test -p desktop-shell-core-legacy io::process` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
