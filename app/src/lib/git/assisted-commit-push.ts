@@ -601,11 +601,13 @@ async function readConfigurationFiles(
   const results = await Promise.all(
     (['GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL'] as const).map(async name => {
       const override = process.env[name]
-      const result = await git(
-        ['var', name],
-        repository.path,
-        'assistedPushConfigurationPaths'
-      )
+      const result = {
+        stdout: await backend().repositoryAssistedCommitConfigPath(
+          repository.path,
+          name,
+          assistedPushConfigurationEnvironment()
+        ),
+      }
       if (result.stdout.length === 0) {
         return []
       }
@@ -769,13 +771,11 @@ async function readAssistedCommitPushDestinationCore(
     }
   }
   const remoteRef = upstreamRef ?? branchRef
-  const format = await git(
-    ['check-ref-format', remoteRef],
+  const format = await backend().repositoryAssistedCommitRefFormat(
     repository.path,
-    'assistedPushRemoteRef',
-    { successExitCodes: new Set([0, 1]) }
+    remoteRef
   )
-  if (format.exitCode !== 0) {
+  if (!format) {
     return {
       kind: 'unavailable',
       error: new AssistedCommitPushError(

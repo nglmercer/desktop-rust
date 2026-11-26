@@ -707,6 +707,28 @@ function nodeBackend(t: TestContext) {
             stderr: result.stderr,
           }
         },
+        repositoryAssistedCommitConfigPath: async (
+          path: string,
+          variable: 'GIT_CONFIG_SYSTEM' | 'GIT_CONFIG_GLOBAL'
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['var', variable],
+            path,
+            { env: { GIT_CONFIG: undefined } } as never
+          )) as Dugite.IGitStringResult
+          return result.stdout
+        },
+        repositoryAssistedCommitRefFormat: async (
+          path: string,
+          reference: string
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            ['check-ref-format', reference],
+            path,
+            { successExitCodes: new Set([0, 1]) } as never
+          )) as Dugite.IGitStringResult
+          return result.exitCode === 0
+        },
         repositoryLastFetch: async (path: string) => {
           const gitDirResult = await actualExec(
             ['rev-parse', '--absolute-git-dir'],

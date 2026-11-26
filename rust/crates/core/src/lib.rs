@@ -610,6 +610,17 @@ impl Repository {
                     .assisted_commit_remote_push_urls(&remote, all, &environment)
                     .await;
             }
+            Operation::AssistedCommitConfigPath {
+                variable,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_config_path(&variable, &environment)
+                    .await;
+            }
+            Operation::AssistedCommitRefFormat { reference } => {
+                return self.assisted_commit_ref_format(&reference).await;
+            }
             Operation::AssistedCommitRefs => {
                 return self.assisted_commit_refs().await;
             }
@@ -1448,6 +1459,8 @@ impl Repository {
             | AssistedCommitPushConfig { .. }
             | AssistedCommitConfigValues { .. }
             | AssistedCommitRemotePushUrls { .. }
+            | AssistedCommitConfigPath { .. }
+            | AssistedCommitRefFormat { .. }
             | AssistedCommitRefs
             | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }

@@ -317,6 +317,48 @@ impl Repository {
         }))
     }
 
+    pub(crate) async fn assisted_commit_config_path(
+        &self,
+        variable: &str,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            matches!(variable, "GIT_CONFIG_SYSTEM" | "GIT_CONFIG_GLOBAL"),
+            "unsupported configuration path variable"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported push configuration environment key"
+            );
+        }
+        let output = crate::process::run_without_git_config_with_environment(
+            &self.path,
+            &args(&["var", variable]),
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot read Git configuration path");
+        anyhow::ensure!(
+            output.stdout.len() <= 65536,
+            "configuration path is too large"
+        );
+        Ok(json!({"stdout":String::from_utf8_lossy(&output.stdout)}))
+    }
+
+    pub(crate) async fn assisted_commit_ref_format(&self, reference: &str) -> Result<Value> {
+        anyhow::ensure!(
+            !reference.is_empty() && reference.len() <= 4096 && !reference.contains('\0'),
+            "invalid reference name"
+        );
+        let output = self.run(&args(&["check-ref-format", reference])).await?;
+        anyhow::ensure!(
+            matches!(output.code, 0 | 1),
+            "Cannot validate reference format"
+        );
+        Ok(json!({"valid":output.code == 0}))
+    }
+
     pub(crate) async fn assisted_commit_refs(&self) -> Result<Value> {
         let output = self
             .run(&args(&[
@@ -637,6 +679,14 @@ mod tests {
                 && entry["key"] == "push.requiresnative"
                 && entry["value"] == "true"
         }));
+        let global_path = repository
+            .assisted_commit_config_path("GIT_CONFIG_GLOBAL", &environment)
+            .await
+            .unwrap();
+        assert_eq!(
+            global_path["stdout"],
+            format!("{}\n", global.to_string_lossy())
+        );
         let unsupported =
             std::collections::BTreeMap::from([("GIT_TRACE".to_string(), Some("1".to_string()))]);
         assert!(
@@ -656,6 +706,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(push_urls["stdout"], push_url["stdout"]);
+        assert!(
+            repository
+                .assisted_commit_ref_format("refs/heads/main")
+                .await
+                .unwrap()["valid"]
+                .as_bool()
+                .unwrap()
+        );
+        assert!(
+            !repository
+                .assisted_commit_ref_format("refs/heads/bad..name")
+                .await
+                .unwrap()["valid"]
+                .as_bool()
+                .unwrap()
+        );
         let values = repository
             .assisted_commit_config_values("branch.main.remote", &Default::default())
             .await

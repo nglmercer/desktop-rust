@@ -3195,6 +3195,59 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitConfigPath(
+    repositoryPath: string,
+    variable: 'GIT_CONFIG_SYSTEM' | 'GIT_CONFIG_GLOBAL',
+    environment?: Record<string, string | undefined>
+  ): Promise<string> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_config_path',
+      { variable, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.stdout === 'string' &&
+      value.stdout.length <= 65536
+    ) {
+      return value.stdout
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid configuration path response',
+      retryable: false,
+    })
+  }
+
+  async repositoryAssistedCommitRefFormat(
+    repositoryPath: string,
+    reference: string
+  ): Promise<boolean> {
+    if (
+      reference.length === 0 ||
+      reference.length > 4096 ||
+      reference.includes('\0')
+    )
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid reference name',
+        retryable: false,
+      })
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_ref_format',
+      { reference }
+    )
+    if (isRecord(value) && typeof value.valid === 'boolean') {
+      return value.valid
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid reference format response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitRefs(
     repositoryPath: string
   ): Promise<ReadonlyArray<AssistedCommitRef>> {

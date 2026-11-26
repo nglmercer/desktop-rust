@@ -307,6 +307,37 @@ describe('WebSocket backend transport', () => {
     await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('sends typed assisted config path and ref format reads', async () => {
+    const { client: value, socket } = await connected()
+    const pathPending = value.repositoryAssistedCommitConfigPath(
+      '/repo',
+      'GIT_CONFIG_GLOBAL',
+      { GIT_CONFIG_GLOBAL: '/tmp/global-config' }
+    )
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'assisted_commit_config_path',
+      repository_path: '/repo',
+      variable: 'GIT_CONFIG_GLOBAL',
+      environment: { GIT_CONFIG_GLOBAL: '/tmp/global-config' },
+    })
+    socket.message({ id: 1, result: { stdout: '/tmp/global-config\n' } })
+    await expect(pathPending).resolves.toBe('/tmp/global-config\n')
+
+    const formatPending = value.repositoryAssistedCommitRefFormat(
+      '/repo',
+      'refs/heads/main'
+    )
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'assisted_commit_ref_format',
+      repository_path: '/repo',
+      reference: 'refs/heads/main',
+    })
+    socket.message({ id: 2, result: { valid: true } })
+    await expect(formatPending).resolves.toBe(true)
+  })
+
   it('sends typed assisted-commit refs reads and validates their response', async () => {
     const { client: value, socket } = await connected()
     const pending = value.repositoryAssistedCommitRefs('/repo')
