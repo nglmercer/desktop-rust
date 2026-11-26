@@ -74,7 +74,6 @@ Priority guidance:
 
 Known contract decisions still open:
 
-- Recursive pull supports initialized submodules. Nested repositories cannot borrow the parent credential lease during the recursive operation; update private nested remotes through their own repository-scoped operation.
 - Free-form history filters such as `--grep` remain Node-only; the app's typed
   first-parent/remotes queries should not keep that fallback.
 - Rust remote discovery intentionally isolates global/system configuration;
