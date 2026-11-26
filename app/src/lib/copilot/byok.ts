@@ -1,4 +1,3 @@
-import { isIPv4 } from 'net'
 import { TokenStore } from '../stores/token-store'
 import type { ReasoningEffort } from '../stores/copilot-store'
 
@@ -199,6 +198,20 @@ export function requiresNewBYOKSecret(
  * surface a "Local" badge in the provider list. Recognises the entire IPv4
  * 127/8 loopback block as well as IPv6 loopback in bracketed and bare forms.
  */
+function isIPv4Address(hostname: string): boolean {
+  const parts = hostname.split('.')
+  return (
+    parts.length === 4 &&
+    parts.every(
+      part =>
+        part.length > 0 &&
+        (part.length === 1 || !part.startsWith('0')) &&
+        /^\d+$/.test(part) &&
+        Number(part) <= 255
+    )
+  )
+}
+
 export function isLocalBaseUrl(baseUrl: string): boolean {
   let hostname: string
   try {
@@ -217,7 +230,7 @@ export function isLocalBaseUrl(baseUrl: string): boolean {
   }
 
   // Any 127.0.0.0/8 address is loopback (RFC 1122 §3.2.1.3).
-  if (isIPv4(hostname) && hostname.startsWith('127.')) {
+  if (isIPv4Address(hostname) && hostname.startsWith('127.')) {
     return true
   }
 

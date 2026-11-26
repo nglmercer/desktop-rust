@@ -120,6 +120,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | paquetes `@types/express`, `@types/klaw-sync`, `@types/plist`, `@types/strip-ansi`, `@types/to-camel-case` y `@types/ua-parser-js` sin paquetes ni imports correspondientes | eliminados del manifiesto raíz y lockfile | `pnpm check:types`, `pnpm lint` |
 | dependencias raíz `chalk`, `@playwright/test` y `node-test-github-reporter` sin imports ni scripts consumidores | eliminadas; las integraciones de navegador usan `playwright` directamente | `pnpm check:types`, `pnpm lint` |
 | imports renderer de `util.stripVTControlCharacters` y `assert` en progreso/log Git | regex terminal local equivalente para parsing y validación explícita; no requieren runtime Node | `app/test/unit/progress/git-test.ts`, `pnpm check:types`, `pnpm lint` |
+| import `net.isIPv4` en validación de URL BYOK | validación IPv4 pública local estricta sin runtime Node; conserva la normalización URL existente | `app/test/unit/copilot-byok-test.ts`, `pnpm check:types`, `pnpm lint` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
