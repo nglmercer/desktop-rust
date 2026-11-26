@@ -81,6 +81,131 @@ let duringConfigWrite:
   | ((args: ReadonlyArray<string>, path: string) => Promise<void>)
   | undefined
 
+type InterceptedGitExec = (
+  args: string[],
+  path: string,
+  options?: Dugite.IGitExecutionOptions
+) => Promise<unknown>
+
+/** Apply command-boundary faults to whichever host-backed Git executor is active. */
+const interceptingGitExec = (
+  execute: InterceptedGitExec
+): InterceptedGitExec => {
+  return async (args, path, options) => {
+    if (
+      historyFailure !== undefined &&
+      pushArguments.length > 0 &&
+      args.includes('log')
+    ) {
+      const failure = historyFailure
+      historyFailure = undefined
+      throw failure
+    }
+    if (
+      statusFailure !== undefined &&
+      pushArguments.length > 0 &&
+      args.includes('status')
+    ) {
+      const failure = statusFailure
+      statusFailure = undefined
+      historyFailure = undefined
+      throw failure
+    }
+    if (
+      beforePublicationConfig !== undefined &&
+      pushArguments.length > 0 &&
+      args[0] === 'rev-parse' &&
+      args.includes('--git-path') &&
+      args.at(-1) === 'config'
+    ) {
+      await beforePublicationConfig(path)
+    }
+    if (
+      duringConfigWrite !== undefined &&
+      args[0] === 'config' &&
+      (args.includes('--file') || args.includes('--local')) &&
+      args.includes('--') &&
+      (args.length > args.indexOf('--') + 2 ||
+        (args.includes('--get-all') &&
+          args[args.indexOf('--file') + 1] === '-'))
+    ) {
+      await duringConfigWrite(args, path)
+    }
+    if (capturePushes) {
+      allArguments.push([...args])
+      allExecutions.push({ path, args: [...args] })
+    }
+    if (
+      denyConfigKey !== undefined &&
+      args[0] === 'config' &&
+      args.includes('--file') &&
+      args[args.indexOf('--') + 1] === denyConfigKey
+    ) {
+      throw new Error('Synthetic publication metadata write failure')
+    }
+    if (capturePushes && args[0] === 'push') {
+      pushArguments.push([...args])
+      await beforePush?.(path)
+      const result = await execute(args, path, options)
+      await afterPush?.(path)
+      if (reportPushFailure !== undefined) {
+        const failure = reportPushFailure
+        reportPushFailure = undefined
+        throw failure
+      }
+      return result
+    }
+    const result = await execute(args, path, options)
+    if (
+      afterPublicationTrackingProbe !== undefined &&
+      pushArguments.length > 0 &&
+      args[0] === 'config' &&
+      args.includes('--get-all') &&
+      args.at(-1)?.endsWith('.merge')
+    ) {
+      const mutate = afterPublicationTrackingProbe
+      afterPublicationTrackingProbe = undefined
+      await mutate(path)
+    }
+    if (
+      afterHistoryRead !== undefined &&
+      pushArguments.length > 0 &&
+      args.includes('log') &&
+      args.includes('--numstat')
+    ) {
+      await afterHistoryRead()
+    }
+    if (
+      afterFollowUpFetch !== undefined &&
+      pushArguments.length > 0 &&
+      args[0] === 'fetch' &&
+      args.includes('--') &&
+      args.at(-1) === 'origin'
+    ) {
+      await afterFollowUpFetch()
+    }
+    if (
+      afterConfigurationRead !== undefined &&
+      args[0] === 'config' &&
+      args.includes('--list') &&
+      args.includes('--show-origin')
+    ) {
+      await afterConfigurationRead(path)
+    }
+    if (
+      afterPinnedLookup !== undefined &&
+      args[0] === 'remote' &&
+      args[1] === 'get-url' &&
+      args.includes('--push') &&
+      args.includes('--all') &&
+      options?.env?.GIT_CONFIG_PARAMETERS?.includes('remote.origin.url=')
+    ) {
+      await afterPinnedLookup(path)
+    }
+    return result
+  }
+}
+
 before(async () => {
   rustClient = backend()
   actualExec = Dugite.exec
@@ -156,124 +281,17 @@ before(async () => {
   })
   vi.doMock('dugite', async () => ({
     ...Dugite,
-    exec: async (
-      args: string[],
-      path: string,
-      options?: Dugite.IGitExecutionOptions
-    ) => {
-      if (
-        historyFailure !== undefined &&
-        pushArguments.length > 0 &&
-        args.includes('log')
-      ) {
-        const failure = historyFailure
-        historyFailure = undefined
-        throw failure
-      }
-      if (
-        statusFailure !== undefined &&
-        pushArguments.length > 0 &&
-        args.includes('status')
-      ) {
-        const failure = statusFailure
-        statusFailure = undefined
-        historyFailure = undefined
-        throw failure
-      }
-      if (
-        beforePublicationConfig !== undefined &&
-        pushArguments.length > 0 &&
-        args[0] === 'rev-parse' &&
-        args.includes('--git-path') &&
-        args.at(-1) === 'config'
-      ) {
-        await beforePublicationConfig(path)
-      }
-      if (
-        duringConfigWrite !== undefined &&
-        args[0] === 'config' &&
-        (args.includes('--file') || args.includes('--local')) &&
-        args.includes('--') &&
-        (args.length > args.indexOf('--') + 2 ||
-          (args.includes('--get-all') &&
-            args[args.indexOf('--file') + 1] === '-'))
-      ) {
-        await duringConfigWrite(args, path)
-      }
-      if (capturePushes) {
-        allArguments.push([...args])
-        allExecutions.push({ path, args: [...args] })
-      }
-      if (
-        denyConfigKey !== undefined &&
-        args[0] === 'config' &&
-        args.includes('--file') &&
-        args[args.indexOf('--') + 1] === denyConfigKey
-      ) {
-        throw new Error('Synthetic publication metadata write failure')
-      }
-      if (capturePushes && args[0] === 'push') {
-        pushArguments.push([...args])
-        await beforePush?.(path)
-        const result = await actualExec(args, path, options)
-        await afterPush?.(path)
-        if (reportPushFailure !== undefined) {
-          const failure = reportPushFailure
-          reportPushFailure = undefined
-          throw failure
-        }
-        return result
-      }
-      const result = await actualExec(args, path, options)
-      if (
-        afterPublicationTrackingProbe !== undefined &&
-        pushArguments.length > 0 &&
-        args[0] === 'config' &&
-        args.includes('--get-all') &&
-        args.at(-1)?.endsWith('.merge')
-      ) {
-        const mutate = afterPublicationTrackingProbe
-        afterPublicationTrackingProbe = undefined
-        await mutate(path)
-      }
-      if (
-        afterHistoryRead !== undefined &&
-        pushArguments.length > 0 &&
-        args.includes('log') &&
-        args.includes('--numstat')
-      ) {
-        await afterHistoryRead()
-      }
-      if (
-        afterFollowUpFetch !== undefined &&
-        pushArguments.length > 0 &&
-        args[0] === 'fetch' &&
-        args.includes('--') &&
-        args.at(-1) === 'origin'
-      ) {
-        await afterFollowUpFetch()
-      }
-      if (
-        afterConfigurationRead !== undefined &&
-        args[0] === 'config' &&
-        args.includes('--list') &&
-        args.includes('--show-origin')
-      ) {
-        await afterConfigurationRead(path)
-      }
-      if (
-        afterPinnedLookup !== undefined &&
-        args[0] === 'remote' &&
-        args[1] === 'get-url' &&
-        args.includes('--push') &&
-        args.includes('--all') &&
-        options?.env?.GIT_CONFIG_PARAMETERS?.includes('remote.origin.url=')
-      ) {
-        await afterPinnedLookup(path)
-      }
-      return result
-    },
+    exec: interceptingGitExec(actualExec),
   }))
+  vi.doMock('../../../src/web/dugite.ts', async () => {
+    const actual = await vi.importActual<
+      typeof import('../../../src/web/dugite')
+    >('../../../src/web/dugite.ts')
+    return {
+      ...actual,
+      exec: interceptingGitExec(actual.exec as InterceptedGitExec),
+    }
+  })
   vi.doMock('fs/promises', async () => ({
     ...FileSystem,
     realpath: async (...args: Parameters<typeof FileSystem.realpath>) => {

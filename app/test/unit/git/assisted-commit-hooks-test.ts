@@ -58,6 +58,21 @@ before(async () => {
       nativeExecFault?.(args, cwd, options) ?? originalExec(args, cwd, options),
     resolveGitBinary: () => resolveBinary(),
   }))
+  vi.doMock('../../../src/web/dugite.ts', async () => {
+    const actual = await vi.importActual<
+      typeof import('../../../src/web/dugite')
+    >('../../../src/web/dugite.ts')
+    return {
+      ...actual,
+      exec: (
+        args: string[],
+        cwd: string,
+        options?: Parameters<typeof actual.exec>[2]
+      ) =>
+        nativeExecFault?.(args, cwd, options as Dugite.IGitExecutionOptions) ??
+        actual.exec(args, cwd, options),
+    }
+  })
   vi.doMock('../../../src/lib/hooks/get-shell-env.ts', async () => ({
     ...(await vi.importActual('../../../src/lib/hooks/get-shell-env.ts')),
     getShellEnv: async () => ({
@@ -563,25 +578,18 @@ describe('git/assisted-commit real hook interception', () => {
       trailers: [{ token: 'Peer', value: 'peer' }],
     })
     let launched = 0
-    nativeExecFault = (args, cwd, options) => {
-      if (cwd !== repository.path || args[0] !== 'interpret-trailers') {
-        return undefined
-      }
-      const index = ++launched
-      return nativeExec(args, cwd, {
-        ...options,
-        processCallback: child => {
-          options?.processCallback?.(child)
-          if (index === 1) {
-            setTimeout(() => {
-              if (child.pid !== undefined && child.exitCode === null) {
-                process.kill(child.pid, 'SIGTERM')
-              }
-            }, 50)
-          }
-        },
+    const interpretTrailers = backend().repositoryInterpretTrailers
+    const trailersSpy = vi
+      .spyOn(backend(), 'repositoryInterpretTrailers')
+      .mockImplementation(async (...args) => {
+        launched++
+        await new Promise(resolve => setTimeout(resolve, 50))
+        if (launched === 1) {
+          throw new Error('Injected formatter failure')
+        }
+        return interpretTrailers.call(backend(), ...args)
       })
-    }
+    t.after(() => trailersSpy.mockRestore())
     await assert.rejects(
       engine.withAssistedCommitSnapshot(repository, input, async snapshot => {
         const checked = await engine.validateAssistedCommitPlan(
