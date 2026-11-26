@@ -26,7 +26,48 @@ import {
 import { fetchFailureToGitError } from './fetch-error'
 import { pushTerminalChunk } from './push-terminal-chunk'
 import { getDescriptionForError, GitError } from './core'
-import { getHooksEnvEnabled } from '../hooks/config'
+import { withHooksEnv } from '../hooks/with-hooks-env'
+
+const pullInterceptHooks = [
+  'pre-merge-commit',
+  'prepare-commit-msg',
+  'commit-msg',
+  'post-merge',
+  'pre-rebase',
+  'pre-commit',
+  'post-rewrite',
+]
+
+type RendererHookEnvironment = {
+  readonly config_parameters: string
+  readonly process_proxy_port: number
+  readonly process_proxy_token: string
+}
+
+function rendererHookEnvironment(
+  environment: Record<string, string | undefined> | undefined
+): RendererHookEnvironment | undefined {
+  const token = environment?.PROCESS_PROXY_TOKEN
+  const rawPort = environment?.PROCESS_PROXY_PORT
+  if (token === undefined && rawPort === undefined) {
+    return undefined
+  }
+  const port = Number(rawPort)
+  if (
+    token === undefined ||
+    token.length === 0 ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  ) {
+    throw new TypeError('Invalid hook interception environment')
+  }
+  return {
+    config_parameters: environment?.GIT_CONFIG_PARAMETERS ?? '',
+    process_proxy_port: port,
+    process_proxy_token: token,
+  }
+}
 
 /**
  * Pull from the specified remote.
@@ -67,24 +108,14 @@ export async function pull(
   const transport =
     typeof window === 'undefined' ? 'none' : backend().transportKind
   const wry = transport === 'wry'
-  // The legacy runner intercepts hooks and loads a configured shell only when
-  // this preference is enabled. Preserve that path until the native hook
-  // environment and callbacks have equivalent support.
-  const usesHookEnvironment = nativeTransport(transport) && getHooksEnvEnabled()
   let native = transport === 'ws' || wry
-  if (wry && native) {
-    if (
-      usesHookEnvironment ||
-      (options?.progressCallback &&
-        typeof (window as any).__desktop?.invokeWithProgress !== 'function')
-    ) {
-      native = false
-    }
-  }
-  if (transport === 'ws' && usesHookEnvironment) {
-    throw new FetchPreviewUnsupported(
-      'The configured hook environment is unavailable through this backend'
-    )
+  if (
+    wry &&
+    native &&
+    options?.progressCallback &&
+    typeof (window as any).__desktop?.invokeWithProgress !== 'function'
+  ) {
+    native = false
   }
   if (native) {
     const title = `Pulling ${remote.name}`
@@ -172,43 +203,60 @@ export async function pull(
         repository.path,
         'mutation',
         () =>
-          backend().pullRepositoryRemote(
+          withHooksEnv(
+            hookEnvironment =>
+              backend().pullRepositoryRemote(
+                repository.path,
+                {
+                  remote: remote.name,
+                  expected_url: remote.url,
+                  no_verify: options?.noVerify ?? false,
+                  report_progress: needsStreaming,
+                  require_hook_callbacks: false,
+                  ...(repository.gitHubRepository?.owner.login === undefined
+                    ? {}
+                    : {
+                        expected_saml_owner:
+                          repository.gitHubRepository.owner.login,
+                      }),
+                  ...(proxy === undefined ? {} : { proxy }),
+                  ...(rendererHookEnvironment(hookEnvironment) === undefined
+                    ? {}
+                    : {
+                        hook_environment:
+                          rendererHookEnvironment(hookEnvironment),
+                      }),
+                },
+                !needsStreaming
+                  ? undefined
+                  : chunk => {
+                      try {
+                        parser?.push(chunk)
+                      } catch {
+                        // Progress observers cannot terminate a pull.
+                      }
+                      if (chunk.stream === 'lfs') {
+                        return
+                      }
+                      const bytes = Uint8Array.from(
+                        atob(chunk.data),
+                        character => character.charCodeAt(0)
+                      )
+                      notifyTerminal(
+                        decoders[chunk.stream].decode(bytes, { stream: true })
+                      )
+                    },
+                terminalObserver === undefined
+                  ? undefined
+                  : registerTerminalObserver
+              ),
             repository.path,
             {
-              remote: remote.name,
-              expected_url: remote.url,
-              no_verify: options?.noVerify ?? false,
-              report_progress: needsStreaming,
-              require_hook_callbacks: false,
-              ...(repository.gitHubRepository?.owner.login === undefined
-                ? {}
-                : {
-                    expected_saml_owner:
-                      repository.gitHubRepository.owner.login,
-                  }),
-              ...(proxy === undefined ? {} : { proxy }),
-            },
-            !needsStreaming
-              ? undefined
-              : chunk => {
-                  try {
-                    parser?.push(chunk)
-                  } catch {
-                    // Progress observers cannot terminate a pull.
-                  }
-                  if (chunk.stream === 'lfs') {
-                    return
-                  }
-                  const bytes = Uint8Array.from(atob(chunk.data), character =>
-                    character.charCodeAt(0)
-                  )
-                  notifyTerminal(
-                    decoders[chunk.stream].decode(bytes, { stream: true })
-                  )
-                },
-            terminalObserver === undefined
-              ? undefined
-              : registerTerminalObserver
+              env: {},
+              interceptHooks: pullInterceptHooks,
+              onHookProgress: options?.onHookProgress,
+              onHookFailure: options?.onHookFailure,
+            }
           ),
         true
       )
@@ -369,10 +417,6 @@ export async function pull(
   ]
 
   await git(args, repository.path, 'pull', opts)
-}
-
-function nativeTransport(transport: string): boolean {
-  return transport === 'wry' || transport === 'ws'
 }
 
 /**

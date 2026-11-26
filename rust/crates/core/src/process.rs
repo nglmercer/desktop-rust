@@ -717,6 +717,31 @@ pub(crate) async fn run_bound_remote_fetch_with_proxy(
         false,
         None,
         proxy,
+        None,
+    )
+    .await
+    .map(|(output, _)| output)
+}
+
+/// Pull may carry a renderer-owned hook interception environment. Its
+/// configuration is merged with Desktop's credential routing rather than
+/// replacing it.
+pub(crate) async fn run_bound_remote_pull(
+    path: &Path,
+    args: &[OsString],
+    report_progress: bool,
+    proxy: Option<&crate::RendererProxy>,
+    hook_environment: Option<&crate::RendererHookEnvironment>,
+) -> Result<RawOutput> {
+    run_bound_remote_operation(
+        path,
+        args,
+        false,
+        report_progress,
+        false,
+        None,
+        proxy,
+        hook_environment,
     )
     .await
     .map(|(output, _)| output)
@@ -740,10 +765,12 @@ pub(crate) async fn run_bound_remote_push(
         observe_hooks,
         hook_proxy,
         proxy,
+        None,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_bound_remote_operation(
     path: &Path,
     args: &[OsString],
@@ -752,6 +779,7 @@ async fn run_bound_remote_operation(
     observe_hooks: bool,
     mut hook_proxy: Option<crate::hook_proxy::HookProxy>,
     proxy: Option<&crate::RendererProxy>,
+    hook_environment: Option<&crate::RendererHookEnvironment>,
 ) -> Result<(RawOutput, bool)> {
     let proxy_redactions = proxy_redactions(proxy);
     let mut command = bound_git_command();
@@ -762,6 +790,18 @@ async fn run_bound_remote_operation(
         if let Some(value) = &proxy.https {
             command.env("https_proxy", value);
         }
+    }
+    // A renderer process-proxy token must never be inherited across requests.
+    command.env_remove("PROCESS_PROXY_PORT");
+    command.env_remove("PROCESS_PROXY_TOKEN");
+    if let Some(hooks) = hook_environment {
+        hooks.validate()?;
+        command.env("PROCESS_PROXY_PORT", hooks.process_proxy_port.to_string());
+        command.env("PROCESS_PROXY_TOKEN", &hooks.process_proxy_token);
+        let parameters = crate::git_credentials::parameters_with_operation_configuration(
+            std::ffi::OsString::from(&hooks.config_parameters),
+        );
+        command.env("GIT_CONFIG_PARAMETERS", parameters);
     }
     #[cfg(unix)]
     let trace = if observe_hooks {

@@ -2,7 +2,7 @@ import { cp, mkdtemp, rm } from '../../web/fs-promises'
 import type { AddressInfo } from 'net'
 import { tmpdir } from '../../web/os'
 import { join } from 'path'
-import { createProxyProcessServer } from 'process-proxy'
+import { createProxyProcessServer, getProxyCommandPath } from 'process-proxy'
 import type { IGitExecutionOptions } from '../git/core'
 import { getRepoHooks, getRepoHooksPath } from './get-repo-hooks'
 import { createHooksProxy } from './hooks-proxy'
@@ -47,7 +47,7 @@ export async function withHooksEnv<T>(
   const originalHooksPath = await getRepoHooksPath(path, opts.env)
 
   const ext = __WIN32__ ? '.exe' : ''
-  const processProxyPath = join(__dirname, `process-proxy${ext}`)
+  const processProxyPath = getProxyCommandPath()
 
   const token = crypto.randomUUID()
   const tmpHooksDir = await mkdtemp(join(tmpdir(), 'desktop-git-hooks-'))

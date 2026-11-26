@@ -1299,6 +1299,44 @@ impl RendererCloneTrampoline {
     }
 }
 
+/// Renderer-owned process-proxy hook interception state for one remote Git
+/// operation. The proxy token is a transient loopback capability, not a credential.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RendererHookEnvironment {
+    pub config_parameters: String,
+    pub process_proxy_port: u16,
+    pub process_proxy_token: String,
+}
+
+impl RendererHookEnvironment {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(self.process_proxy_port != 0, "Invalid hook proxy port");
+        anyhow::ensure!(
+            !self.process_proxy_token.is_empty()
+                && self.process_proxy_token.len() <= 4096
+                && !self.process_proxy_token.chars().any(char::is_control),
+            "Invalid hook proxy token"
+        );
+        anyhow::ensure!(
+            self.config_parameters.len() <= 256 * 1024 && !self.config_parameters.contains(' '),
+            "Invalid hook Git configuration"
+        );
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for RendererHookEnvironment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RendererHookEnvironment")
+            .field("config_parameters", &"<redacted>")
+            .field("process_proxy_port", &self.process_proxy_port)
+            .field("process_proxy_token", &"<redacted>")
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for RendererCloneTrampoline {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

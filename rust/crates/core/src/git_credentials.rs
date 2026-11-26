@@ -848,6 +848,21 @@ pub(crate) fn inherited_parameters() -> Option<std::ffi::OsString> {
     }
 }
 
+/// Append this operation's credential routing to caller-owned configuration
+/// parameters. The caller's entries remain ordered before Desktop's final
+/// helper policy, exactly as with the host-inherited parameter base.
+pub(crate) fn parameters_with_operation_configuration(
+    base: std::ffi::OsString,
+) -> std::ffi::OsString {
+    if clone::parameters().is_some() {
+        return base;
+    }
+    match CURRENT.try_with(|lease| append_configuration(base.clone(), &lease.config)) {
+        Ok(parameters) => parameters,
+        Err(_) => base,
+    }
+}
+
 fn append_configuration(
     mut parameters: std::ffi::OsString,
     config: &[(String, String)],

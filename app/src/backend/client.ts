@@ -515,6 +515,35 @@ export interface FetchFailure {
   readonly exitCode: number
   readonly errorKind: FetchErrorKind | null
 }
+interface IHookEnvironmentRequest {
+  readonly config_parameters: string
+  readonly process_proxy_port: number
+  readonly process_proxy_token: string
+}
+
+function validateHookEnvironment(
+  environment: IHookEnvironmentRequest | undefined
+): void {
+  if (environment === undefined) {
+    return
+  }
+  if (
+    !Number.isInteger(environment.process_proxy_port) ||
+    environment.process_proxy_port < 1 ||
+    environment.process_proxy_port > 65535 ||
+    environment.process_proxy_token.length === 0 ||
+    environment.process_proxy_token.length > 4096 ||
+    [...environment.process_proxy_token].some(character => {
+      const code = character.codePointAt(0) ?? 0
+      return code === 0 || code <= 31 || (code >= 127 && code <= 159)
+    }) ||
+    environment.config_parameters.length > 256 * 1024 ||
+    environment.config_parameters.includes('\0')
+  ) {
+    throw new TypeError('Invalid hook interception environment')
+  }
+}
+
 export interface PullFailure {
   readonly exitCode: number
   readonly errorKind:
@@ -8685,6 +8714,7 @@ export class BackendClient {
       readonly require_hook_callbacks: boolean
       readonly expected_saml_owner?: string
       readonly proxy?: RemoteProxy
+      readonly hook_environment?: IHookEnvironmentRequest
     },
     onProgress?: (chunk: FetchProgressChunk) => void,
     onReviewed?: () => void
@@ -8697,6 +8727,7 @@ export class BackendClient {
       throw new FetchPreviewUnsupported('Native pull progress is unavailable')
     }
     validateRemoteProxy(request.proxy, 'pull')
+    validateHookEnvironment(request.hook_environment)
     const call = (
       method: 'renderer_pull_preview' | 'renderer_pull',
       extra: Record<string, unknown> = {}

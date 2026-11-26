@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     async (): Promise<Record<string, string> | undefined> => undefined
   ),
   PreviewUnsupported: class extends Error {},
+  withHooksEnv: vi.fn(),
   GitError: class extends Error {
     public readonly result: unknown
     public constructor(result: { gitErrorDescription: string }) {
@@ -70,6 +71,9 @@ vi.mock('../../src/lib/git/config', () => ({
 vi.mock('../../src/lib/hooks/config', () => ({
   getHooksEnvEnabled: () => mocks.hooksEnabled,
 }))
+vi.mock('../../src/lib/hooks/with-hooks-env', () => ({
+  withHooksEnv: mocks.withHooksEnv,
+}))
 vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
   withoutRepositoryGitAccess: mocks.without,
@@ -101,6 +105,17 @@ describe('Rust pull routing', () => {
     mocks.pull.mockReset().mockResolvedValue(undefined)
     mocks.git.mockReset().mockResolvedValue(undefined)
     mocks.proxy.mockReset().mockResolvedValue(undefined)
+    mocks.withHooksEnv.mockReset().mockImplementation(async run =>
+      run(
+        mocks.hooksEnabled
+          ? {
+              GIT_CONFIG_PARAMETERS: `'core.hooksPath=/tmp/hooks'`,
+              PROCESS_PROXY_PORT: '4321',
+              PROCESS_PROXY_TOKEN: 'hook-token',
+            }
+          : undefined
+      )
+    )
   })
   afterEach(() => {
     vi.unstubAllEnvs()
@@ -157,31 +172,43 @@ describe('Rust pull routing', () => {
     )
   })
 
-  it('uses the prior Wry route before mutation when the hook environment is enabled', async () => {
-    mocks.transport = 'wry'
-    mocks.hooksEnabled = true
-    await pull(repository, remote, { onHookFailure: vi.fn() })
-    expect(mocks.pull).not.toHaveBeenCalled()
-    expect(mocks.git).toHaveBeenCalledTimes(1)
-    expect(mocks.git.mock.calls[0][0]).toEqual([
-      '-c',
-      'rebase.backend=merge',
-      'pull',
-      '--ff',
-      '--recurse-submodules',
-      '--',
-      'origin',
-    ])
-  })
-
-  it('reports the unsupported hook environment on WebSocket before mutation', async () => {
-    mocks.hooksEnabled = true
-    await expect(pull(repository, remote)).rejects.toBeInstanceOf(
-      mocks.PreviewUnsupported
-    )
-    expect(mocks.pull).not.toHaveBeenCalled()
-    expect(mocks.git).not.toHaveBeenCalled()
-  })
+  it.each(['ws', 'wry'])(
+    'forwards the configured hook environment through %s',
+    async transport => {
+      mocks.transport = transport
+      mocks.hooksEnabled = true
+      await pull(repository, remote, { onHookFailure: vi.fn() })
+      expect(mocks.pull).toHaveBeenCalledTimes(1)
+      expect(mocks.pull).toHaveBeenCalledWith(
+        '/repo',
+        expect.objectContaining({
+          hook_environment: {
+            config_parameters: `'core.hooksPath=/tmp/hooks'`,
+            process_proxy_port: 4321,
+            process_proxy_token: 'hook-token',
+          },
+        }),
+        undefined,
+        undefined
+      )
+      expect(mocks.git).not.toHaveBeenCalled()
+      expect(mocks.withHooksEnv).toHaveBeenCalledWith(
+        expect.any(Function),
+        '/repo',
+        expect.objectContaining({
+          interceptHooks: [
+            'pre-merge-commit',
+            'prepare-commit-msg',
+            'commit-msg',
+            'post-merge',
+            'pre-rebase',
+            'pre-commit',
+            'post-rewrite',
+          ],
+        })
+      )
+    }
+  )
 
   it('recognizes the enabled default in development and beta builds', async () => {
     const previousDev = __DEV__

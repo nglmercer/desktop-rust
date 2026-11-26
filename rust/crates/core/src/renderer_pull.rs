@@ -87,6 +87,8 @@ pub struct RendererPullRequest {
     pub expected_saml_owner: Option<String>,
     #[serde(default)]
     pub proxy: Option<crate::RendererProxy>,
+    #[serde(default)]
+    pub hook_environment: Option<crate::RendererHookEnvironment>,
 }
 
 impl std::fmt::Debug for RendererPullRequest {
@@ -98,6 +100,7 @@ impl std::fmt::Debug for RendererPullRequest {
             .field("report_progress", &self.report_progress)
             .field("require_hook_callbacks", &self.require_hook_callbacks)
             .field("proxy", &self.proxy)
+            .field("hook_environment", &self.hook_environment)
             .finish()
     }
 }
@@ -128,6 +131,9 @@ impl Repository {
     async fn renderer_pull_review(&self, request: &RendererPullRequest) -> Result<(String, bool)> {
         if let Some(proxy) = &request.proxy {
             proxy.validate()?;
+        }
+        if let Some(hooks) = &request.hook_environment {
+            hooks.validate()?;
         }
         ensure!(
             !request.remote.starts_with('-'),
@@ -240,12 +246,12 @@ impl Repository {
             command.push("--no-verify".into());
         }
         command.extend(args(&["--", &request.remote]));
-        let output = process::run_bound_remote_fetch_with_proxy(
+        let output = process::run_bound_remote_pull(
             &self.path,
             &command,
-            false,
             request.report_progress,
             request.proxy.as_ref(),
+            request.hook_environment.as_ref(),
         )
         .await?;
         let error_kind = if output.code == 0 {
@@ -400,6 +406,7 @@ mod tests {
                 require_hook_callbacks: false,
                 expected_saml_owner: None,
                 proxy: None,
+                hook_environment: None,
             }
         }
         fn commit(&self, directory: &Path, name: &str, contents: &str) {
