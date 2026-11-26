@@ -718,6 +718,7 @@ pub(crate) async fn run_bound_remote_fetch_with_proxy(
         None,
         proxy,
         None,
+        None,
     )
     .await
     .map(|(output, _)| output)
@@ -742,6 +743,7 @@ pub(crate) async fn run_bound_remote_pull(
         None,
         proxy,
         hook_environment,
+        None,
     )
     .await
     .map(|(output, _)| output)
@@ -757,6 +759,7 @@ pub(crate) async fn run_bound_remote_push(
     hook_proxy: Option<crate::hook_proxy::HookProxy>,
     proxy: Option<&crate::RendererProxy>,
     hook_environment: Option<&crate::RendererHookEnvironment>,
+    operation_config_parameters: Option<&str>,
 ) -> Result<(RawOutput, bool)> {
     run_bound_remote_operation(
         path,
@@ -767,6 +770,7 @@ pub(crate) async fn run_bound_remote_push(
         hook_proxy,
         proxy,
         hook_environment,
+        operation_config_parameters,
     )
     .await
 }
@@ -781,6 +785,7 @@ async fn run_bound_remote_operation(
     mut hook_proxy: Option<crate::hook_proxy::HookProxy>,
     proxy: Option<&crate::RendererProxy>,
     hook_environment: Option<&crate::RendererHookEnvironment>,
+    operation_config_parameters: Option<&str>,
 ) -> Result<(RawOutput, bool)> {
     let proxy_redactions = proxy_redactions(proxy);
     let mut command = bound_git_command();
@@ -801,6 +806,15 @@ async fn run_bound_remote_operation(
         command.env("PROCESS_PROXY_TOKEN", &hooks.process_proxy_token);
         let parameters = crate::git_credentials::parameters_with_operation_configuration(
             std::ffi::OsString::from(&hooks.config_parameters),
+        );
+        command.env("GIT_CONFIG_PARAMETERS", parameters);
+    } else if let Some(parameters) = operation_config_parameters {
+        anyhow::ensure!(
+            parameters.len() <= 256 * 1024 && !parameters.contains('\0'),
+            "Invalid operation Git configuration"
+        );
+        let parameters = crate::git_credentials::parameters_with_operation_configuration(
+            std::ffi::OsString::from(parameters),
         );
         command.env("GIT_CONFIG_PARAMETERS", parameters);
     }

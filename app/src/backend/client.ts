@@ -8715,6 +8715,13 @@ export class BackendClient {
       readonly expected_saml_owner?: string
       readonly proxy?: RemoteProxy
       readonly hook_environment?: IHookEnvironmentRequest
+      readonly assisted?: {
+        readonly expected_tip: string
+        readonly remote_ref: string
+        readonly raw_push_url: string
+        readonly push_url_source: 'push-url' | 'fetch-url'
+        readonly config_parameters: string
+      }
     },
     onProgress?: (chunk: FetchProgressChunk) => void,
     onReviewed?: () => void
@@ -8981,15 +8988,25 @@ export class BackendClient {
       readonly interactive_hook_decision?: boolean
       readonly proxy?: RemoteProxy
       readonly hook_environment?: IHookEnvironmentRequest
+      readonly assisted?: {
+        readonly expected_tip: string
+        readonly remote_ref: string
+        readonly raw_push_url: string
+        readonly push_url_source: 'push-url' | 'fetch-url'
+        readonly config_parameters: string
+      }
     },
     onProgress?: (chunk: FetchProgressChunk) => void,
     checkDestinations?: (destinations: ReadonlyArray<string>) => Promise<void>,
     onHookProgress?: (event: ICommitHookProgress) => void,
     signal?: AbortSignal,
-    onHookFailure?: (output: Uint8Array) => Promise<'abort' | 'ignore'>
+    onHookFailure?: (output: Uint8Array) => Promise<'abort' | 'ignore'>,
+    onSpawnVerification?: () => Promise<void>
   ): Promise<PushFailure | undefined> {
     if (
-      (onProgress || request.require_hook_callbacks) &&
+      (onProgress ||
+        request.require_hook_callbacks ||
+        onSpawnVerification !== undefined) &&
       this.transport === 'wry' &&
       typeof (window as any).__desktop?.invokeWithProgress !== 'function'
     ) {
@@ -9001,6 +9018,25 @@ export class BackendClient {
     }
     validateRemoteProxy(request.proxy, 'push')
     validateHookEnvironment(request.hook_environment)
+    if (
+      request.assisted !== undefined &&
+      (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(request.assisted.expected_tip) ||
+        !request.assisted.remote_ref.startsWith('refs/heads/') ||
+        request.assisted.remote_ref.length > 4096 ||
+        request.assisted.raw_push_url.length === 0 ||
+        request.assisted.raw_push_url.length > 16 * 1024 ||
+        request.assisted.raw_push_url.includes('\0') ||
+        request.assisted.config_parameters.length > 256 * 1024 ||
+        request.assisted.config_parameters.includes('\0'))
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted push request',
+        retryable: false,
+      })
+    }
+    let spawnVerificationSeen = false
+    let spawnVerificationError: unknown
     const call = (
       method: 'renderer_push_preview' | 'renderer_push',
       extra: Record<string, unknown> = {}
@@ -9011,63 +9047,81 @@ export class BackendClient {
               onProgress,
               signal,
               deadlineMs: 3_600_000,
-              onCommitEvent: request.require_hook_callbacks
-                ? (event: unknown) => {
-                    if (
-                      isRecord(event) &&
-                      event.event === 'commit_hook_progress' &&
-                      event.checkpoint_id === 'push' &&
-                      event.hook_name === 'pre-push' &&
-                      (event.status === 'started' ||
-                        event.status === 'finished' ||
-                        event.status === 'failed')
-                    ) {
-                      onHookProgress?.({
-                        hookName: event.hook_name,
-                        status: event.status,
-                      })
-                    } else if (
-                      isRecord(event) &&
-                      event.event === 'hook_decision' &&
-                      typeof event.decision_id === 'string' &&
-                      /^[0-9a-f-]{36}$/.test(event.decision_id)
-                    ) {
-                      const decisionId = event.decision_id
-                      const requestId = event.request_id
-                      const respond = (ignore: boolean) => {
-                        if (this.transport === 'wry') {
-                          this.wry!.hookDecision(decisionId, ignore)
-                        } else if (
-                          this.transport === 'ws' &&
-                          typeof requestId === 'number'
-                        ) {
-                          this.ws!.hookDecision(requestId, decisionId, ignore)
+              onCommitEvent:
+                request.require_hook_callbacks ||
+                onSpawnVerification !== undefined
+                  ? (event: unknown) => {
+                      if (
+                        isRecord(event) &&
+                        event.event === 'commit_hook_progress' &&
+                        event.checkpoint_id === 'push' &&
+                        event.hook_name === 'pre-push' &&
+                        (event.status === 'started' ||
+                          event.status === 'finished' ||
+                          event.status === 'failed')
+                      ) {
+                        onHookProgress?.({
+                          hookName: event.hook_name,
+                          status: event.status,
+                        })
+                      } else if (
+                        isRecord(event) &&
+                        event.event === 'hook_decision' &&
+                        typeof event.decision_id === 'string' &&
+                        /^[0-9a-f-]{36}$/.test(event.decision_id)
+                      ) {
+                        const decisionId = event.decision_id
+                        const requestId = event.request_id
+                        const respond = (ignore: boolean) => {
+                          if (this.transport === 'wry') {
+                            this.wry!.hookDecision(decisionId, ignore)
+                          } else if (
+                            this.transport === 'ws' &&
+                            typeof requestId === 'number'
+                          ) {
+                            this.ws!.hookDecision(requestId, decisionId, ignore)
+                          }
                         }
-                      }
-                      try {
-                        if (
-                          typeof event.output !== 'string' ||
-                          event.output.length > 32768
-                        ) {
+                        try {
+                          if (
+                            onSpawnVerification !== undefined &&
+                            !spawnVerificationSeen
+                          ) {
+                            spawnVerificationSeen = true
+                            Promise.resolve()
+                              .then(onSpawnVerification)
+                              .then(
+                                () => respond(true),
+                                error => {
+                                  spawnVerificationError = error
+                                  respond(false)
+                                }
+                              )
+                            return
+                          }
+                          if (
+                            typeof event.output !== 'string' ||
+                            event.output.length > 32768
+                          ) {
+                            respond(false)
+                            return
+                          }
+                          const output = Uint8Array.from(
+                            atob(event.output),
+                            character => character.charCodeAt(0)
+                          )
+                          Promise.resolve(
+                            onHookFailure?.(output) ?? 'abort'
+                          ).then(
+                            value => respond(value === 'ignore'),
+                            () => respond(false)
+                          )
+                        } catch {
                           respond(false)
-                          return
                         }
-                        const output = Uint8Array.from(
-                          atob(event.output),
-                          character => character.charCodeAt(0)
-                        )
-                        Promise.resolve(
-                          onHookFailure?.(output) ?? 'abort'
-                        ).then(
-                          value => respond(value === 'ignore'),
-                          () => respond(false)
-                        )
-                      } catch {
-                        respond(false)
                       }
                     }
-                  }
-                : undefined,
+                  : undefined,
             }
           : {}
       return this.transport === 'wry'
@@ -9113,25 +9167,23 @@ export class BackendClient {
       })
     }
     const reviewedRequest = preview.request
-    const proxyFields = (value: unknown) => ({
-      http:
-        isRecord(value) && typeof value.http === 'string' ? value.http : null,
-      https:
-        isRecord(value) && typeof value.https === 'string' ? value.https : null,
-    })
-    const sameProxy = (left: unknown, right: unknown) => {
-      const a = proxyFields(left)
-      const b = proxyFields(right)
-      return a.http === b.http && a.https === b.https
+    const normalize = (value: unknown): unknown => {
+      if (value === undefined) return null
+      if (Array.isArray(value)) return value.map(normalize)
+      if (isRecord(value)) {
+        return Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map(key => [key, normalize(value[key])])
+        )
+      }
+      return value
     }
     if (
-      Object.entries(request).some(([key, value]) =>
-        key === 'tags'
-          ? !Array.isArray(reviewedRequest.tags) ||
-            JSON.stringify(reviewedRequest.tags) !== JSON.stringify(value)
-          : key === 'proxy'
-            ? !sameProxy(reviewedRequest.proxy, value)
-            : reviewedRequest[key] !== value
+      Object.entries(request).some(
+        ([key, value]) =>
+          JSON.stringify(normalize(reviewedRequest[key])) !==
+          JSON.stringify(normalize(value))
       )
     ) {
       throw new BackendError({
@@ -9144,7 +9196,15 @@ export class BackendClient {
     let result: unknown
     try {
       result = await call('renderer_push', { basis: preview.basis })
-    } catch {
+    } catch (error) {
+      if (spawnVerificationError !== undefined) throw spawnVerificationError
+      if (
+        spawnVerificationSeen &&
+        error instanceof Error &&
+        error.message.includes('Push entry verification was rejected')
+      ) {
+        throw error
+      }
       throw new BackendError({
         code: 'push_outcome_uncertain',
         message:

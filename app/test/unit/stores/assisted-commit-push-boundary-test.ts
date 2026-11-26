@@ -570,6 +570,62 @@ function nodeBackend(t: TestContext) {
             ? undefined
             : { exitCode: result.exitCode, errorKind: null }
         },
+        pushRepositoryRemote: async (
+          path: string,
+          request: {
+            remote: string
+            assisted?: {
+              expected_tip: string
+              remote_ref: string
+              config_parameters: string
+            }
+          },
+          onProgress?: never,
+          checkDestinations?: never,
+          onHookProgress?: never,
+          signal?: AbortSignal,
+          onHookFailure?: never,
+          onSpawnVerification?: () => Promise<void>
+        ) => {
+          if (request.assisted === undefined) {
+            return rustClient.pushRepositoryRemote(
+              path,
+              request as never,
+              onProgress,
+              checkDestinations,
+              onHookProgress,
+              signal,
+              onHookFailure,
+              onSpawnVerification
+            )
+          }
+          await onSpawnVerification?.()
+          const result = (await interceptingGitExec(actualExec)(
+            [
+              'push',
+              '--no-force',
+              '--no-mirror',
+              '--no-follow-tags',
+              '--recurse-submodules=no',
+              ...((request as { report_progress?: boolean }).report_progress
+                ? ['--progress']
+                : []),
+              '--',
+              request.remote,
+              `${request.assisted.expected_tip}:${request.assisted.remote_ref}`,
+            ],
+            path,
+            {
+              env: {
+                GIT_CONFIG: undefined,
+                GIT_CONFIG_PARAMETERS: request.assisted.config_parameters,
+              },
+            } as never
+          )) as Dugite.IGitStringResult
+          return result.exitCode === 0
+            ? undefined
+            : { exitCode: result.exitCode, errorKind: null }
+        },
         repositoryReadSnapshot: async (
           path: string,
           method: 'renderer_staged_diff' | 'renderer_working_file',

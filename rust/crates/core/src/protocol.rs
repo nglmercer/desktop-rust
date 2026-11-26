@@ -1375,6 +1375,29 @@ pub struct RendererFetchRequest {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct RendererAssistedPush {
+    pub expected_tip: String,
+    pub remote_ref: String,
+    pub raw_push_url: String,
+    pub push_url_source: String,
+    /// Renderer-owned inherited configuration plus the exact assisted remote pin.
+    pub config_parameters: String,
+}
+
+impl std::fmt::Debug for RendererAssistedPush {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RendererAssistedPush")
+            .field("expected_tip", &self.expected_tip)
+            .field("remote_ref", &self.remote_ref)
+            .field("raw_push_url", &"<redacted>")
+            .field("push_url_source", &self.push_url_source)
+            .field("config_parameters", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RendererPushRequest {
     pub remote: String,
     pub expected_url: String,
@@ -1391,6 +1414,8 @@ pub struct RendererPushRequest {
     pub proxy: Option<RendererProxy>,
     #[serde(default)]
     pub hook_environment: Option<RendererHookEnvironment>,
+    #[serde(default)]
+    pub assisted: Option<RendererAssistedPush>,
 }
 
 impl std::fmt::Debug for RendererPushRequest {
@@ -1409,6 +1434,7 @@ impl std::fmt::Debug for RendererPushRequest {
             .field("interactive_hook_decision", &self.interactive_hook_decision)
             .field("proxy", &self.proxy)
             .field("hook_environment", &self.hook_environment)
+            .field("assisted", &self.assisted)
             .finish()
     }
 }

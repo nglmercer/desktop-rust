@@ -158,8 +158,16 @@ export async function push(
       'Assisted push requires a full commit ID and a normal branch push'
     )
   }
+  const assistedConfigParameters =
+    assisted === undefined
+      ? undefined
+      : getAssistedCommitPushConfigParameters(
+          remote.name,
+          assisted.rawPushURL,
+          assisted.pushURLSource
+        )
 
-  if (assisted === undefined && typeof window !== 'undefined') {
+  if (typeof window !== 'undefined') {
     const needsStreaming =
       progressCallback !== undefined ||
       options?.onTerminalOutputAvailable !== undefined
@@ -211,8 +219,12 @@ export async function push(
         const failure = await withRepositoryGitOperation(
           repository.path,
           'mutation',
-          () =>
-            withHooksEnv(
+          async () => {
+            const verifyAssistedSpawn =
+              assisted === undefined
+                ? undefined
+                : await assisted.prepareForSpawn()
+            return withHooksEnv(
               hookEnvironment => {
                 const hooks = rendererHookEnvironment(hookEnvironment)
                 const useNativeHookCallbacks = hooks === undefined
@@ -220,7 +232,7 @@ export async function push(
                   repository.path,
                   {
                     remote: remote.name,
-                    expected_url: remote.url,
+                    expected_url: assisted?.pushURL ?? remote.url,
                     local_branch: localBranch,
                     remote_branch: remoteBranch,
                     tags: tagsToPush ?? [],
@@ -237,6 +249,18 @@ export async function push(
                       options?.onHookFailure !== undefined,
                     ...(proxy === undefined ? {} : { proxy }),
                     ...(hooks === undefined ? {} : { hook_environment: hooks }),
+                    ...(assisted === undefined ||
+                    assistedConfigParameters === undefined
+                      ? {}
+                      : {
+                          assisted: {
+                            expected_tip: assisted.expectedTip,
+                            remote_ref: assisted.remoteRef,
+                            raw_push_url: assisted.rawPushURL,
+                            push_url_source: assisted.pushURLSource,
+                            config_parameters: assistedConfigParameters,
+                          },
+                        }),
                   },
                   !needsStreaming
                     ? undefined
@@ -310,17 +334,24 @@ export async function push(
                             'pre-push',
                             Buffer.from(output)
                           )
-                        )
+                        ),
+                  assisted === undefined
+                    ? undefined
+                    : async () => verifyAssistedSpawn?.()
                 )
               },
               repository.path,
               {
-                env: {},
+                env:
+                  assistedConfigParameters === undefined
+                    ? {}
+                    : { GIT_CONFIG_PARAMETERS: assistedConfigParameters },
                 interceptHooks: ['pre-push'],
                 onHookProgress: options?.onHookProgress,
                 onHookFailure: options?.onHookFailure,
               }
-            ),
+            )
+          },
           true
         )
         if (failure !== undefined) {

@@ -197,6 +197,7 @@ describe('Rust push routing', () => {
         undefined,
         expect.any(Function),
         undefined,
+        undefined,
         undefined
       )
       expect(progress).toHaveBeenCalledWith(
@@ -247,7 +248,8 @@ describe('Rust push routing', () => {
       undefined,
       expect.any(Function),
       undefined,
-      expect.any(Function)
+      expect.any(Function),
+      undefined
     )
     expect(mocks.withHooksEnv).toHaveBeenCalledWith(
       expect.any(Function),
@@ -270,6 +272,7 @@ describe('Rust push routing', () => {
       undefined,
       undefined,
       expect.any(Function),
+      undefined,
       undefined,
       undefined
     )

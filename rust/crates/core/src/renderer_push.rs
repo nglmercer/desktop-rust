@@ -6,6 +6,91 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+fn quote_config_parameter(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn assisted_config_suffix(remote: &str, raw_url: &str, source: &str) -> String {
+    let property = if source == "push-url" {
+        "pushurl"
+    } else {
+        "url"
+    };
+    [
+        format!("remote.{remote}.{property}="),
+        format!("remote.{remote}.{property}={raw_url}"),
+        format!("remote.{remote}.mirror=false"),
+    ]
+    .iter()
+    .map(|value| quote_config_parameter(value))
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+fn validate_assisted(
+    assisted: &crate::protocol::RendererAssistedPush,
+    remote: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        matches!(assisted.expected_tip.len(), 40 | 64)
+            && assisted
+                .expected_tip
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+        "Invalid assisted push commit"
+    );
+    anyhow::ensure!(
+        assisted.remote_ref.starts_with("refs/heads/")
+            && assisted.remote_ref.len() <= 4096
+            && !assisted.remote_ref.contains('\0'),
+        "Invalid assisted push destination"
+    );
+    anyhow::ensure!(
+        matches!(assisted.push_url_source.as_str(), "push-url" | "fetch-url"),
+        "Invalid assisted push URL source"
+    );
+    anyhow::ensure!(
+        !assisted.raw_push_url.is_empty()
+            && assisted.raw_push_url.len() <= 16 * 1024
+            && !assisted.raw_push_url.contains('\0'),
+        "Invalid assisted push URL"
+    );
+    anyhow::ensure!(
+        assisted.config_parameters.len() <= 256 * 1024
+            && !assisted.config_parameters.contains('\0'),
+        "Invalid assisted push configuration"
+    );
+    let suffix = assisted_config_suffix(remote, &assisted.raw_push_url, &assisted.push_url_source);
+    anyhow::ensure!(
+        assisted.config_parameters == suffix
+            || assisted.config_parameters.ends_with(&format!(" {suffix}")),
+        "Assisted push configuration does not preserve the reviewed destination"
+    );
+    Ok(())
+}
+
+async fn approve_push_entry() -> anyhow::Result<()> {
+    let (sender, request_id) = crate::hook_progress::sender().ok_or_else(|| {
+        anyhow::anyhow!("Push entry verification requires an owning backend request")
+    })?;
+    let mut decision = crate::hook_decision::PendingDecision::new()?;
+    let sent = sender
+        .send((
+            request_id,
+            crate::hook_progress::CommitEvent::HookDecision {
+                decision_id: decision.id(),
+                output: String::new(),
+            },
+        ))
+        .await
+        .is_ok();
+    anyhow::ensure!(
+        sent && decision.wait().await,
+        "Push entry verification was rejected"
+    );
+    Ok(())
+}
+
 impl Repository {
     async fn pre_push_hook_path(&self) -> Result<std::path::PathBuf> {
         let path = self
@@ -155,17 +240,34 @@ impl Repository {
         }
     }
 
-    async fn push_destinations(&self, remote: &str) -> Result<Vec<String>> {
-        let output = self
-            .run(&args(&[
-                "remote", "get-url", "--push", "--all", "--", remote,
-            ]))
-            .await?;
+    async fn push_destinations(
+        &self,
+        remote: &str,
+        config_parameters: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let command = args(&["remote", "get-url", "--push", "--all", "--", remote]);
+        let output = match config_parameters {
+            Some(parameters) => {
+                let environment = std::collections::BTreeMap::from([(
+                    "GIT_CONFIG_PARAMETERS".to_owned(),
+                    Some(parameters.to_owned()),
+                )]);
+                process::run_without_git_config_with_environment(&self.path, &command, &environment)
+                    .await?
+            }
+            None => self.run(&command).await?,
+        };
         ensure!(output.code == 0, "Cannot inspect push destinations");
         let urls = std::str::from_utf8(&output.stdout)?
             .strip_suffix('\n')
             .ok_or_else(|| anyhow::anyhow!("Invalid push destinations"))?;
-        let urls: Vec<String> = urls.split('\n').map(str::to_owned).collect();
+        let mut lines: Vec<&str> = urls.split('\n').collect();
+        if config_parameters.is_some() {
+            if let Some(reset) = lines.iter().rposition(|line| line.is_empty()) {
+                lines.drain(..=reset);
+            }
+        }
+        let urls: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
         ensure!(
             !urls.is_empty()
                 && urls.len() <= 32
@@ -206,6 +308,13 @@ impl Repository {
             ensure!(
                 !request.require_hook_callbacks && !request.interactive_hook_decision,
                 "Renderer hook interception replaces native hook callbacks"
+            );
+        }
+        if let Some(assisted) = &request.assisted {
+            validate_assisted(assisted, &request.remote)?;
+            ensure!(
+                request.tags.is_empty() && !request.force_with_lease && !request.no_verify,
+                "Assisted push cannot force, verify-skip, or publish tags"
             );
         }
         for variable in [
@@ -260,9 +369,43 @@ impl Repository {
                 && fetch_url.stdout.strip_suffix(b"\n") == Some(request.expected_url.as_bytes()),
             "Remote changed; refresh before pushing"
         );
-        let destinations = self.push_destinations(&request.remote).await?;
+        let destinations = self
+            .push_destinations(
+                &request.remote,
+                request
+                    .assisted
+                    .as_ref()
+                    .map(|assisted| assisted.config_parameters.as_str()),
+            )
+            .await?;
+        if request.assisted.is_some() {
+            ensure!(
+                destinations
+                    .iter()
+                    .all(|destination| destination == &request.expected_url),
+                "Assisted push destination changed; refresh before pushing"
+            );
+        }
         self.push_reference("heads", &request.local_branch, true)
             .await?;
+        if let Some(assisted) = &request.assisted {
+            let checked = self
+                .run(&args(&["check-ref-format", &assisted.remote_ref]))
+                .await?;
+            ensure!(checked.code == 0, "Invalid assisted push destination");
+            let tip = self
+                .run(&args(&[
+                    "rev-parse",
+                    "--verify",
+                    &format!("{}^{{commit}}", assisted.expected_tip),
+                ]))
+                .await?;
+            ensure!(
+                tip.code == 0
+                    && tip.stdout.strip_suffix(b"\n") == Some(assisted.expected_tip.as_bytes()),
+                "Assisted push commit no longer exists"
+            );
+        }
         self.push_reference(
             "heads",
             request
@@ -351,25 +494,42 @@ impl Repository {
             )
             .await?;
         let mut command = args(&["push"]);
-        if request.remote_branch.is_none() {
-            command.push("--set-upstream".into());
-        } else if request.force_with_lease {
-            command.push("--force-with-lease".into());
-        }
-        if request.no_verify {
-            command.push("--no-verify".into());
-        }
-        if request.report_progress {
-            command.push("--progress".into());
-        }
-        command.extend(args(&[
-            "--",
-            &request.remote,
-            &format!("{source}:{destination}"),
-        ]));
-        for name in &request.tags {
-            let tag = self.push_reference("tags", name, true).await?;
-            command.push(format!("{tag}:{tag}").into());
+        if let Some(assisted) = &request.assisted {
+            command.extend(args(&[
+                "--no-force",
+                "--no-mirror",
+                "--no-follow-tags",
+                "--recurse-submodules=no",
+            ]));
+            if request.report_progress {
+                command.push("--progress".into());
+            }
+            command.extend(args(&[
+                "--",
+                &request.remote,
+                &format!("{}:{}", assisted.expected_tip, assisted.remote_ref),
+            ]));
+        } else {
+            if request.remote_branch.is_none() {
+                command.push("--set-upstream".into());
+            } else if request.force_with_lease {
+                command.push("--force-with-lease".into());
+            }
+            if request.no_verify {
+                command.push("--no-verify".into());
+            }
+            if request.report_progress {
+                command.push("--progress".into());
+            }
+            command.extend(args(&[
+                "--",
+                &request.remote,
+                &format!("{source}:{destination}"),
+            ]));
+            for name in &request.tags {
+                let tag = self.push_reference("tags", name, true).await?;
+                command.push(format!("{tag}:{tag}").into());
+            }
         }
         ensure!(
             !self.push_requires_legacy_hooks(request).await?,
@@ -411,6 +571,9 @@ impl Repository {
             );
             None
         };
+        if request.assisted.is_some() {
+            approve_push_entry().await?;
+        }
         let (output, hook_failed) = process::run_bound_remote_push(
             &self.path,
             &command,
@@ -419,6 +582,10 @@ impl Repository {
             proxy,
             request.proxy.as_ref(),
             request.hook_environment.as_ref(),
+            request
+                .assisted
+                .as_ref()
+                .map(|assisted| assisted.config_parameters.as_str()),
         )
         .await?;
         Ok(
@@ -480,6 +647,7 @@ mod tests {
                 interactive_hook_decision: false,
                 proxy: None,
                 hook_environment: None,
+                assisted: None,
             };
             (Self(root), request)
         }
