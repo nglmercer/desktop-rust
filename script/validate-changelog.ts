@@ -1,11 +1,12 @@
-#!/usr/bin/env -S node --require ./script/ts-register.cjs
+#!/usr/bin/env -S node --import @oxc-node/core/register
+import { directoryOf } from './esm-utils'
 
 import * as Path from 'path'
 import * as Fs from 'fs'
 
 import assert from 'assert'
 
-const repositoryRoot = Path.dirname(__dirname)
+const repositoryRoot = Path.dirname(directoryOf(import.meta.url))
 const changelogPath = Path.join(repositoryRoot, 'changelog.json')
 
 // eslint-disable-next-line no-sync

@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module'
+import { directoryOf } from './esm-utils'
+
+const require = createRequire(import.meta.url)
 /* generate-octicons
  *
  * Utility script for generating a strongly typed representation of all
@@ -87,7 +91,10 @@ generateIconData().then(results => {
   console.log(`Writing ${results.length} octicons...`)
 
   const out = fs.createWriteStream(
-    Path.resolve(__dirname, '../app/src/ui/octicons/octicons.generated.ts'),
+    Path.resolve(
+      directoryOf(import.meta.url),
+      '../app/src/ui/octicons/octicons.generated.ts'
+    ),
     {
       encoding: 'utf-8',
     }
@@ -124,7 +131,7 @@ export type OcticonSymbol = OcticonSymbolVariant | OcticonSymbolVariants\n\n`)
   out.end()
 
   console.log('Ensuring generated file is formatted correctly...')
-  const root = Path.dirname(__dirname)
+  const root = Path.dirname(directoryOf(import.meta.url))
   const biome = require.resolve('@biomejs/biome/bin/biome')
   return cp.spawn(
     process.execPath,

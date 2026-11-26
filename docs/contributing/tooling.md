@@ -8,9 +8,10 @@ The repository is configured for [Visual Studio Code](https://code.visualstudio.
 2. Choose **Show Workspace Recommended Extensions**.
 3. Install the Biome and oxlint extensions.
 
-The workspace settings use Biome as the default formatter. TypeScript editor
-support uses `@typescript/compiler-api` because TypeScript 7 currently ships
-the native compiler (`tsc`) without the legacy language-service/compiler API.
+The workspace settings use Biome as the default formatter. The workspace does
+not pin a TypeScript language-service SDK because TypeScript 7 currently ships
+the native compiler (`tsc`) without the legacy language-service/compiler API;
+editors may use their bundled TypeScript language service.
 
 ## Command-line tools
 
@@ -23,10 +24,8 @@ cargo test          # Rust tests
 ```
 
 TypeScript 7 is the `typescript` package and the `tsc` binary in
-`node_modules/.bin`. `@typescript/compiler-api` remains installed side-by-side
-only for code that imports the old compiler API (`script/ts-register.cjs`).
-Do not add new compiler-API consumers; use the TypeScript 7 CLI for normal
-checking.
+`node_modules/.bin`. Development-script entry points run through
+`@oxc-node/core/register`; use the TypeScript 7 CLI for normal checking.
 
 ## Debugging the desktop shell
 

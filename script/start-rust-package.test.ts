@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'vitest'
 
-const RUN_HOOK = require('node:path').resolve(__dirname, 'ts-register.cjs')
+const RUN_HOOK = path.resolve('node_modules/@oxc-node/core/register.mjs')
 
 function startFixture(hang = false, acknowledge = true, argument?: string) {
   const root = mkdtempSync(path.join(tmpdir(), 'desktop-prod-supervisor-'))
@@ -72,7 +72,7 @@ setInterval(() => {
   const child = spawn(
     process.execPath,
     [
-      '--require',
+      '--import',
       RUN_HOOK,
       'script/start-rust-package.ts',
       ...(argument ? [argument] : []),
@@ -141,7 +141,7 @@ async function bounded<T>(value: Promise<T>, timeout: number): Promise<T> {
 async function launchAgain(root: string) {
   const child = spawn(
     process.execPath,
-    ['--require', RUN_HOOK, 'script/start-rust-package.ts'],
+    ['--import', RUN_HOOK, 'script/start-rust-package.ts'],
     {
       cwd: process.cwd(),
       detached: true,

@@ -1,10 +1,11 @@
+import { directoryOf } from './esm-utils'
 import * as Path from 'path'
 import { getProductName, getVersion } from '../app/package-info'
 
 const productName = getProductName()
 const version = getVersion()
 
-const projectRoot = Path.join(__dirname, '..')
+const projectRoot = Path.join(directoryOf(import.meta.url), '..')
 
 export function getDistRoot() {
   return Path.join(projectRoot, 'dist')

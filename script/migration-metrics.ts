@@ -1,3 +1,4 @@
+import { directoryOf, isMainModule } from './esm-utils'
 /**
  * Measures how much of the renderer still depends on the non-Rust code paths.
  * Run with `pnpm migration:status`; the numbers feed rust/ROADMAP.md.
@@ -5,7 +6,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-const root = path.resolve(__dirname, '..')
+const root = path.resolve(directoryOf(import.meta.url), '..')
 
 function walk(directory: string, accept: (file: string) => boolean): string[] {
   const result: string[] = []
@@ -150,7 +151,7 @@ function report(metrics: IMetrics) {
   console.log(lines.join('\n'))
 }
 
-if (require.main === module) {
+if (isMainModule(import.meta.url)) {
   const metrics = measure()
   const mode = process.argv[2]
   if (mode === '--update') {

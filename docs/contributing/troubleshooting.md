@@ -39,11 +39,11 @@ need those GUI libraries.
 
 ## TypeScript version confusion
 
-`node_modules/.bin/tsc` and the `typescript` package are TypeScript 7. The
-`@typescript/compiler-api` package is still present for compiler-API
-compatibility. If a script fails because it imports the compiler API, do not
-replace it with the TypeScript 7 CLI: keep the compatibility dependency aligned
-or migrate the script away from the compiler API deliberately.
+`node_modules/.bin/tsc` and the `typescript` package are TypeScript 7.
+Development scripts run through `@oxc-node/core/register`. If a script fails
+because it imports the legacy TypeScript compiler API, migrate that use to the
+TypeScript 7 CLI or the native unstable API deliberately; do not reintroduce
+the TypeScript 6 compatibility package.
 
 ## Renderer changes do not appear
 

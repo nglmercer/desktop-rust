@@ -1,3 +1,4 @@
+import { directoryOf, isMainModule } from './esm-utils'
 import { spawn, type ChildProcess } from 'node:child_process'
 import * as path from 'node:path'
 import { stopDevelopmentBuild } from './rust-dev-process'
@@ -102,8 +103,10 @@ export async function buildRustProduction(
   }
 }
 
-if (require.main === module) {
-  void buildRustProduction(path.resolve(__dirname, '..')).catch(error => {
+if (isMainModule(import.meta.url)) {
+  void buildRustProduction(
+    path.resolve(directoryOf(import.meta.url), '..')
+  ).catch(error => {
     console.error(error)
     process.exitCode = 1
   })

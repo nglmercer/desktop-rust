@@ -16,8 +16,12 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, it } from 'vitest'
 import { resolveRustTarget } from './printenvz'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../app/test/helpers/node-host-bridge'
 
-const tsRegister = path.resolve(__dirname, 'ts-register.cjs')
+const tsRegister = path.resolve('node_modules/@oxc-node/core/register.mjs')
 
 const directories: string[] = []
 afterEach(() => {
@@ -59,7 +63,7 @@ function fixture() {
   mkdirSync(path.dirname(targetBinary), { recursive: true })
   writeFileSync(targetBinary, 'arm64 binary')
   const invoke = (extra: NodeJS.ProcessEnv = {}) =>
-    spawnSync(process.execPath, ['--require', tsRegister, driver], {
+    spawnSync(process.execPath, ['--import', tsRegister, driver], {
       cwd: root,
       env: {
         ...process.env,
@@ -143,7 +147,7 @@ describe.skipIf(process.platform !== 'linux')(
         )
         const build = spawnSync(
           process.execPath,
-          ['--require', tsRegister, driver],
+          ['--import', tsRegister, driver],
           {
             cwd: root,
             env,
@@ -167,6 +171,7 @@ describe.skipIf(process.platform !== 'linux')(
           '#!/bin/sh\n[ "$1" = "-ilc" ] || exit 2\nexport PRINTENVZ_FIXTURE=loaded\nexec /bin/sh -c "$2"\n'
         )
         chmodSync(shell, 0o755)
+        installNodeHostBridge()
         const previous = process.env.SHELL
         try {
           process.env.SHELL = shell
@@ -184,6 +189,7 @@ describe.skipIf(process.platform !== 'linux')(
           } else {
             process.env.SHELL = previous
           }
+          uninstallNodeHostBridge()
         }
       }, 90_000)
     })

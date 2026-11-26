@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module'
+import { directoryOf } from '../esm-utils'
+
+const require = createRequire(import.meta.url)
 import { getLogLines } from '../changelog/git'
 import {
   convertToChangelogFormat,
@@ -15,7 +19,12 @@ import { readFile } from 'fs/promises'
 
 import { getLatestRelease } from './tags'
 
-const changelogPath = join(__dirname, '..', '..', 'changelog.json')
+const changelogPath = join(
+  directoryOf(import.meta.url),
+  '..',
+  '..',
+  'changelog.json'
+)
 
 async function createReleaseBranch(version: string): Promise<void> {
   try {
@@ -200,7 +209,7 @@ interface IChangelog {
 
 async function getPretext(): Promise<string | null> {
   const pretextPath = join(
-    __dirname,
+    directoryOf(import.meta.url),
     '..',
     '..',
     'app',

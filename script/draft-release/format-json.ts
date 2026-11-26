@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module'
+import { directoryOf } from '../esm-utils'
+
+const require = createRequire(import.meta.url)
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -12,7 +16,7 @@ export function formatJson(
     [
       require.resolve('@biomejs/biome/bin/biome'),
       'format',
-      `--config-path=${join(__dirname, '..', 'biome-release.json')}`,
+      `--config-path=${join(directoryOf(import.meta.url), '..', 'biome-release.json')}`,
       `--stdin-file-path=${filename}`,
     ],
     { input: source, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }

@@ -32,8 +32,8 @@ installer.
   authoritative for the workspace. Cargo uses the root `Cargo.lock`.
 - TypeScript 7 is the canonical `typescript` package and provides the fast
   `tsc` used by `pnpm check:types` and `pnpm compile:script`.
-- `@typescript/compiler-api` remains installed side-by-side only for compiler-API
-  compatibility in `script/ts-register.cjs`.
+- Development-script entry points execute through `@oxc-node/core/register`;
+  the TypeScript 6 compiler API compatibility package has been removed.
 - oxlint is the JavaScript/TypeScript linter. Project rules live in
   `oxlint-rules/`; run `pnpm lint:oxlint`, `pnpm lint:security` and
   `pnpm test:oxlint`.

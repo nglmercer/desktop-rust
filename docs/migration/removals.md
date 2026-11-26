@@ -133,6 +133,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | import `net.isIPv4` en validación de URL BYOK | validación IPv4 pública local estricta sin runtime Node; conserva la normalización URL existente | `app/test/unit/copilot-byok-test.ts`, `pnpm check:types`, `pnpm lint` |
 | import `buffer.kStringMaxLength` en el runner legacy Git | límite congelado de la plataforma soportada de 64 bits sin runtime Node; el runner sigue siendo transitorio | `pnpm check:types`, `pnpm lint` |
 | dependencia renderer `which` y tipos raíz asociados | resolución executable local mediante filesystem host-backed, PATH personalizado, bits Unix y PATHEXT Windows | `app/test/unit/executable-path-test.ts`, `app/test/unit/traditional-hook-test.ts`, `pnpm migration:check` |
+| `script/ts-register.cjs` y `@typescript/compiler-api` | scripts TypeScript ESM ejecutados mediante `@oxc-node/core/register`; TypeScript 7 como checker canónico | `pnpm migration:check`, `pnpm compile:script`, `pnpm test:script` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 

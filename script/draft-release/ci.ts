@@ -1,3 +1,4 @@
+import { directoryOf } from '../esm-utils'
 /**
  * CI helper for the Draft Release workflow (.github/workflows/draft-release.yml).
  *
@@ -5,7 +6,7 @@
  * of truth for version computation, tag discovery, and changelog aggregation.
  *
  * Usage (from repo root):
- *   node --require ./script/ts-register.cjs script/draft-release/ci.ts <command> [args]
+ *   node --import @oxc-node/core/register script/draft-release/ci.ts <command> [args]
  *
  * Commands:
  *   version <channel>
@@ -32,7 +33,7 @@ import { getNextVersionNumber, setAppPackageVersion } from './version'
 import { getChangelogEntriesSince } from '../changelog/parser'
 import { Channel } from './channel'
 
-const repoRoot = join(__dirname, '..', '..')
+const repoRoot = join(directoryOf(import.meta.url), '..', '..')
 
 function parseChannel(arg: string): Channel {
   if (arg === 'production' || arg === 'beta') {

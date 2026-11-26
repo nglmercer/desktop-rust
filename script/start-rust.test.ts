@@ -18,7 +18,7 @@ import { watchRustBundle, type DevWatcher } from './rust-dev-watcher'
 import { stopDevelopmentBuild } from './rust-dev-process'
 import { copyStaticResources } from '../vite.config'
 
-const RUN_HOOK = require('node:path').resolve(__dirname, 'ts-register.cjs')
+const RUN_HOOK = path.resolve('node_modules/@oxc-node/core/register.mjs')
 
 const enabled =
   process.env.DESKTOP_TEST_RUST_DEV === '1' &&
@@ -41,7 +41,7 @@ function startHost(
     useDefaultCommand ? 'pnpm' : process.execPath,
     useDefaultCommand
       ? ['start', ...args]
-      : ['--require', RUN_HOOK, 'script/start-rust.ts', ...args],
+      : ['--import', RUN_HOOK, 'script/start-rust.ts', ...args],
     {
       cwd: process.cwd(),
       detached: useDefaultCommand,
@@ -582,7 +582,7 @@ describe.skipIf(process.platform === 'win32')(
       setInterval(() => {}, 1000)
     `
       )
-      const child = spawn(process.execPath, ['--require', RUN_HOOK, script], {
+      const child = spawn(process.execPath, ['--import', RUN_HOOK, script], {
         cwd: process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
       })

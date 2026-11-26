@@ -1,3 +1,4 @@
+import { directoryOf } from './esm-utils'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,7 +8,7 @@ import { installDevelopmentStopSignals } from './rust-dev-signals'
 
 /** Start the staged desktop and request its normal shutdown when signalled. */
 async function main(): Promise<void> {
-  const repo = path.resolve(__dirname, '..')
+  const repo = path.resolve(directoryOf(import.meta.url), '..')
   const releaseLock = acquirePackageOutputLock(repo, 'production')
   let safeToRelease = true
   try {

@@ -1,3 +1,4 @@
+import { directoryOf } from '../esm-utils'
 import * as Path from 'path'
 import * as Fs from 'fs'
 import { gt as greaterThan } from 'semver'
@@ -143,7 +144,7 @@ export async function convertToChangelogFormat(
 }
 
 export function getChangelogEntriesSince(previousVersion: string): string[] {
-  const root = Path.dirname(Path.dirname(__dirname))
+  const root = Path.dirname(Path.dirname(directoryOf(import.meta.url)))
   const changelogPath = Path.join(root, 'changelog.json')
 
   // eslint-disable-next-line no-sync

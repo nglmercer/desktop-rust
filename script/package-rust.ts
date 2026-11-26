@@ -1,3 +1,4 @@
+import { directoryOf, isMainModule } from './esm-utils'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -600,11 +601,11 @@ function packageRustWithOutput(
   return output
 }
 
-if (require.main === module) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2)
   if (args.includes('--help')) {
     console.log(
-      'Usage: node --require ./script/ts-register.cjs script/package-rust.ts [auto|linux|macos|windows]'
+      'Usage: node --import @oxc-node/core/register script/package-rust.ts [auto|linux|macos|windows]'
     )
     console.log(
       'Builds and stages the Rust desktop and embedded browser UI for this host.'
@@ -618,7 +619,10 @@ if (require.main === module) {
     process.exitCode = 1
   } else {
     try {
-      const output = packageRust(path.resolve(__dirname, '..'), args[0])
+      const output = packageRust(
+        path.resolve(directoryOf(import.meta.url), '..'),
+        args[0]
+      )
       console.log(`Package ready: ${output}`)
     } catch (error) {
       console.error(

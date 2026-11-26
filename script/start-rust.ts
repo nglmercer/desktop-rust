@@ -1,3 +1,4 @@
+import { directoryOf } from './esm-utils'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,7 +8,7 @@ import { watchRustBundle, type DevWatcher } from './rust-dev-watcher'
 import { installDevelopmentStopSignals } from './rust-dev-signals'
 import { stopDevelopmentBuild } from './rust-dev-process'
 
-const root = path.resolve(__dirname, '..')
+const root = path.resolve(directoryOf(import.meta.url), '..')
 
 /** Build the native host and use Cargo's artifact path rather than guessing its target directory. */
 async function buildHost(

@@ -1,8 +1,12 @@
+import { directoryOf } from './esm-utils'
 import { execFileSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-const sourceDirectory = path.resolve(__dirname, '../vendor/printenvz')
+const sourceDirectory = path.resolve(
+  directoryOf(import.meta.url),
+  '../vendor/printenvz'
+)
 
 /** Return the path to the installed environment printer. */
 export function getPrintenvzPath(directory = sourceDirectory): string {

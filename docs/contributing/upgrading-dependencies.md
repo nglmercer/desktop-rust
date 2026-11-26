@@ -112,17 +112,16 @@ specific set of dependencies - this will make reviews easier to perform.
 ## TypeScript upgrades
 
 TypeScript 7 is the canonical `typescript` package and command-line type
-checker. `@typescript/compiler-api` remains installed side-by-side only for the
-legacy compiler API used by `script/ts-register.cjs`.
+checker. Development scripts use `@oxc-node/core/register` for TypeScript
+execution rather than the legacy TypeScript compiler API.
 
-When upgrading either compiler:
+When upgrading TypeScript or the script loader:
 
-- keep the canonical TypeScript 7 package, the compiler-API compatibility
-  alias, and the TypeScript-based packages under `vendor/` intentionally aligned
-  with the API they consume;
+- keep the canonical TypeScript 7 package and the TypeScript-based packages
+  under `vendor/` intentionally aligned with the API they consume;
 - preserve strictness and library declaration checking;
 - update incompatible dependencies or callers rather than disabling checks;
-- do not add new consumers of the TypeScript 6 compiler API.
+- do not reintroduce the TypeScript 6 compiler API.
 
 Vite compiles the application and syntax-highlighting worker using `bundler`
 module resolution. Build scripts use `nodenext`, and native modules use `node16`
@@ -145,9 +144,9 @@ pnpm test:oxlint
 pnpm lint
 ```
 
-For compiler-API compatibility, additionally run the branch-rules oracle
-typecheck in `rust/tests/branch-rules-oracle` and the script tests that exercise
-`script/ts-register.cjs` and native-module output.
+Additionally run the branch-rules oracle typecheck in
+`rust/tests/branch-rules-oracle` and the script tests that exercise native-module
+output.
 
 Also run the native-module build/test commands for each TypeScript-based package
 under `vendor/` when their compiler or emitted module format changes.

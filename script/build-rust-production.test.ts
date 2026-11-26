@@ -24,7 +24,7 @@ import {
   viteOutputDirectory,
 } from './vite-output'
 
-const RUN_HOOK = require('node:path').resolve(__dirname, 'ts-register.cjs')
+const RUN_HOOK = path.resolve('node_modules/@oxc-node/core/register.mjs')
 
 const directories: string[] = []
 
@@ -339,7 +339,7 @@ describe.skipIf(process.platform === 'win32')(
           root
         )}).catch(() => { process.exitCode = 1 })\n`
       )
-      const child = spawn(process.execPath, ['--require', RUN_HOOK, driver], {
+      const child = spawn(process.execPath, ['--import', RUN_HOOK, driver], {
         cwd: process.cwd(),
         env: { ...env, WAIT_VITE: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],

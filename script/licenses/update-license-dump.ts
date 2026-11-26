@@ -1,3 +1,4 @@
+import { directoryOf } from '../esm-utils'
 import * as path from 'path'
 import { promisify } from 'util'
 
@@ -43,7 +44,10 @@ const assertValidLicensesIn = async (dir: string) => {
       licensesMessage += `${key} (${license.repository}): ${license.license}\n`
     }
 
-    const overridesPath = path.join(__dirname, 'license-overrides.ts')
+    const overridesPath = path.join(
+      directoryOf(import.meta.url),
+      'license-overrides.ts'
+    )
 
     const message = `The following dependencies have unknown or non-permissive licenses. Check it out and update ${overridesPath} if appropriate:\n${licensesMessage}`
     throw new Error(message)
