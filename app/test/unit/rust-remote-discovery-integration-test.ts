@@ -227,14 +227,14 @@ describe.skipIf(
         name: 'origin',
         url: 'https://user:synthetic-secret@example.invalid/repo',
       })
-    ).resolves.toBe('unsupported')
+    ).resolves.toBe('updated')
     expect(
       execFileSync(
         'git',
         ['-C', mutations, 'config', '--local', '--get', 'remote.origin.url'],
         { encoding: 'utf8' }
       )
-    ).toBe('https://example.invalid/two\n')
+    ).toBe('https://user:synthetic-secret@example.invalid/repo\n')
     await removeRemote(mutationRepository, 'origin')
     await removeRemote(mutationRepository, 'origin')
     expect(

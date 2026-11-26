@@ -226,7 +226,7 @@ pub async fn safe_remote_url(path: &Path, name: &str) -> Result<Value> {
     let Ok(url) = std::str::from_utf8(bytes) else {
         return Ok(json!({"kind":"unsupported"}));
     };
-    if !exact_remote_url(url) {
+    if !safe_url(url) {
         return Ok(json!({"kind":"unsupported"}));
     }
     Ok(json!({"kind":"resolved","url":url}))
@@ -447,6 +447,10 @@ mod tests {
         assert_eq!(
             String::from_utf8(output.stdout).unwrap().trim_end(),
             "https://user:synthetic-secret@example.invalid/repo"
+        );
+        assert_eq!(
+            super::safe_remote_url(&root, "origin").await.unwrap(),
+            serde_json::json!({"kind":"unsupported"})
         );
         std::fs::remove_dir_all(root).unwrap();
     }
