@@ -2,8 +2,16 @@ import { defineConfig } from 'vitest/config'
 import { readFileSync } from 'node:fs'
 import { parseEnv } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 // Do not load the application Vite config: it aliases Node modules for the webview.
+
+const legacyCryptoPackage = createRequire(
+  createRequire(
+    createRequire(import.meta.url).resolve('vite-plugin-node-polyfills')
+  ).resolve('node-stdlib-browser')
+).resolve('crypto-browserify')
+
 Object.assign(
   process.env,
   parseEnv(readFileSync(new URL('.test.env', import.meta.url), 'utf8'))
@@ -41,6 +49,7 @@ export default defineConfig({
           new URL(`./app/src/web/${name}.ts`, import.meta.url)
         ),
       })),
+      { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
       {
         find: /^desktop-notifications$/,
         replacement: fileURLToPath(

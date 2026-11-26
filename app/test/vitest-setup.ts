@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { expect, vi } from 'vitest'
+import { beforeEach, expect, vi } from 'vitest'
 import { JSDOM } from 'jsdom'
 import packageInfo from '../package.json'
 import { arch, homedir, hostname, release, tmpdir } from 'node:os'
@@ -59,6 +59,21 @@ if (typeof window !== 'undefined') {
   if (window.ResizeObserver === undefined) {
     Object.assign(window, { ResizeObserver: globalThis.ResizeObserver })
   }
+}
+
+// Renderer Git/filesystem shims are host-backed even when a test uses the real
+// Rust WebSocket backend. Give ordinary suites the Node implementation of that
+// host bridge; suites whose purpose is to test or replace the bridge install
+// their own explicit boundary instead.
+const ownsHostBridge =
+  /(?:^|\/)(?:script\/|web-|backend-|pull-hook-callbacks-test|commit-message-test)/.test(
+    expect.getState().testPath ?? ''
+  )
+if (!ownsHostBridge) {
+  beforeEach(async () => {
+    const { installNodeHostBridge } = await import('./helpers/node-host-bridge')
+    installNodeHostBridge()
+  })
 }
 
 // Opt-in: run every test file against a real Rust server, so the renderer takes
