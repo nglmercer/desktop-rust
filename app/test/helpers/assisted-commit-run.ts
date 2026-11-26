@@ -63,12 +63,9 @@ export async function createAssistedCommitRunHarness(
   if (account === null) {
     throw new Error('Could not install the synthetic credential session')
   }
-  await stores.repositoriesStore['db'].delete()
-  await stores.repositoriesStore['db'].open()
   const statsDb = new TestStatsDatabase(
     `TestStatsDatabase-assisted-${databaseSequence}`
   )
-  await statsDb.reset()
   const statsStore = new StatsStore(
     statsDb,
     new TestActivityMonitor(),
