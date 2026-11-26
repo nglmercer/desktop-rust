@@ -3,7 +3,6 @@ import '../lib/logging/renderer/install'
 
 import * as React from 'react'
 import * as ReactDOM from 'react-dom'
-import * as Path from 'path'
 import { App } from './app'
 import { API } from '../lib/api'
 import { installAuthenticatedImageTokenHandler } from '../lib/authenticated-image-token-handler'
@@ -80,16 +79,6 @@ if (__DEV__) {
 }
 
 migrateRendererGUID()
-
-// Tell dugite where to find the git environment,
-// see https://github.com/desktop/dugite/pull/85
-process.env['LOCAL_GIT_DIRECTORY'] = Path.resolve(__dirname, 'git')
-
-// Ensure that dugite infers the GIT_EXEC_PATH
-// based on the LOCAL_GIT_DIRECTORY env variable
-// instead of just blindly trusting what's set in
-// the current environment. See https://git.io/JJ7KF
-delete process.env.GIT_EXEC_PATH
 
 const startTime = performance.now()
 
