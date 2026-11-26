@@ -18,6 +18,14 @@ const LIMITS = {
   outputWindow: 256 * 1024,
 }
 
+let lstatHook: ((path: string) => Promise<void> | void) | undefined
+
+export function setNodeHostBridgeLstatHook(
+  hook: ((path: string) => Promise<void> | void) | undefined
+) {
+  lstatHook = hook
+}
+
 let readRegularVerifiedHook: ((path: string) => void) | undefined
 
 export function setNodeHostBridgeReadRegularVerifiedHook(
@@ -202,7 +210,11 @@ export function installNodeHostBridge() {
         await fs.chmod(options.path, options.mode)
         return null
       case 'lstat': {
-        return statResult(await fs.lstat(options.path, { bigint: true }))
+        const result = statResult(
+          await fs.lstat(options.path, { bigint: true })
+        )
+        await lstatHook?.(options.path)
+        return result
       }
       case 'read-range': {
         const bytes = readFileSync(options.path)

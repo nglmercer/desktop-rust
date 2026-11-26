@@ -18,9 +18,10 @@ import * as Dugite from 'dugite'
 import * as FileSystem from 'fs/promises'
 import * as FileSystemSync from 'fs'
 import type { PathLike } from 'fs'
-import { basename, join, sep } from 'path'
+import { basename, join, resolve, sep } from 'path'
 import {
   installNodeHostBridge,
+  setNodeHostBridgeLstatHook,
   setNodeHostBridgeReadRegularVerifiedHook,
   uninstallNodeHostBridge,
 } from '../../helpers/node-host-bridge'
@@ -452,6 +453,15 @@ function reset() {
 
 let rustClient: ReturnType<typeof backend>
 
+function throwPendingHistoryFailure() {
+  if (historyFailure !== undefined && pushArguments.length > 0) {
+    const failure = historyFailure
+    statusFailure = undefined
+    historyFailure = undefined
+    throw failure
+  }
+}
+
 function parseDetailedStatusOutput(output: string) {
   const records = output.split('\0')
   const result: unknown[] = []
@@ -510,6 +520,58 @@ function nodeBackend(t: TestContext) {
         pathExists: (path: string) => rustClient.pathExists(path),
         directoryExists: (path: string) => rustClient.directoryExists(path),
         repositoryType: (path: string) => rustClient.repositoryType(path),
+        fetchRepositoryRemote: async (
+          path: string,
+          remote: string,
+          expectedUrl: string,
+          recurseSubmodules: boolean,
+          isBackgroundTask = false,
+          expectedSamlOwner?: string,
+          onProgress?: never,
+          refspec?: string,
+          proxy?: never
+        ) => {
+          const result = await actualExec(
+            [
+              'fetch',
+              '--progress',
+              '--prune',
+              recurseSubmodules
+                ? '--recurse-submodules'
+                : '--no-recurse-submodules',
+              ...(refspec === undefined ? [] : [refspec]),
+              '--',
+              remote,
+            ],
+            path
+          )
+          if (pushArguments.length > 0) {
+            await afterFollowUpFetch?.()
+          }
+          return result.exitCode === 0
+            ? undefined
+            : { exitCode: result.exitCode, errorKind: null }
+        },
+        repositoryReadSnapshot: async (
+          path: string,
+          method: 'renderer_staged_diff' | 'renderer_working_file',
+          params: Record<string, unknown>,
+          expectedSha256?: string
+        ) => {
+          if (
+            method === 'renderer_working_file' &&
+            typeof params.path === 'string' &&
+            basename(params.path) === 'image.png'
+          ) {
+            await beforeImageRead?.()
+          }
+          return rustClient.repositoryReadSnapshot(
+            path,
+            method,
+            params,
+            expectedSha256
+          )
+        },
         detailedRepositoryStatus: async (
           path: string,
           includeUntracked = true,
@@ -535,9 +597,575 @@ function nodeBackend(t: TestContext) {
           )
           return parseDetailedStatusOutput(result.stdout) as never
         },
+        repositoryStatusContext: async (path: string) => {
+          const gitDirResult = await actualExec(
+            ['rev-parse', '--git-dir'],
+            path
+          )
+          const gitDir = resolve(path, gitDirResult.stdout.trim())
+          const exists = async (name: string) => {
+            try {
+              await FileSystem.lstat(join(gitDir, name))
+              return true
+            } catch {
+              return false
+            }
+          }
+          return {
+            mergeHeadFound: await exists('MERGE_HEAD'),
+            squashMsgFound: await exists('SQUASH_MSG'),
+            isCherryPickingHeadFound: await exists('CHERRY_PICK_HEAD'),
+            rebaseInternalState: null,
+          }
+        },
+        repositoryAssistedCommitGitPath: async (
+          path: string,
+          gitPath: string
+        ) => {
+          const result = await actualExec(
+            ['rev-parse', '--path-format=absolute', '--git-path', gitPath],
+            path
+          )
+          return result.stdout.trim()
+        },
+        repositoryLastFetch: async (path: string) => {
+          const gitDirResult = await actualExec(
+            ['rev-parse', '--absolute-git-dir'],
+            path
+          )
+          if (gitDirResult.exitCode !== 0) return { kind: 'unavailable' }
+          try {
+            const metadata = await FileSystem.stat(
+              join(gitDirResult.stdout.trim(), 'FETCH_HEAD')
+            )
+            if (metadata.size === 0) return { kind: 'empty' }
+            return { kind: 'fetched', time: Math.floor(metadata.mtimeMs) }
+          } catch {
+            return { kind: 'unavailable' }
+          }
+        },
+        repositoryEffectiveGitIdentity: async (
+          path: string,
+          role: 'author' | 'committer'
+        ) => {
+          const result = await actualExec(
+            [
+              'var',
+              role === 'author' ? 'GIT_AUTHOR_IDENT' : 'GIT_COMMITTER_IDENT',
+            ],
+            path,
+            { successExitCodes: new Set([0, 128]) } as never
+          )
+          return result.exitCode === 0 ? result.stdout : null
+        },
+        repositoryWorktrees: async (path: string) => {
+          const head = await actualExec(
+            ['rev-parse', '--verify', '--quiet', 'HEAD'],
+            path,
+            { successExitCodes: new Set([0, 1]) } as never
+          )
+          const symbolic = await actualExec(
+            ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+            path,
+            { successExitCodes: new Set([0, 1]) } as never
+          )
+          return [
+            {
+              path,
+              head: head.exitCode === 0 ? head.stdout.trim() : '0'.repeat(40),
+              branch: symbolic.exitCode === 0 ? symbolic.stdout.trim() : null,
+              isDetached: symbolic.exitCode !== 0,
+              type: 'main',
+              isLocked: false,
+              isPrunable: false,
+            },
+          ]
+        },
+        repositoryGitReadSetting: async (
+          path: string,
+          key: string,
+          onlyLocal: boolean,
+          canonicalBool: boolean
+        ) => {
+          const result = await actualExec(
+            [
+              'config',
+              ...(onlyLocal ? ['--local'] : []),
+              ...(canonicalBool ? ['--type=bool'] : []),
+              '--get',
+              key,
+            ],
+            path,
+            { successExitCodes: new Set([0, 1]) } as never
+          )
+          return result.exitCode === 0 ? result.stdout.trimEnd() : null
+        },
+        repositoryWorkingFileMetadataVersions: async (
+          path: string,
+          paths: ReadonlyArray<string>
+        ) =>
+          Promise.all(
+            paths.map(async file => {
+              try {
+                const metadata = await FileSystem.lstat(join(path, file), {
+                  bigint: true,
+                })
+                return [
+                  metadata.dev,
+                  metadata.ino,
+                  metadata.mode,
+                  metadata.size,
+                  metadata.mtimeNs,
+                  metadata.ctimeNs,
+                ].join(':')
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                  return null
+                }
+                throw error
+              }
+            })
+          ),
+        repositoryAssistedCommitConfig: async (path: string) => {
+          const result = await actualExec(
+            ['config', '--null', '--list', '--includes'],
+            path,
+            {
+              env: {
+                GIT_CONFIG: undefined,
+                GIT_CONFIG_COUNT: '0',
+                GIT_CONFIG_PARAMETERS: '',
+              },
+            } as never
+          )
+          if (result.exitCode !== 0) {
+            throw new Error('Cannot capture Git configuration')
+          }
+          return result.stdout
+            .split('\0')
+            .filter(item => item.length > 0)
+            .flatMap(item => {
+              const delimiter = item.indexOf('\n')
+              const key = delimiter === -1 ? item : item.slice(0, delimiter)
+              const value = delimiter === -1 ? null : item.slice(delimiter + 1)
+              const firstDot = key.indexOf('.')
+              const lastDot = key.lastIndexOf('.')
+              if (firstDot === -1 || lastDot === -1) {
+                throw new Error('configuration key has no section')
+              }
+              const section = key.slice(0, firstDot)
+              if (
+                section.toLowerCase() === 'include' ||
+                section.toLowerCase() === 'includeif'
+              ) {
+                return []
+              }
+              return [
+                {
+                  section,
+                  subsection:
+                    firstDot === lastDot
+                      ? null
+                      : key.slice(firstDot + 1, lastDot),
+                  name: key.slice(lastDot + 1),
+                  value,
+                },
+              ]
+            })
+        },
+        repositoryAssistedCommitRefs: async (path: string) => {
+          const result = await actualExec(
+            ['for-each-ref', '--format=%(objectname)%00%(refname)%00%(symref)'],
+            path
+          )
+          if (result.exitCode !== 0) {
+            throw new Error('Cannot capture repository references')
+          }
+          return result.stdout
+            .replace(/\n$/, '')
+            .split('\n')
+            .filter(row => row.length > 0)
+            .map(row => {
+              const [objectId, name, target] = row.split('\0')
+              return { objectId, name, target: target || null }
+            })
+        },
+        repositoryAssistedCommitIndexEntries: async (path: string) => {
+          const result = await actualExec(['ls-files', '--stage', '-z'], path, {
+            encoding: 'buffer',
+          } as never)
+          if (result.exitCode !== 0) {
+            throw new Error('Cannot capture index entries')
+          }
+          return Buffer.isBuffer(result.stdout)
+            ? result.stdout
+            : Buffer.from(result.stdout)
+        },
+        repositoryAssistedCommitSafety: async (path: string) => {
+          const replacements = await actualExec(['replace', '--list'], path)
+          if (replacements.exitCode !== 0) {
+            throw new Error('Cannot inspect replacement refs')
+          }
+          if (replacements.stdout.length > 0) {
+            return {
+              kind: 'invalid',
+              message:
+                'Assisted commits do not support replacement refs or grafted history',
+            }
+          }
+          const gitDirResult = await actualExec(
+            ['rev-parse', '--absolute-git-dir'],
+            path
+          )
+          const gitDir = gitDirResult.stdout.trim()
+          const exists = async (name: string) => {
+            try {
+              await FileSystem.lstat(join(gitDir, name))
+              return true
+            } catch {
+              return false
+            }
+          }
+          if (await exists('info/grafts')) {
+            return {
+              kind: 'invalid',
+              message:
+                'Assisted commits do not support replacement refs or grafted history',
+            }
+          }
+          for (const name of [
+            'MERGE_HEAD',
+            'CHERRY_PICK_HEAD',
+            'REVERT_HEAD',
+            'rebase-merge',
+            'rebase-apply',
+            'sequencer',
+            'BISECT_LOG',
+          ]) {
+            if (await exists(name)) {
+              return {
+                kind: 'invalid',
+                message: `Cannot create assisted commits during a Git operation (${name})`,
+              }
+            }
+          }
+          const conflicts = await actualExec(
+            ['ls-files', '--unmerged', '-z'],
+            path
+          )
+          if (conflicts.exitCode !== 0) {
+            throw new Error('Cannot inspect unresolved index entries')
+          }
+          if (conflicts.stdout.length > 0) {
+            return {
+              kind: 'invalid',
+              message: 'The real index contains unresolved conflicts',
+            }
+          }
+          return { kind: 'ok' }
+        },
+        repositoryRendererWorkingDiff: async (
+          path: string,
+          file: string,
+          base: 'head' | 'index' | 'empty',
+          hideWhitespace: boolean,
+          noTextconv: boolean
+        ) => {
+          const common = [
+            'diff',
+            ...(noTextconv ? ['--no-textconv'] : []),
+            ...(hideWhitespace ? ['-w'] : []),
+            '--no-ext-diff',
+            '--patch-with-raw',
+            '-z',
+            '--no-color',
+          ]
+          if (base === 'empty') {
+            let input: Buffer
+            try {
+              input = await FileSystem.readFile(join(path, file))
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'EISDIR') {
+                return { stdout: '', stderr: '' }
+              }
+              throw error
+            }
+            const empty = await actualExec(
+              [...common, '--no-index', '--', '/dev/null', '-'],
+              path,
+              {
+                encoding: 'buffer',
+                stdin: input,
+                successExitCodes: new Set([0, 1]),
+              } as never
+            )
+            const emptyBytes = (value: string | Buffer) =>
+              Buffer.isBuffer(value) ? value : Buffer.from(value)
+            return {
+              stdout: emptyBytes(empty.stdout).toString('base64'),
+              stderr: emptyBytes(empty.stderr).toString('base64'),
+            }
+          }
+          const result = await actualExec(
+            [...common, ...(base === 'head' ? ['HEAD'] : []), '--', file],
+            path,
+            { encoding: 'buffer' } as never
+          )
+          const bytes = (value: string | Buffer) =>
+            Buffer.isBuffer(value) ? value : Buffer.from(value)
+          return {
+            stdout: bytes(result.stdout).toString('base64'),
+            stderr: bytes(result.stderr).toString('base64'),
+          }
+        },
+        repositorySafeFetchRemotes: async (path: string) => {
+          const result = await actualExec(['remote', '-v'], path)
+          if (result.exitCode !== 0) return null
+          const remotes = new Map<string, string>()
+          for (const line of result.stdout.split('\n')) {
+            const match = /^([^\s]+)\s+([^\s]+) \(fetch\)$/.exec(line)
+            if (match !== null) remotes.set(match[1], match[2])
+          }
+          return [...remotes].map(([name, url]) => ({ name, url }))
+        },
+        repositoryAssistedCommitHead: async (path: string) => {
+          const run = async (args: string[]) => actualExec(args, path)
+          const line = (value: string) => value.trimEnd()
+          const directory = await run(['rev-parse', '--absolute-git-dir'])
+          if (directory.exitCode !== 0) {
+            return { kind: 'invalid', message: 'Cannot read the Git directory' }
+          }
+          const top = await run(['rev-parse', '--show-toplevel'])
+          if (top.exitCode !== 0) {
+            return { kind: 'invalid', message: 'Cannot read the worktree root' }
+          }
+          const format = await run(['rev-parse', '--show-ref-format'])
+          if (format.exitCode !== 0) {
+            return { kind: 'invalid', message: 'Cannot read the ref format' }
+          }
+          const symbolic = await run([
+            'symbolic-ref',
+            '--quiet',
+            '--no-recurse',
+            'HEAD',
+          ])
+          const ref = symbolic.exitCode === 0 ? line(symbolic.stdout) : null
+          const tip = await run([
+            'rev-parse',
+            '--verify',
+            '--quiet',
+            '--end-of-options',
+            'HEAD^{commit}',
+          ])
+          const sha = tip.exitCode === 0 ? line(tip.stdout) : null
+          if (ref === null && sha === null) {
+            return {
+              kind: 'invalid',
+              message: 'An unborn detached HEAD cannot be committed',
+            }
+          }
+          return {
+            kind: 'ok',
+            gitDir: line(directory.stdout),
+            worktreeRoot: line(top.stdout),
+            refFormat: line(format.stdout),
+            ref,
+            sha,
+          }
+        },
+        repositoryRefLockContext: async (
+          path: string,
+          reference: string,
+          expectedValue: string
+        ) => {
+          const format = await actualExec(
+            ['rev-parse', '--show-ref-format'],
+            path
+          )
+          if (format.exitCode !== 0 || format.stdout.trim() !== 'files') {
+            throw new Error(
+              'Parent-owned ref locks require file-backed Git refs'
+            )
+          }
+          const names = reference === 'HEAD' ? ['HEAD'] : ['HEAD', reference]
+          const paths = []
+          for (const name of names) {
+            const output = await actualExec(
+              ['rev-parse', '--path-format=absolute', '--git-path', name],
+              path
+            )
+            if (output.exitCode !== 0) {
+              throw new Error('Cannot resolve ref lock path')
+            }
+            paths.push(output.stdout.trim())
+          }
+          const current = await actualExec(
+            [
+              'rev-parse',
+              '--verify',
+              '--quiet',
+              '--end-of-options',
+              `${reference}^{commit}`,
+            ],
+            path,
+            { successExitCodes: new Set([0, 1]) } as never
+          )
+          const actual =
+            current.exitCode === 0
+              ? current.stdout.trim()
+              : '0'.repeat(expectedValue.length)
+          return { paths, matches: actual === expectedValue }
+        },
+        repositoryProtectedResources: async (path: string) => {
+          const gitOutput = async (args: string[]) => {
+            const result = await actualExec(args, path)
+            if (result.exitCode !== 0) {
+              throw new Error(`Git resource discovery failed: ${result.stderr}`)
+            }
+            return result
+          }
+          const outputPath = (output: string) => output.replace(/\r?\n$/, '')
+          const directory = outputPath(
+            (await gitOutput(['rev-parse', '--absolute-git-dir'])).stdout
+          )
+          const common = outputPath(
+            (
+              await gitOutput([
+                'rev-parse',
+                '--path-format=absolute',
+                '--git-common-dir',
+              ])
+            ).stdout
+          )
+          const object = outputPath(
+            (
+              await gitOutput([
+                'rev-parse',
+                '--path-format=absolute',
+                '--git-path',
+                'objects',
+              ])
+            ).stdout
+          )
+          const alternates = await gitOutput([
+            '-c',
+            'core.quotePath=false',
+            'count-objects',
+            '-v',
+          ])
+          const objects = [object]
+          for (const line of alternates.stdout.split('\n')) {
+            if (line.startsWith('alternate: ')) {
+              objects.push(line.slice('alternate: '.length).replace(/\r$/, ''))
+            }
+          }
+          const original = [path, directory, common, ...objects]
+          const canonical = await Promise.all(
+            original.map(async value => await FileSystem.realpath(value))
+          )
+          return {
+            paths: [...original, ...canonical],
+            objectDirectories: objects,
+            objectRoutingDiagnostics: alternates.stderr
+              .split('\n')
+              .filter(
+                line =>
+                  line.length > 0 &&
+                  !line.startsWith('warning: garbage found: ')
+              )
+              .join('\n'),
+          }
+        },
         canonicalMutationPath: (path: string) =>
           rustClient.canonicalMutationPath(path),
+        repositoryRendererCommitDiff: async (
+          path: string,
+          revision: string,
+          file: string,
+          oldPath: string | undefined,
+          hideWhitespace: boolean
+        ) => {
+          const result = await actualExec(
+            [
+              '--literal-pathspecs',
+              'log',
+              ...(hideWhitespace ? ['-w'] : []),
+              '-m',
+              '-1',
+              '--first-parent',
+              '--patch-with-raw',
+              '--format=',
+              '-z',
+              '--no-color',
+              '--end-of-options',
+              revision,
+              '--',
+              file,
+              ...(oldPath === undefined ? [] : [oldPath]),
+            ],
+            path,
+            { encoding: 'buffer' } as never
+          )
+          if (result.exitCode !== 0) {
+            throw new Error(result.stderr.toString())
+          }
+          return Buffer.isBuffer(result.stdout)
+            ? new Uint8Array(result.stdout)
+            : new Uint8Array(Buffer.from(result.stdout))
+        },
+        repositoryRendererHistory: async (
+          path: string,
+          revision: string | undefined,
+          limit: number | undefined,
+          skip: number | undefined,
+          firstParent: boolean,
+          excludeRemotes: boolean
+        ) => {
+          throwPendingHistoryFailure()
+          const { formatArgs } = createLogParser({
+            sha: '%H',
+            shortSha: '%h',
+            summary: '%s',
+            body: '%b',
+            author: '%an <%ae> %ad',
+            committer: '%cn <%ce> %cd',
+            parents: '%P',
+            trailers: '%(trailers:unfold,only)',
+            refs: '%D',
+          })
+          const result = await actualExec(
+            [
+              'log',
+              '--date=raw',
+              ...(limit === undefined || limit === null
+                ? []
+                : [`--max-count=${limit}`]),
+              ...(skip === undefined || skip === null
+                ? []
+                : [`--skip=${skip}`]),
+              ...formatArgs,
+              '--no-show-signature',
+              '--no-color',
+              ...(firstParent ? ['--first-parent'] : []),
+              ...(excludeRemotes ? ['--not', '--remotes'] : []),
+              ...(revision === undefined
+                ? []
+                : [
+                    ...(excludeRemotes ? ['--not'] : []),
+                    '--end-of-options',
+                    revision,
+                  ]),
+              '--',
+            ],
+            path,
+            { successExitCodes: new Set([0, 128]) } as never
+          )
+          return result.exitCode === 128
+            ? null
+            : Buffer.from(result.stdout).toString('base64')
+        },
         repositoryRendererCommit: async (path: string, ref: string) => {
+          throwPendingHistoryFailure()
           await afterHistoryRead?.()
           const { formatArgs } = createLogParser({
             sha: '%H',
@@ -567,6 +1195,7 @@ function nodeBackend(t: TestContext) {
           return Buffer.from(result.stdout).toString('base64')
         },
         repositoryRendererCommitChanges: async (path: string, sha: string) => {
+          throwPendingHistoryFailure()
           await afterHistoryRead?.()
           const result = await actualExec(
             [
@@ -3985,15 +4614,16 @@ describe('assisted native push boundary', () => {
     h.dispatcher.setPushAfterAssistedCommit(repository, true)
     const matches = await fixtures.createPathMatcher(first)
     let retargeted = false
-    afterModeStat = async path => {
+    setNodeHostBridgeLstatHook(async path => {
       if (pushArguments.length === 0 || !(await matches(path))) {
         return
       }
-      afterModeStat = undefined
+      setNodeHostBridgeLstatHook(undefined)
       await FileSystem.unlink(alias)
       await FileSystem.symlink(second, alias, 'file')
       retargeted = true
-    }
+    })
+    t.after(() => setNodeHostBridgeLstatHook(undefined))
     capturePushes = true
     const outcome = await h.dispatcher.createCopilotAssistedCommits(
       repository,
