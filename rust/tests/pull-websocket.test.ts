@@ -129,12 +129,32 @@ it('pulls through a real WebSocket bridge and preserves conflicts and hook polic
   const marker = path.join(directory, 'hook-ran')
   await writeFile(hook, `#!/bin/sh\nprintf ran > '${marker}'\n`)
   await chmod(hook, 0o755)
+  const chunks: Array<{ stream: string; text: string }> = []
+  const reviewed = vi.fn()
   await expect(
-    client.pullRepositoryRemote(target, {
-      ...request,
-      require_hook_callbacks: false,
-    })
+    client.pullRepositoryRemote(
+      target,
+      {
+        ...request,
+        report_progress: true,
+        require_hook_callbacks: false,
+      },
+      chunk =>
+        chunks.push({
+          stream: chunk.stream,
+          text: Buffer.from(chunk.data, 'base64').toString('utf8'),
+        }),
+      reviewed
+    )
   ).resolves.toBeUndefined()
+  expect(reviewed).toHaveBeenCalledTimes(1)
+  expect(
+    chunks.some(
+      chunk =>
+        (chunk.stream === 'stdout' || chunk.stream === 'stderr') &&
+        chunk.text.length > 0
+    )
+  ).toBe(true)
   expect(git('-C', target, 'rev-parse', 'HEAD')).toBe(
     git('-C', source, 'rev-parse', 'HEAD')
   )
