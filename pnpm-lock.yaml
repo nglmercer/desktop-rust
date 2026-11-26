@@ -214,9 +214,6 @@ importers:
       primer-support:
         specifier: ^4.0.0
         version: 4.7.2
-      prop-types:
-        specifier: ^15.7.2
-        version: 15.8.1
       re2js:
         specifier: ^2.0.1
         version: 2.9.1
