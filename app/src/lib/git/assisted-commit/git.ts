@@ -1,4 +1,4 @@
-import { Stats, lstatSync } from 'fs'
+import { lstatSync } from 'fs'
 import {
   lstat,
   mkdir,
@@ -8,7 +8,7 @@ import {
   rename,
   unlink,
   writeFile,
-} from 'fs/promises'
+} from '../../../web/fs-promises'
 import { dirname, isAbsolute, join, resolve, win32 } from 'path'
 import { Repository } from '../../../models/repository'
 import { IAssistedCommitHead } from '../../../models/assisted-commit'
@@ -37,6 +37,19 @@ import {
 } from './state'
 import { backend } from '../../../backend/client'
 
+interface IFileMetadata {
+  readonly size: number
+  readonly mode: number
+  readonly dev: number | bigint
+  readonly ino: number | bigint
+  readonly mtimeMs: number
+  readonly ctimeMs: number
+  readonly atimeMs: number
+  isFile(): boolean
+  isDirectory(): boolean
+  isSymbolicLink(): boolean
+}
+
 export function removeGitLineEnding(output: string): string {
   return output.replace(/\r?\n$/, '')
 }
@@ -52,7 +65,7 @@ export async function readOptionalFile(path: string): Promise<Buffer | null> {
   }
 }
 
-async function optionalStat(path: string): Promise<Stats | null> {
+async function optionalStat(path: string): Promise<IFileMetadata | null> {
   try {
     return await lstat(path)
   } catch (error) {
@@ -198,7 +211,10 @@ async function verifyPathParents(root: string, path: string): Promise<void> {
   }
 }
 
-function sameFileIdentity(before: Stats, after: Stats): boolean {
+function sameFileIdentity(
+  before: IFileMetadata,
+  after: IFileMetadata
+): boolean {
   return (
     before.dev === after.dev &&
     before.ino === after.ino &&
@@ -243,8 +259,8 @@ export async function readSelectedFileState(
     kind: before.isSymbolicLink() ? 'symlink' : 'file',
     mode,
     bytes,
-    dev: after.dev,
-    ino: after.ino,
+    dev: Number(after.dev),
+    ino: Number(after.ino),
     mtimeMs: after.mtimeMs,
     ctimeMs: after.ctimeMs,
   }
@@ -320,7 +336,7 @@ export function verifySelectedFileVersionsSync(
   data: IAssistedCommitData
 ): void {
   for (const file of data.files) {
-    let current: Stats | null
+    let current: IFileMetadata | null
     try {
       // eslint-disable-next-line no-sync
       current = lstatSync(join(data.snapshot.repositoryPath, file.file.path))

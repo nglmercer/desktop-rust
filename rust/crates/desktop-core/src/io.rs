@@ -926,7 +926,19 @@ fn fs_invoke(operation: &str, o: &Value) -> Result<Value> {
             "realpath",
         ),
         "readlink" => wrap(
-            std::fs::read_link(path()?).map(|p| json!(p.to_string_lossy())),
+            std::fs::read_link(path()?).map(|p| {
+                #[cfg(unix)]
+                let bytes = {
+                    use std::os::unix::ffi::OsStrExt;
+                    p.as_os_str().as_bytes().to_vec()
+                };
+                #[cfg(not(unix))]
+                let bytes = p.to_string_lossy().as_bytes().to_vec();
+                json!({
+                    "target": p.to_string_lossy(),
+                    "target_base64": base64_encode(&bytes),
+                })
+            }),
             "readlink",
         ),
         "symlink" => {
@@ -1297,6 +1309,30 @@ mod tests {
 
         fs_invoke("rm", &json!({ "path": dir, "recursive": true })).unwrap();
         assert!(!dir.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readlink_preserves_non_utf8_unix_target_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::symlink;
+
+        let dir = temp_dir("readlink-bytes");
+        let link = dir.join("link");
+        let target_bytes = [0xff, 0xfe, b'/', 0x80];
+        symlink(std::ffi::OsStr::from_bytes(&target_bytes), &link).unwrap();
+
+        let result = fs_invoke("readlink", &json!({ "path": link })).unwrap();
+        assert_eq!(
+            base64_decode(result["target_base64"].as_str().unwrap()).unwrap(),
+            target_bytes
+        );
+        assert!(
+            result["target"].as_str().unwrap().contains('\u{fffd}'),
+            "the string form follows Node's lossy UTF-8 conversion"
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -1,4 +1,10 @@
-import { copyFile, mkdir, readFile, rm, writeFile } from 'fs/promises'
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from '../../../web/fs-promises'
 import { lstatSync } from 'fs'
 import { CommitIdentity } from '../../../models/commit-identity'
 import { join } from 'path'

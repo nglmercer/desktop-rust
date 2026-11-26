@@ -544,8 +544,12 @@ export const promises = {
     }
     return call('realpath', { path: toPath(path) })
   },
-  readlink: (path: PathLike): Promise<string> =>
-    call('readlink', { path: toPath(path) }),
+  readlink: async (path: PathLike, options?: any): Promise<any> => {
+    return readlinkResult(
+      await call('readlink', { path: toPath(path) }),
+      options
+    )
+  },
   symlink: async (target: PathLike, path: PathLike) => {
     await call('symlink', { path: toPath(path), target: toPath(target) })
   },
@@ -623,6 +627,18 @@ async function* readRangeBlocks(
       return
     }
   }
+}
+
+/**
+ * Decode the host's byte-exact readlink reply. `target` intentionally follows
+ * Node's lossy UTF-8 string conversion; only an explicit buffer encoding gets
+ * the original Unix target bytes.
+ */
+function readlinkResult(result: any, options: any): any {
+  const encoding = typeof options === 'string' ? options : options?.encoding
+  return encoding === 'buffer'
+    ? Buffer.from(bridge().decodeBase64(result.target_base64))
+    : result.target
 }
 
 // --- synchronous ---------------------------------------------------------------
@@ -725,8 +741,8 @@ export const copyFileSync = (from: PathLike, to: PathLike) => {
 export const chmodSync = (path: PathLike, mode: number) => {
   callSync('chmod', { path: toPath(path), mode })
 }
-export const readlinkSync = (path: PathLike): string =>
-  callSync('readlink', { path: toPath(path) })
+export const readlinkSync = (path: PathLike, options?: any): any =>
+  readlinkResult(callSync('readlink', { path: toPath(path) }), options)
 export const symlinkSync = (target: PathLike, path: PathLike) => {
   callSync('symlink', { path: toPath(path), target: toPath(target) })
 }

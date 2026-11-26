@@ -71,6 +71,13 @@ export function installNodeHostBridge() {
       }
       case 'realpath':
         return fs.realpath(options.path)
+      case 'readlink': {
+        const bytes = await fs.readlink(options.path, { encoding: 'buffer' })
+        return {
+          target: bytes.toString('utf8'),
+          target_base64: bytes.toString('base64'),
+        }
+      }
       case 'chmod':
         await fs.chmod(options.path, options.mode)
         return null
@@ -107,6 +114,12 @@ export function installNodeHostBridge() {
           },
         }
       }
+      case 'rename':
+        await fs.rename(options.path, options.to)
+        return null
+      case 'unlink':
+        await fs.unlink(options.path)
+        return null
       case 'rm':
         await fs.rm(options.path, {
           recursive: options.recursive === true,
