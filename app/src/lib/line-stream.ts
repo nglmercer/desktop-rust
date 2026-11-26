@@ -47,3 +47,42 @@ export function forEachLine(
     consume(decoder.decode(), true)
   })
 }
+
+export function forEachNullRecord(
+  stream: LineStream,
+  callback: (record: string) => void
+): void {
+  const decoder = new TextDecoder()
+  let pending = ''
+  let ended = false
+
+  const consume = (text: string, flush: boolean) => {
+    pending += text
+    let start = 0
+    for (let index = 0; index < pending.length; index++) {
+      if (pending[index] !== '\0') continue
+      callback(pending.slice(start, index))
+      start = index + 1
+    }
+    pending = pending.slice(start)
+    if (flush && pending.length > 0) {
+      callback(pending)
+      pending = ''
+    }
+  }
+
+  stream.on('data', chunk => {
+    if (ended) return
+    consume(
+      typeof chunk === 'string'
+        ? chunk
+        : decoder.decode(chunk, { stream: true }),
+      false
+    )
+  })
+  stream.on('end', () => {
+    if (ended) return
+    ended = true
+    consume(decoder.decode(), true)
+  })
+}

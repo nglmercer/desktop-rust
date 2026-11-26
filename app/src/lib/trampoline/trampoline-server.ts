@@ -1,5 +1,5 @@
 import { createServer, type AddressInfo, type Server, type Socket } from 'net'
-import split2 from 'split2'
+import { forEachNullRecord } from '../line-stream'
 import { sendNonFatalException } from '../helpers/non-fatal-exception'
 import type {
   ITrampolineCommand,
@@ -110,7 +110,7 @@ export class TrampolineServer {
     const parser = new TrampolineCommandParser()
 
     // Messages coming from the trampoline client will be separated by \0
-    socket.pipe(split2(/\0/)).on('data', data => {
+    forEachNullRecord(socket, data => {
       this.onDataReceived(socket, parser, data)
     })
 
@@ -120,9 +120,9 @@ export class TrampolineServer {
   private onDataReceived(
     socket: Socket,
     parser: TrampolineCommandParser,
-    data: Buffer
+    data: string
   ) {
-    const value = data.toString('utf8')
+    const value = data
 
     try {
       parser.processValue(value)

@@ -138,6 +138,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `byline` y `@types/byline` | `app/src/lib/line-stream.ts`, divisor UTF-8 local para registros CR/LF usado por progreso Git/LFS y tailing | `app/test/unit/line-stream-test.ts`, `tailer-test.ts`, `tailer-web-fs-test.ts`, `progress/git-test.ts` |
 | `compare-versions` | comparación local estricta de versiones numéricas del sistema en `app/src/lib/get-os.ts` | `app/test/unit/system-version-comparison-test.ts`, `macos-version-from-darwin-test.ts` |
 | entrada directa `@testing-library/dom` | dependencia transitiva exacta declarada por `@testing-library/react` | `pnpm install --frozen-lockfile --ignore-scripts`, pruebas UI enfocadas |
+| `split2` y `@types/split2` en el paquete renderer | `forEachNullRecord` en `app/src/lib/line-stream.ts`; el vendor trampoline conserva su propia dependencia | `app/test/unit/line-stream-test.ts`, `git/refreshable-credentials-test.ts` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
