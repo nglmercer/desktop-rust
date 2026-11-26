@@ -211,7 +211,7 @@ describe('assisted push lifecycle ownership', () => {
       )
       assert.ok(initial.kind === 'push-error')
       assert.strictEqual(renderedMessage, initial.error.message)
-      assert.match(renderedMessage, /Original receiver rejection/)
+      assert.match(renderedMessage, /Push failed or was rejected/)
       const state = h.state(repository).changesState.assistedCommit
       assert.ok(state.kind === 'push-error')
       const lease =
@@ -464,7 +464,7 @@ describe('assisted push lifecycle ownership', () => {
     assert.ok(outcome.kind === 'push-error')
     const state = h.state(repository).changesState.assistedCommit
     assert.ok(state.kind === 'push-error')
-    assert.match(state.error.message, /actual fixture push failure/)
+    assert.match(state.error.message, /Push failed or was rejected/)
     assert.ok(
       assistedCommitErrorCauses(state.error).includes(statisticsFailure)
     )

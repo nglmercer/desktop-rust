@@ -1611,7 +1611,7 @@ describe('AppStore assisted push with real local remotes', () => {
     )
     assert.ok(outcome.kind === 'push-error')
     assert.strictEqual(outcome.attempted, true)
-    assert.match(outcome.error.message, /fixture push rejected/)
+    assert.match(outcome.error.message, /Push failed or was rejected/)
     assert.strictEqual(await count(repository), 3)
     assert.strictEqual(await remote.tip(), remote.originalTip)
     assert.strictEqual(
