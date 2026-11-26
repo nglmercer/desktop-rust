@@ -46,6 +46,10 @@ import {
   deferred,
   wholeSelectionResponse,
 } from '../../helpers/copilot-assisted-commit'
+import {
+  installNodeHostBridge,
+  uninstallNodeHostBridge,
+} from '../../helpers/node-host-bridge'
 
 async function createEmptyBareRepository(
   t: import('node:test').TestContext
@@ -55,6 +59,9 @@ async function createEmptyBareRepository(
   await git(['init', '--bare', barePath], bareParentPath, 'initBareRepository')
   return barePath
 }
+
+beforeEach(() => installNodeHostBridge())
+afterEach(() => uninstallNodeHostBridge())
 
 describe('git/clone', () => {
   describe('local source path mapping', () => {

@@ -194,6 +194,7 @@ describe('child_process stdin flow control', () => {
       argv0: 'bash.exe',
       windowsVerbatimArguments: true,
       shell: '/bin/sh',
+      useGitBinary: true,
     })
     await settle()
     const request = fake.calls.find(
@@ -202,6 +203,7 @@ describe('child_process stdin flow control', () => {
     assert.deepStrictEqual(request?.options.argv0, 'bash.exe')
     assert.deepStrictEqual(request?.options.windowsVerbatimArguments, true)
     assert.deepStrictEqual(request?.options.shell, '/bin/sh')
+    assert.deepStrictEqual(request?.options.useGitBinary, true)
   })
 
   it('reports AbortError and kills the child when its AbortSignal fires', async () => {

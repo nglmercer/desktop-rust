@@ -1,6 +1,12 @@
+export interface IChildProcessStream {
+  on(event: 'data', listener: (chunk: any) => void): unknown
+  off(event: 'data', listener: (chunk: any) => void): unknown
+  on(event: 'end', listener: () => void): unknown
+}
+
 export interface IChildProcess {
-  readonly stdout: NodeJS.ReadableStream | null
-  readonly stderr: NodeJS.ReadableStream | null
+  readonly stdout: IChildProcessStream | null
+  readonly stderr: IChildProcessStream | null
   readonly stdin: {
     write(chunk: string): unknown
     end(chunk?: string): unknown

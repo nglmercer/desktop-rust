@@ -2,7 +2,7 @@
   "transportChecks": 2,
   "legacyGitCalls": 16,
   "nodeTestFiles": 0,
-  "imports.dugite": 1,
+  "imports.dugite": 0,
   "imports.fs": 0,
   "imports.child_process": 0,
   "imports.os": 0,

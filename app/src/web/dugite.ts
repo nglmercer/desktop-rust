@@ -1,6 +1,7 @@
 // `dugite` for the webview build. git itself is run by the Rust shell
 // (`desktop.io.git-exec`); the error tables and parsers are dugite's own.
 import { bundleUrl } from './bundle'
+import { spawn as spawnProcess, type ChildProcess } from './child_process'
 // @ts-ignore -- aliased to dugite's build output in vite.config.ts
 import * as errors from 'desktop-dugite/errors'
 // @ts-ignore
@@ -8,18 +9,33 @@ import * as parseErrorModule from 'desktop-dugite/parse-error'
 // @ts-ignore
 import * as badConfigModule from 'desktop-dugite/parse-bad-config-value-error-info'
 
+export class ExecError extends Error {
+  readonly code?: string
+  readonly signal?: string
+  readonly killed?: boolean
+  readonly stdout: Buffer | string
+  readonly stderr: Buffer | string
+
+  constructor(
+    message: string,
+    stdout: Buffer | string,
+    stderr: Buffer | string,
+    cause?: unknown
+  ) {
+    super(message, { cause })
+    this.stdout = stdout
+    this.stderr = stderr
+    if (cause !== null && typeof cause === 'object') {
+      const source = cause as Record<string, unknown>
+      if (typeof source.code === 'string') this.code = source.code
+      if (typeof source.signal === 'string') this.signal = source.signal
+      if (typeof source.killed === 'boolean') this.killed = source.killed
+    }
+  }
+}
+
 export const GitError = errors.GitError
 export const GitErrorRegexes = errors.GitErrorRegexes
-export const ExecError: new (
-  message: string,
-  stdout: Buffer | string,
-  stderr: Buffer | string,
-  cause?: unknown
-) => Error & {
-  code?: string
-  stdout: Buffer | string
-  stderr: Buffer | string
-} = errors.ExecError
 export const parseError = parseErrorModule.parseError
 export const parseBadConfigValueErrorInfo =
   badConfigModule.parseBadConfigValueErrorInfo
@@ -35,7 +51,7 @@ export interface IGitExecutionOptions {
   readonly stdinEncoding?: BufferEncoding
   readonly encoding?: BufferEncoding | 'buffer'
   readonly maxBuffer?: number
-  readonly processCallback?: (process: unknown) => void
+  readonly processCallback?: (process: ChildProcess) => void
   readonly signal?: AbortSignal
   readonly killSignal?: string | number
 }
@@ -81,10 +97,140 @@ const newCancelId = () => {
   return (words[0] % 2 ** 21) * 2 ** 32 + words[1] + 1
 }
 
+function outputLength(chunk: string | Buffer): number {
+  return typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+}
+
+function joinOutput(chunks: ReadonlyArray<string | Buffer>, binary: boolean) {
+  return binary
+    ? Buffer.concat(chunks.map(chunk => Buffer.from(chunk as Buffer)))
+    : chunks.join('')
+}
+
+/**
+ * Interactive commands need the live child object that dugite exposes through
+ * processCallback. Drive the host's streaming process implementation while
+ * preserving execFile-style output collection and maxBuffer failure.
+ */
+function execInteractive(
+  args: string[],
+  path: string,
+  options: IGitExecutionOptions
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const binary = options.encoding === 'buffer'
+    const cwd = bundleUrl(path) === null ? path : undefined
+    const child = spawnProcess('git', args, {
+      cwd,
+      env: options.env,
+      signal: options.signal,
+      useGitBinary: true,
+      stdio: 'pipe',
+    })
+    const stdout: Array<string | Buffer> = []
+    const stderr: Array<string | Buffer> = []
+    let stdoutLength = 0
+    let stderrLength = 0
+    let truncated = false
+    const maxBuffer =
+      options.maxBuffer !== undefined && Number.isFinite(options.maxBuffer)
+        ? options.maxBuffer
+        : Infinity
+
+    const collect = (
+      chunks: Array<string | Buffer>,
+      chunk: string | Buffer,
+      stdoutStream: boolean
+    ) => {
+      chunks.push(chunk)
+      if (stdoutStream) {
+        stdoutLength += outputLength(chunk)
+      } else {
+        stderrLength += outputLength(chunk)
+      }
+      if (!truncated && Math.max(stdoutLength, stderrLength) > maxBuffer) {
+        truncated = true
+        child.kill(String(options.killSignal ?? 'SIGTERM'))
+      }
+    }
+
+    if (!binary) {
+      child.stdout?.setEncoding(options.encoding ?? 'utf8')
+      child.stderr?.setEncoding(options.encoding ?? 'utf8')
+    }
+    child.stdout?.on('data', chunk => collect(stdout, chunk, true))
+    child.stderr?.on('data', chunk => collect(stderr, chunk, false))
+    child.on('error', error => {
+      reject(
+        new ExecError(
+          error.message,
+          joinOutput(stdout, binary),
+          joinOutput(stderr, binary),
+          error
+        )
+      )
+    })
+    child.on('close', () => {
+      const stdoutOutput = joinOutput(stdout, binary)
+      const stderrOutput = joinOutput(stderr, binary)
+      if (truncated) {
+        const cause = Object.assign(new Error('maxBuffer exceeded'), {
+          code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+          killed: true,
+          signal: child.signalCode ?? undefined,
+        })
+        reject(
+          new ExecError('maxBuffer exceeded', stdoutOutput, stderrOutput, cause)
+        )
+        return
+      }
+      if (child.exitCode === null) {
+        const signal = child.signalCode ?? 'unknown signal'
+        const cause = Object.assign(
+          new Error(`Command was killed with ${signal}`),
+          {
+            code: null,
+            signal: child.signalCode ?? undefined,
+            killed: child.killed,
+          }
+        )
+        reject(
+          new ExecError(
+            `Command was killed with ${signal}`,
+            stdoutOutput,
+            stderrOutput,
+            cause
+          )
+        )
+        return
+      }
+      resolve({
+        stdout: stdoutOutput,
+        stderr: stderrOutput,
+        exitCode: child.exitCode,
+      })
+    })
+
+    if (options.stdin !== undefined && child.stdin !== null) {
+      if (options.stdinEncoding !== undefined) {
+        child.stdin.end(options.stdin as string, options.stdinEncoding)
+      } else {
+        child.stdin.end(options.stdin)
+      }
+    }
+    try {
+      options.processCallback?.(child)
+    } catch (error) {
+      child.kill()
+      reject(error)
+    }
+  })
+}
+
 /**
  * Run git and resolve with its output whatever the exit code, like
- * `dugite.exec`. `processCallback` is not called: there is no child process
- * object on this side of the bridge, so output arrives only when git exits.
+ * `dugite.exec`. Commands that need the live child use the streaming host
+ * process; the rest use the bounded one-shot host operation.
  */
 export async function exec(
   args: string[],
@@ -94,6 +240,9 @@ export async function exec(
   const signal = options?.signal
   if (signal?.aborted) {
     throw abortError(signal)
+  }
+  if (options?.processCallback !== undefined) {
+    return execInteractive(args, path, options)
   }
 
   const binary = options?.encoding === 'buffer'
@@ -186,10 +335,17 @@ export async function exec(
   })
 }
 
-export function spawn(): never {
-  throw new Error(
-    'Streaming git processes are not available in the Rust shell yet'
-  )
+export function spawn(
+  args: string[],
+  path: string,
+  options?: IGitSpawnOptions
+): ChildProcess {
+  return spawnProcess('git', args, {
+    cwd: bundleUrl(path) === null ? path : undefined,
+    env: options?.env,
+    useGitBinary: true,
+    stdio: 'pipe',
+  })
 }
 
 // The Rust shell chooses the git binary (DESKTOP_GIT_PATH or `git` on PATH).

@@ -587,7 +587,7 @@ fn git_exec(binary: &Path, resources: &Resources, o: &Value) -> Result<Value> {
 
 /// Translate the renderer's environment for a git child. `None` removes a
 /// variable (the renderer passes `undefined` for those).
-fn git_environment(env: Option<&Value>) -> Vec<(String, Option<String>)> {
+pub(crate) fn git_environment(env: Option<&Value>) -> Vec<(String, Option<String>)> {
     let mut out = Vec::new();
     let Some(map) = env.and_then(Value::as_object) else {
         return out;

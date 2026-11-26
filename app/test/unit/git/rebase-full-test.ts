@@ -7,7 +7,8 @@ import {
   getRebaseInternalState,
   RebaseResult,
 } from '../../../src/lib/git/rebase'
-import { getCommits, getBranches, git } from '../../../src/lib/git'
+import { getCommits, getBranches } from '../../../src/lib/git'
+import { exec } from 'dugite'
 import { setupEmptyRepository } from '../../helpers/repositories'
 import {
   makeCommit,
@@ -75,22 +76,14 @@ describe('git/rebase', () => {
 
         const targetRef = `refs/heads/${targetName}`
         // Imported refs can have names that git branch does not create.
-        await git(['update-ref', targetRef, 'HEAD'], repo.path, 'create target')
+        await exec(['update-ref', targetRef, 'HEAD'], repo.path)
         await makeCommit(repo, {
           entries: [{ path: 'base.txt', contents: 'base' }],
           commitMessage: 'base commit',
         })
 
-        await git(
-          ['checkout', '--detach', targetRef],
-          repo.path,
-          'checkout target'
-        )
-        await git(
-          ['symbolic-ref', 'HEAD', targetRef],
-          repo.path,
-          'attach target'
-        )
+        await exec(['checkout', '--detach', targetRef], repo.path)
+        await exec(['symbolic-ref', 'HEAD', targetRef], repo.path)
         await makeCommit(repo, {
           entries: [{ path: 'feature.txt', contents: 'feature' }],
           commitMessage: 'feature commit',

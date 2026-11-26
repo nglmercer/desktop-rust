@@ -299,6 +299,8 @@ struct Entry {
     outputs: [Arc<OutputGate>; 2],
     /// Detached integration processes are not stopped when the renderer shuts down.
     detached: bool,
+    /// Git children are process-group leaders, so cancellation can reach hooks.
+    process_group: bool,
     /// The process-slot budget of the application that spawned the child.
     owner: Arc<ByteBudget>,
 }
@@ -325,7 +327,12 @@ fn id_of(o: &Value) -> Result<u64> {
 
 /// Clone out what a request needs, so the registry lock is never held while
 /// touching pipes or the child.
-type ProcessHandles = (Arc<InputGate>, Arc<Mutex<Child>>, [Arc<OutputGate>; 2]);
+type ProcessHandles = (
+    Arc<InputGate>,
+    Arc<Mutex<Child>>,
+    [Arc<OutputGate>; 2],
+    bool,
+);
 
 fn lookup(id: u64) -> Option<ProcessHandles> {
     registry()
@@ -337,6 +344,7 @@ fn lookup(id: u64) -> Option<ProcessHandles> {
                 entry.input.clone(),
                 entry.child.clone(),
                 entry.outputs.clone(),
+                entry.process_group,
             )
         })
 }
@@ -373,7 +381,15 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
         .try_acquire(1)
         .ok_or_else(|| busy("too many persistent processes are running"))?;
 
-    let command = resolve_command(app, &string(o, "command")?)?;
+    let use_git_binary = o
+        .get("useGitBinary")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let command = if use_git_binary {
+        app.git.binary.clone()
+    } else {
+        resolve_command(app, &string(o, "command")?)?
+    };
     let detached = o.get("detached").and_then(Value::as_bool).unwrap_or(false);
     let args: Vec<String> = o
         .get("args")
@@ -479,7 +495,20 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
     {
         child_command.current_dir(cwd);
     }
-    if let Some(env) = o.get("env").and_then(Value::as_object) {
+    if use_git_binary {
+        // Match desktop.io.git-exec: Git inherits the host environment, never
+        // waits on an invisible terminal, uses untranslated messages, and the
+        // renderer's overlay passes through the Git-specific credential and
+        // bundled-path filters.
+        child_command.env("GIT_TERMINAL_PROMPT", "0");
+        child_command.env("LANGUAGE", "en");
+        for (key, value) in crate::io::git_environment(o.get("env")) {
+            match value {
+                Some(value) => child_command.env(key, value),
+                None => child_command.env_remove(key),
+            };
+        }
+    } else if let Some(env) = o.get("env").and_then(Value::as_object) {
         child_command.env_clear();
         for (key, value) in env {
             if let Some(value) = value.as_str() {
@@ -503,6 +532,13 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
         } else {
             Stdio::null()
         });
+
+    #[cfg(unix)]
+    if use_git_binary {
+        use std::os::unix::process::CommandExt;
+        // Match git-exec: cancellation reaches hook children in Git's group.
+        child_command.process_group(0);
+    }
 
     #[cfg(unix)]
     if detached {
@@ -617,6 +653,7 @@ pub fn spawn(app: &DesktopApp, o: &Value) -> Result<Value> {
             child: child.clone(),
             outputs,
             detached,
+            process_group: use_git_binary,
             owner: app.resources.process_slots.clone(),
         },
     );
@@ -716,7 +753,7 @@ fn signal_name(_status: &ExitStatus) -> Option<&'static str> {
 pub fn write(o: &Value) -> Result<Value> {
     let id = id_of(o)?;
     let bytes = base64_decode(&string(o, "data")?)?;
-    let Some((input, _, _)) = lookup(id) else {
+    let Some((input, _, _, _)) = lookup(id) else {
         return Err(AppError::msg("the process has already exited"));
     };
     match input.push(bytes) {
@@ -737,7 +774,7 @@ pub fn write(o: &Value) -> Result<Value> {
 /// only records the state, so it never waits behind a full pipe.
 pub fn end_input(o: &Value) -> Result<Value> {
     let id = id_of(o)?;
-    if let Some((input, _, _)) = lookup(id) {
+    if let Some((input, _, _, _)) = lookup(id) {
         input.end();
     }
     Ok(Value::Null)
@@ -760,7 +797,7 @@ pub fn ack(o: &Value) -> Result<Value> {
             ));
         }
     };
-    if let Some((_, _, outputs)) = lookup(id) {
+    if let Some((_, _, outputs, _)) = lookup(id) {
         outputs[index].ack(seq);
     }
     Ok(Value::Null)
@@ -770,7 +807,7 @@ pub fn ack(o: &Value) -> Result<Value> {
 /// `drain` is woken. Returns whether the signal was sent.
 pub fn kill(app: &DesktopApp, o: &Value) -> Result<Value> {
     let id = id_of(o)?;
-    let Some((input, child, _)) = lookup(id) else {
+    let Some((input, child, _, process_group)) = lookup(id) else {
         return Ok(json!(false));
     };
     if input.refuse() {
@@ -788,13 +825,31 @@ pub fn kill(app: &DesktopApp, o: &Value) -> Result<Value> {
             "SIGHUP" => "-HUP",
             _ => "-TERM",
         };
-        let sent = Command::new("kill")
-            .args([flag, &child.id().to_string()])
+        let pid = child.id().to_string();
+        let mut sent = false;
+        if process_group {
+            sent = Command::new("kill")
+                .args([flag, "--", &format!("-{pid}")])
+                .status()
+                .is_ok_and(|status| status.success());
+        }
+        sent = Command::new("kill")
+            .args([flag, &pid])
             .status()
-            .is_ok_and(|status| status.success());
+            .is_ok_and(|status| status.success())
+            || sent;
         return Ok(json!(sent));
     }
     let _ = signal;
+    #[cfg(unix)]
+    if process_group {
+        let pid = child.id().to_string();
+        let group = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{pid}")])
+            .status()
+            .is_ok_and(|status| status.success());
+        return Ok(json!(child.kill().is_ok() || group));
+    }
     Ok(json!(child.kill().is_ok()))
 }
 
@@ -817,11 +872,12 @@ pub fn shutdown(app: &DesktopApp) {
                     entry.input.clone(),
                     entry.child.clone(),
                     entry.outputs.clone(),
+                    entry.process_group,
                 ),
             )
         })
         .collect();
-    for (id, (input, child, outputs)) in entries {
+    for (id, (input, child, outputs, process_group)) in entries {
         if input.refuse() {
             app.host()
                 .emit(EVENT, json!([{ "id": id, "event": "drain" }]));
@@ -829,7 +885,14 @@ pub fn shutdown(app: &DesktopApp) {
         for output in &outputs {
             output.window.close();
         }
-        let _ = child.lock().unwrap_or_else(|e| e.into_inner()).kill();
+        let mut child = child.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(unix)]
+        if process_group {
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", &format!("-{}", child.id())])
+                .status();
+        }
+        let _ = child.kill();
     }
     app.resources.process_slots.close();
     app.resources.input.close();

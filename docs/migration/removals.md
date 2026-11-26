@@ -93,8 +93,8 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | wrapper compartido `exec-file` ejecutado directamente con `child_process` | ejecución a través del shim host `web/child_process`, con `timeout`, `maxBuffer`, señal de terminación y kills pendientes antes de asignar id | `app/test/unit/web-child-process-test.ts`, `app/test/unit/copilot-app-test.ts` |
 | lanzamiento de integraciones personalizadas importando directamente `child_process` | spawn host-backed `web/child_process` con stdio ignorado; el host preserva procesos detached en sesión propia y fuera del apagado del renderer, y la interfaz de shells consume la abstracción estructural `IChildProcess` | `app/test/unit/native-custom-integration-test.ts`, `cargo test -p desktop-shell-core-legacy io::process::tests` |
 | creación y limpieza de archivos de progreso LFS mediante imports directos `fs` | operaciones host-backed `web/fs`/`web/fs-promises`; la creación conserva exclusividad `wx` | `app/test/unit/web-fs-lfs-progress-test.ts` |
-| imports dispersos del enum `GitError` de dugite en consumidores renderer | vocabulario centralizado en `app/src/lib/git/error-kind.ts`; quedan imports directos solo en la frontera del vocabulario y el legacy runner | `pnpm check:types`, `app/test/unit/rust-fetch-error-test.ts`, routing fetch/pull/push |
-| reexportación del enum `GitError` desde dugite | vocabulario numérico congelado en `app/src/lib/git/error-kind.ts` con paridad verificada; solo el legacy runner importa dugite | `app/test/unit/git-error-kind-test.ts`, `app/test/unit/git/core-test.ts`, `app/test/unit/rust-fetch-error-test.ts` |
+| imports dispersos del enum `GitError` de dugite en consumidores renderer | vocabulario centralizado en `app/src/lib/git/error-kind.ts`; no quedan imports renderer del paquete; la frontera `web/dugite` consume la tabla interna | `pnpm check:types`, `app/test/unit/rust-fetch-error-test.ts`, routing fetch/pull/push |
+| reexportación del enum `GitError` desde dugite | vocabulario numérico congelado en `app/src/lib/git/error-kind.ts` con paridad verificada; el runner usa la frontera `web/dugite`; ningún renderer importa el paquete | `app/test/unit/git-error-kind-test.ts`, `app/test/unit/git/core-test.ts`, `app/test/unit/rust-fetch-error-test.ts` |
 | resolución dugite del binario Git para hooks y tabla vacía de señales del shim `os` | ejecución mediante `git` resuelto por el host/PATH, como ya ocurría en el bundle web; códigos de salida por señal POSIX conservados | `app/test/unit/traditional-hook-test.ts` |
 | imports directos `dugite` en hooks/credenciales | frontera explícita host-backed `app/src/web/dugite.ts`; los tests inyectan un bridge Node solo para ejercitar la superficie web | `app/test/unit/hooks-discovery-test.ts`, `app/test/unit/git/credential-test.ts` |
 | `fs.createWriteStream` ausente en el shim host usado para stdin de hooks | stream Writable real con creación/truncado inicial y appends chunked por el host; conserva destinos vacíos | `app/test/unit/web-fs-write-stream-test.ts` |
@@ -148,6 +148,7 @@ prueba vigente es la que se puede ejecutar desde este checkout.
 | `deep-equal` + `@types/deep-equal` | igualdad estructural estricta local en `app/src/lib/equality.ts` | `app/test/unit/structural-equality-test.ts` |
 | dependencia directa `prop-types` | se conserva solo como dependencia transitiva de componentes React que la requieren | typecheck/build |
 | `app-path` | resolución tipada de bundles macOS mediante Launch Services en el host Rust | compilación Rust/typecheck; comportamiento macOS cubierto por integración de shells/Copilot |
+| import directo `dugite` del runner legacy renderer | `app/src/web/dugite.ts` ejecuta comandos no interactivos por `desktop.io.git-exec` y callbacks/progreso por procesos streaming host-owned con entorno Git filtrado, `maxBuffer`, stdin, señales y grupo de proceso | `app/test/unit/web-dugite-interactive-test.ts`, `app/test/unit/web-child-process-test.ts`, `app/test/unit/git/rebase-full-test.ts`, `app/test/unit/git/clone-test.ts`, `cargo test -p desktop-shell-core-legacy io::process` |
 
 ## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
 
@@ -160,7 +161,7 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | `desktop-notifications` | fuentes vendorizadas/resolución de tipos para consumidores existentes | reemplazo Rust/tipado completo en notificaciones |
 | `desktop-trampoline` | dependencia real en `app/package.json` | entorno Git/SSH/askpass servido completamente por Rust |
 | `printenvz` | helper Rust vendorizado usado por scripts de entorno de hooks | integración de hooks migrada o eliminada |
-| `dugite` | dependencia real mientras existen fallbacks Git Node | 0 imports del renderer y tests usando Rust |
+| `dugite` | dependencia real para tabla de errores, tests y operaciones Git legacy restantes; ya no hay imports renderer del paquete | operaciones Git legacy migradas a operaciones Rust tipadas y tests sin dependencia directa |
 | shims `app/src/web/*` | compatibilidad para renderer/tests | retirar archivo por archivo tras eliminar consumidores |
 
 ## 3. Candidatos estructurales pendientes
@@ -176,8 +177,8 @@ fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
 | documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
 
 La línea base numérica viva está en `pnpm migration:status` (2 comprobaciones
-`transportKind`, 18 llamadas legacy Git, 1 import `dugite`, 0 imports `fs`, 0 imports `child_process`,
-0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
+`transportKind`, 16 llamadas legacy Git, 0 imports renderer `dugite`, 0 imports `fs`, 0 imports
+`child_process`, 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
 
 ## 4. Qué se conserva
 

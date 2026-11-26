@@ -188,7 +188,8 @@ class InputStream extends EventEmitter {
   public write(
     chunk: unknown,
     encodingOrCallback?: any,
-    callback?: any
+    callback?: any,
+    enforceBudget: boolean = true
   ): boolean {
     const done =
       typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
@@ -222,7 +223,7 @@ class InputStream extends EventEmitter {
       })
     }
     this.queuedBytes += bytes.length
-    if (this.queuedBytes > this.budget()) {
+    if (enforceBudget && this.queuedBytes > this.budget()) {
       this.fail(
         Object.assign(
           new Error(
@@ -316,14 +317,25 @@ class InputStream extends EventEmitter {
     this.pump()
   }
 
-  public end(chunk?: unknown, callback?: any) {
+  public end(chunk?: unknown, encodingOrCallback?: any, callback?: any) {
     if (chunk !== undefined && typeof chunk !== 'function') {
-      this.write(chunk)
+      this.write(
+        chunk,
+        typeof encodingOrCallback === 'string' ? encodingOrCallback : undefined,
+        undefined,
+        false
+      )
     }
-    if (typeof callback === 'function') {
-      this.onFinish = callback
-    } else if (typeof chunk === 'function') {
-      this.onFinish = chunk as () => void
+    const done =
+      typeof encodingOrCallback === 'function'
+        ? encodingOrCallback
+        : typeof callback === 'function'
+          ? callback
+          : typeof chunk === 'function'
+            ? chunk
+            : undefined
+    if (done !== undefined) {
+      this.onFinish = done
     }
     if (!this.finished) {
       this.finished = true
@@ -491,6 +503,8 @@ export interface ISpawnOptions {
   signal?: AbortSignal
   argv0?: string
   windowsVerbatimArguments?: boolean
+  /** Use the host-configured Git binary and Git execution environment. */
+  useGitBinary?: boolean
 }
 
 function isArgumentList(
@@ -557,6 +571,7 @@ export function spawn(
       shell: options.shell,
       argv0: options.argv0,
       windowsVerbatimArguments: options.windowsVerbatimArguments,
+      useGitBinary: options.useGitBinary,
     })
     .then(
       ({

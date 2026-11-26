@@ -83,6 +83,7 @@ function statResult(value: any) {
  * tests exercise the real web adapters end-to-end while production uses Rust.
  */
 const listeners = new Map<string, (event: unknown, message: any) => void>()
+let nextProcessId = 1
 
 export function installNodeHostBridge() {
   const children = new Map<number, INodeChild>()
@@ -91,7 +92,6 @@ export function installNodeHostBridge() {
     number,
     { child?: ReturnType<typeof nodeSpawn>; cancelled: boolean }
   >()
-  let nextId = 1
   let nextFileHandleId = 1
 
   const emit = (message: Record<string, unknown>) => {
@@ -437,22 +437,51 @@ export function installNodeHostBridge() {
         case 'desktop.io.git-exec':
           return gitExec(options)
         case 'desktop.io.process-spawn': {
-          const id = nextId++
+          const id = nextProcessId++
           const stdio = (options.stdio ?? ['pipe', 'pipe', 'pipe']).map(
             (mode: string) => (mode === 'ignore' ? 'ignore' : 'pipe')
           )
-          const envEntries =
-            options.env === undefined
-              ? undefined
-              : (Object.entries(
-                  options.env as Record<string, string | null>
-                ).filter(
-                  ([, value]) => value !== null && value !== undefined
-                ) as Array<[string, string]>)
-          const env =
-            envEntries === undefined
-              ? undefined
-              : Object.fromEntries(envEntries)
+          let env: Record<string, string | undefined> | undefined
+          if (options.useGitBinary === true) {
+            env = {
+              ...process.env,
+              GIT_TERMINAL_PROMPT: '0',
+              LANGUAGE: 'en',
+            }
+            for (const [key, value] of Object.entries(
+              (options.env ?? {}) as Record<string, string | null>
+            )) {
+              if (
+                key === 'DESKTOP_PORT' ||
+                key === 'DESKTOP_TRAMPOLINE_TOKEN' ||
+                key === 'GIT_ASKPASS' ||
+                key === 'SSH_ASKPASS' ||
+                key === 'LOCAL_GIT_DIRECTORY' ||
+                key === 'GIT_EXEC_PATH' ||
+                key === 'GIT_TEMPLATE_DIR'
+              ) {
+                continue
+              }
+              if (value === null || value === undefined) {
+                delete env[key]
+              } else {
+                env[key] = String(value)
+              }
+            }
+          } else {
+            const envEntries =
+              options.env === undefined
+                ? undefined
+                : (Object.entries(
+                    options.env as Record<string, string | null>
+                  ).filter(
+                    ([, value]) => value !== null && value !== undefined
+                  ) as Array<[string, string]>)
+            env =
+              envEntries === undefined
+                ? undefined
+                : Object.fromEntries(envEntries)
+          }
           let child: ReturnType<typeof nodeSpawn>
           try {
             child = nodeSpawn(options.command, options.args ?? [], {
@@ -485,7 +514,13 @@ export function installNodeHostBridge() {
           }
           wire('stdout')
           wire('stderr')
+          let startupSettled = false
+          let startupError: Error | undefined
           child.on('error', error => {
+            if (!startupSettled) {
+              startupError = error
+              return
+            }
             emit({ id, event: 'end', stream: 'stdout' })
             emit({ id, event: 'end', stream: 'stderr' })
             emit({ id, event: 'exit', code: 1, signal: null })
@@ -494,7 +529,17 @@ export function installNodeHostBridge() {
             emit({ id, event: 'exit', code, signal })
             children.delete(id)
           })
-          return Promise.resolve({ id, pid: child.pid, limits: LIMITS })
+          return new Promise((resolve, reject) => {
+            setImmediate(() => {
+              startupSettled = true
+              if (startupError !== undefined) {
+                children.delete(id)
+                reject(startupError)
+              } else {
+                resolve({ id, pid: child.pid, limits: LIMITS })
+              }
+            })
+          })
         }
         case 'desktop.io.process-write': {
           const entry = children.get(options.id)
