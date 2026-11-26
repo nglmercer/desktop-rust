@@ -454,6 +454,99 @@ impl Repository {
         Ok(json!({"path":path}))
     }
 
+    /// Resolve every metadata path whose routing assisted push must pin before
+    /// publication. Keeping the discovery in the host preserves the caller's
+    /// explicit Git routing environment without exposing a general Git runner.
+    pub(crate) async fn assisted_commit_push_paths(
+        &self,
+        branch_ref: &str,
+        environment: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            snapshot_reference_name(branch_ref),
+            "invalid assisted-commit branch ref"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_push_config_environment_key(key),
+                "unsupported push path environment key"
+            );
+        }
+        let requests: [(&str, Vec<std::ffi::OsString>); 8] = [
+            ("git_directory", args(&["rev-parse", "--absolute-git-dir"])),
+            (
+                "config",
+                args(&[
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    "config",
+                ]),
+            ),
+            (
+                "common_directory",
+                args(&["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+            ),
+            (
+                "branch",
+                args(&[
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    branch_ref,
+                ]),
+            ),
+            (
+                "packed_refs",
+                args(&[
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    "packed-refs",
+                ]),
+            ),
+            (
+                "shallow",
+                args(&[
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    "shallow",
+                ]),
+            ),
+            (
+                "grafts",
+                args(&[
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    "info/grafts",
+                ]),
+            ),
+            (
+                "replace",
+                args(&[
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-path",
+                    "refs/replace",
+                ]),
+            ),
+        ];
+        let mut paths = serde_json::Map::new();
+        for (name, command) in requests {
+            let output = self.run_with_environment(&command, environment).await?;
+            anyhow::ensure!(output.code == 0, "Cannot resolve assisted push Git paths");
+            let path = output_line(&output.stdout, "assisted push Git path", true)?;
+            anyhow::ensure!(
+                std::path::Path::new(&path).is_absolute(),
+                "assisted push Git path must be absolute"
+            );
+            paths.insert(name.to_owned(), json!(path));
+        }
+        Ok(Value::Object(paths))
+    }
+
     pub(crate) async fn assisted_commit_safety(&self) -> Result<Value> {
         let replacements = self.run(&args(&["replace", "--list"])).await?;
         anyhow::ensure!(replacements.code == 0, "Cannot inspect replacement refs");
@@ -802,6 +895,73 @@ mod tests {
         assert!(
             repository
                 .assisted_commit_git_path("../outside")
+                .await
+                .is_err()
+        );
+        let push_paths = repository
+            .assisted_commit_push_paths("refs/heads/main", &Default::default())
+            .await
+            .unwrap();
+        assert!(
+            push_paths["git_directory"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git")
+        );
+        assert!(
+            push_paths["common_directory"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git")
+        );
+        assert!(
+            push_paths["config"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git/config")
+        );
+        assert!(
+            push_paths["branch"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git/refs/heads/main")
+        );
+        assert!(
+            push_paths["packed_refs"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git/packed-refs")
+        );
+        assert!(
+            push_paths["shallow"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git/shallow")
+        );
+        assert!(
+            push_paths["grafts"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git/info/grafts")
+        );
+        assert!(
+            push_paths["replace"]
+                .as_str()
+                .unwrap()
+                .ends_with(".git/refs/replace")
+        );
+        assert!(
+            repository
+                .assisted_commit_push_paths("heads/main", &Default::default())
+                .await
+                .is_err()
+        );
+        let mut unsupported: std::collections::BTreeMap<String, Option<String>> =
+            Default::default();
+        unsupported.insert("GIT_TERMINAL_PROMPT".into(), Some("0".into()));
+        assert!(
+            repository
+                .assisted_commit_push_paths("refs/heads/main", &unsupported)
                 .await
                 .is_err()
         );

@@ -702,6 +702,53 @@ function nodeBackend(t: TestContext) {
           )) as Dugite.IGitStringResult
           return result.stdout.trim()
         },
+        repositoryAssistedCommitPushPaths: async (
+          path: string,
+          branchRef: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const run = async (args: string[]) => {
+            const result = (await interceptingGitExec(actualExec)(args, path, {
+              env: { GIT_CONFIG: undefined, ...environment },
+            } as never)) as Dugite.IGitStringResult
+            return result.stdout.replace(/\r?\n$/, '')
+          }
+          const gitPath = (name: string) => [
+            'rev-parse',
+            '--path-format=absolute',
+            '--git-path',
+            name,
+          ]
+          const [
+            gitDirectory,
+            config,
+            commonDirectory,
+            branch,
+            packedRefs,
+            shallow,
+            grafts,
+            replace,
+          ] = await Promise.all([
+            run(['rev-parse', '--absolute-git-dir']),
+            run(gitPath('config')),
+            run(['rev-parse', '--path-format=absolute', '--git-common-dir']),
+            run(gitPath(branchRef)),
+            run(gitPath('packed-refs')),
+            run(gitPath('shallow')),
+            run(gitPath('info/grafts')),
+            run(gitPath('refs/replace')),
+          ])
+          return {
+            gitDirectory,
+            config,
+            commonDirectory,
+            branch,
+            packedRefs,
+            shallow,
+            grafts,
+            replace,
+          }
+        },
         repositoryAssistedCommitPushConfiguration: async (path: string) => {
           const result = (await interceptingGitExec(actualExec)(
             ['config', '--null', '--list', '--show-origin', '--includes'],

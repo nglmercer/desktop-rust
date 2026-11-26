@@ -27,7 +27,7 @@ import {
   assistedCommitGitRoutingEnvironmentNames,
   quoteConfig,
 } from './assisted-commit/git'
-import { git, isGitError } from './core'
+import { isGitError } from './core'
 import { backend } from '../../backend/client'
 import { isErrnoException } from '../errno-exception'
 import { getRemotes } from './remote'
@@ -845,69 +845,19 @@ async function readAssistedCommitPushDestinationCore(
       ),
     })
   }
-  const [
-    gitDirectory,
-    config,
-    commonDirectory,
-    branchPath,
-    packedRefsPath,
-    shallowPath,
-    graftPath,
-    replacementPath,
-  ] = await Promise.all([
-    git(
-      ['rev-parse', '--absolute-git-dir'],
-      repository.path,
-      'assistedPushGitDirectory'
-    ),
-    git(
-      ['rev-parse', '--path-format=absolute', '--git-path', 'config'],
-      repository.path,
-      'assistedPushConfigPath'
-    ),
-    git(
-      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-      repository.path,
-      'assistedPushCommonDirectory'
-    ),
-    git(
-      ['rev-parse', '--path-format=absolute', '--git-path', branchRef],
-      repository.path,
-      'assistedPushBranchPath'
-    ),
-    git(
-      ['rev-parse', '--path-format=absolute', '--git-path', 'packed-refs'],
-      repository.path,
-      'assistedPushPackedRefsPath'
-    ),
-    git(
-      ['rev-parse', '--path-format=absolute', '--git-path', 'shallow'],
-      repository.path,
-      'assistedPushShallowPath'
-    ),
-    git(
-      ['rev-parse', '--path-format=absolute', '--git-path', 'info/grafts'],
-      repository.path,
-      'assistedPushGraftPath'
-    ),
-    git(
-      ['rev-parse', '--path-format=absolute', '--git-path', 'refs/replace'],
-      repository.path,
-      'assistedPushReplacementPath'
-    ),
-  ])
-  const configurationFile = config.stdout.replace(/\r?\n$/, '')
-  const canonicalGitDirectory = await realpath(
-    gitDirectory.stdout.replace(/\r?\n$/, '')
+  const pushPaths = await backend().repositoryAssistedCommitPushPaths(
+    repository.path,
+    branchRef,
+    assistedCommitGitRoutingEnvironment()
   )
+  const configurationFile = pushPaths.config
+  const canonicalGitDirectory = await realpath(pushPaths.gitDirectory)
   const configurationPath = await realpath(configurationFile)
-  const canonicalCommonDirectory = await realpath(
-    commonDirectory.stdout.replace(/\r?\n$/, '')
-  )
+  const canonicalCommonDirectory = await realpath(pushPaths.commonDirectory)
   const shallowPaths = [
     join(canonicalGitDirectory, 'shallow'),
     join(canonicalCommonDirectory, 'shallow'),
-    shallowPath.stdout.replace(/\r?\n$/, ''),
+    pushPaths.shallow,
     ...(process.env.GIT_SHALLOW_FILE === undefined
       ? []
       : [rebaseNativePath(repository.path, process.env.GIT_SHALLOW_FILE)]),
@@ -916,7 +866,7 @@ async function readAssistedCommitPushDestinationCore(
     join(canonicalGitDirectory, 'index'),
     join(canonicalGitDirectory, 'FETCH_HEAD'),
     join(canonicalCommonDirectory, 'packed-refs'),
-    packedRefsPath.stdout.replace(/\r?\n$/, ''),
+    pushPaths.packedRefs,
     ...shallowPaths,
     ...(process.env.GIT_INDEX_FILE === undefined
       ? []
@@ -939,7 +889,7 @@ async function readAssistedCommitPushDestinationCore(
     throw error
   })
   const graftPaths = [
-    graftPath.stdout.replace(/\r?\n$/, ''),
+    pushPaths.grafts,
     ...(process.env.GIT_GRAFT_FILE === undefined
       ? []
       : [rebaseNativePath(repository.path, process.env.GIT_GRAFT_FILE)]),
@@ -965,9 +915,7 @@ async function readAssistedCommitPushDestinationCore(
     })
   }
   const verifyBranchCondition = () => {
-    const { bytes } = readRegularConfigurationInputSync(
-      branchPath.stdout.replace(/\r?\n$/, '')
-    )
+    const { bytes } = readRegularConfigurationInputSync(pushPaths.branch)
     if (bytes !== null && bytes.toString('utf8').startsWith('ref:')) {
       throw new AssistedCommitFileVersionMismatchError(repository.path, {
         cause: new AssistedCommitPushError(
@@ -983,7 +931,7 @@ async function readAssistedCommitPushDestinationCore(
     join(canonicalCommonDirectory, 'logs'),
   ])
   const verifyReplacementHistory = () => {
-    const pending = [replacementPath.stdout.replace(/\r?\n$/, '')]
+    const pending = [pushPaths.replace]
     while (pending.length > 0) {
       const path = pending.pop()
       if (path === undefined) {
@@ -1005,9 +953,7 @@ async function readAssistedCommitPushDestinationCore(
         throw error
       }
     }
-    const packed = readRegularConfigurationInputSync(
-      packedRefsPath.stdout.replace(/\r?\n$/, '')
-    )
+    const packed = readRegularConfigurationInputSync(pushPaths.packedRefs)
     if (
       packed.bytes
         ?.toString('utf8')
@@ -1016,9 +962,7 @@ async function readAssistedCommitPushDestinationCore(
           line.slice(line.indexOf(' ') + 1).startsWith('refs/replace/')
         )
     ) {
-      throw new AssistedCommitFileVersionMismatchError(
-        packedRefsPath.stdout.replace(/\r?\n$/, '')
-      )
+      throw new AssistedCommitFileVersionMismatchError(pushPaths.packedRefs)
     }
   }
   const admittedMetadata = await Promise.all(
@@ -1084,8 +1028,8 @@ async function readAssistedCommitPushDestinationCore(
     configurationFile,
     configurationPath,
     configurationAlias: join(canonicalCommonDirectory, 'config'),
-    branchPath: branchPath.stdout.replace(/\r?\n$/, ''),
-    packedRefsPath: packedRefsPath.stdout.replace(/\r?\n$/, ''),
+    branchPath: pushPaths.branch,
+    packedRefsPath: pushPaths.packedRefs,
     publishBranch: upstreamRef === null,
     configuration: destinationConfiguration(configuration, branch, remote.name),
   })

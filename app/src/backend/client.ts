@@ -3520,6 +3520,70 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitPushPaths(
+    repositoryPath: string,
+    branchRef: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<{
+    readonly gitDirectory: string
+    readonly config: string
+    readonly commonDirectory: string
+    readonly branch: string
+    readonly packedRefs: string
+    readonly shallow: string
+    readonly grafts: string
+    readonly replace: string
+  }> {
+    if (
+      branchRef.length === 0 ||
+      branchRef.length > 4096 ||
+      branchRef.includes('\0')
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted-commit branch ref',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_push_paths',
+      {
+        branch_ref: branchRef,
+        environment: serializeGitEnvironment(environment),
+      }
+    )
+    const validPath = (input: unknown): input is string =>
+      typeof input === 'string' && input.length > 0 && input.length <= 65536
+    if (
+      isRecord(value) &&
+      validPath(value.git_directory) &&
+      validPath(value.config) &&
+      validPath(value.common_directory) &&
+      validPath(value.branch) &&
+      validPath(value.packed_refs) &&
+      validPath(value.shallow) &&
+      validPath(value.grafts) &&
+      validPath(value.replace)
+    ) {
+      return {
+        gitDirectory: value.git_directory,
+        config: value.config,
+        commonDirectory: value.common_directory,
+        branch: value.branch,
+        packedRefs: value.packed_refs,
+        shallow: value.shallow,
+        grafts: value.grafts,
+        replace: value.replace,
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted-commit push paths response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitSafety(
     repositoryPath: string
   ): Promise<

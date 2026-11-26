@@ -487,6 +487,11 @@ pub enum Operation {
     AssistedCommitGitPath {
         git_path: String,
     },
+    AssistedCommitPushPaths {
+        branch_ref: String,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     MergeBase {
         first: String,
         second: String,

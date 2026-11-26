@@ -109,6 +109,21 @@ describe.skipIf(
     client = backend()
     await client.waitReady()
     expect(await client.snapshot()).toBeNull()
+    const pushPaths = await client.repositoryAssistedCommitPushPaths(
+      repository,
+      'refs/heads/main',
+      { GIT_CONFIG: undefined }
+    )
+    expect(pushPaths).toEqual({
+      gitDirectory: path.join(repository, '.git'),
+      config: path.join(repository, '.git', 'config'),
+      commonDirectory: path.join(repository, '.git'),
+      branch: path.join(repository, '.git', 'refs', 'heads', 'main'),
+      packedRefs: path.join(repository, '.git', 'packed-refs'),
+      shallow: path.join(repository, '.git', 'shallow'),
+      grafts: path.join(repository, '.git', 'info', 'grafts'),
+      replace: path.join(repository, '.git', 'refs', 'replace'),
+    })
     await expect(getRemotes({ path: nested } as Repository)).resolves.toEqual([
       { name: 'origin', url: 'https://example.invalid/owner/repo' },
     ])

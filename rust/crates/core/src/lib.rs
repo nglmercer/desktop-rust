@@ -698,6 +698,14 @@ impl Repository {
             Operation::AssistedCommitGitPath { git_path } => {
                 return self.assisted_commit_git_path(&git_path).await;
             }
+            Operation::AssistedCommitPushPaths {
+                branch_ref,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_push_paths(&branch_ref, &environment)
+                    .await;
+            }
             Operation::RendererCommitDiff {
                 revision,
                 path,
@@ -1544,6 +1552,7 @@ impl Repository {
             | AssistedCommitRefs
             | AssistedCommitIndexEntries
             | AssistedCommitGitPath { .. }
+            | AssistedCommitPushPaths { .. }
             | MergeBase { .. }
             | MergeTreePreview { .. }
             | InterpretTrailers { .. }
