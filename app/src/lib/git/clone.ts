@@ -9,7 +9,6 @@ import { backendRemoteProxy, envForProxy } from './environment'
 import { withTrampolineEnv } from '../trampoline/trampoline-environment'
 import { homedir } from '../../web/os'
 import * as Path from 'path'
-import { unescape as decodeFilePath } from 'querystring'
 import { Repository } from '../../models/repository'
 import { getRepositoryType } from './rev-parse'
 import { listWorktrees } from './worktree'
@@ -22,6 +21,41 @@ import {
 } from './repository-operation'
 
 const unsupportedCloneProtocols: ReadonlyArray<string> = ['ext', 'ext.exe']
+
+const hexadecimalByte = /^[0-9a-fA-F]{2}$/
+
+/**
+ * Decode percent-encoded file URL input using Git's forgiving semantics.
+ * Valid percent-encoded bytes are UTF-8 decoded; malformed percent sequences
+ * and plus signs remain literal.
+ */
+function decodeFilePath(value: string): string {
+  const decoder = new TextDecoder()
+  const bytes: number[] = []
+  let output = ''
+
+  const flushBytes = () => {
+    if (bytes.length !== 0) {
+      output += decoder.decode(new Uint8Array(bytes))
+      bytes.length = 0
+    }
+  }
+
+  for (let index = 0; index < value.length; index++) {
+    const encoded = value.slice(index + 1, index + 3)
+    if (value[index] === '%' && hexadecimalByte.test(encoded)) {
+      bytes.push(parseInt(encoded, 16))
+      index += 2
+      continue
+    }
+
+    flushBytes()
+    output += value[index]
+  }
+
+  flushBytes()
+  return output
+}
 
 /** Resolve the filesystem source read by Git's local and file transports. */
 export function getLocalCloneSourcePath(

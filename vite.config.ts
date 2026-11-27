@@ -508,7 +508,6 @@ export default defineConfig({
         'crypto',
         'assert',
         'events',
-        'querystring',
         'string_decoder',
       ],
       globals: { Buffer: true, global: true, process: true },

@@ -29,6 +29,8 @@ progress, security, and byte-exact behavior.
   scheduler now covers application callbacks and the narrow dependency surface.
 - The legacy Node `url` module/polyfill in renderer production code; URL parsing
   now uses the web-platform `URL` API and purpose-specific file URL handling.
+- The `querystring` polyfill in renderer production code; local clone file URL
+  decoding now uses a small byte-exact UTF-8 decoder.
 
 ## Temporary compatibility pieces
 

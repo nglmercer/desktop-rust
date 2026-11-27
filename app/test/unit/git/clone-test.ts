@@ -128,6 +128,9 @@ describe('git/clone', () => {
         '/space #question?percent%+plus',
       ],
       ['file://clone-local/space #raw%+plus', '/space #raw%+plus'],
+      ['file://clone-local/euro%E2%82%AC', '/euro€'],
+      ['file://clone-local/invalid%FFbyte', '/invalid�byte'],
+      ['file://clone-local/malformed%ZZpercent%', '/malformed%ZZpercent%'],
       ['file://clone-local', null],
       ['file://', null],
     ] as const) {
