@@ -584,6 +584,27 @@ fn retained_clone_path(path: &Path) -> Value {
 }
 
 impl Backend {
+    async fn open_exact_repository(&self, repository_path: &str) -> Result<Repository> {
+        let canonical = Path::new(repository_path)
+            .canonicalize()
+            .map_err(|error| AppError::msg(error.to_string()))?;
+        let repo = Repository::open(&canonical)
+            .await
+            .map_err(|error| AppError::msg(error.to_string()))?;
+        if repo.path() != canonical {
+            return Err(AppError::msg("select a repository root, not a nested path"));
+        }
+        Ok(repo)
+    }
+
+    async fn open_exact_registry_repository(&self, repository_path: &str) -> Result<Repository> {
+        let mut repo = self.open_exact_repository(repository_path).await?;
+        if let Some(registry) = &self.registry {
+            repo = repo.with_registry(registry.clone());
+        }
+        Ok(repo)
+    }
+
     async fn clone_selected(
         &self,
         url: String,
@@ -2956,15 +2977,11 @@ impl Backend {
                             GitInfoOperation::OpenGlobalGitConfigEditor { name } => desktop_backend::open_global_git_config_editor(name).await,
                             GitInfoOperation::OpenCustomGlobalGitConfigEditor { editor } => desktop_backend::open_global_git_config_custom_editor(editor).await,
                             GitInfoOperation::OpenNamedEditor { repository_path, path, name } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                let repo = self.open_exact_repository(&repository_path).await?;
                                 repo.open_editor(path, desktop_backend::ExternalEditor::Named { name }).await
                             }
                             GitInfoOperation::OpenCustomEditor { repository_path, path, editor } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                let repo = self.open_exact_repository(&repository_path).await?;
                                 repo.open_desktop_custom_editor(path, editor).await
                             }
                             GitInfoOperation::Clone { url, path, branch, default_branch, recursive, report_progress, proxy, allow_protocol, trampoline } => {
@@ -3012,277 +3029,161 @@ impl Backend {
                                 repo.execute(Operation::SetGitDescription { description }).await
                             }
                             GitInfoOperation::WriteCreationFile { repository_path, kind, contents } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical {
-                                    return Err(AppError::msg("select a repository root, not a nested path"));
-                                }
+                                let repo = self.open_exact_repository(&repository_path).await?;
                                 repo.execute(Operation::WriteCreationFile { kind, contents }).await
                             }
                             GitInfoOperation::GitIgnore { repository_path, action } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                let repo = self.open_exact_repository(&repository_path).await?;
                                 repo.execute(Operation::GitIgnore { action }).await
                             }
                             GitInfoOperation::ReleaseComparisonSnapshot { snapshot_id } => {
                                 desktop_backend::comparison_snapshots::release_owned(&snapshot_id)
                             }
                             GitInfoOperation::ReviewedDiscard { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                let mut repo = self.open_exact_repository(&repository_path).await?;
                                 if matches!(operation, Operation::ConflictDetail { .. } | Operation::StageConflict { .. } | Operation::ResolveConflict { .. }) {
                                     if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
                                 }
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchCreation { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchDeletion { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::RemoteBranchDeletion { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchRename { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::StashWorkflow { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::BranchCheckout { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::RevertCommit { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::AbortGitOperation { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::FinishMergeCommit { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::ContinueCherryPick { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::StartCherryPick { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::ContinueRebase { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::StartRebase { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::StartMerge { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::MixedReset { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::Reset { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::FastForwardBranches { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::FetchRemote { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::WorktreeMutation { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::SelectedCommitPreview { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
+                                let repo = self.open_exact_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::CommitCheckpoint { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::InterpretTrailers { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::MergeTreePreview { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::MergeBase { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::SubmoduleStatus { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::CheckoutIndex { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::ResetIndex { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::UpdateIndex { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::DeleteInitialHead { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::UpdateRefTransaction { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::ResetSubmodules { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::UpdateSubmodules { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::TagMutation { repository_path, operation } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(operation).await
                             }
                             GitInfoOperation::InitialCommit { repository_path, paths } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical {
-                                    return Err(AppError::msg("select a repository root, not a nested path"));
-                                }
-                                if let Some(registry) = &self.registry {
-                                    repo = repo.with_registry(registry.clone());
-                                }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(Operation::InitialCommit { paths }).await
                             }
                             GitInfoOperation::ManageRemote { repository_path, action } => {
-                                let canonical = Path::new(&repository_path).canonicalize().map_err(|error| AppError::msg(error.to_string()))?;
-                                let mut repo = Repository::open(&canonical).await.map_err(|error| AppError::msg(error.to_string()))?;
-                                if repo.path() != canonical { return Err(AppError::msg("select a repository root, not a nested path")); }
-                                if let Some(registry) = &self.registry { repo = repo.with_registry(registry.clone()); }
+                                let repo = self.open_exact_registry_repository(&repository_path).await?;
                                 repo.execute(Operation::ManageRemote { action }).await
                             }
                             GitInfoOperation::InitializeRepository { repository_path, default_branch } => {
