@@ -4158,6 +4158,47 @@ export class BackendClient {
     })
   }
 
+  async repositoryRendererCredential(
+    repositoryPath: string,
+    command: 'fill' | 'approve' | 'reject',
+    input: string,
+    interactive: boolean,
+    softwareRendering: boolean
+  ): Promise<Buffer> {
+    if (input.length > 256 * 1024) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid renderer credential request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'renderer_credential',
+      {
+        command,
+        input_base64: Buffer.from(input, 'utf8').toString('base64'),
+        interactive,
+        software_rendering: softwareRendering,
+      }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.bytes_base64 === 'string' &&
+      value.bytes_base64.length <= 2 * 1024 * 1024
+    ) {
+      const bytes = Buffer.from(value.bytes_base64, 'base64')
+      if (bytes.length <= 1024 * 1024) {
+        return bytes
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid renderer credential response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

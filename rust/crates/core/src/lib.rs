@@ -46,6 +46,7 @@ mod hook_proxy {
 #[cfg(unix)]
 mod hook_trace;
 mod hooks;
+mod renderer_credential;
 pub use branch_policy::{BranchPermissions, BranchPolicy, DefaultBranch};
 mod commit;
 mod commit_checkpoint;
@@ -707,6 +708,16 @@ impl Repository {
             }
             Operation::AssistedCommitGitPath { git_path } => {
                 return self.assisted_commit_git_path(&git_path).await;
+            }
+            Operation::RendererCredential {
+                command,
+                input_base64,
+                interactive,
+                software_rendering,
+            } => {
+                return self
+                    .renderer_credential(&command, &input_base64, interactive, software_rendering)
+                    .await;
             }
             Operation::RendererHooks {
                 filter,
@@ -1712,6 +1723,7 @@ impl Repository {
             | AssistedCommitIndexTree { .. }
             | AssistedCommitTreeRevision { .. }
             | RendererHooks { .. }
+            | RendererCredential { .. }
             | AssistedCommitPushPaths { .. }
             | MergeBase { .. }
             | MergeTreePreview { .. }

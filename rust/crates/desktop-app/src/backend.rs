@@ -102,6 +102,14 @@ struct ReadRequest {
     #[serde(default)]
     filter_output: Option<String>,
     #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    input_base64: Option<String>,
+    #[serde(default)]
+    interactive: Option<bool>,
+    #[serde(default)]
+    software_rendering: Option<bool>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -459,6 +467,7 @@ enum ReadMethod {
     AssistedCommitTreeRevision,
     AssistedCommitDiffDriver,
     RendererHooks,
+    RendererCredential,
     Worktrees,
     WorktreesFromGitDir,
     ProtectedResources,
@@ -1516,6 +1525,28 @@ impl Backend {
                 "paths only apply to file-tracking and frozen diff reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::RendererCredential) {
+            if request.command.is_some() {
+                return Err(AppError::BadArgs(
+                    "command only applies to renderer credentials".into(),
+                ));
+            }
+            if request.input_base64.is_some() {
+                return Err(AppError::BadArgs(
+                    "input_base64 only applies to renderer credentials".into(),
+                ));
+            }
+            if request.interactive.is_some() {
+                return Err(AppError::BadArgs(
+                    "interactive only applies to renderer credentials".into(),
+                ));
+            }
+            if request.software_rendering.is_some() {
+                return Err(AppError::BadArgs(
+                    "software_rendering only applies to renderer credentials".into(),
+                ));
+            }
+        }
         if !matches!(&request.method, ReadMethod::SubmoduleDisplayUrl)
             && request.submodule_path.is_some()
         {
@@ -2337,6 +2368,30 @@ impl Backend {
                             .path
                             .ok_or_else(|| AppError::BadArgs("path is required".into()))?,
                         environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::RendererCredential
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.paths.is_none()
+                        && request.path.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.environment.is_none()
+                        && request.bytes_base64.is_none() =>
+                {
+                    Operation::RendererCredential {
+                        command: request
+                            .command
+                            .ok_or_else(|| AppError::BadArgs("command is required".into()))?,
+                        input_base64: request
+                            .input_base64
+                            .ok_or_else(|| AppError::BadArgs("input_base64 is required".into()))?,
+                        interactive: request.interactive.unwrap_or(false),
+                        software_rendering: request.software_rendering.unwrap_or(false),
                     }
                 }
                 ReadMethod::RendererHooks

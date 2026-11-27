@@ -506,6 +506,12 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    RendererCredential {
+        command: String,
+        input_base64: String,
+        interactive: bool,
+        software_rendering: bool,
+    },
     AssistedCommitTreeEntry {
         tree: String,
         path: GitPath,
