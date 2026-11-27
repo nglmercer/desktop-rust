@@ -3632,7 +3632,6 @@ describe('backend Copilot session cleanup', () => {
     }))
     vi.doMock('../../src/lib/progress', () => ({
       CheckoutProgressParser: vi.fn(),
-      executionOptionsWithProgress: vi.fn(),
     }))
     const { checkoutBranch, checkoutCommit } = await import(
       '../../src/lib/git/checkout'

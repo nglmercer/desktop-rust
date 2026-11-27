@@ -1,20 +1,5 @@
-import { getTempFilePath } from '../file-system'
 import type { IGitProgress, IGitProgressInfo, IGitOutput } from './git'
 import { formatBytes } from '../../ui/lib/bytes'
-import { open } from '../../web/fs-promises'
-
-/** Create the Git LFS progress reporting file and return the path. */
-export async function createLFSProgressFile(): Promise<string> {
-  const path = await getTempFilePath('GitHubDesktop-lfs-progress')
-
-  // getTempFilePath will take care of creating the directory, we only need
-  // to make sure the file exists as well. We use `wx` to throw if the file
-  // already exists since we don't expect it to given that getTempFilePath
-  // creates a random path.
-  await open(path, 'wx').then(f => f.close())
-
-  return path
-}
 
 // The regex for parsing LFS progress lines. See
 // https://github.com/git-lfs/git-lfs/blob/dce20b0d18213d720ff2897267e68960d296eb5e/docs/man/git-lfs-config.5.ronn

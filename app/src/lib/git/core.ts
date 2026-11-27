@@ -86,9 +86,6 @@ export interface IGitExecutionOptions
    */
   readonly expectedErrors?: ReadonlySet<DugiteError>
 
-  /** Should it track & report LFS progress? */
-  readonly trackLFSProgress?: boolean
-
   /**
    * Whether the command about to run is part of a background task or not.
    * This affects error handling and UI such as credential prompts.
