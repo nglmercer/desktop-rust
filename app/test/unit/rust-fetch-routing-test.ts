@@ -15,21 +15,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/backend/client', () => ({
   backend: () => ({ fetchRepositoryRemote: mocks.fetch }),
 }))
-vi.mock('../../src/lib/git/environment', () => ({
+vi.mock('../../src/lib/git/environment', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/lib/git/environment')>()),
   envForProxy: mocks.proxy,
-  backendRemoteProxy: (
-    environment: Record<string, string | undefined> | undefined
-  ) =>
-    environment === undefined
-      ? undefined
-      : {
-          ...(typeof environment.http_proxy === 'string'
-            ? { http: environment.http_proxy }
-            : {}),
-          ...(typeof environment.https_proxy === 'string'
-            ? { https: environment.https_proxy }
-            : {}),
-        },
 }))
 vi.mock('../../src/lib/git/fetch-error', () => ({
   fetchFailureToGitError: mocks.convert,
@@ -123,6 +111,24 @@ describe('Rust fetch routing', () => {
       undefined,
       undefined,
       { https: 'http://proxy.invalid:8080' }
+    )
+  })
+
+  it('does not forward an empty proxy contract for host-inherited proxy settings', async () => {
+    mocks.proxy.mockResolvedValue({})
+
+    await fetch(repository, remote)
+
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      '/repo',
+      'origin',
+      remote.url,
+      true,
+      false,
+      'example',
+      undefined,
+      undefined,
+      undefined
     )
   })
 

@@ -59,22 +59,10 @@ vi.mock('../../src/lib/git/core', () => ({
   git: mocks.git,
   GitError: mocks.GitError,
 }))
-vi.mock('../../src/lib/git/environment', () => ({
+vi.mock('../../src/lib/git/environment', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/lib/git/environment')>()),
   envForRemoteOperation: mocks.environment,
   envForProxy: mocks.proxy,
-  backendRemoteProxy: (
-    environment: Record<string, string | undefined> | undefined
-  ) =>
-    environment === undefined
-      ? undefined
-      : {
-          ...(typeof environment.http_proxy === 'string'
-            ? { http: environment.http_proxy }
-            : {}),
-          ...(typeof environment.https_proxy === 'string'
-            ? { https: environment.https_proxy }
-            : {}),
-        },
 }))
 vi.mock('../../src/lib/git/fetch-error', () => ({
   fetchFailureToGitError: mocks.convert,
@@ -83,17 +71,10 @@ vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
   withoutRepositoryGitAccess: mocks.without,
 }))
-vi.mock('../../src/lib/hooks/with-hooks-env', () => ({
-  rendererHookEnvironment: (
-    environment: Record<string, string | undefined> | undefined
-  ) =>
-    environment?.PROCESS_PROXY_TOKEN === undefined
-      ? undefined
-      : {
-          config_parameters: environment.GIT_CONFIG_PARAMETERS ?? '',
-          process_proxy_port: Number(environment.PROCESS_PROXY_PORT),
-          process_proxy_token: environment.PROCESS_PROXY_TOKEN,
-        },
+vi.mock('../../src/lib/hooks/with-hooks-env', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('../../src/lib/hooks/with-hooks-env')
+  >()),
   withHooksEnv: mocks.withHooksEnv,
 }))
 
@@ -256,6 +237,25 @@ describe('Rust push routing', () => {
       '/repo',
       expect.objectContaining({ interceptHooks: ['pre-push'] })
     )
+  })
+
+  it('rejects invalid hook interception environments before pushing', async () => {
+    const invalidEnvironments: Array<Record<string, string | undefined>> = [
+      { PROCESS_PROXY_TOKEN: 'hook-token' },
+      { PROCESS_PROXY_PORT: '4321' },
+      { PROCESS_PROXY_PORT: '0', PROCESS_PROXY_TOKEN: 'hook-token' },
+      { PROCESS_PROXY_PORT: '65536', PROCESS_PROXY_TOKEN: 'hook-token' },
+      { PROCESS_PROXY_PORT: '4321', PROCESS_PROXY_TOKEN: '' },
+    ]
+
+    for (const environment of invalidEnvironments) {
+      mocks.withHooksEnv.mockImplementationOnce(async run => run(environment))
+      await expect(
+        push(repository, remote, 'main', 'main', [])
+      ).rejects.toThrow('Invalid hook interception environment')
+    }
+    expect(mocks.push).not.toHaveBeenCalled()
+    expect(mocks.git).not.toHaveBeenCalled()
   })
 
   it('forwards trampoline credentials through the native push contract', async () => {

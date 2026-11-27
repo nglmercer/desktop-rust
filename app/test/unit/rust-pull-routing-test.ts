@@ -48,22 +48,10 @@ vi.mock('../../src/lib/git/core', () => ({
   getDescriptionForError: () => 'conflicts',
   GitError: mocks.GitError,
 }))
-vi.mock('../../src/lib/git/environment', () => ({
+vi.mock('../../src/lib/git/environment', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/lib/git/environment')>()),
   envForRemoteOperation: mocks.environment,
   envForProxy: mocks.proxy,
-  backendRemoteProxy: (
-    environment: Record<string, string | undefined> | undefined
-  ) =>
-    environment === undefined
-      ? undefined
-      : {
-          ...(typeof environment.http_proxy === 'string'
-            ? { http: environment.http_proxy }
-            : {}),
-          ...(typeof environment.https_proxy === 'string'
-            ? { https: environment.https_proxy }
-            : {}),
-        },
 }))
 vi.mock('../../src/lib/git/config', () => ({
   getConfigValue: async () => null,
@@ -71,18 +59,11 @@ vi.mock('../../src/lib/git/config', () => ({
 vi.mock('../../src/lib/hooks/config', () => ({
   getHooksEnvEnabled: () => mocks.hooksEnabled,
 }))
-vi.mock('../../src/lib/hooks/with-hooks-env', () => ({
+vi.mock('../../src/lib/hooks/with-hooks-env', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('../../src/lib/hooks/with-hooks-env')
+  >()),
   withHooksEnv: mocks.withHooksEnv,
-  rendererHookEnvironment: (
-    environment: Record<string, string | undefined> | undefined
-  ) =>
-    environment === undefined
-      ? undefined
-      : {
-          config_parameters: environment.GIT_CONFIG_PARAMETERS ?? '',
-          process_proxy_port: Number(environment.PROCESS_PROXY_PORT),
-          process_proxy_token: environment.PROCESS_PROXY_TOKEN,
-        },
 }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
