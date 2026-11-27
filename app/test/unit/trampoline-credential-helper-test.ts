@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert/strict'
-import { after, before, describe, it, mock } from 'node:test'
+import { afterEach, beforeAll, describe, it, vi } from 'vitest'
 import { Account, IAccountIdentity } from '../../src/models/account'
 import { Repository } from '../../src/models/repository'
 import { GitHubRepository } from '../../src/models/github-repository'
@@ -70,15 +69,15 @@ describe('repository-aware credential trampoline', () => {
   let path = '/repo'
   let background = false
   let fallbackAccount: IAccountIdentity | undefined
-  const prompt = mock.fn(
+  const prompt = vi.fn(
     async (_repository: Repository): Promise<Account | undefined> => undefined
   )
-  const associate = mock.fn(
+  const associate = vi.fn(
     async (repository: Repository, _endpoint: string): Promise<Repository> =>
       repository
   )
 
-  before(async () => {
+  beforeAll(async () => {
     const environment = await import(
       '../../src/lib/trampoline/trampoline-environment'
     )
@@ -99,7 +98,7 @@ describe('repository-aware credential trampoline', () => {
     ).createCredentialHelperTrampolineHandler
   })
 
-  after(() => mock.restoreAll())
+  afterEach(() => vi.restoreAllMocks())
 
   const command = (host = 'github.com') => ({
     identifier: TrampolineCommandIdentifier.CredentialHelper,
@@ -144,17 +143,13 @@ describe('repository-aware credential trampoline', () => {
       () => {
         assert.fail('Initial repository load has not started')
       }
-    mock.method(
-      accounts,
-      'getAll',
+    vi.spyOn(accounts, 'getAll').mockImplementation(
       () =>
         new Promise<ReadonlyArray<Account>>(resolve => {
           resolveAccounts = resolve
         })
     )
-    mock.method(
-      repositories,
-      'getAll',
+    vi.spyOn(repositories, 'getAll').mockImplementation(
       () =>
         new Promise<ReadonlyArray<Repository>>(resolve => {
           resolveRepositories = resolve
@@ -169,30 +164,30 @@ describe('repository-aware credential trampoline', () => {
   })
 
   it('prompts for an unassigned repository and uses the explicit choice', async () => {
-    prompt.mock.mockImplementationOnce(async () => bob)
+    prompt.mockImplementationOnce(async () => bob)
     const handler = createHandler(
       new TestAccountsStore([alice, bob]),
       new TestRepositoriesStore([repository(null)])
     )
     assert.match((await handler(command())) ?? '', /bob-token/)
-    assert.equal(prompt.mock.calls.at(-1)?.arguments[0].login, null)
+    assert.equal(prompt.mock.calls.at(-1)?.[0].login, null)
   })
 
   it('associates a repository whose GitHub remote was not recognized yet', async () => {
     const unrecognized = new Repository('/repo', 1, null, false)
-    associate.mock.mockImplementationOnce(async () => repository(null))
-    prompt.mock.mockImplementationOnce(async () => bob)
+    associate.mockImplementationOnce(async () => repository(null))
+    prompt.mockImplementationOnce(async () => bob)
     const handler = createHandler(
       new TestAccountsStore([alice, bob]),
       new TestRepositoriesStore([unrecognized])
     )
     assert.match((await handler(command())) ?? '', /bob-token/)
-    assert.equal(associate.mock.calls.at(-1)?.arguments[0], unrecognized)
-    assert.equal(associate.mock.calls.at(-1)?.arguments[1], endpoint)
+    assert.equal(associate.mock.calls.at(-1)?.[0], unrecognized)
+    assert.equal(associate.mock.calls.at(-1)?.[1], endpoint)
   })
 
   it('does not associate a repository with a host that is not GitHub', async () => {
-    const count = associate.mock.callCount()
+    const count = associate.mock.calls.length
     const handler = createHandler(
       new TestAccountsStore([alice]),
       new TestRepositoriesStore([new Repository('/repo', 1, null, false)])
@@ -202,7 +197,7 @@ describe('repository-aware credential trampoline', () => {
       stdin:
         'protocol=https\nhost=gitlab.example.com\nwwwauth[]=Basic realm="GitLab"\n\n',
     })
-    assert.equal(associate.mock.callCount(), count)
+    assert.equal(associate.mock.calls.length, count)
   })
 
   it('preserves a missing assignment and prompts for that login', async () => {
@@ -211,13 +206,13 @@ describe('repository-aware credential trampoline', () => {
       new TestRepositoriesStore([repository('bob')])
     )
     assert.equal(await handler(command()), undefined)
-    assert.equal(prompt.mock.calls.at(-1)?.arguments[0].login, 'bob')
+    assert.equal(prompt.mock.calls.at(-1)?.[0].login, 'bob')
   })
 
   it('does not prompt or fall back during background work', async () => {
     background = true
     try {
-      const count = prompt.mock.callCount()
+      const count = prompt.mock.calls.length
       for (const login of [null, 'bob']) {
         const handler = createHandler(
           new TestAccountsStore([alice]),
@@ -225,7 +220,7 @@ describe('repository-aware credential trampoline', () => {
         )
         assert.equal(await handler(command()), undefined)
       }
-      assert.equal(prompt.mock.callCount(), count)
+      assert.equal(prompt.mock.calls.length, count)
     } finally {
       background = false
     }
@@ -300,7 +295,7 @@ describe('repository-aware credential trampoline', () => {
   })
 
   it('rejects a different endpoint returned after an interactive prompt', async () => {
-    prompt.mock.mockImplementationOnce(
+    prompt.mockImplementationOnce(
       async () =>
         new Account(
           'alice',
