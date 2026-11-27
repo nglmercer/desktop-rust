@@ -13,7 +13,7 @@
   "imports.stream": 0,
   "imports.stream_promises": 0,
   "imports.path": 66,
-  "imports.desktop_trampoline": 1,
+  "imports.desktop_trampoline": 0,
   "imports.registry_js": 3,
   "imports.desktop_notifications": 6,
   "imports.buffer": 0,

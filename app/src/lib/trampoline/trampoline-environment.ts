@@ -12,7 +12,6 @@ import {
 import { GitErrorKind } from '../git/error-kind'
 import { memoizeOne } from '../memoize-one'
 import { GitError, getDescriptionForError } from '../git/core'
-import { getDesktopAskpassTrampolineFilename } from 'desktop-trampoline'
 import type { IAccountIdentity } from '../../models/account'
 import { backend } from '../../backend/client'
 
@@ -259,11 +258,7 @@ const isSSHAuthFailure = (e: unknown): e is GitError =>
 
 /** Returns the path of the desktop-askpass-trampoline binary. */
 export function getDesktopAskpassTrampolinePath(): string {
-  return Path.resolve(
-    __dirname,
-    'desktop-trampoline',
-    getDesktopAskpassTrampolineFilename()
-  )
+  return Path.resolve(__dirname, 'desktop-trampoline', 'desktop-askpass')
 }
 
 /** Returns the path of the ssh-wrapper binary. */

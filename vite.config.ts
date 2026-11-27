@@ -574,13 +574,6 @@ export default defineConfig({
         ),
       },
       {
-        find: /^desktop-trampoline$/,
-        replacement: path.resolve(
-          __dirname,
-          'app/src/web/desktop-trampoline.ts'
-        ),
-      },
-      {
         find: /^registry-js$/,
         replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts'),
       },
