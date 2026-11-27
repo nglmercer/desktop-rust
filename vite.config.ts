@@ -114,10 +114,6 @@ const polyfillRequire = createRequire(
 const legacyUrlPackage = createRequire(
   polyfillRequire.resolve('node-stdlib-browser')
 ).resolve('url/')
-// The crypto implementation behind app/src/web/crypto.ts (randomUUID is added there).
-const legacyCryptoPackage = createRequire(
-  polyfillRequire.resolve('node-stdlib-browser')
-).resolve('crypto-browserify')
 const legacyStreamPackage = createRequire(
   polyfillRequire.resolve('node-stdlib-browser')
 ).resolve('stream-browserify')
@@ -572,7 +568,6 @@ export default defineConfig({
         replacement: path.resolve(__dirname, 'app/src/web/koffi.ts'),
       },
       { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
-      { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
       { find: /^desktop-stream-impl$/, replacement: legacyStreamPackage },
       {
         find: /^(node:)?url$/,
