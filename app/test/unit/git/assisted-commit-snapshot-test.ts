@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { afterEach, before, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {
@@ -20,7 +19,7 @@ let diff: typeof import('../../../src/lib/git/diff')
 let config: typeof import('../../../src/lib/hooks/config')
 let operations: string[] | undefined
 
-before(async () => {
+beforeAll(async () => {
   vi.doMock('../../../src/ui/lib/git-perf.ts', async () => ({
     ...(await vi.importActual('../../../src/ui/lib/git-perf.ts')),
     start: () => {},
@@ -45,7 +44,7 @@ describe('git/assisted-commit snapshot tree reuse', () => {
   for (const partialCount of [0, 1, 3]) {
     it(`materializes each whole-file tree once with ${partialCount} partial selections`, async t => {
       config.setHooksEnvEnabled(false)
-      t.after(() => {
+      t.onTestFinished(() => {
         operations = undefined
         localStorage.removeItem('git-hooks-env-enabled')
       })

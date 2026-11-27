@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { afterEach, before, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import * as FileSystem from 'fs/promises'
 import type { CopyOptions } from 'fs'
 import * as Dugite from 'dugite'
@@ -27,7 +26,7 @@ let nativeExecFault:
 let nativeExec: typeof Dugite.exec
 let loginGitParameters: string | undefined
 
-before(async () => {
+beforeAll(async () => {
   // Unit tests do not have the packaged binary assets. Resolve only those
   // assets and the login-shell environment; all Git, hooks and proxy IPC are real.
   const copy = FileSystem.cp
@@ -127,7 +126,7 @@ describe('git/assisted-commit real hook interception', () => {
           }
           return attributeSource.call(backend(), path, variable, environment)
         })
-      t.after(() => attributeSourceSpy.mockRestore())
+      t.onTestFinished(() => attributeSourceSpy.mockRestore())
       const result = await fixtures.single(repository, input)
       assert.strictEqual(result.commits.length, 1)
       assert.strictEqual(await fixtures.count(repository), 2)
@@ -161,7 +160,7 @@ describe('git/assisted-commit real hook interception', () => {
         }
         return attributeSource.call(backend(), path, variable, environment)
       })
-    t.after(() => attributeSourceSpy.mockRestore())
+    t.onTestFinished(() => attributeSourceSpy.mockRestore())
     await assert.rejects(fixtures.single(repository, input), error => {
       assert.ok(error instanceof engine.AssistedCommitError)
       return error.code === 'unsafe-selection'
@@ -549,7 +548,7 @@ describe('git/assisted-commit real hook interception', () => {
         }
         return readHead.call(backend(), path)
       })
-    t.after(() => headSpy.mockRestore())
+    t.onTestFinished(() => headSpy.mockRestore())
     await assert.rejects(
       fixtures.single(repository, input),
       error =>
@@ -590,7 +589,7 @@ describe('git/assisted-commit real hook interception', () => {
         }
         return interpretTrailers.call(backend(), ...args)
       })
-    t.after(() => trailersSpy.mockRestore())
+    t.onTestFinished(() => trailersSpy.mockRestore())
     await assert.rejects(
       engine.withAssistedCommitSnapshot(repository, input, async snapshot => {
         const checked = await engine.validateAssistedCommitPlan(
@@ -643,7 +642,7 @@ describe('git/assisted-commit real hook interception', () => {
         }
         return readHead.call(backend(), path)
       })
-    t.after(() => headSpy.mockRestore())
+    t.onTestFinished(() => headSpy.mockRestore())
     await assert.rejects(
       engine.withAssistedCommitSnapshot(repository, input, async snapshot => {
         const checked = await engine.validateAssistedCommitPlan(

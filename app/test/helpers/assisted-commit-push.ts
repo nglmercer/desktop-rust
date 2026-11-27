@@ -1,11 +1,10 @@
-import { TestContext } from 'node:test'
 import { Repository } from '../../src/models/repository'
 import { rawGit, tip } from './assisted-commit'
-import { createTempDirectory } from './temp'
+import { createTempDirectory, type TestCleanupContext } from './temp'
 
 /** Local-only bare destination, with explicit --git-dir reads on hardened Git installations. */
 export async function addBareRemote(
-  t: TestContext,
+  t: TestCleanupContext,
   repository: Repository,
   options: {
     readonly name?: string

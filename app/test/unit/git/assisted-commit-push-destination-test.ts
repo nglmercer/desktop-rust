@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'vitest'
 import { cp, mkdir, symlink, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { Repository } from '../../../src/models/repository'
@@ -248,7 +248,7 @@ describe('frozen assisted push destination inputs', () => {
         { name: 'GIT_CONFIG_SYSTEM', value: process.env.GIT_CONFIG_SYSTEM },
         { name: 'GIT_CONFIG_NOSYSTEM', value: process.env.GIT_CONFIG_NOSYSTEM },
       ]
-      t.after(() => {
+      t.onTestFinished(() => {
         for (const { name, value } of previous) {
           if (value === undefined) {
             delete process.env[name]

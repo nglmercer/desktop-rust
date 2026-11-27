@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { afterEach, before, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import * as FileSystem from 'fs/promises'
 import { join } from 'path'
 import {
@@ -17,7 +16,7 @@ let afterStat:
   | ((path: Parameters<typeof FileSystem.lstat>[0]) => Promise<void>)
   | undefined
 
-before(async () => {
+beforeAll(async () => {
   const read = FileSystem.readFile
   const stat = FileSystem.lstat
   vi.doMock('fs/promises', async () => ({
@@ -58,7 +57,7 @@ describe('assisted selected-file completion fence', () => {
       await fixtures.request(repository, ['a', 'b'])
     )
     let recovered = false
-    t.after(async () => {
+    t.onTestFinished(async () => {
       beforeRead = undefined
       if (!recovered) {
         await transactions.rollbackAssistedCommitTransaction(result)
@@ -114,7 +113,7 @@ describe('assisted selected-file completion fence', () => {
       await fixtures.request(repository, ['a', 'b'])
     )
     let recovered = false
-    t.after(async () => {
+    t.onTestFinished(async () => {
       beforeRead = undefined
       afterStat = undefined
       if (!recovered) {
