@@ -2548,6 +2548,52 @@ export class BackendClient {
     return value
   }
 
+  /** Open a repository in GitHub Copilot through scoped host process execution. */
+  async openCopilotApp(
+    executable: string,
+    repositoryPath: string
+  ): Promise<{
+    readonly kind: 'success' | 'not-found' | 'launch-failed'
+    readonly message: string
+  }> {
+    for (const value of [executable, repositoryPath]) {
+      if (value.length === 0 || value.length > 4096 || value.includes('\0')) {
+        throw new BackendError({
+          code: 'invalid_request',
+          message: 'Invalid Copilot app handoff path',
+          retryable: false,
+        })
+      }
+    }
+    const operation = {
+      type: 'open_copilot_app',
+      executable,
+      repository_path: repositoryPath,
+    }
+    const value =
+      this.transport === 'wry'
+        ? await this.request('git_info', { operation })
+        : await this.request('open_copilot_app', {
+            executable,
+            repository_path: repositoryPath,
+          })
+    if (
+      !isRecord(value) ||
+      (value.kind !== 'success' &&
+        value.kind !== 'not-found' &&
+        value.kind !== 'launch-failed') ||
+      typeof value.message !== 'string' ||
+      value.message.length > 1024 * 1024
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid Copilot app handoff response',
+        retryable: false,
+      })
+    }
+    return { kind: value.kind, message: value.message }
+  }
+
   /** Read the installed Git version through the Rust host. */
   async gitVersion(): Promise<string> {
     const value =

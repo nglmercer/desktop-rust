@@ -352,6 +352,10 @@ enum ManagementOperation {
         #[serde(default)]
         path: Option<String>,
     },
+    OpenCopilotApp {
+        executable: String,
+        repository_path: String,
+    },
     RendererShellEnv {
         #[serde(default)]
         cwd: Option<String>,
@@ -794,6 +798,10 @@ async fn execute(
         ApplicationOperation::Management(ResolveExecutable { command, path }) => {
             desktop_core::resolve_executable(command, path).await
         }
+        ApplicationOperation::Management(OpenCopilotApp {
+            executable,
+            repository_path,
+        }) => desktop_core::open_copilot_app(executable, repository_path).await,
         ApplicationOperation::Management(RendererShellEnv { cwd, shell_kind }) => {
             anyhow::ensure!(
                 expected_repository.is_none(),

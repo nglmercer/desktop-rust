@@ -1,6 +1,7 @@
 //! Repository workflows shared by the CLI and browser/native transports.
 pub mod application;
 pub mod copilot;
+mod copilot_app;
 mod copilot_bridge;
 pub mod executable;
 pub mod migration;
@@ -134,6 +135,7 @@ pub use state::OperationState;
 mod process;
 mod push_error;
 mod stream_redaction;
+pub use copilot_app::open_copilot_app;
 pub use executable::resolve_executable;
 pub use github::{GitHubAction, GitHubRequest, execute_github};
 pub use shell_env::renderer_shell_env;

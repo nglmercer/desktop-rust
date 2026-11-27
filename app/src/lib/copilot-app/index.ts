@@ -1,5 +1,5 @@
 import { isAbsolute } from 'path'
-import { execFile } from '../exec-file'
+import { backend } from '../../backend/client'
 import { pathExists } from '../path-exists'
 import * as Darwin from './darwin'
 import * as Win32 from './win32'
@@ -38,18 +38,24 @@ export interface ICopilotAppDependencies {
  * own 20-second cold-start deadline, so callers allow it 30 seconds. Never retry:
  * a request may already have been queued even when its response is lost.
  */
-export async function runCopilotAppCommand(
+async function runCopilotAppCommand(
   executable: string,
   args: ReadonlyArray<string>,
   timeout: number
 ): Promise<{ readonly stdout: string; readonly stderr: string }> {
-  return execFile(executable, args, {
-    encoding: 'utf8',
-    timeout,
-    killSignal: 'SIGKILL',
-    windowsHide: true,
-    maxBuffer: 1024 * 1024,
-  })
+  if (timeout !== 30000 || args.length !== 2 || args[0] !== 'open') {
+    throw new Error('Invalid Copilot app handoff request')
+  }
+  const outcome = await backend().openCopilotApp(executable, args[1])
+  if (outcome.kind === 'success') {
+    return { stdout: '', stderr: '' }
+  }
+  if (outcome.kind === 'not-found') {
+    throw Object.assign(new Error(outcome.message || 'Executable not found'), {
+      code: 'ENOENT',
+    })
+  }
+  throw new Error(outcome.message || 'The command could not be completed.')
 }
 
 function errorDetail(error: unknown): string {

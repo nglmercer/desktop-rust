@@ -100,6 +100,39 @@ describe('WebSocket backend transport', () => {
     })
   })
 
+  it('routes Copilot app handoff through the scoped host operation', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.openCopilotApp(
+      '/opt/Copilot/github',
+      '/tmp/repository'
+    )
+    const sent = socket.sent.at(-1)!
+    expect(sent).toMatchObject({
+      method: 'open_copilot_app',
+      executable: '/opt/Copilot/github',
+      repository_path: '/tmp/repository',
+    })
+    socket.message({
+      id: sent.id,
+      result: { kind: 'success', message: '' },
+    })
+    await expect(pending).resolves.toEqual({ kind: 'success', message: '' })
+  })
+
+  it('rejects malformed Copilot app handoff responses', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.openCopilotApp(
+      '/opt/Copilot/github',
+      '/tmp/repository'
+    )
+    const sent = socket.sent.at(-1)!
+    socket.message({
+      id: sent.id,
+      result: { kind: 'sometimes', message: '' },
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('rejects malformed hooks shell environment entries', async () => {
     const { client: value, socket } = await connected()
     const pending = value.shellEnvironment()
