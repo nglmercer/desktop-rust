@@ -1,6 +1,6 @@
 import * as Path from 'path'
 import { backend } from '../backend/client'
-import { pathToFileURL } from 'url'
+import { pathToFileURL } from './file-url'
 
 /**
  * Resolve and encode the path information into a URL.

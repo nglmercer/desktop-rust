@@ -1,4 +1,3 @@
-import * as URL from 'url'
 import * as Path from 'path'
 
 import { Account, isSameAccount } from '../models/account'
@@ -171,7 +170,7 @@ function getRemoteWebHost(remote: IGitRemoteURL): string | null {
       ? remote.hostname
       : remote.hostname.replace(/:\d+$/, '')
   try {
-    return new URL.URL(`https://${hostname}`).host.toLowerCase()
+    return new URL(`https://${hostname}`).host.toLowerCase()
   } catch {
     return null
   }
@@ -192,7 +191,7 @@ export function remoteMatchesEndpoint(
     return false
   }
 
-  const html = new URL.URL(getHTMLURL(endpoint))
+  const html = new URL(getHTMLURL(endpoint))
   return remote.protocol === 'https'
     ? remoteHost === html.host.toLowerCase()
     : remoteHost === html.hostname.toLowerCase()

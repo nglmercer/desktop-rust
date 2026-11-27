@@ -7,7 +7,6 @@ import {
   getOAuthAuthorizationURL,
 } from '../../src/lib/api'
 import { CopilotError } from '../../src/lib/copilot-error'
-import * as URL from 'url'
 
 interface IPageInfo {
   per_page: number
@@ -30,15 +29,15 @@ function assertNext(current: IPageInfo, expected: IPageInfo) {
   )
 
   assert(nextPath !== null)
-  const { pathname, query } = URL.parse(nextPath, true)
+  const parsedNextPath = new URL(nextPath, 'https://api.github.com')
 
-  assert.equal(pathname, '/items')
+  assert.equal(parsedNextPath.pathname, '/items')
 
   const per_page = parseInt(
-    typeof query.per_page === 'string' ? query.per_page : '',
+    parsedNextPath.searchParams.get('per_page') ?? '',
     10
   )
-  const page = parseInt(typeof query.page === 'string' ? query.page : '', 10)
+  const page = parseInt(parsedNextPath.searchParams.get('page') ?? '', 10)
 
   assert.equal(per_page, expected.per_page)
   assert.equal(page, expected.page)

@@ -1,4 +1,3 @@
-import * as URL from 'url'
 import { Account } from '../models/account'
 import {
   ICopilotCommitMessage,
@@ -694,8 +693,12 @@ function getNextPagePathFromLink(response: Response): string | null {
     const match = part.match(/<([^>]+)>; rel="([^"]+)"/)
 
     if (match && match[2] === 'next') {
-      const nextURL = URL.parse(match[1])
-      return nextURL.path || null
+      try {
+        const nextURL = new URL(match[1], 'https://api.github.com')
+        return `${nextURL.pathname}${nextURL.search}`
+      } catch {
+        return null
+      }
     }
   }
 
@@ -754,11 +757,13 @@ export function getNextPagePathWithIncreasingPageSize(response: Response) {
     return null
   }
 
-  const { pathname, query } = URL.parse(nextPath, true)
-  const { per_page, page } = query
+  const parsedNextPath = new URL(nextPath, 'https://api.github.com')
+  const { pathname, searchParams } = parsedNextPath
+  const perPage = searchParams.get('per_page')
+  const page = searchParams.get('page')
 
-  const pageSize = typeof per_page === 'string' ? parseInt(per_page, 10) : NaN
-  const pageNumber = typeof page === 'string' ? parseInt(page, 10) : NaN
+  const pageSize = perPage === null ? NaN : parseInt(perPage, 10)
+  const pageNumber = page === null ? NaN : parseInt(page, 10)
 
   if (!pageSize || !pageNumber) {
     return nextPath
@@ -779,9 +784,9 @@ export function getNextPagePathWithIncreasingPageSize(response: Response) {
   // second page would seamlessly fit? No sense going
   // above 100 since that's the max the API supports
   if (pageSize !== nextPageSize && received % nextPageSize === 0) {
-    query.per_page = `${nextPageSize}`
-    query.page = `${received / nextPageSize + 1}`
-    return URL.format({ pathname, query })
+    searchParams.set('per_page', `${nextPageSize}`)
+    searchParams.set('page', `${received / nextPageSize + 1}`)
+    return `${pathname}?${searchParams.toString()}`
   }
 
   return nextPath
@@ -2332,7 +2337,7 @@ export async function fetchUser(
  * http://github.mycompany.com/my-team/my-project -> http://github.mycompany.com/api
  */
 export function getEndpointForRepository(url: string): string {
-  const parsed = URL.parse(url)
+  const parsed = new URL(url)
   if (parsed.hostname === 'github.com') {
     return getDotComAPIEndpoint()
   } else {
@@ -2364,7 +2369,7 @@ export function getHTMLURL(endpoint: string): string {
     return 'https://github.com'
   } else {
     if (isGHE(endpoint)) {
-      const url = new URL.URL(endpoint)
+      const url = new URL(endpoint)
 
       url.pathname = '/'
 
@@ -2377,7 +2382,7 @@ export function getHTMLURL(endpoint: string): string {
 
     // Use the origin rather than the hostname so that GitHub Enterprise
     // Server instances running on a non-default port retain their port.
-    return new URL.URL(endpoint).origin
+    return new URL(endpoint).origin
   }
 }
 

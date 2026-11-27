@@ -1,6 +1,5 @@
 import type { HostCertificate } from '../../lib/host-types'
 import * as React from 'react'
-import * as URL from 'url'
 import { Dialog, DialogContent, DialogFooter } from '../dialog'
 import { OkCancelButtonGroup } from '../dialog/ok-cancel-button-group'
 
@@ -34,7 +33,12 @@ export class UntrustedCertificate extends React.Component<
   {}
 > {
   public render() {
-    const host = URL.parse(this.props.url).hostname
+    let host: string | null = null
+    try {
+      host = new URL(this.props.url).hostname
+    } catch {
+      // Preserve the legacy parser behavior for malformed input: render no host.
+    }
 
     return (
       <Dialog

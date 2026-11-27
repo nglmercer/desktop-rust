@@ -1,5 +1,3 @@
-import * as URL from 'url'
-
 /** The name for errors thrown because of an invalid URL. */
 export const InvalidURLErrorName = 'invalid-url'
 
@@ -22,14 +20,21 @@ export function validateURL(address: string): string {
     throw error
   }
 
-  let url = URL.parse(trimmed)
-  if (!url.host) {
-    // E.g., if they user entered 'ghe.io', let's assume they're using https.
-    address = `https://${trimmed}`
-    url = URL.parse(address)
+  // E.g., if the user entered 'ghe.io', assume they're using https.
+  address = /^[a-z][a-z0-9+.-]*:/i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`
+
+  let url: URL
+  try {
+    url = new URL(address)
+  } catch {
+    const error = new Error('Invalid URL')
+    error.name = InvalidURLErrorName
+    throw error
   }
 
-  if (!url.protocol) {
+  if (!url.host) {
     const error = new Error('Invalid URL')
     error.name = InvalidURLErrorName
     throw error

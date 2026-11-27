@@ -1,4 +1,3 @@
-import * as URL from 'url'
 import { getHTMLURL, API } from './api'
 import { parseRemote, parseRepositoryIdentifier } from './remote-parsing'
 import { Account, isDotComAccount } from '../models/account'
@@ -57,7 +56,7 @@ export async function findAccountForRemoteURL(
     const account =
       allAccounts.find(a => {
         const htmlURL = getHTMLURL(a.endpoint)
-        const parsedEndpoint = URL.parse(htmlURL)
+        const parsedEndpoint = new URL(htmlURL)
         return parsedURL.hostname === parsedEndpoint.hostname
       }) || null
 
@@ -92,8 +91,7 @@ export async function findAccountForRemoteURL(
 
     for (const account of sortedAccounts) {
       if (hostname != null) {
-        const htmlURL = URL.parse(getHTMLURL(account.endpoint))
-        const accountHost = htmlURL.hostname
+        const accountHost = new URL(getHTMLURL(account.endpoint)).hostname
         if (accountHost !== hostname) {
           continue
         }

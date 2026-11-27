@@ -27,6 +27,8 @@ progress, security, and byte-exact behavior.
   replaced it.
 - Direct renderer `setImmediate`/`clearImmediate` use; a small MessageChannel
   scheduler now covers application callbacks and the narrow dependency surface.
+- The legacy Node `url` module/polyfill in renderer production code; URL parsing
+  now uses the web-platform `URL` API and purpose-specific file URL handling.
 
 ## Temporary compatibility pieces
 

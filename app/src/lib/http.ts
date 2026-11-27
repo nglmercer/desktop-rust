@@ -1,5 +1,4 @@
 import * as appProxy from '../ui/lib/app-proxy'
-import { URL } from 'url'
 
 /** The HTTP methods available. */
 export type HTTPMethod = 'GET' | 'POST' | 'PUT' | 'HEAD' | 'DELETE'

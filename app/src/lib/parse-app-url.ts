@@ -1,4 +1,3 @@
-import * as URL from 'url'
 import { testForInvalidChars } from './sanitize-ref-name'
 
 export interface IOAuthAction {
@@ -33,14 +32,6 @@ export type URLActionType =
   | IOpenRepositoryFromURLAction
   | IUnknownAction
 
-// eslint-disable-next-line @typescript-eslint/naming-convention
-interface ParsedUrlQueryWithUndefined {
-  // `undefined` is added here to ensure we handle the missing querystring key
-  // See https://github.com/Microsoft/TypeScript/issues/13778 for discussion about
-  // why this isn't supported natively in TypeScript
-  [key: string]: string | string[] | undefined
-}
-
 /**
  * Parse the URL to find a given key in the querystring text.
  *
@@ -48,30 +39,27 @@ interface ParsedUrlQueryWithUndefined {
  * @param key The key to look for in the querystring
  */
 function getQueryStringValue(
-  query: ParsedUrlQueryWithUndefined,
+  query: URLSearchParams,
   key: string
 ): string | null {
-  const value = query[key]
-  if (value == null) {
-    return null
-  }
-
-  if (Array.isArray(value)) {
-    return value[0]
-  }
-
-  return value
+  return query.get(key)
 }
 
 export function parseAppURL(url: string): URLActionType {
-  const parsedURL = URL.parse(url, true)
-  const hostname = parsedURL.hostname
   const unknown: IUnknownAction = { name: 'unknown', url }
+  let parsedURL: URL
+  try {
+    parsedURL = new URL(url)
+  } catch {
+    return unknown
+  }
+
+  const hostname = parsedURL.hostname
   if (!hostname) {
     return unknown
   }
 
-  const query = parsedURL.query
+  const query = parsedURL.searchParams
 
   const actionName = hostname.toLowerCase()
   if (actionName === 'oauth') {

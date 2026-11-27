@@ -106,14 +106,11 @@ export function sassLoadPaths(root: string): string[] {
   ]
 }
 
-// The `url` npm package that vite-plugin-node-polyfills ships. app/src/web/url.ts
-// wraps it, so it needs a name the `url` alias below does not capture.
+// The stream-browserify package that vite-plugin-node-polyfills ships.
+// app/src/web/stream.ts wraps it, so it needs a name the `stream` aliases do not capture.
 const polyfillRequire = createRequire(
   createRequire(import.meta.url).resolve('vite-plugin-node-polyfills')
 )
-const legacyUrlPackage = createRequire(
-  polyfillRequire.resolve('node-stdlib-browser')
-).resolve('url/')
 const legacyStreamPackage = createRequire(
   polyfillRequire.resolve('node-stdlib-browser')
 ).resolve('stream-browserify')
@@ -566,12 +563,7 @@ export default defineConfig({
         find: /^koffi$/,
         replacement: path.resolve(__dirname, 'app/src/web/koffi.ts'),
       },
-      { find: /^desktop-url-impl$/, replacement: legacyUrlPackage },
       { find: /^desktop-stream-impl$/, replacement: legacyStreamPackage },
-      {
-        find: /^(node:)?url$/,
-        replacement: path.resolve(__dirname, 'app/src/web/url.ts'),
-      },
       {
         find: /^keytar$/,
         replacement: path.resolve(__dirname, 'app/src/web/keytar.ts'),
