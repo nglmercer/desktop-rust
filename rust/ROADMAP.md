@@ -16,7 +16,7 @@ if it regresses.
 | Renderer files importing `child_process` | 0 | 0 |
 | Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
 | Unit test files on the Node runner | 0 of 426 | 0 |
-| Rust code (crates, non-test) | 94,243 lines | — |
+| Rust code (crates, non-test) | 96,926 lines | — |
 
 The command-site count includes indirect assisted-commit `privateGit` operations,
 credential-helper execution, hook discovery, and the tutorial push; the earlier
