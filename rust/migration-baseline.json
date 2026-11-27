@@ -1,9 +1,9 @@
 {
   "transportChecks": 0,
   "legacyGitCalls": 0,
-  "nodeTestFiles": 28,
+  "nodeTestFiles": 27,
   "imports.dugite": 0,
-  "imports.fs": 10,
+  "imports.fs": 9,
   "imports.child_process": 7,
   "imports.os": 0,
   "imports.crypto": 0,
