@@ -1,7 +1,14 @@
-import { vi } from 'vitest'
 import assert from 'node:assert/strict'
-import { after, before, beforeEach, describe, it, mock } from 'node:test'
-import type { TestContext } from 'node:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  it,
+  vi,
+  type TestContext,
+} from 'vitest'
 import { setImmediate } from 'node:timers/promises'
 import type { AppStore } from '../../../src/lib/stores/app-store'
 import type { SignInResult } from '../../../src/lib/stores/sign-in-store'
@@ -13,6 +20,7 @@ import { createMockAPIRepository } from '../../helpers/mock-api'
 import type { ITestStores } from '../../helpers/app-store-test-harness'
 import type { TestStatsDatabase } from '../../helpers/databases/test-stats-database'
 import { exec } from 'dugite'
+import { mockMethod } from '../../helpers/mock-method'
 
 describe('AppStore repository accounts', () => {
   let appStore: AppStore
@@ -33,29 +41,33 @@ describe('AppStore repository accounts', () => {
 
   let aliveStorePrototype: { setEnabled: (enabled: boolean) => void }
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   // The Vitest compat tracker restores module-level mocks after every test,
   // unlike node:test which leaves them until `mock.restoreAll()` in `after`.
   // Reinstall the method mocks before each test so the shared AppStore keeps
   // recording popups for the whole suite.
   function installMethodMocks() {
-    mock.method(aliveStorePrototype, 'setEnabled', () => {})
-    mock.method(window, 'setTimeout', () => 0)
-    mock.method(window, 'requestAnimationFrame', () => 0)
-    mock.method(window, 'addEventListener', () => {})
-    mock.method(appStore, '_showPopup', async (popup: Popup) => {
+    mockMethod(aliveStorePrototype, 'setEnabled', () => {})
+    window.setTimeout = (() => 0) as unknown as typeof window.setTimeout
+    window.requestAnimationFrame = () => 0
+    window.addEventListener = (() => {}) as typeof window.addEventListener
+    mockMethod(appStore, '_showPopup', async (popup: Popup) => {
       popups.push(popup)
     })
     const popupManager = appStore['popupManager']
     const addPopup = popupManager.addPopup.bind(popupManager)
-    mock.method(popupManager, 'addPopup', (popup: Popup) => {
+    mockMethod(popupManager, 'addPopup', (popup: Popup) => {
       const added = addPopup(popup)
       popups.push(added)
       return added
     })
-    mock.method(appStore, '_selectRepository', async () => null)
+    mockMethod(appStore, '_selectRepository', async () => null)
   }
 
-  before(async () => {
+  beforeAll(async () => {
     vi.doMock('../../../src/lib/api', async () => ({
       ...(await vi.importActual('../../../src/lib/api')),
       deleteToken: async () => true,
@@ -125,12 +137,11 @@ describe('AppStore repository accounts', () => {
     installMethodMocks()
   })
 
-  after(async () => {
+  afterAll(async () => {
     stores.repositoriesStore['emitter'].dispose()
     stores.accountsStore['emitter'].dispose()
     await setImmediate()
     statsDb?.close()
-    mock.restoreAll()
   })
 
   async function addRepository(path: string, login: string | null) {
@@ -182,7 +193,7 @@ describe('AppStore repository accounts', () => {
 
   describe('refreshing pull requests', () => {
     function mockRefresh(t: TestContext) {
-      return t.mock.method(
+      return mockMethod(
         appStore['pullRequestCoordinator'],
         'refreshPullRequests',
         async () => {}
@@ -193,14 +204,14 @@ describe('AppStore repository accounts', () => {
       const repository = await addRepository('/refresh-assigned', 'bob')
       const refresh = mockRefresh(t)
       await appStore._refreshPullRequests(repository)
-      assert.equal(refresh.mock.callCount(), 1)
-      assert.equal(refresh.mock.calls[0].arguments[1]?.login, 'bob')
+      assert.equal(refresh.mock.calls.length, 1)
+      assert.equal(refresh.mock.calls[0][1]?.login, 'bob')
     })
 
     it('skips the refresh when the repository is reassigned meanwhile', async t => {
       const repository = await addRepository('/refresh-reassigned', 'bob')
       const refresh = mockRefresh(t)
-      t.mock.method(appStore, '_ensureRepositoryAccount', async () => {
+      mockMethod(appStore, '_ensureRepositoryAccount', async () => {
         await stores.repositoriesStore.updateRepositoryAccount(
           repository,
           'alice'
@@ -208,7 +219,7 @@ describe('AppStore repository accounts', () => {
         return bob
       })
       await appStore._refreshPullRequests(repository)
-      assert.equal(refresh.mock.callCount(), 0)
+      assert.equal(refresh.mock.calls.length, 0)
     })
   })
 
@@ -274,14 +285,14 @@ describe('AppStore repository accounts', () => {
         endpoint?: string
         callback?: (result: SignInResult) => void
       } = {}
-      t.mock.method(
+      mockMethod(
         appStore,
         '_beginEnterpriseSignIn',
         (callback: (result: SignInResult) => void) => {
           signIn.callback = callback
         }
       )
-      t.mock.method(appStore, '_setSignInEndpoint', async (url: string) => {
+      mockMethod(appStore, '_setSignInEndpoint', async (url: string) => {
         signIn.endpoint = url
       })
       return signIn
@@ -304,7 +315,9 @@ describe('AppStore repository accounts', () => {
       await nextPopup(PopupType.SignIn)
       assert.equal(signIn.endpoint, 'https://company.ghe.com/')
       await stores.accountsStore.addAccount(carol)
-      t.after(() => stores.accountsStore.removeAccount(carol))
+      t.onTestFinished(async () => {
+        await stores.accountsStore.removeAccount(carol)
+      })
       signIn.callback?.({ kind: 'success', account: carol })
 
       assert.equal((await prompt)?.login, 'carol')
@@ -367,7 +380,7 @@ describe('AppStore repository accounts', () => {
 
   it('offers keep or clear on explicit sign-out, and allows cancellation', async t => {
     const repository = await addRepository('/explicit-sign-out', 'alice')
-    const removed = t.mock.method(appStore, '_removeAccount', async () => {})
+    const removed = mockMethod(appStore, '_removeAccount', async () => {})
     const cancelled = appStore._signOutAccount(alice)
     const cancelPopup = await nextPopup(PopupType.ConfirmAccountSignOut)
     if (cancelPopup.type !== PopupType.ConfirmAccountSignOut) {
@@ -376,7 +389,7 @@ describe('AppStore repository accounts', () => {
     assert.ok(cancelPopup.repositoryCount > 0)
     cancelPopup.onComplete(undefined)
     await cancelled
-    assert.equal(removed.mock.callCount(), 0)
+    assert.equal(removed.mock.calls.length, 0)
 
     const keep = appStore._signOutAccount(alice)
     const keepPopup = await nextPopup(PopupType.ConfirmAccountSignOut)
@@ -404,7 +417,7 @@ describe('AppStore repository accounts', () => {
       )?.login,
       null
     )
-    assert.equal(removed.mock.callCount(), 2)
+    assert.equal(removed.mock.calls.length, 2)
   })
 
   it('signs out only the account whose token is rejected and keeps its assignments', async () => {
@@ -491,12 +504,12 @@ describe('AppStore repository accounts', () => {
       assert.equal(remote.exitCode, 0)
       const repository = await addRepository(local.path, login)
       await appStore['gitStoreCache'].get(repository).loadRemotes()
-      t.mock.method(appStore, '_refreshRepository', async () => {})
+      mockMethod(appStore, '_refreshRepository', async () => {})
       // The local remote path never matches a GitHub repository, so keep the
       // repository as-is rather than clearing its association.
       const refresh = appStore['repositoryWithRefreshedGitHubRepository']
       appStore['repositoryWithRefreshedGitHubRepository'] = async r => r
-      t.after(() => {
+      t.onTestFinished(() => {
         appStore['repositoryWithRefreshedGitHubRepository'] = refresh
       })
       popups.length = 0
