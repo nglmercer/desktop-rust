@@ -150,12 +150,13 @@ export function measure(): IMetrics {
   })
   const imports: Record<string, number> = {}
   for (const [name, modules] of Object.entries({
-    dugite: 'dugite',
-    fs: 'fs|fs/promises|node:fs|node:fs/promises',
-    child_process: 'child_process|node:child_process',
-    os: 'os|node:os',
-    crypto: 'crypto|node:crypto',
-    keytar: 'keytar',
+    dugite: 'dugite|(?:\\.\\./)+web/dugite',
+    fs: 'fs|fs/promises|node:fs|node:fs/promises|(?:\\.\\./)+web/fs|(?:\\.\\./)+web/fs-promises',
+    child_process:
+      'child_process|node:child_process|(?:\\.\\./)+web/child_process',
+    os: 'os|node:os|(?:\\.\\./)+web/os',
+    crypto: 'crypto|node:crypto|(?:\\.\\./)+web/crypto',
+    keytar: 'keytar|(?:\\.\\./)+web/keytar',
   })) {
     imports[name] = filesMatching(importOf(modules))
   }
