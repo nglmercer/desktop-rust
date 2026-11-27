@@ -446,6 +446,7 @@ enum ReadMethod {
     AssistedCommitHashBlob,
     AssistedCommitVerifyCreatedCommit,
     AssistedCommitValidateMessages,
+    AssistedCommitPrivateTip,
     AssistedCommitCaptureConfig,
     AssistedCommitIndexTree,
     AssistedCommitTreeRevision,
@@ -2014,6 +2015,19 @@ impl Backend {
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
+                ReadMethod::AssistedCommitPrivateTip
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.paths.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none() =>
+                {
+                    Operation::AssistedCommitPrivateTip {
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
                 ReadMethod::AssistedCommitCaptureConfig
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()
@@ -3294,6 +3308,12 @@ mod tests {
                 .unwrap();
                 assert!(String::from_utf8_lossy(&validation_object)
                     .contains("Validation subject"));
+                let private_tip = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_private_tip","environment":{"GIT_DIR":root.join(".git"),"GIT_WORK_TREE":root,"GIT_OBJECT_DIRECTORY":root.join(".git/objects"),"GIT_INDEX_FILE":root.join(".git/index")}}),
+                    ])
+                    .unwrap();
+                assert_eq!(private_tip["sha"], head);
                 assert!(
                     backend
                         .admit(vec![

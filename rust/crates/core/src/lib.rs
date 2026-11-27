@@ -750,6 +750,9 @@ impl Repository {
                     )
                     .await;
             }
+            Operation::AssistedCommitPrivateTip { environment } => {
+                return self.assisted_commit_private_tip(&environment).await;
+            }
             Operation::AssistedCommitValidateMessages {
                 initial_sha,
                 trees,
@@ -1660,6 +1663,7 @@ impl Repository {
             | AssistedCommitHashBlob { .. }
             | AssistedCommitVerifyCreatedCommit { .. }
             | AssistedCommitValidateMessages { .. }
+            | AssistedCommitPrivateTip { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
             | AssistedCommitIndexTree { .. }

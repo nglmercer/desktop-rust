@@ -836,6 +836,26 @@ function nodeBackend(t: TestContext) {
           }
           return result.stdout.trim()
         },
+        repositoryAssistedCommitPrivateTip: async (
+          path: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            [
+              'rev-parse',
+              '--verify',
+              '--quiet',
+              '--end-of-options',
+              'HEAD^{commit}',
+            ],
+            path,
+            {
+              env: environment,
+              successExitCodes: new Set([0, 1]),
+            } as never
+          )) as Dugite.IGitStringResult
+          return result.exitCode === 0 ? result.stdout.trim() : null
+        },
         repositoryAssistedCommitValidateMessages: async (
           path: string,
           initialSha: string | null,

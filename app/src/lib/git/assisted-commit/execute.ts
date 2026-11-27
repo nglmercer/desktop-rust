@@ -33,7 +33,6 @@ import {
   readHead,
   readIndexState,
   releaseIndexLock,
-  removeGitLineEnding,
   verifyHead,
   verifyIndex,
   verifySelectedFiles,
@@ -182,13 +181,10 @@ async function cleanupOwnedLocks(
 }
 
 async function privateTip(data: IAssistedCommitData): Promise<string | null> {
-  const result = await privateGit(
-    data,
-    ['rev-parse', '--verify', '--quiet', '--end-of-options', 'HEAD^{commit}'],
-    'assistedCommitPrivateTip',
-    { successExitCodes: new Set([0, 1]) }
+  return backend().repositoryAssistedCommitPrivateTip(
+    data.repository.path,
+    objectReadEnvironment(data.environment)
   )
-  return result.exitCode === 0 ? removeGitLineEnding(result.stdout) : null
 }
 
 async function verifyCreatedCommit(
@@ -491,15 +487,20 @@ export async function executeAssistedCommitPlan(
           'The private transaction HEAD changed unexpectedly'
         )
       }
-      const configuration = [
-        '-c',
-        `core.hooksPath=${join(data.temporaryDirectory, 'no-hooks')}`,
-      ]
-      await privateGit(
-        data,
-        [...configuration, 'read-tree', tree],
-        'assistedCommitPrepareCommit'
+      const prepared = await backend().repositoryAssistedCommitIndexTree(
+        data.repository.path,
+        tree,
+        {
+          useEnvironmentIndex: true,
+          environment: objectReadEnvironment(data.environment),
+        }
       )
+      if (prepared.tree !== tree) {
+        throw new AssistedCommitError(
+          'commit-failed',
+          'Could not prepare the planned cumulative commit tree'
+        )
+      }
       checkAssistedCommitCancellation(options.signal)
       const args = [
         'commit',

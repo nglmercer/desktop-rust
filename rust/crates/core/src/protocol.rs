@@ -531,6 +531,10 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitPrivateTip {
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitValidateMessages {
         initial_sha: Option<String>,
         trees: Vec<String>,

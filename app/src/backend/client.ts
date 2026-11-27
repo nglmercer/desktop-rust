@@ -3985,6 +3985,30 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitPrivateTip(
+    repositoryPath: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<string | null> {
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_private_tip',
+      { environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      (value.sha === null ||
+        (typeof value.sha === 'string' &&
+          /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.sha)))
+    ) {
+      return value.sha
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted private tip response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

@@ -298,6 +298,39 @@ impl Repository {
         }))
     }
 
+    /// Read the private validation/commit HEAD tip without treating an unborn
+    /// or missing commit as a transport failure.
+    pub(crate) async fn assisted_commit_private_tip(
+        &self,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        validate_environment(environment)?;
+        let output = crate::process::run_git_with_environment(
+            &self.path,
+            &args(&[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "--end-of-options",
+                "HEAD^{commit}",
+            ]),
+            None,
+            None,
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(
+            matches!(output.code, 0 | 1),
+            "Cannot read the private HEAD commit"
+        );
+        if output.code == 1 {
+            return Ok(json!({"sha":Value::Null}));
+        }
+        let sha = output_line(&output.stdout, "private HEAD commit")?;
+        object_id(&sha, "private HEAD commit")?;
+        Ok(json!({"sha":sha}))
+    }
+
     /// Run native commit-message validation in a host-owned scratch Git
     /// directory. Objects remain those of the private assisted object view;
     /// only refs, index, HEAD, and configuration are scratch state.

@@ -10,7 +10,7 @@ if it regresses.
 | Measure | Now | Done when |
 | --- | --- | --- |
 | Fallback checks (`transportKind`) in the renderer | 0 in 0 files | 0 |
-| Renderer-driven Git command sites | 11 in 4 files | 0 |
+| Renderer-driven Git command sites | 9 in 4 files | 0 |
 | Renderer files importing `dugite` | 0 | 0 |
 | Renderer files importing `fs` | 0 | 0 (host operations only) |
 | Renderer files importing `child_process` | 0 | 0 |
