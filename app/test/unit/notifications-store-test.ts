@@ -1,54 +1,53 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { describe, it, mock, TestContext } from 'node:test'
+import { afterEach, describe, it, vi, type TestContext } from 'vitest'
 import { DesktopAliveEvent } from '../../src/lib/stores/alive-store'
 
 let notificationShown = false
-const show = mock.fn(async () => notificationShown)
+const show = vi.fn(async () => notificationShown)
 vi.doMock('../../src/lib/notifications/show-notification', async () => ({
   showNotification: show,
 }))
 
-describe('NotificationsStore', async () => {
-  const { NotificationsStore } = await import(
-    '../../src/lib/stores/notifications-store'
-  )
-  const { AliveStore } = await import('../../src/lib/stores/alive-store')
-  const { PullRequestCoordinator } = await import(
-    '../../src/lib/stores/pull-request-coordinator'
-  )
-  const {
-    createTestAccountsStore,
-    createTestRepositoriesStore,
-    createTestPullRequestStore,
-  } = await import('../helpers/app-store-test-harness')
-  const { StatsStore } = await import('../../src/lib/stats')
-  const { TestStatsDatabase } = await import('../helpers/databases')
-  const { TestActivityMonitor } = await import(
-    '../helpers/test-activity-monitor'
-  )
-  const { TestStatsStore } = await import('../helpers/test-stats-store')
-  const { fakePost } = await import('../fake-stats-post')
-  const { setupEmptyRepository } = await import('../helpers/repositories')
-  const { makeCommit } = await import('../helpers/repository-scaffolding')
-  const { getTipOrError } = await import('../helpers/git')
-  const { Account } = await import('../../src/models/account')
-  const { Repository } = await import('../../src/models/repository')
-  const { GitHubRepository } = await import(
-    '../../src/models/github-repository'
-  )
-  const { Owner } = await import('../../src/models/owner')
-  const { PullRequest, PullRequestRef } = await import(
-    '../../src/models/pull-request'
-  )
-  const { API, APICheckConclusion, APICheckStatus } = await import(
-    '../../src/lib/api'
-  )
-  const { createMockAPI, createMockAPIIdentity, createMockAPIEmail } =
-    await import('../helpers/mock-api')
+const { NotificationsStore } = await import(
+  '../../src/lib/stores/notifications-store'
+)
+const { AliveStore } = await import('../../src/lib/stores/alive-store')
+const { PullRequestCoordinator } = await import(
+  '../../src/lib/stores/pull-request-coordinator'
+)
+const {
+  createTestAccountsStore,
+  createTestRepositoriesStore,
+  createTestPullRequestStore,
+} = await import('../helpers/app-store-test-harness')
+const { StatsStore } = await import('../../src/lib/stats')
+const { TestStatsDatabase } = await import('../helpers/databases')
+const { TestActivityMonitor } = await import('../helpers/test-activity-monitor')
+const { TestStatsStore } = await import('../helpers/test-stats-store')
+const { fakePost } = await import('../fake-stats-post')
+const { setupEmptyRepository } = await import('../helpers/repositories')
+const { makeCommit } = await import('../helpers/repository-scaffolding')
+const { getTipOrError } = await import('../helpers/git')
+const { Account } = await import('../../src/models/account')
+const { Repository } = await import('../../src/models/repository')
+const { GitHubRepository } = await import('../../src/models/github-repository')
+const { Owner } = await import('../../src/models/owner')
+const { PullRequest, PullRequestRef } = await import(
+  '../../src/models/pull-request'
+)
+const { API, APICheckConclusion, APICheckStatus } = await import(
+  '../../src/lib/api'
+)
+const { createMockAPI, createMockAPIIdentity, createMockAPIEmail } =
+  await import('../helpers/mock-api')
+
+describe('NotificationsStore', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
 
   async function createHarness(t: TestContext) {
-    show.mock.resetCalls()
+    show.mockClear()
     const localRepository = await setupEmptyRepository(t)
     await makeCommit(localRepository, {
       entries: [{ path: 'README.md', contents: 'Notification test' }],
@@ -84,7 +83,7 @@ describe('NotificationsStore', async () => {
       ''
     )
     const accounts = createTestAccountsStore()
-    t.mock.method(accounts, 'getAll', async () => [
+    vi.spyOn(accounts, 'getAll').mockImplementation(async () => [
       new Account(
         'author',
         endpoint,
@@ -96,27 +95,27 @@ describe('NotificationsStore', async () => {
       ),
     ])
     const alive = new AliveStore(accounts)
-    t.mock.method(alive, 'setEnabled', () => {})
+    vi.spyOn(alive, 'setEnabled').mockImplementation(() => {})
     let onAliveEvent: ((event: DesktopAliveEvent) => void) | undefined
-    t.mock.method(
-      alive,
-      'onAliveEventReceived',
+    vi.spyOn(alive, 'onAliveEventReceived').mockImplementation(
       (callback: (event: DesktopAliveEvent) => void) => {
         onAliveEvent = callback
       }
     )
     const repositories = createTestRepositoriesStore()
-    t.mock.method(repositories, 'getAll', async () => [])
+    vi.spyOn(repositories, 'getAll').mockImplementation(async () => [])
     const coordinator = new PullRequestCoordinator(
       createTestPullRequestStore(repositories),
       repositories
     )
-    t.mock.method(coordinator, 'getAllPullRequests', async () => [pullRequest])
+    vi.spyOn(coordinator, 'getAllPullRequests').mockImplementation(async () => [
+      pullRequest,
+    ])
     const statsDb = new TestStatsDatabase()
-    t.after(() => statsDb.close())
+    t.onTestFinished(() => statsDb.close())
     const stats = new StatsStore(statsDb, new TestActivityMonitor(), fakePost)
     const metrics = new TestStatsStore()
-    t.mock.method(stats, 'increment', metrics.increment)
+    vi.spyOn(stats, 'increment').mockImplementation(metrics.increment)
     const store = new NotificationsStore(
       accounts,
       alive,
@@ -125,7 +124,7 @@ describe('NotificationsStore', async () => {
       repositories
     )
     store.selectRepository(repository)
-    t.mock.method(store, 'getChecksForRef', async () => [
+    vi.spyOn(store, 'getChecksForRef').mockImplementation(async () => [
       {
         id: 1,
         name: 'Test',
@@ -160,7 +159,7 @@ describe('NotificationsStore', async () => {
               : 'COMMENTED',
       }),
     })
-    t.mock.method(API, 'fromAccount', () => api)
+    vi.spyOn(API, 'fromAccount').mockImplementation(() => api)
     assert.ok(onAliveEvent)
     return {
       store,
@@ -236,7 +235,7 @@ describe('NotificationsStore', async () => {
           [testCase.count]: 1,
           ...(shown ? { [testCase.shown]: 1 } : {}),
         })
-        assert.strictEqual(show.mock.callCount(), 1)
+        assert.strictEqual(show.mock.calls.length, 1)
       })
     }
   }
@@ -252,7 +251,7 @@ describe('NotificationsStore', async () => {
       assert.deepStrictEqual(metrics.metrics, {
         [testCase.count.replace(/Count$/, 'Clicked')]: 1,
       })
-      assert.strictEqual(show.mock.callCount(), 0)
+      assert.strictEqual(show.mock.calls.length, 0)
     })
   }
 
@@ -271,7 +270,7 @@ describe('NotificationsStore', async () => {
       checksFailedNotificationCount: 1,
       checksFailedNotificationShownCount: 1,
     })
-    assert.strictEqual(show.mock.callCount(), 1)
+    assert.strictEqual(show.mock.calls.length, 1)
   })
 
   it('does not count events for another repository as shown', async t => {
@@ -286,12 +285,14 @@ describe('NotificationsStore', async () => {
     assert.deepStrictEqual(metrics.metrics, {
       pullRequestCommentNotificationFromNonRecentRepoCount: 1,
     })
-    assert.strictEqual(show.mock.callCount(), 0)
+    assert.strictEqual(show.mock.calls.length, 0)
   })
 
   it('does not count an uncached PR as eligible or shown', async t => {
     const { onAliveEvent, metrics, coordinator } = await createHarness(t)
-    t.mock.method(coordinator, 'getAllPullRequests', async () => [])
+    vi.spyOn(coordinator, 'getAllPullRequests').mockImplementation(
+      async () => []
+    )
     await onAliveEvent({
       ...commonEvent,
       type: 'pr-comment',
@@ -299,6 +300,6 @@ describe('NotificationsStore', async () => {
       comment_id: '1',
     })
     assert.deepStrictEqual(metrics.metrics, {})
-    assert.strictEqual(show.mock.callCount(), 0)
+    assert.strictEqual(show.mock.calls.length, 0)
   })
 })
