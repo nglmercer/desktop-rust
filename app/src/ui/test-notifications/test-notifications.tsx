@@ -24,11 +24,13 @@ import { getPullRequestReviewStateIcon } from '../notifications/pull-request-rev
 import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import {
-  getNotificationSettingsUrl,
+  getNativeNotificationSettingsUrl,
+  supportsNativeNotificationPermissionRequest,
+} from '../../lib/notifications/native-notification-capabilities'
+import {
   getNotificationsPermission,
   requestNotificationsPermission,
-  supportsNotificationsPermissionRequest,
-} from 'desktop-notifications'
+} from '../main-process-proxy'
 import { LinkButton } from '../lib/link-button'
 
 enum TestNotificationType {
@@ -176,7 +178,7 @@ export class TestNotifications extends React.Component<
     const notificationsPermission = await getNotificationsPermission()
     this.setState({
       suggestGrantNotificationPermission:
-        supportsNotificationsPermissionRequest() &&
+        supportsNativeNotificationPermissionRequest() &&
         notificationsPermission === 'default',
       warnNotificationsDenied: notificationsPermission === 'denied',
       suggestConfigureNotifications: notificationsPermission === 'granted',
@@ -208,7 +210,7 @@ export class TestNotifications extends React.Component<
       )
     }
 
-    const notificationSettingsURL = getNotificationSettingsUrl()
+    const notificationSettingsURL = getNativeNotificationSettingsUrl()
 
     if (notificationSettingsURL === null) {
       return null

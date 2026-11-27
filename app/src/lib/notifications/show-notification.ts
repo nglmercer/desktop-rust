@@ -1,5 +1,5 @@
 import { focusWindow } from '../../ui/main-process-proxy'
-import { supportsNotifications } from 'desktop-notifications'
+import { supportsNativeNotifications } from './native-notification-capabilities'
 import { showNotification as invokeShowNotification } from '../../ui/main-process-proxy'
 import { notificationCallbacks } from './notification-handler'
 import type { DesktopAliveEvent } from '../stores/alive-store'
@@ -23,9 +23,9 @@ interface IShowNotificationOptions {
 export async function showNotification(
   options: IShowNotificationOptions
 ): Promise<boolean> {
-  // `supportNotifications` checks if `desktop-notifications` is supported by
-  // the current platform. Otherwise, we'll rely on the HTML5 notification API.
-  if (!supportsNotifications()) {
+  // Native delivery is not currently available; rely on the HTML5
+  // notification API.
+  if (!supportsNativeNotifications()) {
     if (typeof Notification === 'undefined') {
       log.warn('System notifications are unavailable')
       return false

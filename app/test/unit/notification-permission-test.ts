@@ -4,8 +4,8 @@ import { hostIpc } from '../../src/web/host-bridge'
 import { MockIPC } from '../helpers/mock-ipc'
 
 let nativeNotificationsSupported = true
-vi.mock('desktop-notifications', () => ({
-  supportsNotifications: () => nativeNotificationsSupported,
+vi.mock('../../src/lib/notifications/native-notification-capabilities', () => ({
+  supportsNativeNotifications: () => nativeNotificationsSupported,
 }))
 
 async function getSystemNotificationsPermission() {

@@ -50,12 +50,6 @@ export default defineConfig({
         ),
       })),
       { find: /^desktop-crypto-impl$/, replacement: legacyCryptoPackage },
-      {
-        find: /^desktop-notifications$/,
-        replacement: fileURLToPath(
-          new URL('./app/src/web/desktop-notifications.ts', import.meta.url)
-        ),
-      },
     ],
   },
   test: {

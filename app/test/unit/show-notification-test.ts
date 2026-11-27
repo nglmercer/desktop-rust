@@ -13,8 +13,8 @@ import { MockIPC } from '../helpers/mock-ipc'
 import { notificationCallbacks } from '../../src/lib/notifications/notification-handler'
 
 let nativeNotificationsSupported = true
-vi.mock('desktop-notifications', () => ({
-  supportsNotifications: () => nativeNotificationsSupported,
+vi.mock('../../src/lib/notifications/native-notification-capabilities', () => ({
+  supportsNativeNotifications: () => nativeNotificationsSupported,
 }))
 
 let showNotification: typeof import('../../src/lib/notifications/show-notification').showNotification

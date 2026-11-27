@@ -563,13 +563,6 @@ export default defineConfig({
           '/$1.js',
       },
       {
-        find: /^desktop-notifications$/,
-        replacement: path.resolve(
-          __dirname,
-          'app/src/web/desktop-notifications.ts'
-        ),
-      },
-      {
         find: /^registry-js$/,
         replacement: path.resolve(__dirname, 'app/src/web/registry-js.ts'),
       },

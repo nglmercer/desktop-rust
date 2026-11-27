@@ -11,10 +11,10 @@ const native = vi.hoisted(() => ({
   requestPermission: vi.fn(),
 }))
 
-vi.mock('desktop-notifications', () => ({
-  supportsNotifications: () => native.supported,
-  supportsNotificationsPermissionRequest: () => native.canRequest,
-  getNotificationSettingsUrl: () => native.settingsUrl,
+vi.mock('../../src/lib/notifications/native-notification-capabilities', () => ({
+  supportsNativeNotifications: () => native.supported,
+  supportsNativeNotificationPermissionRequest: () => native.canRequest,
+  getNativeNotificationSettingsUrl: () => native.settingsUrl,
 }))
 vi.mock('../../src/ui/main-process-proxy', () => ({
   getNotificationsPermission: native.getPermission,

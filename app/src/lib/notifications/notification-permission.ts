@@ -1,4 +1,4 @@
-import { supportsNotifications } from 'desktop-notifications'
+import { supportsNativeNotifications } from './native-notification-capabilities'
 import { getNotificationsPermission } from '../../ui/main-process-proxy'
 
 /**
@@ -11,7 +11,7 @@ export async function getSystemNotificationsPermission(): Promise<
   boolean | null
 > {
   try {
-    if (supportsNotifications()) {
+    if (supportsNativeNotifications()) {
       const permission = await getNotificationsPermission()
       return permission === 'granted' || (__WIN32__ && permission === 'default')
     }

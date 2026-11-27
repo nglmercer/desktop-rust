@@ -1,8 +1,8 @@
 import {
-  getNotificationSettingsUrl,
-  supportsNotifications,
-  supportsNotificationsPermissionRequest,
-} from 'desktop-notifications'
+  getNativeNotificationSettingsUrl,
+  supportsNativeNotificationPermissionRequest,
+  supportsNativeNotifications,
+} from './native-notification-capabilities'
 import {
   getNotificationsPermission,
   requestNotificationsPermission,
@@ -19,12 +19,12 @@ export type NotificationSettings =
 
 /** Read the permission from the implementation that will display notifications. */
 export async function readNotificationSettings(): Promise<NotificationSettings> {
-  if (supportsNotifications()) {
+  if (supportsNativeNotifications()) {
     return {
       kind: 'native',
       permission: await getNotificationsPermission(),
-      canRequest: supportsNotificationsPermissionRequest(),
-      settingsUrl: getNotificationSettingsUrl(),
+      canRequest: supportsNativeNotificationPermissionRequest(),
+      settingsUrl: getNativeNotificationSettingsUrl(),
     }
   }
   if (typeof Notification === 'undefined') {
@@ -40,7 +40,7 @@ export async function readNotificationSettings(): Promise<NotificationSettings> 
 
 /** Request permission synchronously from a user-initiated click. */
 export function requestNotificationSettingsPermission(): Promise<unknown> {
-  if (supportsNotifications()) {
+  if (supportsNativeNotifications()) {
     return requestNotificationsPermission()
   }
   if (
