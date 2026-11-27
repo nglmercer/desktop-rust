@@ -554,6 +554,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 }
                 AppEvent::ShutdownComplete { drained } => {
                     if !shutting_down { return; }
+                    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+                    if let Some(menu) = native_menu.take() {
+                        std::mem::forget(menu);
+                    }
                     #[cfg(feature = "packaged-ui")]
                     if let Some(path) = &package_control {
                         let status = if drained { "drained" } else { "timed-out" };

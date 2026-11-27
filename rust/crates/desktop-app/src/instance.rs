@@ -70,19 +70,27 @@ mod imp {
         }
         let mut marker = String::new();
         for line in lines {
-            let Some((device, inode)) = line.split_once(':') else {
-                return Err(refused("invalid instance marker"));
+            let inode = match line.split_once(':') {
+                Some((device, inode)) => {
+                    if device.parse::<u64>().is_err() || inode.parse::<u64>().is_err() {
+                        return Err(refused("invalid instance marker"));
+                    }
+                    inode
+                }
+                None => {
+                    if line.parse::<u64>().is_err() {
+                        return Err(refused("invalid instance marker"));
+                    }
+                    line
+                }
             };
-            if device.parse::<u64>().is_err() || inode.parse::<u64>().is_err() {
-                return Err(refused("invalid instance marker"));
-            }
-            marker = line.to_owned();
+            marker = inode.to_owned();
         }
         Ok((marker, (complete.len() + 1) as u64))
     }
 
     /// Accept only a socket recorded in a private application lock file.
-    fn socket_identity(socket: &Path) -> io::Result<(u64, u64)> {
+    fn socket_identity(socket: &Path) -> io::Result<u64> {
         private_parent(socket)?;
         let uid = unsafe { libc::geteuid() };
         let socket_info = std::fs::symlink_metadata(socket)?;
@@ -106,8 +114,8 @@ mod imp {
             return Err(refused("instance lock is not a private owned file"));
         }
         let (marker, _) = read_marker(&mut file)?;
-        let identity = (socket_info.dev(), socket_info.ino());
-        if marker != format!("{}:{}", identity.0, identity.1) {
+        let identity = socket_info.ino();
+        if marker != identity.to_string() {
             return Err(refused("instance socket does not match its marker"));
         }
         Ok(identity)
@@ -214,11 +222,11 @@ mod imp {
         Ok(())
     }
 
-    fn write_marker(file: &mut File, identity: (u64, u64)) -> io::Result<()> {
+    fn write_marker(file: &mut File, identity: u64) -> io::Result<()> {
         // Append and sync rather than truncate: a crash partway through the
         // next record cannot destroy the last complete socket identity.
         file.seek(SeekFrom::End(0))?;
-        writeln!(file, "{}:{}", identity.0, identity.1)?;
+        writeln!(file, "{identity}")?;
         file.sync_data()
     }
 
@@ -264,7 +272,7 @@ mod imp {
                         "another process is listening on the instance socket",
                     ));
                 }
-                if marker != format!("{}:{}", metadata.dev(), metadata.ino()) {
+                if marker != metadata.ino().to_string() {
                     // Only a socket this application recorded may be removed. A
                     // stale one left by another build is reported with its
                     // path so it can be deleted by hand when nothing runs.
@@ -300,7 +308,7 @@ mod imp {
         let result: io::Result<()> = (|| {
             std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600))?;
             let metadata = std::fs::symlink_metadata(&staging)?;
-            write_marker(lock, (metadata.dev(), metadata.ino()))?;
+            write_marker(lock, metadata.ino())?;
             std::fs::hard_link(&staging, socket)?;
             Ok(())
         })();
@@ -454,6 +462,7 @@ pub fn listen(
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
@@ -788,6 +797,41 @@ mod tests {
         })
         .unwrap();
         assert!(!interrupted_staging.exists());
+        let args = vec!["--cli-open=/tmp/repository".to_owned()];
+        assert!(forward(&socket, &args));
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), args);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovers_a_marked_socket_when_the_device_number_changes() {
+        let directory = test_directory();
+        let socket = directory.join("instance.sock");
+        let stale = UnixListener::bind(&socket).unwrap();
+        let metadata = std::fs::symlink_metadata(&socket).unwrap();
+        drop(stale);
+        let different_device = if metadata.dev() == 0 {
+            1
+        } else {
+            metadata.dev() - 1
+        };
+        let lock = directory.join("instance.sock.lock");
+        std::fs::write(
+            &lock,
+            format!(
+                "github-desktop-rs-instance-v1\n{}:{}\n",
+                different_device,
+                metadata.ino()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let (sender, receiver) = mpsc::channel();
+        listen(&socket, move |args| {
+            let _ = sender.send(args);
+        })
+        .unwrap();
         let args = vec!["--cli-open=/tmp/repository".to_owned()];
         assert!(forward(&socket, &args));
         assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), args);
