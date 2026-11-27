@@ -9,7 +9,11 @@ import {
 import { backend } from '../../../backend/client'
 import { formatCommitMessage } from '../../format-commit-message'
 import { isErrnoException } from '../../errno-exception'
-import { HookCallbackOptions } from '../core'
+import { HookCallbackOptions, TerminalOutput } from '../core'
+import {
+  rendererHookEnvironment,
+  withHooksEnv,
+} from '../../hooks/with-hooks-env'
 import { getAuthorIdentity, getCommitterIdentity } from '../var'
 import { updateRefWithVerification, withRefLock } from '../update-ref'
 import { IOwnedFileLease, releaseOwnedFileLock } from '../owned-file-lock'
@@ -29,7 +33,6 @@ import {
   IOwnedIndexLock,
   lockIndex,
   objectReadEnvironment,
-  privateGit,
   readHead,
   readIndexState,
   releaseIndexLock,
@@ -502,62 +505,101 @@ export async function executeAssistedCommitPlan(
         )
       }
       checkAssistedCommitCancellation(options.signal)
-      const args = [
-        'commit',
-        '-F',
-        '-',
-        ...(data.request.skipCommitHooks ? ['--no-verify'] : []),
-        ...(data.request.signOffCommits ? ['--signoff'] : []),
-        ...(snapshot.analysis.changes.length === 0 &&
-        data.request.allowEmptyCommit
-          ? ['--allow-empty']
-          : []),
-      ]
       let commitError: unknown
+      const outputChunks: Buffer[] = []
+      const outputListeners = new Set<(chunk: TerminalOutput) => void>()
+      const notifyOutput = (bytes: Uint8Array) => {
+        const chunk = Buffer.from(bytes)
+        outputChunks.push(chunk)
+        for (const listener of outputListeners) {
+          try {
+            listener(chunk)
+          } catch {
+            /* Output observers cannot terminate a commit. */
+          }
+        }
+      }
       try {
-        await privateGit(data, args, 'assistedCommitCreateCommit', {
-          stdin: messages[index],
-          interceptHooks: [
-            'pre-commit',
-            'prepare-commit-msg',
-            'commit-msg',
-            'post-commit',
-            'pre-auto-gc',
-          ],
-          onHookProgress: progress => {
+        options.onTerminalOutputAvailable?.(listener => {
+          for (const chunk of outputChunks) {
             try {
-              options.onHookProgress?.(progress)
-            } catch (error) {
-              callbackErrors.push(error)
+              listener(chunk)
+            } catch {
+              /* Output observers cannot terminate a commit. */
             }
-          },
-          onHookFailure:
-            options.onHookFailure === undefined
-              ? undefined
-              : async (name, output) => {
-                  const cancelled = () => options.signal?.aborted === true
-                  if (cancelled()) {
-                    return 'abort'
-                  }
-                  try {
-                    const result = await options.onHookFailure?.(name, output)
-                    hookAborted = result === 'abort'
-                    return cancelled() || result !== 'ignore'
-                      ? 'abort'
-                      : 'ignore'
-                  } catch (error) {
-                    callbackErrors.push(error)
-                    return 'abort'
-                  }
-                },
-          onTerminalOutputAvailable: subscribe => {
-            try {
-              options.onTerminalOutputAvailable?.(subscribe)
-            } catch (error) {
-              callbackErrors.push(error)
-            }
-          },
+          }
+          outputListeners.add(listener)
+          return { unsubscribe: () => outputListeners.delete(listener) }
         })
+      } catch (error) {
+        callbackErrors.push(error)
+      }
+      try {
+        await withHooksEnv(
+          async hooksEnvironment => {
+            const result = await backend().repositoryAssistedCommitCreate(
+              data.repository.path,
+              messages[index],
+              {
+                skipHooks: data.request.skipCommitHooks,
+                signOff: data.request.signOffCommits,
+                allowEmpty:
+                  snapshot.analysis.changes.length === 0 &&
+                  data.request.allowEmptyCommit,
+                environment: objectReadEnvironment(data.environment),
+                hookEnvironment: rendererHookEnvironment(hooksEnvironment),
+                onOutput: output => notifyOutput(output.bytes),
+              }
+            )
+            if (result.code !== 0) {
+              commitError = new Error(
+                result.stderr.toString('utf8') ||
+                  result.stdout.toString('utf8') ||
+                  `Unknown error (exit code ${result.code})`
+              )
+            }
+          },
+          data.repository.path,
+          {
+            env: data.environment,
+            interceptHooks: [
+              'pre-commit',
+              'prepare-commit-msg',
+              'commit-msg',
+              'post-commit',
+              'pre-auto-gc',
+            ],
+            onHookProgress: progress => {
+              try {
+                options.onHookProgress?.(progress)
+              } catch (error) {
+                callbackErrors.push(error)
+              }
+            },
+            onHookFailure:
+              options.onHookFailure === undefined
+                ? undefined
+                : async (name, output) => {
+                    const cancelled = () => options.signal?.aborted === true
+                    if (cancelled()) {
+                      return 'abort'
+                    }
+                    try {
+                      const decision = await options.onHookFailure?.(
+                        name,
+                        output
+                      )
+                      hookAborted = decision === 'abort'
+                      return cancelled() || decision !== 'ignore'
+                        ? 'abort'
+                        : 'ignore'
+                    } catch (error) {
+                      callbackErrors.push(error)
+                      return 'abort'
+                    }
+                  },
+          }
+        )
       } catch (error) {
         commitError = error
       }

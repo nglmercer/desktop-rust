@@ -4199,6 +4199,89 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitCreate(
+    repositoryPath: string,
+    message: string,
+    options: {
+      readonly skipHooks: boolean
+      readonly signOff: boolean
+      readonly allowEmpty: boolean
+      readonly environment?: Record<string, string | undefined>
+      readonly hookEnvironment?: IHookEnvironmentRequest
+      readonly signal?: AbortSignal
+      readonly onOutput?: (output: {
+        readonly stream: 'stdout' | 'stderr'
+        readonly bytes: Uint8Array
+      }) => void
+    }
+  ): Promise<{
+    readonly code: number
+    readonly stdout: Buffer
+    readonly stderr: Buffer
+  }> {
+    validateHookEnvironment(options.hookEnvironment)
+    if (message.length === 0 || message.length > 1024 * 1024) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted commit message',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_create',
+      {
+        message_base64: Buffer.from(message, 'utf8').toString('base64'),
+        skip_hooks: options.skipHooks,
+        sign_off: options.signOff,
+        allow_empty: options.allowEmpty,
+        environment: serializeGitEnvironment(options.environment),
+        ...(options.hookEnvironment === undefined
+          ? {}
+          : { hook_environment: options.hookEnvironment }),
+      },
+      {
+        signal: options.signal,
+        deadlineMs: 3_600_000,
+        onCommitEvent: event => {
+          if (
+            isRecord(event) &&
+            event.event === 'commit_output' &&
+            (event.stream === 'stdout' || event.stream === 'stderr') &&
+            typeof event.data === 'string' &&
+            event.data.length <= 10924
+          ) {
+            const decoded = atob(event.data)
+            options.onOutput?.({
+              stream: event.stream,
+              bytes: Uint8Array.from(decoded, character =>
+                character.charCodeAt(0)
+              ),
+            })
+          }
+        },
+      }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.code === 'number' &&
+      Number.isInteger(value.code) &&
+      typeof value.stdout_base64 === 'string' &&
+      typeof value.stderr_base64 === 'string'
+    ) {
+      return {
+        code: value.code,
+        stdout: Buffer.from(value.stdout_base64, 'base64'),
+        stderr: Buffer.from(value.stderr_base64, 'base64'),
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted commit creation response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

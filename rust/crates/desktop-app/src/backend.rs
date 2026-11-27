@@ -110,6 +110,14 @@ struct ReadRequest {
     #[serde(default)]
     software_rendering: Option<bool>,
     #[serde(default)]
+    message_base64: Option<String>,
+    #[serde(default)]
+    skip_hooks: Option<bool>,
+    #[serde(default)]
+    allow_empty: Option<bool>,
+    #[serde(default)]
+    hook_environment: Option<desktop_backend::RendererHookEnvironment>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -457,6 +465,7 @@ enum ReadMethod {
     AssistedCommitBlob,
     AssistedCommitHashBlob,
     AssistedCommitVerifyCreatedCommit,
+    AssistedCommitCreate,
     AssistedCommitValidateMessages,
     AssistedCommitPrivateTip,
     AssistedCommitFrozenDiff,
@@ -1461,6 +1470,37 @@ impl Backend {
                 "path only applies to assisted tree entry and diff driver reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::AssistedCommitCreate) {
+            if request.message_base64.is_some() {
+                return Err(AppError::BadArgs(
+                    "message_base64 only applies to assisted commit creation".into(),
+                ));
+            }
+            if request.skip_hooks.is_some() {
+                return Err(AppError::BadArgs(
+                    "skip_hooks only applies to assisted commit creation".into(),
+                ));
+            }
+            if request.allow_empty.is_some() {
+                return Err(AppError::BadArgs(
+                    "allow_empty only applies to assisted commit creation".into(),
+                ));
+            }
+            if request.hook_environment.is_some() {
+                return Err(AppError::BadArgs(
+                    "hook_environment only applies to assisted commit creation".into(),
+                ));
+            }
+        }
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitValidateMessages | ReadMethod::AssistedCommitCreate
+        ) && request.sign_off.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "sign_off only applies to assisted commit creation or message validation".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::AssistedCommitValidateMessages) {
             if request.initial_sha.is_some() {
                 return Err(AppError::BadArgs(
@@ -1475,11 +1515,6 @@ impl Backend {
             if request.messages.is_some() {
                 return Err(AppError::BadArgs(
                     "messages only applies to assisted message validation".into(),
-                ));
-            }
-            if request.sign_off.is_some() {
-                return Err(AppError::BadArgs(
-                    "sign_off only applies to assisted message validation".into(),
                 ));
             }
         }
@@ -2047,6 +2082,16 @@ impl Backend {
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
+                ReadMethod::AssistedCommitCreate => Operation::AssistedCommitCreate {
+                    message_base64: request
+                        .message_base64
+                        .ok_or_else(|| AppError::BadArgs("message_base64 is required".into()))?,
+                    skip_hooks: request.skip_hooks.unwrap_or(false),
+                    sign_off: request.sign_off.unwrap_or(false),
+                    allow_empty: request.allow_empty.unwrap_or(false),
+                    environment: request.environment.unwrap_or_default(),
+                    hook_environment: request.hook_environment,
+                },
                 ReadMethod::AssistedCommitValidateMessages
                     if request.include_untracked.is_none()
                         && request.prefixes.is_none()

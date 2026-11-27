@@ -565,6 +565,16 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitCreate {
+        message_base64: String,
+        skip_hooks: bool,
+        sign_off: bool,
+        allow_empty: bool,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+        #[serde(default)]
+        hook_environment: Option<RendererHookEnvironment>,
+    },
     AssistedCommitValidateMessages {
         initial_sha: Option<String>,
         trees: Vec<String>,

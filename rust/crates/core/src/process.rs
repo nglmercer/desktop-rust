@@ -503,6 +503,51 @@ pub async fn run_commit(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     .await
 }
 
+/// Run an assisted commit inside its private object view. Hook callbacks are
+/// owned by the renderer process proxy; this host operation only streams bounded
+/// terminal output and supplies the frozen private environment.
+pub(crate) async fn run_assisted_private_commit(
+    path: &Path,
+    args: &[OsString],
+    input: Vec<u8>,
+    environment: &std::collections::BTreeMap<String, Option<String>>,
+    hook_environment: Option<&crate::RendererHookEnvironment>,
+    checkpoint: &str,
+) -> Result<RawOutput> {
+    let mut command = git_native_paths(None);
+    apply_environment(&mut command, environment)?;
+    if let Some(hooks) = hook_environment {
+        hooks.validate()?;
+        command
+            .env("PROCESS_PROXY_PORT", hooks.process_proxy_port.to_string())
+            .env("PROCESS_PROXY_TOKEN", &hooks.process_proxy_token)
+            .env("GIT_CONFIG_PARAMETERS", &hooks.config_parameters);
+    } else {
+        command.env_remove("PROCESS_PROXY_PORT");
+        command.env_remove("PROCESS_PROXY_TOKEN");
+    }
+    let live = crate::hook_progress::sender().map(|(sender, request_id)| LiveOutput {
+        sender,
+        request_id,
+        checkpoint: Some(checkpoint.to_owned()),
+        clone_progress: false,
+        emit_clone_progress: false,
+        extra_redactions: Vec::new(),
+    });
+    Box::pin(run_command_inner(
+        path,
+        command,
+        args,
+        Some(input),
+        2 * 1024 * 1024,
+        None,
+        None,
+        None,
+        live,
+    ))
+    .await
+}
+
 /// Run a commit against a private index while preserving Git's normal hook
 /// pathspec environment. The caller owns index/ref reconciliation and must
 /// not treat a successful process exit as proof that publication is durable.

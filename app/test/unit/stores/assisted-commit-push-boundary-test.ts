@@ -836,6 +836,51 @@ function nodeBackend(t: TestContext) {
           }
           return result.stdout.trim()
         },
+        repositoryAssistedCommitCreate: async (
+          path: string,
+          message: string,
+          options: {
+            readonly skipHooks: boolean
+            readonly signOff: boolean
+            readonly allowEmpty: boolean
+            readonly environment?: Record<string, string | undefined>
+            readonly hookEnvironment?: {
+              readonly config_parameters: string
+              readonly process_proxy_port: number
+              readonly process_proxy_token: string
+            }
+          }
+        ) => {
+          const environment = {
+            ...options.environment,
+            ...(options.hookEnvironment === undefined
+              ? {}
+              : {
+                  GIT_CONFIG_PARAMETERS:
+                    options.hookEnvironment.config_parameters,
+                  PROCESS_PROXY_PORT: `${options.hookEnvironment.process_proxy_port}`,
+                  PROCESS_PROXY_TOKEN:
+                    options.hookEnvironment.process_proxy_token,
+                }),
+          }
+          const result = (await interceptingGitExec(actualExec)(
+            [
+              'commit',
+              '-F',
+              '-',
+              ...(options.skipHooks ? ['--no-verify'] : []),
+              ...(options.signOff ? ['--signoff'] : []),
+              ...(options.allowEmpty ? ['--allow-empty'] : []),
+            ],
+            path,
+            { encoding: 'buffer', env: environment, stdin: message } as never
+          )) as Dugite.IGitBufferResult
+          return {
+            code: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr,
+          }
+        },
         repositoryAssistedCommitNativeFullConversion: async (
           path: string,
           baseTree: string,

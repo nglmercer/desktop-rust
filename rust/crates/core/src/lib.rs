@@ -804,6 +804,25 @@ impl Repository {
                     )
                     .await;
             }
+            Operation::AssistedCommitCreate {
+                message_base64,
+                skip_hooks,
+                sign_off,
+                allow_empty,
+                environment,
+                hook_environment,
+            } => {
+                return self
+                    .assisted_commit_create(
+                        &message_base64,
+                        skip_hooks,
+                        sign_off,
+                        allow_empty,
+                        &environment,
+                        hook_environment.as_ref(),
+                    )
+                    .await;
+            }
             Operation::AssistedCommitValidateMessages {
                 initial_sha,
                 trees,
@@ -1718,6 +1737,7 @@ impl Repository {
             | AssistedCommitFrozenDiff { .. }
             | AssistedCommitCertifyDiff { .. }
             | AssistedCommitNativeFullConversion { .. }
+            | AssistedCommitCreate { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
             | AssistedCommitIndexTree { .. }

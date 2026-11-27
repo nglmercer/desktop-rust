@@ -637,6 +637,65 @@ impl Repository {
         Ok(json!({"sha":entry["sha"],"tree":native_tree}))
     }
 
+    /// Run one hook-aware commit in the private assisted object view. The
+    /// renderer retains hook decisions through its process proxy; the host owns
+    /// process execution, input bounds, and output streaming.
+    pub(crate) async fn assisted_commit_create(
+        &self,
+        message_base64: &str,
+        skip_hooks: bool,
+        sign_off: bool,
+        allow_empty: bool,
+        environment: &BTreeMap<String, Option<String>>,
+        hook_environment: Option<&crate::RendererHookEnvironment>,
+    ) -> Result<Value> {
+        anyhow::ensure!(
+            message_base64.len() <= 2 * 1024 * 1024,
+            "commit message is too large"
+        );
+        let message = STANDARD
+            .decode(message_base64)
+            .map_err(|_| anyhow::anyhow!("commit message is not valid base64"))?;
+        anyhow::ensure!(
+            !message.is_empty() && message.len() <= 1024 * 1024,
+            "commit message is too large"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_object_environment_key(key),
+                "unsupported assisted commit environment key"
+            );
+        }
+        if let Some(hooks) = hook_environment {
+            hooks.validate()?;
+        }
+        let mut command = args(&["commit", "-F", "-"]);
+        if skip_hooks {
+            command.push("--no-verify".into());
+        }
+        if sign_off {
+            command.push("--signoff".into());
+        }
+        if allow_empty {
+            command.push("--allow-empty".into());
+        }
+        let checkpoint = uuid::Uuid::new_v4().to_string();
+        let output = crate::process::run_assisted_private_commit(
+            &self.path,
+            &command,
+            message,
+            environment,
+            hook_environment,
+            &checkpoint,
+        )
+        .await?;
+        Ok(json!({
+            "code":output.code,
+            "stdout_base64":STANDARD.encode(output.stdout),
+            "stderr_base64":STANDARD.encode(output.stderr),
+        }))
+    }
+
     /// Run native commit-message validation in a host-owned scratch Git
     /// directory. Objects remain those of the private assisted object view;
     /// only refs, index, HEAD, and configuration are scratch state.
