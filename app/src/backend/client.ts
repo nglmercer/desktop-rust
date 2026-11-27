@@ -3814,25 +3814,25 @@ export class BackendClient {
         retryable: false,
       })
     }
-    const value = await this.repositoryRead(
-      repositoryPath,
-      'assisted_commit_blob',
-      { sha, environment: serializeGitEnvironment(environment) }
-    )
-    if (
-      isRecord(value) &&
-      typeof value.bytes_base64 === 'string' &&
-      value.bytes_base64.length <= 768 * 1024 * 1024
-    ) {
-      const bytes = Buffer.from(value.bytes_base64, 'base64')
-      if (bytes.length <= 512 * 1024 * 1024) {
-        return bytes
+    return this.serializedComparison(async () => {
+      const value = await this.repositoryRead(
+        repositoryPath,
+        'assisted_commit_blob',
+        { sha, environment: serializeGitEnvironment(environment) }
+      )
+      const decoded = await this.decodeComparisonSnapshot(
+        repositoryPath,
+        value,
+        false
+      )
+      if (decoded instanceof Uint8Array) {
+        return Buffer.from(decoded)
       }
-    }
-    throw new BackendError({
-      code: 'invalid_response',
-      message: 'Invalid assisted blob response',
-      retryable: false,
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid assisted blob response',
+        retryable: false,
+      })
     })
   }
 
@@ -3843,9 +3843,8 @@ export class BackendClient {
     environment?: Record<string, string | undefined>
   ): Promise<string> {
     if (
-      bytes.length > 512 * 1024 * 1024 ||
-      (path !== undefined &&
-        (path.length === 0 || path.length > 65536 || path.includes('\0')))
+      path !== undefined &&
+      (path.length === 0 || path.length > 65536 || path.includes('\0'))
     ) {
       throw new BackendError({
         code: 'invalid_request',
@@ -3853,27 +3852,34 @@ export class BackendClient {
         retryable: false,
       })
     }
-    const value = await this.repositoryRead(
+    return this.withUploadedSessionBytes(
       repositoryPath,
-      'assisted_commit_hash_blob',
-      {
-        bytes_base64: bytes.toString('base64'),
-        path: path ?? null,
-        environment: serializeGitEnvironment(environment),
+      bytes,
+      'assisted blob',
+      async input => {
+        const value = await this.repositoryRead(
+          repositoryPath,
+          'assisted_commit_hash_blob',
+          {
+            ...input,
+            path: path ?? null,
+            environment: serializeGitEnvironment(environment),
+          }
+        )
+        if (
+          isRecord(value) &&
+          typeof value.sha === 'string' &&
+          /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.sha)
+        ) {
+          return value.sha
+        }
+        throw new BackendError({
+          code: 'invalid_response',
+          message: 'Invalid assisted hash blob response',
+          retryable: false,
+        })
       }
     )
-    if (
-      isRecord(value) &&
-      typeof value.sha === 'string' &&
-      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.sha)
-    ) {
-      return value.sha
-    }
-    throw new BackendError({
-      code: 'invalid_response',
-      message: 'Invalid assisted hash blob response',
-      retryable: false,
-    })
   }
 
   async repositoryAssistedCommitVerifyCreatedCommit(
@@ -4032,30 +4038,31 @@ export class BackendClient {
         retryable: false,
       })
     }
-    const value = await this.repositoryRead(
-      repositoryPath,
-      'assisted_commit_frozen_diff',
-      {
-        base,
-        tree,
-        paths: [...paths],
-        environment: serializeGitEnvironment(environment),
+    return this.serializedComparison(async () => {
+      const value = await this.repositoryRead(
+        repositoryPath,
+        'assisted_commit_frozen_diff',
+        {
+          base,
+          tree,
+          paths: [...paths],
+          environment: serializeGitEnvironment(environment),
+        }
+      )
+      const decoded = await this.decodeComparisonSnapshot(
+        repositoryPath,
+        value,
+        false,
+        64 * 1024 * 1024
+      )
+      if (decoded instanceof Uint8Array) {
+        return Buffer.from(decoded)
       }
-    )
-    if (
-      isRecord(value) &&
-      typeof value.bytes_base64 === 'string' &&
-      value.bytes_base64.length <= 96 * 1024 * 1024
-    ) {
-      const bytes = Buffer.from(value.bytes_base64, 'base64')
-      if (bytes.length <= 64 * 1024 * 1024) {
-        return bytes
-      }
-    }
-    throw new BackendError({
-      code: 'invalid_response',
-      message: 'Invalid assisted frozen diff response',
-      retryable: false,
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid assisted frozen diff response',
+        retryable: false,
+      })
     })
   }
 
@@ -4078,29 +4085,30 @@ export class BackendClient {
         retryable: false,
       })
     }
-    const value = await this.repositoryRead(
-      repositoryPath,
-      'assisted_commit_certify_diff',
-      {
-        base,
-        path,
-        environment: serializeGitEnvironment(environment),
+    return this.serializedComparison(async () => {
+      const value = await this.repositoryRead(
+        repositoryPath,
+        'assisted_commit_certify_diff',
+        {
+          base,
+          path,
+          environment: serializeGitEnvironment(environment),
+        }
+      )
+      const decoded = await this.decodeComparisonSnapshot(
+        repositoryPath,
+        value,
+        false,
+        64 * 1024 * 1024
+      )
+      if (decoded instanceof Uint8Array) {
+        return Buffer.from(decoded)
       }
-    )
-    if (
-      isRecord(value) &&
-      typeof value.bytes_base64 === 'string' &&
-      value.bytes_base64.length <= 96 * 1024 * 1024
-    ) {
-      const bytes = Buffer.from(value.bytes_base64, 'base64')
-      if (bytes.length <= 64 * 1024 * 1024) {
-        return bytes
-      }
-    }
-    throw new BackendError({
-      code: 'invalid_response',
-      message: 'Invalid assisted certification diff response',
-      retryable: false,
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid assisted certification diff response',
+        retryable: false,
+      })
     })
   }
 
@@ -4121,7 +4129,6 @@ export class BackendClient {
       path.length === 0 ||
       path.length > 65536 ||
       path.includes('\0') ||
-      bytes.length > 512 * 1024 * 1024 ||
       !['100644', '100755'].includes(mode) ||
       filterOutput.length > 2 * 1024 * 1024
     ) {
@@ -4131,31 +4138,38 @@ export class BackendClient {
         retryable: false,
       })
     }
-    const value = await this.repositoryRead(
+    return this.withUploadedSessionBytes(
       repositoryPath,
-      'assisted_commit_native_full_conversion',
-      {
-        base: baseTree,
-        revision,
-        path,
-        bytes_base64: bytes.toString('base64'),
-        mode,
-        filter_output: filterOutput,
-        environment: serializeGitEnvironment(environment),
+      bytes,
+      'native conversion',
+      async input => {
+        const value = await this.repositoryRead(
+          repositoryPath,
+          'assisted_commit_native_full_conversion',
+          {
+            base: baseTree,
+            revision,
+            path,
+            ...input,
+            mode,
+            filter_output: filterOutput,
+            environment: serializeGitEnvironment(environment),
+          }
+        )
+        if (
+          isRecord(value) &&
+          typeof value.sha === 'string' &&
+          objectId.test(value.sha)
+        ) {
+          return value.sha
+        }
+        throw new BackendError({
+          code: 'invalid_response',
+          message: 'Invalid assisted native conversion response',
+          retryable: false,
+        })
       }
     )
-    if (
-      isRecord(value) &&
-      typeof value.sha === 'string' &&
-      objectId.test(value.sha)
-    ) {
-      return value.sha
-    }
-    throw new BackendError({
-      code: 'invalid_response',
-      message: 'Invalid assisted native conversion response',
-      retryable: false,
-    })
   }
 
   async repositoryRendererCredential(
@@ -6095,6 +6109,104 @@ export class BackendClient {
       }
     } finally {
       if (uploadId !== undefined) await this.releaseComparisonSnapshot(uploadId)
+      releaseTurn()
+    }
+  }
+
+  private async serializedComparison<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.comparisonTurn
+    let releaseTurn!: () => void
+    this.comparisonTurn = new Promise(resolve => {
+      releaseTurn = resolve
+    })
+    await previous
+    try {
+      return await operation()
+    } finally {
+      releaseTurn()
+    }
+  }
+
+  private async uploadSessionBytes(
+    repositoryPath: string,
+    bytes: Uint8Array,
+    label: string
+  ): Promise<string> {
+    const upload = await this.repositoryRendererRequest(
+      repositoryPath,
+      'renderer_resolution_begin',
+      {}
+    )
+    if (
+      !isRecord(upload) ||
+      upload.kind !== 'snapshot' ||
+      upload.size !== 0 ||
+      typeof upload.id !== 'string' ||
+      !/^[0-9a-f-]{36}$/.test(upload.id)
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: `Invalid ${label} upload`,
+        retryable: false,
+      })
+    }
+    const uploadId = upload.id
+    for (let offset = 0; offset < bytes.length; ) {
+      const chunk = bytes.subarray(offset, offset + 24 * 1024)
+      const data = btoa(String.fromCharCode(...chunk))
+      const result = await this.repositoryRendererRequest(
+        repositoryPath,
+        'renderer_resolution_append',
+        { snapshot_id: uploadId, offset, data }
+      )
+      offset += chunk.length
+      if (!isRecord(result) || result.size !== offset) {
+        throw new BackendError({
+          code: 'invalid_response',
+          message: `Invalid ${label} upload progress`,
+          retryable: false,
+        })
+      }
+    }
+    return uploadId
+  }
+
+  private async withUploadedSessionBytes<T>(
+    repositoryPath: string,
+    bytes: Uint8Array,
+    label: string,
+    operation: (input: Record<string, unknown>) => Promise<T>
+  ): Promise<T> {
+    if (bytes.length > 70_000_000) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: `${label} input exceeds the supported size`,
+        retryable: false,
+      })
+    }
+    if (bytes.length <= 24 * 1024) {
+      return operation({ bytes_base64: Buffer.from(bytes).toString('base64') })
+    }
+    const previous = this.comparisonTurn
+    let releaseTurn!: () => void
+    this.comparisonTurn = new Promise(resolve => {
+      releaseTurn = resolve
+    })
+    await previous
+    let uploadId: string | undefined
+    try {
+      uploadId = await this.uploadSessionBytes(repositoryPath, bytes, label)
+      return await operation({
+        bytes_base64: '',
+        snapshot_id: uploadId,
+        size: bytes.length,
+      })
+    } catch (error) {
+      if (uploadId !== undefined) await this.releaseComparisonSnapshot(uploadId)
+      throw error
+    } finally {
       releaseTurn()
     }
   }

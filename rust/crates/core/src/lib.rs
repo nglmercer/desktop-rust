@@ -739,11 +739,19 @@ impl Repository {
             }
             Operation::AssistedCommitHashBlob {
                 bytes_base64,
+                snapshot_id,
+                size,
                 path,
                 environment,
             } => {
                 return self
-                    .assisted_commit_hash_blob(&bytes_base64, path, &environment)
+                    .assisted_commit_hash_blob(
+                        &bytes_base64,
+                        snapshot_id.as_deref(),
+                        size,
+                        path,
+                        &environment,
+                    )
                     .await;
             }
             Operation::AssistedCommitVerifyCreatedCommit {
@@ -788,6 +796,8 @@ impl Repository {
                 revision,
                 path,
                 bytes_base64,
+                snapshot_id,
+                size,
                 mode,
                 filter_output,
                 environment,
@@ -798,6 +808,8 @@ impl Repository {
                         &revision,
                         &path,
                         &bytes_base64,
+                        snapshot_id.as_deref(),
+                        size,
                         &mode,
                         &filter_output,
                         &environment,

@@ -8,8 +8,6 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-const MAX_BLOB_BYTES: u64 = 512 * 1024 * 1024;
-
 fn object_id(value: &str, what: &str) -> Result<()> {
     anyhow::ensure!(
         matches!(value.len(), 40 | 64)
@@ -49,6 +47,40 @@ fn assisted_object_environment_key(key: &str) -> bool {
 
 fn assisted_diff_environment_key(key: &str) -> bool {
     assisted_object_environment_key(key) || matches!(key, "GIT_ATTR_NOSYSTEM" | "GIT_ATTR_SOURCE")
+}
+
+fn assisted_input_bytes(
+    repository: &str,
+    bytes_base64: &str,
+    snapshot_id: Option<&str>,
+    size: Option<u64>,
+    maximum: u64,
+) -> Result<Vec<u8>> {
+    if snapshot_id.is_some() || size.is_some() {
+        anyhow::ensure!(
+            bytes_base64.is_empty(),
+            "assisted input cannot use inline and uploaded bytes together"
+        );
+        let snapshot_id = snapshot_id.ok_or_else(|| anyhow::anyhow!("missing upload id"))?;
+        let size = size.ok_or_else(|| anyhow::anyhow!("missing upload size"))?;
+        let (bytes, permit) = crate::comparison_snapshots::take_upload(
+            repository,
+            uuid::Uuid::parse_str(snapshot_id)?,
+            size,
+        )?;
+        drop(permit);
+        anyhow::ensure!(bytes.len() as u64 <= maximum, "assisted input is too large");
+        return Ok(bytes);
+    }
+    let maximum_base64 =
+        usize::try_from(maximum.saturating_mul(4).div_ceil(3) + 4).unwrap_or(usize::MAX);
+    anyhow::ensure!(
+        bytes_base64.len() <= maximum_base64,
+        "assisted input is too large"
+    );
+    let bytes = STANDARD.decode(bytes_base64)?;
+    anyhow::ensure!(bytes.len() as u64 <= maximum, "assisted input is too large");
+    Ok(bytes)
 }
 
 struct TemporaryIndexDirectory {
@@ -189,6 +221,8 @@ impl Repository {
     pub(crate) async fn assisted_commit_hash_blob(
         &self,
         bytes_base64: &str,
+        snapshot_id: Option<&str>,
+        size: Option<u64>,
         path: Option<GitPath>,
         environment: &BTreeMap<String, Option<String>>,
     ) -> Result<Value> {
@@ -198,15 +232,13 @@ impl Repository {
                 "unsupported assisted hash environment key"
             );
         }
-        anyhow::ensure!(
-            bytes_base64.len() <= 768 * 1024 * 1024,
-            "assisted blob input is too large"
-        );
-        let bytes = STANDARD.decode(bytes_base64)?;
-        anyhow::ensure!(
-            bytes.len() <= MAX_BLOB_BYTES as usize,
-            "assisted blob input is too large"
-        );
+        let bytes = assisted_input_bytes(
+            &self.id(),
+            bytes_base64,
+            snapshot_id,
+            size,
+            crate::comparison_snapshots::MAX_BYTES as u64,
+        )?;
         let mut command = args(&["hash-object", "-w", "--stdin"]);
         if let Some(path) = path {
             let path = validate_index_tree_path(&path)?;
@@ -369,6 +401,7 @@ impl Repository {
         for path in paths {
             command.push(validate_index_tree_path(path)?);
         }
+        let permit = crate::comparison_snapshots::reserve().await?;
         let output = crate::process::run_git_with_environment_limit(
             &self.path,
             &command,
@@ -379,7 +412,16 @@ impl Repository {
         )
         .await?;
         anyhow::ensure!(output.code == 0, "Cannot create the frozen assisted diff");
-        Ok(json!({"bytes_base64":STANDARD.encode(output.stdout)}))
+        let cancellation = crate::cancellation::Cancellation::current();
+        cancellation.check()?;
+        let snapshot = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;
+        if let Err(error) = cancellation.check() {
+            if let Some(id) = snapshot["id"].as_str() {
+                let _ = crate::comparison_snapshots::release_owned(id);
+            }
+            return Err(error);
+        }
+        Ok(snapshot)
     }
 
     /// Produce the native working-tree diff used to certify that a partial
@@ -419,6 +461,7 @@ impl Repository {
         command.push(path);
         let mut environment = environment.clone();
         environment.insert("GIT_OPTIONAL_LOCKS".to_string(), Some("0".to_string()));
+        let permit = crate::comparison_snapshots::reserve().await?;
         let output = crate::process::run_git_with_environment_limit(
             &self.path,
             &command,
@@ -432,7 +475,16 @@ impl Repository {
             output.code == 0 || output.code == 1,
             "Cannot certify the assisted partial diff"
         );
-        Ok(json!({"bytes_base64":STANDARD.encode(output.stdout)}))
+        let cancellation = crate::cancellation::Cancellation::current();
+        cancellation.check()?;
+        let snapshot = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;
+        if let Err(error) = cancellation.check() {
+            if let Some(id) = snapshot["id"].as_str() {
+                let _ = crate::comparison_snapshots::release_owned(id);
+            }
+            return Err(error);
+        }
+        Ok(snapshot)
     }
 
     /// Convert one captured regular file through Git's native clean/process
@@ -444,6 +496,8 @@ impl Repository {
         revision: &str,
         path: &GitPath,
         bytes_base64: &str,
+        snapshot_id: Option<&str>,
+        size: Option<u64>,
         mode: &str,
         filter_output: &str,
         environment: &BTreeMap<String, Option<String>>,
@@ -454,17 +508,13 @@ impl Repository {
             matches!(mode, "100644" | "100755"),
             "invalid native conversion mode"
         );
-        anyhow::ensure!(
-            bytes_base64.len() <= 768 * 1024 * 1024,
-            "native conversion input is too large"
-        );
-        let bytes = STANDARD
-            .decode(bytes_base64)
-            .map_err(|_| anyhow::anyhow!("native conversion input is not valid base64"))?;
-        anyhow::ensure!(
-            bytes.len() <= 512 * 1024 * 1024,
-            "decoded native conversion input is too large"
-        );
+        let bytes = assisted_input_bytes(
+            &self.id(),
+            bytes_base64,
+            snapshot_id,
+            size,
+            crate::comparison_snapshots::MAX_BYTES as u64,
+        )?;
         anyhow::ensure!(
             filter_output.len() <= 2 * 1024 * 1024,
             "native conversion filter configuration is too large"
@@ -1098,9 +1148,8 @@ impl Repository {
     }
 
     /// Read an exact blob from the private object view. Blob bytes stay inside
-    /// the typed host boundary and are returned as bounded base64 because the
-    /// legacy renderer consumes the complete byte string for comparison and
-    /// index reconstruction.
+    /// the typed host boundary and are exposed through the session-owned bounded
+    /// snapshot transport used for other large comparison bytes.
     pub(crate) async fn assisted_commit_blob(
         &self,
         sha: &str,
@@ -1108,16 +1157,26 @@ impl Repository {
     ) -> Result<Value> {
         object_id(sha, "blob object")?;
         validate_environment(environment)?;
+        let permit = crate::comparison_snapshots::reserve().await?;
         let output = crate::process::run_git_with_environment_limit(
             &self.path,
             &args(&["cat-file", "blob", sha]),
             None,
             None,
             environment,
-            MAX_BLOB_BYTES,
+            crate::comparison_snapshots::MAX_BYTES as u64,
         )
         .await?;
         anyhow::ensure!(output.code == 0, "Cannot read assisted blob");
-        Ok(json!({"bytes_base64":STANDARD.encode(output.stdout)}))
+        let cancellation = crate::cancellation::Cancellation::current();
+        cancellation.check()?;
+        let snapshot = crate::comparison_snapshots::insert(&self.id(), output.stdout, permit)?;
+        if let Err(error) = cancellation.check() {
+            if let Some(id) = snapshot["id"].as_str() {
+                let _ = crate::comparison_snapshots::release_owned(id);
+            }
+            return Err(error);
+        }
+        Ok(snapshot)
     }
 }

@@ -80,6 +80,10 @@ struct ReadRequest {
     #[serde(default)]
     bytes_base64: Option<String>,
     #[serde(default)]
+    snapshot_id: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
     parent: Option<String>,
     #[serde(default)]
     initial_sha: Option<String>,
@@ -1530,11 +1534,19 @@ impl Backend {
         if !matches!(
             &request.method,
             ReadMethod::AssistedCommitHashBlob | ReadMethod::AssistedCommitNativeFullConversion
-        ) && request.bytes_base64.is_some()
-        {
-            return Err(AppError::BadArgs(
-                "bytes_base64 only applies to assisted blob writes and native conversion".into(),
-            ));
+        ) {
+            if request.bytes_base64.is_some() {
+                return Err(AppError::BadArgs(
+                    "bytes_base64 only applies to assisted blob writes and native conversion"
+                        .into(),
+                ));
+            }
+            if request.snapshot_id.is_some() || request.size.is_some() {
+                return Err(AppError::BadArgs(
+                    "snapshot input only applies to assisted blob writes and native conversion"
+                        .into(),
+                ));
+            }
         }
         if !matches!(
             &request.method,
@@ -2041,6 +2053,8 @@ impl Backend {
                         bytes_base64: request
                             .bytes_base64
                             .ok_or_else(|| AppError::BadArgs("bytes_base64 is required".into()))?,
+                        snapshot_id: request.snapshot_id,
+                        size: request.size,
                         path: request.path,
                         environment: request.environment.unwrap_or_default(),
                     }
@@ -2274,6 +2288,8 @@ impl Backend {
                         bytes_base64: request
                             .bytes_base64
                             .ok_or_else(|| AppError::BadArgs("bytes_base64 is required".into()))?,
+                        snapshot_id: request.snapshot_id,
+                        size: request.size,
                         mode: request
                             .mode
                             .ok_or_else(|| AppError::BadArgs("mode is required".into()))?,
@@ -3328,6 +3344,37 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn snapshot_bytes(backend: &Backend, repository: &Path, snapshot: &Value) -> Vec<u8> {
+        assert_eq!(snapshot["kind"], "snapshot");
+        let id = snapshot["id"].as_str().unwrap();
+        let size = snapshot["size"].as_u64().unwrap();
+        let mut bytes = Vec::new();
+        while (bytes.len() as u64) < size {
+            let offset = bytes.len() as u64;
+            let length = (size - offset).min(512 * 1024) as u32;
+            let request = backend
+                .admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":repository,"operation":{"method":"renderer_compare_diff_chunk","snapshot_id":id,"offset":offset,"length":length}}})])
+                .unwrap();
+            let chunk = backend.read(request).unwrap();
+            assert_eq!(chunk["offset"], offset);
+            assert_eq!(chunk["size"], size);
+            bytes.extend(
+                base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    chunk["data"].as_str().unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+        let release = backend
+            .admit_git_info(vec![
+                json!({"operation":{"type":"release_comparison_snapshot","snapshot_id":id}}),
+            ])
+            .unwrap();
+        assert_eq!(backend.read(release).unwrap()["released"], true);
+        bytes
+    }
+
     #[test]
     fn wry_release_changelog_operation_is_typed() {
         let operation: GitInfoOperation = serde_json::from_value(json!({
@@ -3521,7 +3568,7 @@ mod tests {
                         json!({"repository_path":root,"method":"assisted_commit_blob","sha":blob}),
                     ])
                     .unwrap();
-                assert_eq!(bytes["bytes_base64"], "Y29udGVudAo=");
+                assert_eq!(snapshot_bytes(&backend, &root, &bytes), b"content\n");
                 let hashed = backend
                     .read_args(vec![
                         json!({"repository_path":root,"method":"assisted_commit_hash_blob","bytes_base64":"aGVsbG8="}),
@@ -3531,6 +3578,38 @@ mod tests {
                     hashed["sha"],
                     "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0"
                 );
+                let large = vec![b'x'; 25 * 1024];
+                let large_base64 = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &large,
+                );
+                let inline_large = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_hash_blob","bytes_base64":large_base64}),
+                    ])
+                    .unwrap();
+                let upload = backend
+                    .read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_resolution_begin"}}})]).unwrap())
+                    .unwrap();
+                let upload_id = upload["id"].as_str().unwrap();
+                let mut offset = 0usize;
+                for chunk in large.chunks(24 * 1024) {
+                    let data = base64::Engine::encode(
+                        &base64::engine::general_purpose::STANDARD,
+                        chunk,
+                    );
+                    offset += chunk.len();
+                    let appended = backend
+                        .read(backend.admit_git_info(vec![json!({"operation":{"type":"reviewed_discard","repository_path":root,"operation":{"method":"renderer_resolution_append","snapshot_id":upload_id,"offset":offset-chunk.len(),"data":data}}})]).unwrap())
+                        .unwrap();
+                    assert_eq!(appended["size"], offset);
+                }
+                let uploaded_large = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_hash_blob","bytes_base64":"","snapshot_id":upload_id,"size":large.len()}),
+                    ])
+                    .unwrap();
+                assert_eq!(uploaded_large["sha"], inline_large["sha"]);
                 let diff_driver = backend
                     .read_args(vec![
                         json!({"repository_path":root,"method":"assisted_commit_diff_driver","path":"file"}),
@@ -3597,11 +3676,7 @@ mod tests {
                         json!({"repository_path":root,"method":"assisted_commit_certify_diff","base":head,"path":"file"}),
                     ])
                     .unwrap();
-                let certified_bytes = base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    certified["bytes_base64"].as_str().unwrap(),
-                )
-                .unwrap();
+                let certified_bytes = snapshot_bytes(&backend, &root, &certified);
                 assert!(String::from_utf8_lossy(&certified_bytes).contains("+changed"));
                 git(&["add", "file"]);
                 git(&["commit", "-qm", "second"]);
@@ -3611,11 +3686,7 @@ mod tests {
                         json!({"repository_path":root,"method":"assisted_commit_frozen_diff","base":tree,"tree":changed_tree,"paths":["file"]}),
                     ])
                     .unwrap();
-                let frozen_bytes = base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    frozen["bytes_base64"].as_str().unwrap(),
-                )
-                .unwrap();
+                let frozen_bytes = snapshot_bytes(&backend, &root, &frozen);
                 assert!(String::from_utf8_lossy(&frozen_bytes).contains("+changed"));
                 let conversion = backend
                     .read_args(vec![

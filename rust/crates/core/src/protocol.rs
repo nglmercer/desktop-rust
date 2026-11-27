@@ -526,6 +526,10 @@ pub enum Operation {
     AssistedCommitHashBlob {
         bytes_base64: String,
         #[serde(default)]
+        snapshot_id: Option<String>,
+        #[serde(default)]
+        size: Option<u64>,
+        #[serde(default)]
         path: Option<GitPath>,
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
@@ -560,6 +564,10 @@ pub enum Operation {
         revision: String,
         path: GitPath,
         bytes_base64: String,
+        #[serde(default)]
+        snapshot_id: Option<String>,
+        #[serde(default)]
+        size: Option<u64>,
         mode: String,
         filter_output: String,
         #[serde(default)]
