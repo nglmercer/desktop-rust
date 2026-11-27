@@ -21,7 +21,7 @@ import {
 import { squash } from '../../../src/lib/git/squash'
 import { exec } from 'dugite'
 import { getStatusOrThrow } from '../../helpers/status'
-import { getTempFilePath } from '../../../src/lib/file-system'
+import { createTempDirectory } from '../../helpers/temp'
 
 // The Rust backend does not run a caller-supplied editor command when a rebase
 // continues, and the app never passes one to `continueRebase`; only these tests
@@ -254,7 +254,10 @@ describe('git/cherry-pick', () => {
 
     // If there are conflicts, we need to resend in git editor for changing the
     // git message on continue
-    const messagePath = await getTempFilePath('squashCommitMessage')
+    const messagePath = Path.join(
+      await createTempDirectory(t),
+      'squashCommitMessage'
+    )
     await writeFile(messagePath, 'Test Summary\n\nTest Body')
 
     // continue rebase

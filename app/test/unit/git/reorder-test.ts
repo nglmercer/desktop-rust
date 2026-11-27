@@ -15,7 +15,7 @@ import { setupEmptyRepositoryDefaultMain } from '../../helpers/repositories'
 import { makeCommit } from '../../helpers/repository-scaffolding'
 import { exec } from 'dugite'
 import { getStatusOrThrow } from '../../helpers/status'
-import { getTempFilePath } from '../../../src/lib/file-system'
+import { createTempDirectory } from '../../helpers/temp'
 import {
   installNodeFileBridge,
   uninstallNodeFileBridge,
@@ -166,7 +166,10 @@ describe('git/reorder', () => {
 
     // If there are conflicts, we need to resend in git editor for changing the
     // git message on continue
-    const thirdMessagePath = await getTempFilePath('reorderCommitMessage-third')
+    const thirdMessagePath = Path.join(
+      await createTempDirectory(t),
+      'reorderCommitMessage-third'
+    )
     await writeFile(thirdMessagePath, 'third - fixed')
 
     // continue rebase
@@ -190,7 +193,8 @@ describe('git/reorder', () => {
       '# resolve conflict from putting "third" before "second"'
     )
 
-    const secondMessagePath = await getTempFilePath(
+    const secondMessagePath = Path.join(
+      await createTempDirectory(t),
       'reorderCommitMessage-second'
     )
     await writeFile(secondMessagePath, 'second - fixed')
