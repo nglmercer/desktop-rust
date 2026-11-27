@@ -1,26 +1,11 @@
-import * as Path from 'path'
-import { execFile } from './exec-file'
+import { which } from './executable-path'
 
-const findOnPath = (program: string) => {
-  if (__WIN32__) {
-    const cwd = process.env.SystemRoot || 'C:\\Windows'
-    const cmd = Path.join(cwd, 'System32', 'where.exe')
-    return execFile(cmd, [program], { cwd })
+/** Attempts to locate the path to the system version of Git. */
+export const findGitOnPath = async () => {
+  try {
+    return (await which('git', { nothrow: true })) ?? undefined
+  } catch (error) {
+    log.warn(`Failed trying to find Git on PATH`, error)
+    return undefined
   }
-  return execFile('which', [program])
 }
-
-/** Attempts to locate the path to the system version of Git */
-export const findGitOnPath = () =>
-  // `where` (i.e on Windows) will list _all_ PATH components where the
-  // executable is found, one per line, and return 0, or print an error and
-  // return 1 if it cannot be found.
-  //
-  // `which` (i.e. on macOS and Linux) will print the path and return 0
-  // when the executable is found under PATH, or return 1 if it cannot be found
-  findOnPath('git')
-    .then(({ stdout }) => stdout.split(/\r?\n/, 1)[0])
-    .catch(err => {
-      log.warn(`Failed trying to find Git on PATH`, err)
-      return undefined
-    })
