@@ -62,10 +62,10 @@ mod tests {
 
     #[test]
     fn ipc_contract_covers_all_electron_channels() {
-        assert_eq!(ipc::channels::invoke::ALL.len(), 28);
-        assert_eq!(ipc::channels::send::ALL.len(), 31);
+        assert_eq!(ipc::channels::invoke::ALL.len(), 26);
+        assert_eq!(ipc::channels::send::ALL.len(), 30);
         assert_eq!(ipc::channels::event::ALL.len(), 20);
-        assert_eq!(28 + 31 + 20, 79);
+        assert_eq!(26 + 30 + 20, 76);
         for channel in ipc::channels::invoke::ALL {
             assert!(ipc::channels::is_known(channel), "{channel}");
         }

@@ -1,7 +1,7 @@
 //! The complete the legacy shell IPC channel contract, transcribed from
 //! `app/src/lib/ipc-shared.ts` and `app/src/main-process/main.ts`.
 //!
-//! 27 duplex (`invoke`/`handle`) channels, 50 simplex (`send`/`on`) channels.
+//! 26 duplex (`invoke`/`handle`) channels, 50 simplex (`send`/`on`) channels.
 //! 20 of the simplex channels are main-process -> renderer pushes and have no
 //! inbound handler; they live in [`event`] and are emitted by Rust.
 
