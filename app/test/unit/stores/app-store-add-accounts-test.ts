@@ -1,6 +1,13 @@
-import { vi } from 'vitest'
 import assert from 'node:assert/strict'
-import { after, before, describe, it, mock, TestContext } from 'node:test'
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  it,
+  vi,
+  type TestContext,
+} from 'vitest'
 import { setImmediate } from 'node:timers/promises'
 import * as Path from 'path'
 import { existsSync } from 'fs'
@@ -19,8 +26,13 @@ import { Popup, PopupType } from '../../../src/models/popup'
 import { createMockAPI, createMockAPIRepository } from '../../helpers/mock-api'
 import type { ITestStores } from '../../helpers/app-store-test-harness'
 import type { TestStatsDatabase } from '../../helpers/databases/test-stats-database'
+import { mockMethod } from '../../helpers/mock-method'
 
 describe('AppStore explicitly adding repositories', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   let appStore: AppStore
   let statsDb: TestStatsDatabase
   let stores: ITestStores
@@ -44,7 +56,7 @@ describe('AppStore explicitly adding repositories', () => {
     state: 'open',
   }
 
-  before(async () => {
+  beforeAll(async () => {
     vi.doMock('../../../src/ui/main-process-proxy', async () => ({
       ...(await vi.importActual('../../../src/ui/main-process-proxy')),
       getAppMenu: () => {},
@@ -57,7 +69,7 @@ describe('AppStore explicitly adding repositories', () => {
     )
     stores = createTestStores()
     const { AliveStore } = await import('../../../src/lib/stores/alive-store')
-    mock.method(AliveStore.prototype, 'setEnabled', () => {})
+    mockMethod(AliveStore.prototype, 'setEnabled', () => {})
     const { CopilotStore } = await import(
       '../../../src/lib/stores/copilot-store'
     )
@@ -75,9 +87,9 @@ describe('AppStore explicitly adding repositories', () => {
       '../../helpers/test-activity-monitor'
     )
     const { fakePost } = await import('../../fake-stats-post')
-    mock.method(window, 'setTimeout', () => 0)
-    mock.method(window, 'requestAnimationFrame', () => 0)
-    mock.method(window, 'addEventListener', () => {})
+    window.setTimeout = (() => 0) as unknown as typeof window.setTimeout
+    window.requestAnimationFrame = () => 0
+    window.addEventListener = (() => {}) as typeof window.addEventListener
     statsDb = new TestStatsDatabase()
     await statsDb.reset()
     const stats = new StatsStore(statsDb, new TestActivityMonitor(), fakePost)
@@ -105,18 +117,17 @@ describe('AppStore explicitly adding repositories', () => {
       ),
       new CopilotStore(stores.accountsStore)
     )
-    mock.method(appStore, '_showPopup', async () => {})
-    mock.method(appStore, '_selectRepository', async () => null)
+    mockMethod(appStore, '_showPopup', async () => {})
+    mockMethod(appStore, '_selectRepository', async () => null)
     await stores.accountsStore.addAccount(alice)
     await stores.accountsStore.addAccount(bob)
   })
 
-  after(async () => {
+  afterAll(async () => {
     stores.repositoriesStore['emitter'].dispose()
     stores.accountsStore['emitter'].dispose()
     await setImmediate()
     statsDb?.close()
-    mock.restoreAll()
   })
 
   async function setupRepository(t: TestContext) {
@@ -245,7 +256,7 @@ describe('AppStore explicitly adding repositories', () => {
 
     it('keeps the draft when refreshed metadata changes the repository', async t => {
       const repository = await setupDraft(t)
-      t.mock.method(API, 'fromAccount', () =>
+      mockMethod(API, 'fromAccount', () =>
         createMockAPI({
           fetchRepository: async () => apiRepository,
           fetchProtectedBranches: async () => [],
@@ -276,7 +287,7 @@ describe('AppStore explicitly adding repositories', () => {
         description: null,
         timestamp: 1,
       })
-      t.mock.method(API, 'fromAccount', () =>
+      mockMethod(API, 'fromAccount', () =>
         createMockAPI({
           fetchRepository: async () => null,
           fetchProtectedBranches: async () => [],
@@ -290,8 +301,8 @@ describe('AppStore explicitly adding repositories', () => {
 
     it('keeps the draft when signing out clears the assignment', async t => {
       const repository = await setupDraft(t)
-      t.mock.method(appStore, '_removeAccount', async () => {})
-      t.mock.method(appStore, '_showPopup', async (popup: Popup) => {
+      mockMethod(appStore, '_removeAccount', async () => {})
+      mockMethod(appStore, '_showPopup', async (popup: Popup) => {
         if (popup.type === PopupType.ConfirmAccountSignOut) {
           popup.onComplete(true)
         }
@@ -351,7 +362,7 @@ describe('AppStore explicitly adding repositories', () => {
 
     it('finishes a fetch that was running when metadata was refreshed', async t => {
       const repository = await setupDraft(t)
-      t.mock.method(API, 'fromAccount', () =>
+      mockMethod(API, 'fromAccount', () =>
         createMockAPI({
           fetchRepository: async () => ({
             ...apiRepository,
@@ -385,7 +396,7 @@ describe('AppStore explicitly adding repositories', () => {
         repository.path,
         repository.resolvedGitDir
       )
-      t.mock.method(API, 'fromAccount', () =>
+      mockMethod(API, 'fromAccount', () =>
         createMockAPI({
           fetchRepository: async () => null,
           fetchProtectedBranches: async () => [],
@@ -447,10 +458,14 @@ describe('AppStore explicitly adding repositories', () => {
       const repository = await setupDraft(t)
       const updated = await appStore._updateRepositoryAccount(repository, 'bob')
       const selectedRepository = appStore['selectedRepository']
-      t.after(() => (appStore['selectedRepository'] = selectedRepository))
+      t.onTestFinished(() => {
+        appStore['selectedRepository'] = selectedRepository
+      })
       appStore['selectedRepository'] = updated
       const emitUpdate = appStore['emitUpdate']
-      t.after(() => (appStore['emitUpdate'] = emitUpdate))
+      t.onTestFinished(() => {
+        appStore['emitUpdate'] = emitUpdate
+      })
       let emitted = 0
       appStore['emitUpdate'] = () => emitted++
 
@@ -481,7 +496,7 @@ describe('AppStore explicitly adding repositories', () => {
         false,
         ''
       )
-      t.mock.method(
+      mockMethod(
         appStore['gitStoreCache'].get(repository),
         'pruneForkedRemotes',
         async () => {}
@@ -504,11 +519,11 @@ describe('AppStore explicitly adding repositories', () => {
       )
       await appStore['onPullRequestChanged'](repository, [pullRequest])
       assert.strictEqual(pullRequestsOf(updated).length, 0)
-      const fromAccount = t.mock.method(API, 'fromAccount', () =>
+      const fromAccount = mockMethod(API, 'fromAccount', () =>
         createMockAPI({})
       )
       await appStore['refreshBranchProtectionState'](repository)
-      assert.strictEqual(fromAccount.mock.callCount(), 0)
+      assert.strictEqual(fromAccount.mock.calls.length, 0)
 
       await appStore['onPullRequestChanged'](updated, [pullRequest])
       assert.strictEqual(pullRequestsOf(updated).length, 1)
@@ -655,18 +670,18 @@ describe('AppStore explicitly adding repositories', () => {
       local.path,
       local.resolvedGitDir
     )
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       createMockAPI({
         createRepository: async () => apiRepository,
         fetchRepository: async () => apiRepository,
         fetchProtectedBranches: async () => [],
       })
     )
-    t.mock.method(appStore, '_initializeCompare', async () => {})
+    mockMethod(appStore, '_initializeCompare', async () => {})
     const performPush = appStore['performPush']
     const refreshBranchProtectionState =
       appStore['refreshBranchProtectionState']
-    t.after(() => {
+    t.onTestFinished(() => {
       appStore['performPush'] = performPush
       appStore['refreshBranchProtectionState'] = refreshBranchProtectionState
     })
@@ -686,7 +701,7 @@ describe('AppStore explicitly adding repositories', () => {
   })
 
   it('confirms an unfamiliar Enterprise Server before signing in for Git', async t => {
-    const showPopup = t.mock.method(appStore, '_showPopup', async () => {})
+    const showPopup = mockMethod(appStore, '_showPopup', async () => {})
     const { GitHubRepository } = await import(
       '../../../src/models/github-repository'
     )
@@ -702,7 +717,7 @@ describe('AppStore explicitly adding repositories', () => {
     assert.ok(isRepositoryWithGitHubRepository(repository))
 
     const result = appStore['promptForUnassignedRepositoryAccount'](repository)
-    for (let i = 0; i < 100 && showPopup.mock.callCount() === 0; i++) {
+    for (let i = 0; i < 100 && showPopup.mock.calls.length === 0; i++) {
       await setImmediate()
     }
 
@@ -710,7 +725,7 @@ describe('AppStore explicitly adding repositories', () => {
     assert.ok(state?.kind === SignInStep.Authentication)
     assert.strictEqual(state.endpoint, enterprise)
     assert.strictEqual(state.isUnrecognizedEnterpriseServer, true)
-    assert.deepStrictEqual(showPopup.mock.calls[0].arguments, [
+    assert.deepStrictEqual(showPopup.mock.calls[0], [
       { type: PopupType.SignIn },
     ])
 
@@ -720,11 +735,8 @@ describe('AppStore explicitly adding repositories', () => {
 
   it('adds a tutorial with scoped permissions without a post-add account rebind', async t => {
     const repository = await setupRepository(t)
-    t.mock.method(
-      stores.repositoriesStore,
-      'updateRepositoryAccount',
-      async () =>
-        assert.fail('Tutorial creation must persist its assignment atomically')
+    mockMethod(stores.repositoriesStore, 'updateRepositoryAccount', async () =>
+      assert.fail('Tutorial creation must persist its assignment atomically')
     )
 
     await appStore._addTutorialRepository(
@@ -746,7 +758,7 @@ describe('AppStore explicitly adding repositories', () => {
   it('assigns the only accessible account when adding a local repository', async t => {
     const repository = await setupRepository(t)
     const tokens: string[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    mockMethod(API, 'fromAccount', (account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           tokens.push(account.token)
@@ -754,7 +766,7 @@ describe('AppStore explicitly adding repositories', () => {
         },
       })
     )
-    t.mock.method(appStore, '_chooseRepositoryAccount', async () =>
+    mockMethod(appStore, '_chooseRepositoryAccount', async () =>
       assert.fail('Only one account can access this repository')
     )
     const { gitHubRepositories } = stores.repositoriesStore['db']
@@ -780,10 +792,10 @@ describe('AppStore explicitly adding repositories', () => {
 
   it('persists the explicit selection when multiple accounts have access', async t => {
     const repository = await setupRepository(t)
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       createMockAPI({ fetchRepositoryIfAccessible: async () => apiRepository })
     )
-    const chooser = t.mock.method(
+    const chooser = mockMethod(
       appStore,
       '_chooseRepositoryAccount',
       async (
@@ -798,12 +810,12 @@ describe('AppStore explicitly adding repositories', () => {
     const added = await appStore._addRepositories([repository.path])
     assert.strictEqual(added[0].login, 'bob')
     assert.strictEqual(added[0].gitHubRepository?.permissions, 'write')
-    assert.strictEqual(chooser.mock.callCount(), 1)
+    assert.strictEqual(chooser.mock.calls.length, 1)
   })
 
   it('keeps an inaccessible repository unassigned', async t => {
     const repository = await setupRepository(t)
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       createMockAPI({ fetchRepositoryIfAccessible: async () => null })
     )
     const { gitHubRepositories } = stores.repositoriesStore['db']
@@ -822,7 +834,7 @@ describe('AppStore explicitly adding repositories', () => {
 
   it('skips accounts whose access check fails when adding a repository', async t => {
     const repository = await setupRepository(t)
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    mockMethod(API, 'fromAccount', (account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           if (account.login === alice.login) {
@@ -832,7 +844,7 @@ describe('AppStore explicitly adding repositories', () => {
         },
       })
     )
-    t.mock.method(appStore, '_chooseRepositoryAccount', async () =>
+    mockMethod(appStore, '_chooseRepositoryAccount', async () =>
       assert.fail('Only one account could be checked')
     )
     const added = await appStore._addRepositories([repository.path])
@@ -841,7 +853,7 @@ describe('AppStore explicitly adding repositories', () => {
 
   it('adds the repository unassigned when no account can be checked', async t => {
     const repository = await setupRepository(t)
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           throw new Error('Network error')
@@ -860,7 +872,7 @@ describe('AppStore explicitly adding repositories', () => {
       repository.path,
       repository.resolvedGitDir
     )
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       assert.fail('Adding an existing repository must not probe accounts')
     )
     const added = await appStore._addRepositories([repository.path])
@@ -870,12 +882,12 @@ describe('AppStore explicitly adding repositories', () => {
 
   it('assigns the account selected for a clone before its metadata is known', async t => {
     const repository = await setupRepository(t)
-    t.mock.method(
+    mockMethod(
       stores.cloningRepositoriesStore,
       'takeCompletedAssignment',
       () => ({ name: 'repo', owner: 'owner', account: bob })
     )
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       assert.fail('The account was chosen in the clone dialog')
     )
     const added = await appStore._addRepositories([repository.path])
@@ -892,7 +904,7 @@ describe('AppStore explicitly adding repositories', () => {
 
   it('preserves the account selected during clone without prompting again', async t => {
     const repository = await setupRepository(t)
-    t.mock.method(
+    mockMethod(
       stores.cloningRepositoriesStore,
       'takeCompletedAssignment',
       () => ({
@@ -902,7 +914,7 @@ describe('AppStore explicitly adding repositories', () => {
         apiRepository,
       })
     )
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       assert.fail('The clone already verified this account')
     )
     const added = await appStore._addRepositories([repository.path])
@@ -912,14 +924,14 @@ describe('AppStore explicitly adding repositories', () => {
 
   describe('cloning with an explicitly selected account', () => {
     async function chooseForClone(t: TestContext, login: string) {
-      t.mock.method(API, 'fromAccount', () =>
+      mockMethod(API, 'fromAccount', () =>
         assert.fail('The selected account must be used without probing')
       )
-      t.mock.method(appStore, '_chooseRepositoryAccount', async () =>
+      mockMethod(appStore, '_chooseRepositoryAccount', async () =>
         assert.fail('The selected account must be used without prompting')
       )
       let choose: (() => Promise<unknown>) | undefined
-      t.mock.method(
+      mockMethod(
         stores.cloningRepositoriesStore,
         'clone',
         async (
@@ -959,7 +971,7 @@ describe('AppStore explicitly adding repositories', () => {
       local.path,
       local.resolvedGitDir
     )
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       createMockAPI({
         createRepository: async () => {
           const anonymous =
@@ -1004,10 +1016,10 @@ describe('AppStore explicitly adding repositories', () => {
         ...accounts,
         new Account('carol', ported, 'carol-token', [], '', 3, ''),
       ]
-      t.after(() => {
+      t.onTestFinished(() => {
         appStore['accounts'] = accounts
       })
-      t.mock.method(API, 'fromAccount', () =>
+      mockMethod(API, 'fromAccount', () =>
         createMockAPI({
           fetchRepository: async () => null,
           fetchProtectedBranches: async () => [],
@@ -1115,31 +1127,31 @@ describe('AppStore explicitly adding repositories', () => {
       )
       const previous = appStore['repositories']
       appStore['repositories'] = [missing]
-      t.after(() => {
+      t.onTestFinished(() => {
         appStore['repositories'] = previous
       })
-      const ensure = t.mock.method(
+      const ensure = mockMethod(
         appStore,
         '_ensureRepositoryAccount',
         async () => alice
       )
-      const clone = t.mock.method(appStore, '_clone', () => ({
+      const clone = mockMethod(appStore, '_clone', () => ({
         promise: Promise.resolve(false),
         repository: {},
       }))
       await appStore._cloneAgain('https://github.com/owner/repo', '/missing')
-      return { ensure, options: clone.mock.calls[0]?.arguments[2] }
+      return { ensure, options: clone.mock.calls[0][2] }
     }
 
     it('clones with the assigned account without discovering another', async t => {
       const { ensure, options } = await cloneAgain(t, 'alice')
-      assert.strictEqual(ensure.mock.callCount(), 1)
+      assert.strictEqual(ensure.mock.calls.length, 1)
       assert.deepStrictEqual(options, { account: { endpoint, login: 'alice' } })
     })
 
     it('discovers an account for an unassigned repository', async t => {
       const { ensure, options } = await cloneAgain(t, null)
-      assert.strictEqual(ensure.mock.callCount(), 0)
+      assert.strictEqual(ensure.mock.calls.length, 0)
       assert.deepStrictEqual(options, {})
     })
   })
@@ -1173,7 +1185,7 @@ describe('AppStore explicitly adding repositories', () => {
       )
       await stores.repositoriesStore.updateRepositoryAccount(repository, 'bob')
       const requests: string[][] = []
-      t.mock.method(API, 'fromAccount', (account: Account) =>
+      mockMethod(API, 'fromAccount', (account: Account) =>
         createMockAPI({
           fetchPullRequest: async (owner, repositoryName, pr) => {
             requests.push([account.token, owner, repositoryName, pr])
@@ -1181,7 +1193,7 @@ describe('AppStore explicitly adding repositories', () => {
           },
         })
       )
-      t.mock.method(appStore, '_chooseRepositoryAccount', async () =>
+      mockMethod(appStore, '_chooseRepositoryAccount', async () =>
         assert.fail(
           'An existing assigned repository must not choose another account'
         )
@@ -1211,12 +1223,12 @@ describe('AppStore explicitly adding repositories', () => {
       ),
       gh
     )
-    const ensure = t.mock.method(
+    const ensure = mockMethod(
       appStore,
       '_ensureRepositoryAccount',
       async () => undefined
     )
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       assert.fail('Canceled account selection must not fall back')
     )
 
@@ -1227,14 +1239,14 @@ describe('AppStore explicitly adding repositories', () => {
       ),
       null
     )
-    assert.strictEqual(ensure.mock.callCount(), 1)
-    assert.strictEqual(ensure.mock.calls[0].arguments[0]?.id, repository.id)
+    assert.strictEqual(ensure.mock.calls.length, 1)
+    assert.strictEqual(ensure.mock.calls[0][0]?.id, repository.id)
   })
 
   it('probes and explicitly selects an account before fetching an untracked PR URL', async t => {
     const probes: string[] = []
     const requests: string[] = []
-    t.mock.method(API, 'fromAccount', (account: Account) =>
+    mockMethod(API, 'fromAccount', (account: Account) =>
       createMockAPI({
         fetchRepositoryIfAccessible: async () => {
           probes.push(account.token)
@@ -1246,7 +1258,7 @@ describe('AppStore explicitly adding repositories', () => {
         },
       })
     )
-    const chooser = t.mock.method(
+    const chooser = mockMethod(
       appStore,
       '_chooseRepositoryAccount',
       async () => bob
@@ -1259,15 +1271,15 @@ describe('AppStore explicitly adding repositories', () => {
 
     assert.deepStrictEqual(probes.sort(), ['alice-token', 'bob-token'])
     assert.deepStrictEqual(requests, ['bob-token'])
-    assert.strictEqual(chooser.mock.callCount(), 1)
-    assert.strictEqual(chooser.mock.calls[0].arguments[0]?.id, -1)
+    assert.strictEqual(chooser.mock.calls.length, 1)
+    assert.strictEqual(chooser.mock.calls[0][0]?.id, -1)
   })
 
   it('does not fetch an untracked PR when no account can access the repository', async t => {
-    t.mock.method(API, 'fromAccount', () =>
+    mockMethod(API, 'fromAccount', () =>
       createMockAPI({ fetchRepositoryIfAccessible: async () => null })
     )
-    t.mock.method(appStore, '_chooseRepositoryAccount', async () =>
+    mockMethod(appStore, '_chooseRepositoryAccount', async () =>
       assert.fail(
         'No verified account must not prompt for an arbitrary account'
       )
