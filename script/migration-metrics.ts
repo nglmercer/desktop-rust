@@ -157,6 +157,18 @@ export function measure(): IMetrics {
     os: 'os|node:os|(?:\\.\\./)+web/os',
     crypto: 'crypto|node:crypto|(?:\\.\\./)+web/crypto',
     keytar: 'keytar|(?:\\.\\./)+web/keytar',
+    async_hooks: 'async_hooks|node:async_hooks|(?:\\.\\./)+web/async_hooks',
+    net: 'net|node:net|(?:\\.\\./)+web/net',
+    stream: 'stream|node:stream|(?:\\.\\./)+web/stream',
+    stream_promises:
+      'stream/promises|node:stream/promises|(?:\\.\\./)+web/stream-promises',
+    path: 'path|node:path|(?:\\.\\./)+web/path',
+    desktop_trampoline: 'desktop-trampoline|(?:\\.\\./)+web/desktop-trampoline',
+    registry_js: 'registry-js|(?:\\.\\./)+web/registry-js',
+    desktop_notifications:
+      'desktop-notifications|(?:\\.\\./)+web/desktop-notifications',
+    buffer: 'buffer|node:buffer',
+    events: 'events|node:events',
   })) {
     imports[name] = filesMatching(importOf(modules))
   }

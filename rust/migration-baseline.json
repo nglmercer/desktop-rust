@@ -7,5 +7,15 @@
   "imports.child_process": 7,
   "imports.os": 0,
   "imports.crypto": 0,
-  "imports.keytar": 1
+  "imports.keytar": 1,
+  "imports.async_hooks": 1,
+  "imports.net": 2,
+  "imports.stream": 1,
+  "imports.stream_promises": 1,
+  "imports.path": 66,
+  "imports.desktop_trampoline": 1,
+  "imports.registry_js": 3,
+  "imports.desktop_notifications": 6,
+  "imports.buffer": 0,
+  "imports.events": 0
 }
