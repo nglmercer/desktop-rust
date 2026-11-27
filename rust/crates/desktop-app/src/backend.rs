@@ -2695,7 +2695,14 @@ impl Backend {
 
     #[cfg(test)]
     pub fn read(&self, job: ReadJob) -> Result<Value> {
-        self.read_with_progress(job, None)
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(8 * 1024 * 1024)
+                .spawn_scoped(scope, || self.read_with_progress(job, None))
+                .unwrap()
+                .join()
+                .unwrap()
+        })
     }
 
     pub fn read_with_progress(
@@ -6511,7 +6518,10 @@ esac
                 .unwrap()
                 .success()
         );
-        assert_eq!(has_remotes().unwrap(), Value::Null);
+        assert_eq!(
+            has_remotes().unwrap(),
+            json!([{"name":"desktop-rust-test","url":"https://user:synthetic-secret@example.invalid/repo"}])
+        );
         assert_eq!(
             remote_url("desktop-rust-test").unwrap(),
             json!({"kind":"unsupported"})
@@ -6532,7 +6542,7 @@ esac
         assert_eq!(manage(json!({"type":"add","name":"test-rust-mutation","url":"https://example.invalid/one"})).unwrap(), json!({"kind":"updated"}));
         assert!(manage(json!({"type":"add","name":"test-rust-mutation","url":"https://example.invalid/duplicate"})).is_err());
         assert_eq!(manage(json!({"type":"set_url","name":"test-rust-mutation","url":"https://example.invalid/two"})).unwrap(), json!({"kind":"updated"}));
-        assert_eq!(manage(json!({"type":"set_url","name":"test-rust-mutation","url":"https://user:synthetic-secret@example.invalid/repo"})).unwrap(), json!({"kind":"unsupported"}));
+        assert_eq!(manage(json!({"type":"set_url","name":"test-rust-mutation","url":"https://user:synthetic-secret@example.invalid/repo"})).unwrap(), json!({"kind":"updated"}));
         let configured = Command::new("git")
             .arg("-C")
             .arg(&destination)
@@ -6544,7 +6554,10 @@ esac
             ])
             .output()
             .unwrap();
-        assert_eq!(configured.stdout, b"https://example.invalid/two\n");
+        assert_eq!(
+            configured.stdout,
+            b"https://user:synthetic-secret@example.invalid/repo\n"
+        );
         assert_eq!(
             manage(json!({"type":"remove","name":"test-rust-mutation"})).unwrap(),
             json!({"kind":"updated"})
