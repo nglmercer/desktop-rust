@@ -11,7 +11,7 @@ remaining worklist.
 | Renderer build | Vite builds the React renderer. | Bundle size and legacy browser compatibility shims. |
 | Desktop shell | Tao/Wry shell is active on Linux. | Real macOS/Windows validation and production shutdown/package evidence. |
 | Headless bridge | Authenticated loopback WebSocket bridge serves typed operations. | Security review, reconnect/load validation, and request-budget review. |
-| Git operations | Measured renderer-driven Git command sites are zero. | Hook environment, trampoline ownership, progress parity, and final shim removal. |
+| Git operations | Measured renderer-driven Git command sites are zero. | Hook environment, trampoline ownership, and final shim removal. |
 | Assisted commit | Typed host operations perform Git object/index/commit work. | Transaction ownership still depends on the browser-incomplete async-context design. |
 | Copilot | Rust runtime client exists; renderer still owns parts of the SDK client lifecycle. | Live Rust-client turn validation, model/quota operations, packaged runtime layout. |
 | GitHub/API | Some typed operations exist. | Broad PR/issue/check/enterprise/pagination/cancellation migration. |
@@ -44,7 +44,6 @@ that still need runtime validation.
   operations must independently reject unsafe or credential-bearing destinations.
 - Missing alternate object directories are strict during push but non-fatal for
   status and run protection.
-- Rebase and cherry-pick still need live progress parity.
 - Development packages are not production installers and must not replace a
   stable GitHub Desktop installation.
 

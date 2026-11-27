@@ -14,7 +14,11 @@ import { stageManualConflictResolution } from './stage'
 import { getCommit } from '.'
 import { IMultiCommitOperationProgress } from '../../models/progress'
 import { backend } from '../../backend/client'
-import { withRepositoryGitOperation } from './repository-operation'
+import {
+  withoutRepositoryGitAccess,
+  withRepositoryGitOperation,
+} from './repository-operation'
+import { OutputLineStream } from '../progress/fetch-stream'
 
 /** The app-specific results from attempting to cherry pick commits*/
 export enum CherryPickResult {
@@ -52,21 +56,21 @@ class GitCherryPickParser {
   }
 }
 
-/**
- * The native cherry-pick does not stream its steps yet. Report the commits it
- * applied (positions `from + 1` through `to`) once the operation has returned.
- */
-function reportCherryPickSteps(
+function cherryPickProgressStream(
   commits: ReadonlyArray<CommitOneLine>,
-  progressCallback: (progress: IMultiCommitOperationProgress) => void,
-  from: number,
-  to: number
-) {
-  const parser = new GitCherryPickParser(commits, from)
-  for (let step = from + 1; step <= to; step++) {
-    const progress = parser.parse('[branch sha] summary')
-    if (progress !== null) progressCallback(progress)
-  }
+  initialCount: number,
+  callback: (progress: IMultiCommitOperationProgress) => void
+): OutputLineStream {
+  const parser = new GitCherryPickParser(commits, initialCount)
+  return new OutputLineStream((_stream, line) => {
+    const progress = parser.parse(line)
+    if (progress === null) return
+    try {
+      withoutRepositoryGitAccess(() => callback(progress))
+    } catch {
+      // Progress observers cannot terminate a cherry-pick.
+    }
+  })
 }
 
 async function readCherryPickState(repository: Repository) {
@@ -91,23 +95,28 @@ export async function cherryPick(
   if (expected === undefined) {
     throw new Error('Refresh the current branch before cherry-picking')
   }
-  const result = await withRepositoryGitOperation(
-    repository.path,
-    'mutation',
-    () =>
-      backend().startRepositoryCherryPick(
-        repository.path,
-        commits.map(commit => commit.sha),
-        expected
-      ),
-    true
-  )
-  if (progressCallback !== undefined) {
-    const applied =
-      result === 'complete'
-        ? commits.length
-        : ((await getCherryPickSnapshot(repository))?.cherryPickedCount ?? 0)
-    reportCherryPickSteps(commits, progressCallback, 0, applied)
+  const progressStream =
+    progressCallback === undefined
+      ? undefined
+      : cherryPickProgressStream(commits, 0, progressCallback)
+  let result: 'complete' | 'conflict'
+  try {
+    result = await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().startRepositoryCherryPick(
+          repository.path,
+          commits.map(commit => commit.sha),
+          expected,
+          progressStream === undefined
+            ? undefined
+            : chunk => progressStream.push(chunk)
+        ),
+      true
+    )
+  } finally {
+    progressStream?.finish()
   }
   return result === 'complete'
     ? CherryPickResult.CompletedWithoutError
@@ -239,6 +248,14 @@ export async function continueCherryPick(
       ? null
       : await getCherryPickSnapshot(repository)
 
+  const progressStream =
+    progressCallback === undefined || before === null
+      ? undefined
+      : cherryPickProgressStream(
+          before.commits,
+          before.cherryPickedCount,
+          progressCallback
+        )
   let outcome: 'complete' | 'conflict'
   try {
     outcome = await withRepositoryGitOperation(
@@ -248,7 +265,10 @@ export async function continueCherryPick(
         backend().continueRepositoryCherryPick(
           repository.path,
           expectedState.head,
-          trackedFilesAfter.length === 0
+          trackedFilesAfter.length === 0,
+          progressStream === undefined
+            ? undefined
+            : chunk => progressStream.push(chunk)
         ),
       true
     )
@@ -260,21 +280,10 @@ export async function continueCherryPick(
       return CherryPickResult.OutstandingFilesNotStaged
     }
     throw error
+  } finally {
+    progressStream?.finish()
   }
 
-  if (progressCallback !== undefined && before !== null) {
-    const applied =
-      outcome === 'complete'
-        ? before.commits.length
-        : ((await getCherryPickSnapshot(repository))?.cherryPickedCount ??
-          before.cherryPickedCount)
-    reportCherryPickSteps(
-      before.commits,
-      progressCallback,
-      before.cherryPickedCount,
-      applied
-    )
-  }
   return outcome === 'complete'
     ? CherryPickResult.CompletedWithoutError
     : CherryPickResult.ConflictsEncountered

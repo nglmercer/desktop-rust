@@ -10747,7 +10747,8 @@ export class BackendClient {
       readonly expected_head: string
       readonly no_verify: boolean
       readonly commit_message: string | null
-    }
+    },
+    onProgress?: (chunk: FetchProgressChunk) => void
   ): Promise<{
     readonly outcome: 'complete' | 'conflict' | 'up_to_date' | 'failed'
     readonly code: number
@@ -10774,22 +10775,27 @@ export class BackendClient {
       })
     const value =
       this.transport === 'wry'
-        ? await this.request('git_info', {
-            operation: {
-              type: 'start_rebase',
-              repository_path: repositoryPath,
+        ? await this.request(
+            'git_info',
+            {
               operation: {
-                method: 'renderer_rebase_interactive',
-                request,
+                type: 'start_rebase',
+                repository_path: repositoryPath,
+                operation: {
+                  method: 'renderer_rebase_interactive',
+                  request,
+                },
               },
             },
-          })
+            { onProgress }
+          )
         : await this.repositoryRead(
             repositoryPath,
             'renderer_rebase_interactive',
             {
               request,
-            }
+            },
+            { onProgress }
           )
     if (
       !isRecord(value) ||
@@ -10828,7 +10834,8 @@ export class BackendClient {
       readonly target_head: string
       readonly current_head: string
       readonly current_branch: string | null
-    }
+    },
+    onProgress?: (chunk: FetchProgressChunk) => void
   ): Promise<'complete' | 'conflict' | 'up_to_date'> {
     const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
     if (
@@ -10853,16 +10860,27 @@ export class BackendClient {
     const call = (
       method: 'renderer_rebase_start_preview' | 'renderer_rebase_start',
       extra: Record<string, unknown> = {}
-    ) =>
-      this.transport === 'wry'
-        ? this.request('git_info', {
-            operation: {
-              type: 'start_rebase',
-              repository_path: repositoryPath,
-              operation: { method, request, ...extra },
+    ) => {
+      const options = method === 'renderer_rebase_start' ? { onProgress } : {}
+      return this.transport === 'wry'
+        ? this.request(
+            'git_info',
+            {
+              operation: {
+                type: 'start_rebase',
+                repository_path: repositoryPath,
+                operation: { method, request, ...extra },
+              },
             },
-          })
-        : this.repositoryRead(repositoryPath, method, { request, ...extra })
+            options
+          )
+        : this.repositoryRead(
+            repositoryPath,
+            method,
+            { request, ...extra },
+            options
+          )
+    }
     const preview = await call('renderer_rebase_start_preview')
     if (
       !isRecord(preview) ||
@@ -10920,7 +10938,8 @@ export class BackendClient {
     repositoryPath: string,
     expected: string,
     empty: boolean,
-    noVerify: boolean
+    noVerify: boolean,
+    onProgress?: (chunk: FetchProgressChunk) => void
   ): Promise<'complete' | 'conflict'> {
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expected))
       throw new BackendError({
@@ -10931,16 +10950,28 @@ export class BackendClient {
     const call = (
       method: 'renderer_rebase_continue_preview' | 'renderer_rebase_continue',
       extra: Record<string, unknown> = {}
-    ) =>
-      this.transport === 'wry'
-        ? this.request('git_info', {
-            operation: {
-              type: 'continue_rebase',
-              repository_path: repositoryPath,
-              operation: { method, expected, ...extra },
+    ) => {
+      const options =
+        method === 'renderer_rebase_continue' ? { onProgress } : {}
+      return this.transport === 'wry'
+        ? this.request(
+            'git_info',
+            {
+              operation: {
+                type: 'continue_rebase',
+                repository_path: repositoryPath,
+                operation: { method, expected, ...extra },
+              },
             },
-          })
-        : this.repositoryRead(repositoryPath, method, { expected, ...extra })
+            options
+          )
+        : this.repositoryRead(
+            repositoryPath,
+            method,
+            { expected, ...extra },
+            options
+          )
+    }
     const preview = await call('renderer_rebase_continue_preview')
     if (
       !isRecord(preview) ||
@@ -10992,7 +11023,8 @@ export class BackendClient {
   async startRepositoryCherryPick(
     repositoryPath: string,
     commits: readonly string[],
-    expected: { readonly head: string; readonly branch: string | null }
+    expected: { readonly head: string; readonly branch: string | null },
+    onProgress?: (chunk: FetchProgressChunk) => void
   ): Promise<'complete' | 'conflict'> {
     const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/
     if (
@@ -11012,27 +11044,39 @@ export class BackendClient {
         | 'renderer_cherry_pick_start_preview'
         | 'renderer_cherry_pick_start',
       extra: Record<string, unknown> = {}
-    ) =>
-      this.transport === 'wry'
-        ? this.request('git_info', {
-            operation: {
-              type: 'start_cherry_pick',
-              repository_path: repositoryPath,
+    ) => {
+      const options =
+        method === 'renderer_cherry_pick_start' ? { onProgress } : {}
+      return this.transport === 'wry'
+        ? this.request(
+            'git_info',
+            {
               operation: {
-                method,
-                commits,
-                expected_head: expected.head,
-                expected_branch: expected.branch,
-                ...extra,
+                type: 'start_cherry_pick',
+                repository_path: repositoryPath,
+                operation: {
+                  method,
+                  commits,
+                  expected_head: expected.head,
+                  expected_branch: expected.branch,
+                  ...extra,
+                },
               },
             },
-          })
-        : this.repositoryRead(repositoryPath, method, {
-            commits,
-            expected_head: expected.head,
-            expected_branch: expected.branch,
-            ...extra,
-          })
+            options
+          )
+        : this.repositoryRead(
+            repositoryPath,
+            method,
+            {
+              commits,
+              expected_head: expected.head,
+              expected_branch: expected.branch,
+              ...extra,
+            },
+            options
+          )
+    }
     const preview = await call('renderer_cherry_pick_start_preview')
     if (
       !isRecord(preview) ||
@@ -11086,7 +11130,8 @@ export class BackendClient {
   async continueRepositoryCherryPick(
     repositoryPath: string,
     expected: string,
-    empty: boolean
+    empty: boolean,
+    onProgress?: (chunk: FetchProgressChunk) => void
   ): Promise<'complete' | 'conflict'> {
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expected))
       throw new BackendError({
@@ -11099,16 +11144,28 @@ export class BackendClient {
         | 'renderer_cherry_pick_continue_preview'
         | 'renderer_cherry_pick_continue',
       extra: Record<string, unknown> = {}
-    ) =>
-      this.transport === 'wry'
-        ? this.request('git_info', {
-            operation: {
-              type: 'continue_cherry_pick',
-              repository_path: repositoryPath,
-              operation: { method, expected, ...extra },
+    ) => {
+      const options =
+        method === 'renderer_cherry_pick_continue' ? { onProgress } : {}
+      return this.transport === 'wry'
+        ? this.request(
+            'git_info',
+            {
+              operation: {
+                type: 'continue_cherry_pick',
+                repository_path: repositoryPath,
+                operation: { method, expected, ...extra },
+              },
             },
-          })
-        : this.repositoryRead(repositoryPath, method, { expected, ...extra })
+            options
+          )
+        : this.repositoryRead(
+            repositoryPath,
+            method,
+            { expected, ...extra },
+            options
+          )
+    }
     const preview = await call('renderer_cherry_pick_continue_preview')
     if (
       !isRecord(preview) ||

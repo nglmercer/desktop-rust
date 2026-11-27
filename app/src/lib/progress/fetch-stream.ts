@@ -3,7 +3,7 @@ import { FetchProgressParser } from './fetch'
 import type { GitProgressParser, IGitOutput, IGitProgress } from './git'
 import { GitLFSProgressParser } from './lfs'
 
-type Stream = 'stderr' | 'lfs'
+type Stream = 'stdout' | 'stderr' | 'lfs'
 
 interface StreamState {
   readonly decoder: TextDecoder
@@ -16,23 +16,18 @@ interface StreamState {
 // until its delimiter so untrusted remote output cannot grow memory forever.
 const maximumLineLength = 1024 * 1024
 
-/** Parse the request-owned bytes from one native fetch operation. */
-export class FetchStreamProgressParser {
-  private readonly git: GitProgressParser
-  private readonly lfs = new GitLFSProgressParser()
+/** Decode request-owned base64 output chunks into stdout/stderr/LFS records. */
+export class OutputLineStream {
   private readonly streams: Record<Stream, StreamState> = {
+    stdout: this.newState(),
     stderr: this.newState(),
     lfs: this.newState(),
   }
-  private lfsActive = false
   private closed = false
 
   public constructor(
-    private readonly onProgress: (progress: IGitProgress | IGitOutput) => void,
-    parser: GitProgressParser = new FetchProgressParser()
-  ) {
-    this.git = parser
-  }
+    private readonly onLine: (stream: Stream, line: string) => void
+  ) {}
 
   private newState(): StreamState {
     return {
@@ -44,7 +39,7 @@ export class FetchStreamProgressParser {
   }
 
   public push(chunk: FetchProgressChunk): void {
-    if (this.closed || chunk.stream === 'stdout') return
+    if (this.closed) return
     let bytes: Uint8Array
     try {
       const binary = atob(chunk.data)
@@ -59,10 +54,10 @@ export class FetchStreamProgressParser {
   /** Flush a final record even if Git exits without a newline. */
   public finish(): void {
     if (this.closed) return
-    for (const stream of ['stderr', 'lfs'] as const) {
+    for (const stream of ['stdout', 'stderr', 'lfs'] as const) {
       const state = this.streams[stream]
       this.consume(stream, state.decoder.decode())
-      if (state.line && !state.droppingLine) this.emit(stream, state.line)
+      if (state.line && !state.droppingLine) this.onLine(stream, state.line)
       state.line = ''
     }
     this.closed = true
@@ -76,7 +71,7 @@ export class FetchStreamProgressParser {
         if (character === '\n') continue
       }
       if (character === '\r' || character === '\n') {
-        if (state.line && !state.droppingLine) this.emit(stream, state.line)
+        if (state.line && !state.droppingLine) this.onLine(stream, state.line)
         state.line = ''
         state.droppingLine = false
         state.afterCarriageReturn = character === '\r'
@@ -89,6 +84,31 @@ export class FetchStreamProgressParser {
       }
     }
   }
+}
+
+/** Parse the request-owned bytes from one native fetch operation. */
+export class FetchStreamProgressParser {
+  private readonly git: GitProgressParser
+  private readonly lfs = new GitLFSProgressParser()
+  private readonly lines: OutputLineStream
+  private lfsActive = false
+
+  public constructor(
+    private readonly onProgress: (progress: IGitProgress | IGitOutput) => void,
+    parser: GitProgressParser = new FetchProgressParser()
+  ) {
+    this.git = parser
+    this.lines = new OutputLineStream((stream, line) => this.emit(stream, line))
+  }
+
+  public push(chunk: FetchProgressChunk): void {
+    if (chunk.stream !== 'stdout') this.lines.push(chunk)
+  }
+
+  /** Flush a final record even if Git exits without a newline. */
+  public finish(): void {
+    this.lines.finish()
+  }
 
   private emit(stream: Stream, line: string): void {
     if (stream === 'lfs') {
@@ -99,6 +119,7 @@ export class FetchStreamProgressParser {
       }
       return
     }
+    if (stream === 'stdout') return
     const progress = this.git.parse(line)
     if (this.lfsActive) {
       if (progress.kind === 'context') return

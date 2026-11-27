@@ -145,7 +145,7 @@ impl Repository {
         );
         let mut command = args(&["cherry-pick", "--empty=keep", "-m", "1", "--"]);
         command.extend(commits.iter().map(std::ffi::OsString::from));
-        let output = process::run_bound_noninteractive(&self.path, &command).await?;
+        let output = process::run_bound_noninteractive_with_progress(&self.path, &command).await?;
         let unmerged = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
         anyhow::ensure!(unmerged.code == 0, "Cannot inspect cherry-pick outcome");
         let state = self.renderer_cherry_pick_state().await?;
@@ -254,7 +254,7 @@ impl Repository {
         } else {
             args(&["-c", "core.editor=true", "cherry-pick", "--continue"])
         };
-        let output = process::run_bound_noninteractive(&self.path, &command).await?;
+        let output = process::run_bound_noninteractive_with_progress(&self.path, &command).await?;
         let unmerged = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
         anyhow::ensure!(unmerged.code == 0, "Cannot inspect cherry-pick outcome");
         let state = self.renderer_cherry_pick_state().await?;
@@ -395,16 +395,40 @@ mod tests {
             .renderer_cherry_pick_start_preview(&commits, &head, Some("refs/heads/clean"))
             .await
             .unwrap();
-        let result = repo
-            .renderer_cherry_pick_start(
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+        let result = crate::hook_progress::scope(
+            sender,
+            42,
+            repo.renderer_cherry_pick_start(
                 &commits,
                 &head,
                 Some("refs/heads/clean"),
                 review["basis"].as_str().unwrap(),
-            )
-            .await
-            .unwrap();
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(result["outcome"], "complete");
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let mut stdout = String::new();
+        while let Ok((request_id, event)) = receiver.try_recv() {
+            assert_eq!(request_id, 42);
+            if let crate::hook_progress::CommitEvent::FetchOutput {
+                stream: "stdout",
+                data,
+            } = event
+            {
+                stdout.push_str(&String::from_utf8(STANDARD.decode(data).unwrap()).unwrap());
+            }
+        }
+        assert!(
+            stdout.contains("] source"),
+            "missing cherry-pick progress in {stdout:?}"
+        );
+        assert!(
+            stdout.contains("] second"),
+            "missing cherry-pick progress in {stdout:?}"
+        );
         assert_eq!(f.ok(&["show", "HEAD:file"]), "source");
         assert_eq!(f.ok(&["show", "HEAD:second"]), "next");
         assert_eq!(f.ok(&["log", "-2", "--format=%s"]), "second\nsource");

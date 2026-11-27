@@ -24,6 +24,7 @@ vi.mock('../../src/backend/client', () => ({
   }),
 }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
+  withoutRepositoryGitAccess: (work: () => unknown) => work(),
   withRepositoryGitOperation: mocks.scope,
 }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
@@ -73,12 +74,48 @@ describe.each(['wry', 'ws'])('Rust cherry-pick state through %s', transport => {
     expect(mocks.startPick).toHaveBeenCalledWith(
       '/repo',
       commits.map(c => c.sha),
-      expected
+      expected,
+      undefined
     )
     expect(mocks.git).not.toHaveBeenCalled()
     await expect(cherryPick(repository, commits)).rejects.toThrow(
       'Refresh the current branch'
     )
+  })
+
+  it('streams native stdout records as cherry-pick progress', async () => {
+    const expected = { head, branch: 'refs/heads/main' }
+    const commits = [
+      { sha: 'b'.repeat(40), summary: 'one' },
+      { sha: 'c'.repeat(40), summary: 'two' },
+    ]
+    mocks.startPick.mockImplementation(
+      async (_path, _commits, _expected, onProgress) => {
+        onProgress?.({ stream: 'stdout', data: btoa('[main abc] one\n[main') })
+        onProgress?.({ stream: 'stdout', data: btoa(' def] two\n') })
+        return 'complete'
+      }
+    )
+    const seen: unknown[] = []
+    await expect(
+      cherryPick(repository, commits, progress => seen.push(progress), expected)
+    ).resolves.toBe(CherryPickResult.CompletedWithoutError)
+    expect(seen).toEqual([
+      {
+        kind: 'multiCommitOperation',
+        value: 0.5,
+        position: 1,
+        totalCommitCount: 2,
+        currentCommitSummary: 'one',
+      },
+      {
+        kind: 'multiCommitOperation',
+        value: 1,
+        position: 2,
+        totalCommitCount: 2,
+        currentCommitSummary: 'two',
+      },
+    ])
   })
 
   it('returns null when no cherry-pick is in progress', async () => {
@@ -152,7 +189,12 @@ describe.each(['wry', 'ws'])('Rust cherry-pick state through %s', transport => {
       await expect(continueCherryPick(repository, files as any)).resolves.toBe(
         result
       )
-      expect(mocks.continuePick).toHaveBeenCalledWith('/repo', head, empty)
+      expect(mocks.continuePick).toHaveBeenCalledWith(
+        '/repo',
+        head,
+        empty,
+        undefined
+      )
       expect(mocks.git).not.toHaveBeenCalled()
     }
   )

@@ -17,7 +17,11 @@ import { getStatus } from './status'
 import { getCommitsBetweenCommits } from './rev-list'
 import { Branch } from '../../models/branch'
 import { backend } from '../../backend/client'
-import { withRepositoryGitOperation } from './repository-operation'
+import {
+  withoutRepositoryGitAccess,
+  withRepositoryGitOperation,
+} from './repository-operation'
+import { OutputLineStream } from '../progress/fetch-stream'
 
 /** The app-specific results from attempting to rebase a repository */
 export enum RebaseResult {
@@ -227,6 +231,22 @@ class GitRebaseParser {
   }
 }
 
+function rebaseProgressStream(
+  commits: ReadonlyArray<CommitOneLine>,
+  callback: (progress: IMultiCommitOperationProgress) => void
+): OutputLineStream {
+  const parser = new GitRebaseParser(commits)
+  return new OutputLineStream((_stream, line) => {
+    const progress = parser.parse(line)
+    if (progress === null) return
+    try {
+      withoutRepositoryGitAccess(() => callback(progress))
+    } catch {
+      // Progress observers cannot terminate a rebase.
+    }
+  })
+}
+
 /**
  * A stub function to use for initiating rebase in the app.
  *
@@ -257,8 +277,6 @@ export async function rebase(
     current_head: expected.head,
     current_branch: expected.branch,
   }
-  // The native rebase does not stream its steps yet. Read the commits it will
-  // replay now and report each step once the operation has returned.
   const replayed =
     progressCallback === undefined
       ? null
@@ -267,26 +285,27 @@ export async function rebase(
           baseBranch.tip.sha,
           targetBranch.tip.sha
         )
-  const result = await withRepositoryGitOperation(
-    repository.path,
-    'mutation',
-    () => backend().startRepositoryRebase(repository.path, request),
-    true
-  )
-  if (
-    progressCallback !== undefined &&
-    replayed !== null &&
-    result !== 'up_to_date'
-  ) {
-    const steps =
-      result === 'conflict'
-        ? ((await getRebaseSnapshot(repository))?.progress.position ?? 0)
-        : replayed.length
-    const parser = new GitRebaseParser(replayed)
-    for (let step = 1; step <= steps; step++) {
-      const progress = parser.parse(`Rebasing (${step}/${replayed.length})`)
-      if (progress !== null) progressCallback(progress)
-    }
+  const progressStream =
+    progressCallback === undefined || replayed === null
+      ? undefined
+      : rebaseProgressStream(replayed, progressCallback)
+  let result: 'complete' | 'conflict' | 'up_to_date'
+  try {
+    result = await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().startRepositoryRebase(
+          repository.path,
+          request,
+          progressStream === undefined
+            ? undefined
+            : chunk => progressStream.push(chunk)
+        ),
+      true
+    )
+  } finally {
+    progressStream?.finish()
   }
   return result === 'conflict'
     ? RebaseResult.ConflictsEncountered
@@ -378,6 +397,10 @@ export async function continueRebase(
   const before = opts?.progressCallback
     ? await getRebaseSnapshot(repository)
     : null
+  const progressStream =
+    opts?.progressCallback === undefined || before === null
+      ? undefined
+      : rebaseProgressStream(before.commits, opts.progressCallback)
   let result: 'complete' | 'conflict'
   try {
     result = await withRepositoryGitOperation(
@@ -388,7 +411,10 @@ export async function continueRebase(
           repository.path,
           initialState.head,
           trackedFilesAfter.length === 0,
-          opts?.noVerify === true
+          opts?.noVerify === true,
+          progressStream === undefined
+            ? undefined
+            : chunk => progressStream.push(chunk)
         ),
       true
     )
@@ -407,23 +433,10 @@ export async function continueRebase(
       }
     }
     throw error
+  } finally {
+    progressStream?.finish()
   }
 
-  // The native rebase does not stream its steps yet; report the ones it
-  // applied now that it has returned.
-  if (opts?.progressCallback && before !== null) {
-    const total = before.progress.totalCommitCount
-    const reached =
-      result === 'complete'
-        ? total
-        : ((await getRebaseSnapshot(repository))?.progress.position ??
-          before.progress.position)
-    const parser = new GitRebaseParser(before.commits)
-    for (let step = before.progress.position + 1; step <= reached; step++) {
-      const progress = parser.parse(`Rebasing (${step}/${total})`)
-      if (progress !== null) opts.progressCallback(progress)
-    }
-  }
   return result === 'complete'
     ? RebaseResult.CompletedWithoutError
     : RebaseResult.ConflictsEncountered
@@ -471,22 +484,39 @@ export async function rebaseInteractive(
     return RebaseResult.Error
   }
 
-  const result = await withRepositoryGitOperation(
-    repository.path,
-    'mutation',
-    () =>
-      backend().repositoryRebaseInteractive(repository.path, {
-        todo,
-        retained_commit: lastRetainedCommitRef,
-        expected_head: expectedHead,
-        no_verify: opts?.noVerify === true,
-        commit_message: opts?.commitMessage ?? null,
-      }),
-    true
-  )
+  const progressStream =
+    progressCallback === undefined || commits === undefined
+      ? undefined
+      : rebaseProgressStream(commits, progressCallback)
+  let result: Awaited<
+    ReturnType<ReturnType<typeof backend>['repositoryRebaseInteractive']>
+  >
+  try {
+    result = await withRepositoryGitOperation(
+      repository.path,
+      'mutation',
+      () =>
+        backend().repositoryRebaseInteractive(
+          repository.path,
+          {
+            todo,
+            retained_commit: lastRetainedCommitRef,
+            expected_head: expectedHead,
+            no_verify: opts?.noVerify === true,
+            commit_message: opts?.commitMessage ?? null,
+          },
+          progressStream === undefined
+            ? undefined
+            : chunk => progressStream.push(chunk)
+        ),
+      true
+    )
+  } finally {
+    progressStream?.finish()
+  }
 
-  // The native operation is bounded rather than streaming. Replay the captured
-  // progress and terminal output in order so observers retain the same events.
+  // Terminal output remains bounded rather than streaming. Replay it in order
+  // so observers retain the same events.
   if (opts?.onTerminalOutputAvailable !== undefined) {
     opts.onTerminalOutputAvailable(callback => {
       if (result.stdout.length > 0) callback(result.stdout)
@@ -494,14 +524,6 @@ export async function rebaseInteractive(
       return { unsubscribe: () => {} }
     })
   }
-  if (progressCallback && commits) {
-    const parser = new GitRebaseParser(commits)
-    for (const line of result.stderr.split(/\r\n|\n|\r/)) {
-      const progress = parser.parse(line)
-      if (progress !== null) progressCallback(progress)
-    }
-  }
-
   if (result.outcome === 'complete') return RebaseResult.CompletedWithoutError
   if (result.outcome === 'up_to_date') return RebaseResult.AlreadyUpToDate
   if (result.outcome === 'conflict') return RebaseResult.ConflictsEncountered

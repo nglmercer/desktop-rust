@@ -3285,6 +3285,53 @@ describe('backend Copilot session cleanup', () => {
     expect(invoke).toHaveBeenCalledTimes(5)
   })
 
+  it('uses the progress transport only for a reviewed rebase mutation', async () => {
+    const head = 'a'.repeat(40)
+    const request = {
+      base_ref: 'refs/remotes/origin/main',
+      base_head: 'b'.repeat(40),
+      target_ref: 'refs/heads/topic',
+      target_head: 'c'.repeat(40),
+      current_head: head,
+      current_branch: null,
+    }
+    const preview = { request, basis: 'd'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview)
+    const invokeWithProgress = vi.fn((_channel, listener, _payload) => {
+      listener({ stream: 'stderr', data: btoa('Rebasing (1/2)\r') })
+      return Promise.resolve({
+        outcome: 'complete',
+        code: 0,
+        stdout: '',
+        stderr: '',
+      })
+    })
+    installWryBridge({ invoke, invokeWithProgress })
+    const client = new BackendClient()
+    const progress = vi.fn()
+    await expect(
+      client.startRepositoryRebase('/repo', request, progress)
+    ).resolves.toBe('complete')
+    expect(invoke).toHaveBeenCalledOnce()
+    expect(invokeWithProgress).toHaveBeenCalledOnce()
+    const [channel, , payload] = invokeWithProgress.mock.calls[0]
+    expect(channel).toBe('desktop.backend.git_info')
+    expect(payload).toEqual(
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          type: 'start_rebase',
+          operation: expect.objectContaining({
+            method: 'renderer_rebase_start',
+          }),
+        }),
+      })
+    )
+    expect(progress).toHaveBeenCalledWith({
+      stream: 'stderr',
+      data: btoa('Rebasing (1/2)\r'),
+    })
+  })
+
   it('reviews rebase continuation and never replays an interrupted mutation', async () => {
     const head = 'a'.repeat(40)
     const preview = { head, basis: 'b'.repeat(64) }
@@ -3393,6 +3440,45 @@ describe('backend Copilot session cleanup', () => {
       message: expect.stringContaining('inspect cherry-pick state'),
     })
     expect(invoke).toHaveBeenCalledTimes(5)
+  })
+
+  it('uses the progress transport only for a reviewed cherry-pick mutation', async () => {
+    const head = 'a'.repeat(40)
+    const preview = { head, basis: 'b'.repeat(64) }
+    const invoke = vi.fn().mockResolvedValueOnce(preview)
+    const invokeWithProgress = vi.fn((_channel, listener, _payload) => {
+      listener({ stream: 'stdout', data: btoa('[main abc] commit\n') })
+      return Promise.resolve({
+        outcome: 'complete',
+        code: 0,
+        stdout: '',
+        stderr: '',
+      })
+    })
+    installWryBridge({ invoke, invokeWithProgress })
+    const client = new BackendClient()
+    const progress = vi.fn()
+    await expect(
+      client.continueRepositoryCherryPick('/repo', head, false, progress)
+    ).resolves.toBe('complete')
+    expect(invoke).toHaveBeenCalledOnce()
+    expect(invokeWithProgress).toHaveBeenCalledOnce()
+    const [channel, , payload] = invokeWithProgress.mock.calls[0]
+    expect(channel).toBe('desktop.backend.git_info')
+    expect(payload).toEqual(
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          type: 'continue_cherry_pick',
+          operation: expect.objectContaining({
+            method: 'renderer_cherry_pick_continue',
+          }),
+        }),
+      })
+    )
+    expect(progress).toHaveBeenCalledWith({
+      stream: 'stdout',
+      data: btoa('[main abc] commit\n'),
+    })
   })
 
   it('reviews cherry-pick continuation and never replays an interrupted mutation', async () => {

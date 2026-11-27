@@ -1053,6 +1053,17 @@ pub(crate) async fn run_bound_local_fetch(
     run_command(path, command, args, Some(input), 2 * 1024 * 1024, None).await
 }
 
+fn local_operation_live_output() -> Option<LiveOutput> {
+    crate::hook_progress::sender().map(|(sender, request_id)| LiveOutput {
+        sender,
+        request_id,
+        checkpoint: None,
+        clone_progress: false,
+        emit_clone_progress: false,
+        extra_redactions: Vec::new(),
+    })
+}
+
 /// Continue a Git operation without invoking an inherited interactive editor.
 pub(crate) async fn run_bound_noninteractive(path: &Path, args: &[OsString]) -> Result<RawOutput> {
     let mut command = bound_git_command();
@@ -1060,7 +1071,28 @@ pub(crate) async fn run_bound_noninteractive(path: &Path, args: &[OsString]) -> 
     run_command(path, command, args, None, 2 * 1024 * 1024, None).await
 }
 
-/// Run a local operation with a host-generated editor command.
+/// Continue a Git operation while streaming its redacted output to the request owner.
+pub(crate) async fn run_bound_noninteractive_with_progress(
+    path: &Path,
+    args: &[OsString],
+) -> Result<RawOutput> {
+    let mut command = bound_git_command();
+    command.env("GIT_EDITOR", ":");
+    run_command_inner(
+        path,
+        command,
+        args,
+        None,
+        2 * 1024 * 1024,
+        None,
+        None,
+        None,
+        local_operation_live_output(),
+    )
+    .await
+}
+
+/// Run a host-edited operation while streaming its redacted output to the request owner.
 pub(crate) async fn run_bound_editor(
     path: &Path,
     args: &[OsString],
@@ -1071,7 +1103,18 @@ pub(crate) async fn run_bound_editor(
         .env("GIT_EDITOR", editor)
         .env_remove("GIT_SEQUENCE_EDITOR")
         .env("TERM", "dumb");
-    run_command(path, command, args, None, 2 * 1024 * 1024, None).await
+    run_command_inner(
+        path,
+        command,
+        args,
+        None,
+        2 * 1024 * 1024,
+        None,
+        None,
+        None,
+        local_operation_live_output(),
+    )
+    .await
 }
 
 /// Discover a repository without inherited command-scoped Git configuration.

@@ -41,7 +41,7 @@ machinery, test fixtures, and release infrastructure remain migration work.
 - [ ] Move remaining trampoline credential/environment ownership into Rust.
 - [ ] Resolve exact remote-configuration versus typed transport admission and
       finish the cross-Git destination guard.
-- [ ] Stream live progress for rebase and cherry-pick.
+- [x] Stream live progress for rebase and cherry-pick.
 - [ ] Remove compatibility shims only after their consumers are gone.
 
 ### R3 — Assisted commit and Copilot

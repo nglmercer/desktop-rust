@@ -2757,6 +2757,21 @@ impl Backend {
                 GitInfoOperation::Clone { .. }
                     | GitInfoOperation::CloneSelected { .. }
                     | GitInfoOperation::UpdateRefTransaction { .. }
+            ) | BackendOperation::GitInfo(
+                GitInfoOperation::ContinueCherryPick {
+                    operation: Operation::RendererCherryPickContinue { .. },
+                    ..
+                } | GitInfoOperation::StartCherryPick {
+                    operation: Operation::RendererCherryPickStart { .. },
+                    ..
+                } | GitInfoOperation::ContinueRebase {
+                    operation: Operation::RendererRebaseContinue { .. },
+                    ..
+                } | GitInfoOperation::StartRebase {
+                    operation: Operation::RendererRebaseStart { .. }
+                        | Operation::RendererRebaseInteractive { .. },
+                    ..
+                }
             )
         ) {
             progress

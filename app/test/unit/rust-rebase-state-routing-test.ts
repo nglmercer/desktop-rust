@@ -23,6 +23,7 @@ vi.mock('../../src/backend/client', () => ({
   }),
 }))
 vi.mock('../../src/lib/git/repository-operation', () => ({
+  withoutRepositoryGitAccess: (work: () => unknown) => work(),
   withRepositoryGitOperation: mocks.scope,
 }))
 vi.mock('../../src/lib/git/core', () => ({ git: mocks.git }))
@@ -78,18 +79,71 @@ describe.each(['wry', 'ws'])('Rust rebase state through %s', transport => {
     await expect(
       rebase(repository, base as any, target as any, undefined, expected)
     ).resolves.toBe(RebaseResult.ConflictsEncountered)
-    expect(mocks.startRebase).toHaveBeenCalledWith('/repo', {
-      base_ref: base.ref,
-      base_head: base.tip.sha,
-      target_ref: target.ref,
-      target_head: target.tip.sha,
-      current_head: hash,
-      current_branch: null,
-    })
+    expect(mocks.startRebase).toHaveBeenCalledWith(
+      '/repo',
+      {
+        base_ref: base.ref,
+        base_head: base.tip.sha,
+        target_ref: target.ref,
+        target_head: target.tip.sha,
+        current_head: hash,
+        current_branch: null,
+      },
+      undefined
+    )
     expect(mocks.git).not.toHaveBeenCalled()
     await expect(
       rebase(repository, base as any, target as any)
     ).rejects.toThrow('Refresh the current branch')
+  })
+
+  it('streams native stderr records as rebase progress', async () => {
+    const base = {
+      ref: 'refs/remotes/origin/main',
+      tip: { sha: 'b'.repeat(40) },
+    }
+    const target = { ref: 'refs/heads/topic', tip: { sha: 'c'.repeat(40) } }
+    const expected = { head: hash, branch: null }
+    mocks.commits.mockResolvedValue([
+      { sha: 'one', summary: 'first' },
+      { sha: 'two', summary: 'second' },
+    ])
+    mocks.startRebase.mockImplementation(
+      async (_path, _request, onProgress) => {
+        onProgress?.({ stream: 'stderr', data: btoa('Rebasing (1/') })
+        onProgress?.({
+          stream: 'stderr',
+          data: btoa('2)\rRebasing (2/2)\r'),
+        })
+        return 'complete'
+      }
+    )
+    const seen: unknown[] = []
+    await expect(
+      rebase(
+        repository,
+        base as any,
+        target as any,
+        progress => seen.push(progress),
+        expected
+      )
+    ).resolves.toBe(RebaseResult.CompletedWithoutError)
+    expect(seen).toEqual([
+      {
+        kind: 'multiCommitOperation',
+        value: 0.5,
+        position: 1,
+        totalCommitCount: 2,
+        currentCommitSummary: 'first',
+      },
+      {
+        kind: 'multiCommitOperation',
+        value: 1,
+        position: 2,
+        totalCommitCount: 2,
+        currentCommitSummary: 'second',
+      },
+    ])
   })
 
   it('reads state and computes progress without renderer filesystem access', async () => {
@@ -150,7 +204,8 @@ describe.each(['wry', 'ws'])('Rust rebase state through %s', transport => {
         '/repo',
         hash,
         empty,
-        false
+        false,
+        undefined
       )
       expect(mocks.git).not.toHaveBeenCalled()
     }

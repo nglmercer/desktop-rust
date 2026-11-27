@@ -333,7 +333,7 @@ impl Repository {
             &request.base_head,
             short,
         ]);
-        let output = process::run_bound_noninteractive(&self.path, &command).await?;
+        let output = process::run_bound_noninteractive_with_progress(&self.path, &command).await?;
         if output.code == 0 {
             let branch = self
                 .run(&args(&["symbolic-ref", "--quiet", "HEAD"]))
@@ -460,7 +460,7 @@ impl Repository {
         if no_verify {
             command.extend(args(&["--no-verify"]));
         }
-        let output = process::run_bound_noninteractive(&self.path, &command).await?;
+        let output = process::run_bound_noninteractive_with_progress(&self.path, &command).await?;
         let unmerged = self.run(&args(&["ls-files", "--unmerged", "-z"])).await?;
         anyhow::ensure!(unmerged.code == 0, "Cannot inspect rebase outcome");
         let state = self.renderer_rebase_state().await?;
@@ -564,11 +564,34 @@ mod tests {
             let request = start_request(&f, name);
             let repo = Repository::open(&f.0).await.unwrap();
             let preview = repo.renderer_rebase_start_preview(&request).await.unwrap();
-            let result = repo
-                .renderer_rebase_start(&request, preview["basis"].as_str().unwrap())
-                .await
-                .unwrap();
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
+            let result = crate::hook_progress::scope(
+                sender,
+                42,
+                repo.renderer_rebase_start(&request, preview["basis"].as_str().unwrap()),
+            )
+            .await
+            .unwrap();
             assert_eq!(result["outcome"], "complete");
+            if name == "-CaseSensitive" {
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                let mut stderr = String::new();
+                while let Ok((request_id, event)) = receiver.try_recv() {
+                    assert_eq!(request_id, 42);
+                    if let crate::hook_progress::CommitEvent::FetchOutput {
+                        stream: "stderr",
+                        data,
+                    } = event
+                    {
+                        stderr
+                            .push_str(&String::from_utf8(STANDARD.decode(data).unwrap()).unwrap());
+                    }
+                }
+                assert!(
+                    stderr.contains("Rebasing (1/1)"),
+                    "missing live rebase progress in {stderr:?}"
+                );
+            }
             assert_eq!(
                 f.git(&["symbolic-ref", "HEAD"]),
                 format!("refs/heads/{name}")
