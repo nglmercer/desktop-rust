@@ -203,7 +203,7 @@ async fn enrich_git_exec_path(environment: &mut serde_json::Map<String, Value>) 
             }
         }
         let output = match tokio::time::timeout(
-            std::time::Duration::from_secs(10),
+            std::time::Duration::from_secs(30),
             command.output(),
         )
         .await
