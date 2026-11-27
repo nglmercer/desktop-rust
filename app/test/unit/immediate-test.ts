@@ -1,5 +1,4 @@
-import { afterEach, describe, it } from 'node:test'
-import { vi } from 'vitest'
+import { afterEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 
 import { cancelImmediate, scheduleImmediate } from '../../src/lib/immediate'

@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { afterEach, describe, it } from 'node:test'
+import { afterEach, describe, it } from 'vitest'
 import * as React from 'react'
 
 import { AppTheme } from '../../../src/ui/app-theme'
