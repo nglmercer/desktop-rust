@@ -8329,15 +8329,10 @@ export class BackendClient {
       method: 'delete_branch_preview' | 'delete_branch',
       extra: Record<string, unknown> = {}
     ) =>
-      this.transport === 'wry'
-        ? this.request('git_info', {
-            operation: {
-              type: 'branch_deletion',
-              repository_path: repositoryPath,
-              operation: { method, ...params, ...extra },
-            },
-          })
-        : this.repositoryRead(repositoryPath, method, { ...params, ...extra })
+      this.branchDeletionRequest(repositoryPath, false, method, {
+        ...params,
+        ...extra,
+      })
     const preview = await call('delete_branch_preview')
     if (
       !isRecord(preview) ||

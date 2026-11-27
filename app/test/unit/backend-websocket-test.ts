@@ -218,6 +218,55 @@ describe('WebSocket backend transport', () => {
     await expect(invalid).rejects.toMatchObject({ code: 'invalid_response' })
   })
 
+  it('sends the exact WebSocket branch deletion wire payloads', async () => {
+    const { client: value, socket } = await connected()
+    const oid = 'b'.repeat(40)
+    const basis = 'a'.repeat(64)
+    const receiptId = '12345678-1234-4234-8234-123456789abc'
+    const pending = value.deleteRepositoryBranch('/repo', 'feature', oid)
+    expect(socket.sent[1]).toEqual({
+      id: 1,
+      method: 'delete_branch_preview',
+      repository_path: '/repo',
+      name: 'refs/heads/feature',
+      to_checkout: null,
+      upstream: null,
+    })
+    socket.message({
+      id: 1,
+      result: {
+        basis,
+        branch: { ref: 'refs/heads/feature', oid },
+        current: false,
+        checkout: null,
+        in_use_worktree: null,
+      },
+    })
+    for (let i = 0; i < 10 && socket.sent.length < 3; i++) {
+      await Promise.resolve()
+    }
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'delete_branch',
+      repository_path: '/repo',
+      name: 'refs/heads/feature',
+      to_checkout: null,
+      upstream: null,
+      basis,
+      ref_only: true,
+      force: true,
+    })
+    socket.message({
+      id: 2,
+      result: {
+        code: 0,
+        receipt_id: receiptId,
+        backup_ref: `refs/desktop/deleted-branches/${receiptId}`,
+      },
+    })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
   it('sends typed assisted-commit safety reads and validates their response', async () => {
     const { client: value, socket } = await connected()
     const pending = value.repositoryAssistedCommitSafety('/repo')
