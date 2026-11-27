@@ -101,7 +101,7 @@ rules, and Biome formats the repository. Run `pnpm lint`, `pnpm check:types`,
 and `pnpm test` before handing off TypeScript changes.
 
 See [Rust development and commands](rust/README.md) and the
-[full migration ledger](rust/MIGRATION.md). Install scripts are never needed
+[migration overview](rust/MIGRATION.md). Install scripts are never needed
 by the Rust shell; use `--ignore-scripts`.
 This is an in-progress fork, not an official GitHub Desktop release.
 

@@ -1,201 +1,64 @@
-# Retiradas — desktop-rust
+# Migration removals
 
-Este documento distingue lo que ya salió del flujo activo de lo que todavía es
-un candidato de retirada. No uses entradas históricas como evidencia actual: la
-prueba vigente es la que se puede ejecutar desde este checkout.
+This file tracks what is already out of the active flow, which compatibility
+pieces remain temporarily, and what evidence is required before deleting them.
+Git history contains the detailed per-change ledger; this document only keeps
+actionable current state.
 
-## 1. Ya retirado del flujo activo
+## Removal rule
 
-| Ruta o pieza | Sustitución actual | Evidencia rutinaria |
-|---|---|---|
-| `app/src/main-process/**`, entradas Electron y crash shell | `rust/crates/desktop-app` (Tao/Wry) | `pnpm build:dev`, `cargo test -p desktop-app` y smoke Xvfb en CI |
-| `app/webpack.*`, `script/build.ts`, `script/package.ts`, `script/post-install.ts` | Vite + `script/package-rust.ts` | `pnpm vite:build`, `pnpm package` |
-| Electron, electron-packager/installer/devtools y dependencias exclusivas | host Rust nativo | root `package.json`/`pnpm-lock.yaml` sin esas dependencias |
-| `package-lock.json` raíz y `app/package-lock.json` | `pnpm-lock.yaml` | `pnpm install --frozen-lockfile --ignore-scripts` |
-| ESLint, typescript-eslint, plugins ESLint y Prettier raíz | oxlint + reglas `oxlint-rules/` + Biome format | `pnpm lint`, `pnpm test:oxlint` |
-| `eslint-rules/`, `biome-rules/`, `biome.security.json`, `.eslintrc*`, `.prettierrc*` | `.oxlintrc.json`, `.oxlint.security.json`, `biome.json` | `pnpm lint`, `pnpm format:check` |
-| `vitest-suites.json` y enrutado explícito de suites | Vitest como único runner | `pnpm test`, `pnpm test:script` |
-| Suites Python ya reemplazadas | tests Rust/Vitest equivalentes | `cargo test`, `pnpm test` |
-| `rust/Cargo.toml`/`rust/Cargo.lock` separados | workspace Cargo raíz | `cargo metadata`, `cargo test --workspace` |
-| `ipc-shim.js` fuente manual | `web/ipc-shim.ts` compilado por Vite | `pnpm vite:build` |
-| `script/run.ts` (launcher del paquete Electron) | `script/start-rust.ts` / `script/start-rust-package.ts` | `pnpm compile:script` |
-| `script/copilot.ts` y su test aislado de copia npm del runtime | empaquetado Rust en `script/package-rust.ts` | `pnpm compile:script`, `pnpm test:script` |
-| `app/src/lib/compute-bundle-hash.ts` y metadatos de instaladores/NuGet/bundle Electron en `script/dist-info.ts` | empaquetado Rust/Vite vigente | `pnpm compile:script`, `pnpm check:types` |
-| `find-toast-activator-clsid.ts`, GUIDs Electron de actualizador/main, `set-state.ts`, `logging/get-log-path.ts` y `actions-log-parser/` | sin consumidores; notificaciones/actualización/host Rust vigentes | `pnpm check:types`, `pnpm lint` |
-| fallback de tamaño de archivos por `fs.stat` | `renderer_large_files` en backend Rust | `app/test/unit/rust-large-files-routing-test.ts` |
-| lectura directa de `static/licenses.json` mediante `fs` | recurso servido por el host mediante `readBundledTemplate` | `app/test/unit/acknowledgements-test.tsx` |
-| lectura directa de `emoji.json` mediante `fs` | recurso servido por el host y `fetch` del bundle | `app/test/unit/read-emoji-test.ts` |
-| configuración Git arbitraria por shell en renderer | contratos Rust tipados y allowlist de settings consumidos por la app | `app/test/unit/rust-global-git-identity-test.ts`, `app/test/unit/git/config-test.ts` |
-| fallback backend-less de creación de commits | checkpoint Rust `prepareSelectedCommit`/`publishSelectedCommit` obligatorio | `app/test/unit/rust-native-commit-routing-test.ts`, `app/test/unit/git/commit-test.ts` |
-| descubrimiento de editores por `child_process`/archivos específicos de Darwin, Linux y Windows | descubrimiento validado del host Rust | `pnpm check:types`, integración backend `available_editors` |
-| fallback backend-less de creación de repositorios y commit inicial | inicialización, archivos y commit inicial Rust obligatorios | `app/test/unit/ui/assisted-repository-creation-test.tsx` |
-| lectura de `pretext-draft.md` mediante `fs` y constantes de imágenes sin consumidores | recurso servido por el bundle/host | `app/test/unit/release-notes-test.ts` |
-| diálogo legacy de borrado de `config.lock` y parsing de errores de config lock | escritura de configuración Rust tipada; errores genéricos sin borrado renderer | `app/test/unit/configure-git-user-save-test.tsx`, `app/test/unit/git/core-test.ts` |
-| validación backend-less de rutas/argumentos de integraciones personalizadas | validación de host Rust obligatoria | `app/test/unit/native-custom-integration-test.ts` |
-| serialización IPC de menús contextuales y fallback `show-contextual-menu` | menús contextuales DOM-owned usados siempre por el renderer | `app/test/unit/ui/commit-message-test.tsx`, `app/test/unit/ui/assisted-commit-history-test.tsx` |
-| lectura directa del destino de clone mediante `readdir` | estado de destino Rust disponible por WebSocket y Tao/Wry | `app/test/unit/clone-destination-websocket-test.tsx`, `app/test/unit/ui/clone-repository-test.tsx` |
-| lectura directa de `markdown.css` mediante `fs` | hoja servida como recurso del bundle y obtenida con `fetch` same-origin | `app/test/unit/sandboxed-markdown-test.tsx` |
-| lectura directa de emoji mediante URLs `file:` | solo emoji servidos por el origen/bundle Rust | `app/test/unit/sandboxed-markdown-test.tsx` |
-| lectura directa de archivos de trabajo para syntax highlighting | snapshot acotado `renderer_working_file` Rust obligatorio | `app/test/unit/rust-syntax-highlighting-test.ts` |
-| lectura directa de `FETCH_HEAD` para fecha de fetch | lectura Rust `repositoryLastFetch` obligatoria | `app/test/unit/stores/last-fetch-test.ts` |
-| `readPartialFile` sin consumidores de producción | lecturas acotadas Rust del archivo de trabajo | `app/test/unit/file-system-test.ts` |
-| lectura directa `lstat` de entradas assisted-commit para freshness preflight | operación tipada Rust `renderer_working_file_metadata` con rutas confinadas y versión opaca validada | `app/test/unit/assisted-commit-selection-test.ts`, `app/test/unit/backend-client-session-test.ts`, `cargo test -p desktop-core renderer_working_file::tests::metadata_versions_are_bounded_literal_and_missing_aware` |
-| ejecución directa de `git reset` hard/soft en renderer | reset revisado Rust por WebSocket y Tao/Wry | `app/test/unit/git/reset-test.ts`, `cargo test -p desktop-core renderer_reset`, `cargo test -p desktop-app wry_resets_a_reviewed_commit` |
-| lanzamiento backend-less de editores externos y edición de configuración global | apertura de editores validada por el host Rust | `pnpm check:types`, integración backend `open_editor` |
-| fallback backend-less de descarte de cambios y borrado directo de archivos en `GitStore` | descarte revisado/recuperable del backend Rust obligatorio | `app/test/unit/rust-reviewed-discard-test.ts`, `app/test/unit/rust-batch-discard-dialog-test.tsx`, `app/test/unit/rust-discard-recovery-test.tsx` |
-| diálogo legacy de descarte con recuperación por papelera y lista no revisada | revisión Rust obligatoria con recuperación exacta | `app/test/unit/rust-batch-discard-dialog-test.tsx` |
-| comprobación duplicada de archivos grandes en sidebar y exclusión condicional de recuperación de descartes | revisión grande integrada en `prepareSelectedCommit`; recuperación siempre disponible | `app/test/unit/ui/commit-message-test.tsx`, `app/test/unit/rust-reviewed-discard-test.ts` |
-| puerta `transportKind` del diálogo de borrado remoto de ramas | revisión y recuperación Rust obligatorias para borrado remoto | `app/test/unit/ui/rust-remote-branch-deletion-dialog-test.tsx`, `app/test/unit/rust-remote-branch-deletion-test.ts` |
-| lectura de archivos de trabajo sin lease en WebSocket para highlighting | lectura uniforme bajo lease de operación de repositorio | `app/test/unit/rust-syntax-highlighting-test.ts` |
-| fallback shell para eliminar HEAD inicial en revert del primer commit | eliminación revisada Rust obligatoria | `app/test/unit/rust-first-undo-routing-test.ts` |
-| inicialización renderer de `LOCAL_GIT_DIRECTORY`/`GIT_EXEC_PATH` para dugite | el host Rust posee la ubicación de Git y filtra esas variables heredadas | `pnpm vite:build`, `pnpm check:types` |
-| `script/setup-macos-keychain` de firma Electron/Travis | empaquetado Rust actual; no hay consumidor ni flujo de firma activo que use ese keychain | `pnpm compile:script`, `pnpm lint` |
-| `vendor/desktop-notifications` y `tsconfig.notifications.json` | shim web tipado usado por build y tests; rutas de módulos integradas en `tsconfig.json` | `pnpm check:types`, tests de notificaciones y build Vite |
-| comprobación duplicada de capacidad de progreso de commit en `createCommit` | validación única en el cliente backend tipado | `app/test/unit/git/commit-test.ts`, `app/test/unit/rust-native-commit-routing-test.ts` |
-| wrapper TypeScript sin consumidores para `diff-index`/estado del índice | operaciones de índice Rust usadas por flujos vivos; constante null-tree local a `diff.ts` | `app/test/unit/git/diff-test.ts` |
-| wrappers TypeScript sin consumidores para `checkoutIndex`, `resetPaths` y `resetSubmodulePaths` | operaciones Rust internas de descarte/checkout/staging ya revisadas; batching compartido conservado | `app/test/unit/git/reset-test.ts`, `app/test/unit/git/submodule-test.ts`, `app/test/unit/rust-submodule-routing-test.ts` |
-| `getGlobalConfigPath` sin consumidores de producción | edición de configuración global abierta directamente por el host Rust | `app/test/unit/rust-global-git-identity-test.ts`, `app/test/unit/git/config-test.ts` |
-| `DiscardChangesError` y handler legacy de fallos al mover a papelera | descarte revisado/recuperable Rust obligatorio | `pnpm check:types`, `pnpm lint` |
-| `getRemoteURL` sin consumidores de producción y su fallback shell para URLs sensibles | lectura de remotes segura Rust; tests de fixtures usan `getRemotes` | `app/test/unit/git/remote-management-test.ts`, `app/test/unit/rust-remote-presence-test.ts` |
-| fallback directo de release notes mediante `fetch` cross-origin en Tao/Wry | operación Rust `release_changelog` compartida por WebSocket y Tao/Wry | `app/test/unit/release-changelog-routing-test.ts`, `app/test/unit/release-changelog-client-test.ts` |
-| canal host `show-contextual-menu` y menú DOM duplicado del shim Wry | menús contextuales DOM-owned del renderer mediante `showBrowserContextMenu` | `app/test/unit/ipc-contract-test.ts`, `app/test/unit/wry-fetch-progress-test.ts` |
-| `app/src/lib/process/win32.ts` y helper macOS Catalina sin consumidores | operaciones de terminal/proceso vigentes en host Rust o módulos plataforma vivos | `pnpm check:types`, `app/test/unit/rust-terminal-dispatch-test.ts` |
-| helpers renderer sin consumidores de terminal output, revert progress, buffers, `pick` y SHA tooltip | flujos Git/progreso vigentes en backend Rust o UI actual | `pnpm check:types`, `app/test/unit/rust-abort-operation-routing-test.ts` |
-| componentes UI huérfanos `HorizontalRule`, `ToggleButton`, `Caption` y estilo horizontal exclusivo | componentes de diálogo/input description vigentes usados por producción | `app/test/unit/ui/component-primitives-test.tsx`, `app/test/unit/ui/dialog-composition-and-toggle-test.tsx`, `app/test/unit/ui/dialog-and-input-description-test.tsx` |
-| wrapper y operación standalone `renderer_large_files` sin consumidores de producción | revisión de archivos grandes integrada en `prepareSelectedCommit`/commit preview Rust | `app/test/unit/rust-native-commit-routing-test.ts`, `cargo check -p desktop-core -p desktop-app --locked` |
-| fallback shell general de `deleteRef` sin consumidores de producción | única operación viva acotada a eliminación revisada de HEAD inicial | `app/test/unit/rust-submodule-routing-test.ts`, `app/test/unit/rust-first-undo-routing-test.ts` |
-| inicialización, README, commit inicial y remote de tutorial mediante filesystem/shell directos | operaciones Rust de creación de repositorio ya usadas por el diálogo de nuevo repositorio | `app/test/unit/tutorial-repository-accounts-test.ts` |
-| lectura filesystem backend-less de conflictos para contexto Copilot | captura certificada/acotada Rust obligatoria bajo lease uniforme | `app/test/unit/copilot-conflict-context-native-test.ts`, `app/test/unit/copilot-conflict-context-test.ts` |
-| staging de resoluciones Copilot mediante `git add` directo | `update-index` Rust literal por lotes bajo lease | `app/test/unit/copilot-conflict-resolution-test.ts`, `app/test/unit/stores/copilot-store-test.ts` |
-| fallbacks backend-less de revisión de commit, revisión de checkout, abort squash y certificados Copilot en `AppStore` | operaciones revisadas Rust obligatorias | `app/test/unit/git/commit-test.ts`, `app/test/unit/ui/stash-and-switch-branch-dialog-test.tsx`, `app/test/unit/git/checkout-test.ts` |
-| selección nativa condicional de generación de mensajes Copilot | selección tipada Rust siempre disponible cuando el SDK está habilitado | `app/test/unit/ui/commit-message-test.tsx`, `app/test/unit/copilot-commit-message-prompt-test.ts` |
-| puertas `transportKind` de UI de clone nativo y recuperaciones | UI nativa disponible siempre; la selección explícita del usuario sigue controlando la operación | `app/test/unit/ui/clone-repository-test.tsx`, `app/test/unit/clone-destination-websocket-test.tsx` |
-| detección Linux de Git/terminales con fallback de proceso renderer | consulta obligatoria al host Rust en Linux | `app/test/unit/rust-terminal-dispatch-test.ts` |
-| descubrimiento/lanzamiento Linux de terminales duplicado en renderer | lista fija y lanzamiento confinado del host Rust (`available_terminals`/`open_terminal`) | `app/test/unit/rust-terminal-discovery-test.ts`, `app/test/unit/rust-terminal-dispatch-test.ts` |
-| loader síncrono `source-map-support` acoplado a nombres webpack/Electron y filesystem renderer | normalización explícita de errores con stack original; mapas Vite quedan fuera del bundle y la dependencia fue retirada | `app/test/unit/normalize-error-test.ts`, `pnpm vite:build` |
-| lecturas `rev-parse` del contexto de locks padre HEAD/ref (`format`, rutas Git y valor esperado) | operación tipada Rust `ref_lock_context`; el valor se vuelve a validar después de adquirir los locks | `cargo test -p desktop-core ref_lock`, `cargo test -p desktop-app wry_ref_lock_context`, `app/test/unit/backend-websocket-test.ts` |
-| fallback genérico de apertura de carpetas para repositorios guardados | operación confinada `reveal_repository`/`reveal_registered_repository` en WebSocket y Tao/Wry, sin IPC genérico ni apertura de paquetes ejecutables | `app/test/unit/reveal-repository-client-test.ts`, `app/test/unit/reveal-repository-routing-test.ts`, `cargo test -p desktop-app wry_reveal_repository` |
-| parche renderer de entorno de shell en macOS (`shell.ts`) | eliminado: mutar el shim `process.env` del webview no afecta al host Rust ni a procesos Git reales | `pnpm check:types`, `pnpm vite:build` |
-| lecturas renderer de HEAD, rama, tip, Git dir, raíz de worktree, formato de refs, resolución confinada de rutas Git, captura de entradas del índice, captura estructurada de configuración/refs y comprobación de operaciones/conflictos para assisted-commit | operaciones tipadas Rust `assisted_commit_head`/`assisted_commit_safety`/`assisted_commit_git_path`/`assisted_commit_index_entries`/`assisted_commit_refs`/`assisted_commit_config`, con estados inseguros o bytes del índice devueltos como datos validados | `cargo test -p desktop-core assisted_head`, `cargo test -p desktop-app wry_assisted_commit_head`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/git/assisted-commit-test.ts` |
-| construcción renderer de árboles e índices assisted-commit mediante `read-tree`/`update-index --index-info`/`write-tree`/`mktree` | operación tipada Rust `assisted_commit_index_tree` con índice scratch de propiedad del host, hooks de índice desactivados, entradas crudas o tipadas validadas y bytes del índice final devueltos acotados | `cargo test -p desktop-app wry_assisted_commit_head`, `app/test/unit/git/assisted-commit-test.ts`, `app/test/unit/stores/assisted-commit-push-boundary-test.ts` |
-| transporte inline base64 de blobs, diffs congelados/certificados y conversiones assisted-commit por encima del límite de frames WebSocket | cargas y descargas chunked de sesión, acotadas y con propiedad/conflicto validados en el host; las operaciones conservan entradas inline pequeñas y límites explícitos de tamaño | `app/test/unit/git/assisted-commit-test.ts` (incluido el límite exacto combinado de 4 MiB), `cargo test -p desktop-app wry_assisted_commit_head` |
-| wrapper `privateGit` assisted-commit sin consumidores tras migrar todas sus operaciones a operaciones tipadas | eliminado; no queda invocación renderer directa ni indirecta de Git para assisted-commit | `pnpm check:types`, `pnpm migration:check` |
-| lecturas renderer `git config --null --list --show-origin --includes` y `git config --null --get-all` para certificación de assisted push | operaciones tipadas Rust `assisted_commit_push_config`/`assisted_commit_config_values`/`assisted_commit_remote_push_urls`/`assisted_commit_config_path`/`assisted_commit_ref_format`/`assisted_commit_staged_config_values` con orígenes/valores exactos, stdin fijado mediante upload acotado, entorno de configuración renderer acotado por allowlist y `GIT_CONFIG` siempre retirado | `cargo test -p desktop-core assisted_head`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/stores/assisted-commit-push-boundary-test.ts` |
-| comprobación renderer `which`/`where.exe` de Git al abrir terminal | `git_version` revisado del host Rust en todas las plataformas | `app/test/unit/rust-terminal-dispatch-test.ts` |
-| canonicalización filesystem directa en `resolveWithin` | canonicalización host Rust tipada | `app/test/unit/path-test.ts` |
-| `isGitOnPath` sin consumidores tras la detección obligatoria de Git por host | `findGitOnPath` conservado solo para el alias Git de CMD en Windows | `pnpm check:types`, `pnpm lint` |
-| imports directos de tipos `ChildProcess` en rebase/update-ref/progreso/terminales | interfaz estructural mínima `IChildProcess`, preparada para procesos host o shim web | `pnpm check:types`, `app/test/unit/rust-rebase-state-routing-test.ts`, `app/test/unit/pull-hook-callbacks-test.ts` |
-| apertura genérica de carpetas sin consumidores (`showFolderContents`, `is-application-bundle` y canales `unsafe-open-directory`/`confirm-reveal-directory`) | apertura confinada de repositorios registrados; el host usa reveal seguro sin clasificar metadata en el renderer | `app/test/unit/reveal-repository-routing-test.ts`, `app/test/unit/ipc-contract-test.ts`, `cargo check --workspace --locked` |
-| imports renderer escritos como builtin `os` aunque Vite ya los resolvía al shim host | frontera explícita `app/src/web/os.ts`; queda prohibido reintroducir `from 'os'` fuera de `web/` | `app/test/unit/file-system-test.ts`, `app/test/unit/copilot-app-test.ts`, `app/test/unit/macos-version-from-darwin-test.ts`, `pnpm migration:check` |
-| ramas `transportKind` de clone/recovery nativo en la UI | métodos tipados `cloneSelectedRepository`, `listNativeCloneRecoveries` y `recoverNativeClone` del cliente backend | `app/test/unit/native-clone-ui-test.ts`, `app/test/unit/backend-client-session-test.ts` |
-| puerta `transportKind` de selección de repositorio browser en `AppStore` | flujo tipado `selectBrowserRepositoryAtPath` que clasifica la ruta y limpia la selección cuando no es un working tree regular | `app/test/unit/backend-client-session-test.ts`, `app/test/unit/browser-repository-selection-test.ts` |
-| fallback legacy de `fetch`/`fetchRefspec` y resolución proxy incompatible con IPC | fetch revisado Rust obligatorio; proxies explícitos pasan por contrato tipado y se redactan en diagnósticos | `app/test/unit/rust-fetch-routing-test.ts`, `app/test/unit/git/fetch-test.ts`, tests Rust `renderer_fetch`/`process` |
-| fallback proxy/inherited-proxy de push nativo | proxies explícitos pasan por el mismo contrato tipado que fetch; proxies heredados permanecen confinados al entorno del proceso host y ambos se redactan en diagnósticos | `app/test/unit/rust-push-routing-test.ts`, `app/test/unit/git/environment-test.ts`, test Rust `renderer_proxy_validation_and_debug_protect_credentials` |
-| ejecución legacy `git push` y fallback pre-mutation del renderer | push revisado Rust obligatorio; los errores pre-mutación se propagan sin reintento y los outcomes inciertos suprimen acciones de retry inseguras | `app/test/unit/rust-push-routing-test.ts`, `app/test/unit/stores/assisted-commit-push-boundary-test.ts` |
-| rama `transportKind` al aplicar deadline de generación Copilot | deadline uniforme calculado una vez; la shell Tao/Wry sigue exigiendo la operación Copilot repository-scoped antes de evaluar opciones | `app/test/unit/backend-websocket-test.ts` |
-| fallback proxy/inherited-proxy de pull nativo | proxies explícitos pasan por contrato tipado al igual que fetch/push; el helper fetch sin proxy quedó retirado porque todas las operaciones usan la forma explícita | `app/test/unit/rust-pull-routing-test.ts`, `app/test/unit/rust-pull-progress-ownership-test.ts` |
-| fallbacks shell de descubrimiento/alta/borrado/URL/HEAD de remotes | descubrimiento seguro y mutaciones revisadas Rust obligatorias; URLs ambiguas o con credenciales se rechazan explícitamente | `app/test/unit/rust-remote-presence-test.ts`, `app/test/unit/git/remote-discovery-test.ts`, `app/test/unit/git/remote-management-test.ts` |
-| imports renderer directos de `crypto` y `keytar` | boundary web explícita ya respaldada por Rust (`web/crypto`, `web/keytar`) | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
-| escritura directa de resoluciones Copilot mediante `writeFile` del renderer | contenido subido en chunks acotados de sesión y escrito bajo lease por operación confinada Rust `renderer_write_working_file`; staging posterior sigue bajo lease | `cargo test -p desktop-core write_working_file`, `cargo test -p desktop-app wry_resolution_preview_upload_and_read`, `app/test/unit/backend-websocket-test.ts`, `app/test/unit/stores/app-store-add-accounts-test.ts` |
-| wrapper compartido `exec-file` ejecutado directamente con `child_process` | ejecución a través del shim host `web/child_process`, con `timeout`, `maxBuffer`, señal de terminación y kills pendientes antes de asignar id | `app/test/unit/web-child-process-test.ts`, `app/test/unit/copilot-app-test.ts` |
-| lanzamiento de integraciones personalizadas importando directamente `child_process` | spawn host-backed `web/child_process` con stdio ignorado; el host preserva procesos detached en sesión propia y fuera del apagado del renderer, y la interfaz de shells consume la abstracción estructural `IChildProcess` | `app/test/unit/native-custom-integration-test.ts`, `cargo test -p desktop-shell-core-legacy io::process::tests` |
-| creación y limpieza de archivos de progreso LFS mediante imports directos `fs` | operaciones host-backed `web/fs`/`web/fs-promises`; la creación conserva exclusividad `wx` | `app/test/unit/web-fs-lfs-progress-test.ts` |
-| imports dispersos del enum `GitError` de dugite en consumidores renderer | vocabulario centralizado en `app/src/lib/git/error-kind.ts`; no quedan imports renderer del paquete; la frontera `web/dugite` consume la tabla interna | `pnpm check:types`, `app/test/unit/rust-fetch-error-test.ts`, routing fetch/pull/push |
-| reexportación del enum `GitError` desde dugite | vocabulario numérico congelado en `app/src/lib/git/error-kind.ts` con paridad verificada; el runner usa la frontera `web/dugite`; ningún renderer importa el paquete | `app/test/unit/git-error-kind-test.ts`, `app/test/unit/git/core-test.ts`, `app/test/unit/rust-fetch-error-test.ts` |
-| resolución dugite del binario Git para hooks y tabla vacía de señales del shim `os` | ejecución mediante `git` resuelto por el host/PATH, como ya ocurría en el bundle web; códigos de salida por señal POSIX conservados | `app/test/unit/traditional-hook-test.ts` |
-| imports directos `dugite` en hooks/credenciales | frontera explícita host-backed `app/src/web/dugite.ts`; los tests inyectan un bridge Node solo para ejercitar la superficie web | `app/test/unit/hooks-discovery-test.ts`, `app/test/unit/git/credential-test.ts` |
-| `fs.createWriteStream` ausente en el shim host usado para stdin de hooks | stream Writable real con creación/truncado inicial y appends chunked por el host; conserva destinos vacíos | `app/test/unit/web-fs-write-stream-test.ts` |
-| import directo `fs/promises` en descubrimiento de hooks | frontera explícita `web/fs-promises` con `readdir` tipado para Dirent | `app/test/unit/hooks-discovery-test.ts` |
-| streams de archivo escritos como builtin `fs` en el proxy de hooks | frontera explícita `web/fs`; stdin buffered usa WriteStream host-backed y lectura por rangos | `app/test/unit/traditional-hook-test.ts` |
-| escritura/borrado temporal de reorder/squash como builtin `fs/promises` | frontera explícita `web/fs-promises`; las pruebas comparten un bridge Node mínimo de filesystem | `app/test/unit/git/reorder-test.ts`, `app/test/unit/git/squash-test.ts` |
-| watcher/stat/read streams directos del tailer de progreso | frontera explícita `web/fs` con watcher host-backed por sondeo, stat y lecturas por rangos; `ReadStream` expone `readable` para consumo por `byline` | `app/test/unit/tailer-test.ts`, `app/test/unit/tailer-web-fs-test.ts` |
-| metadata, lectura, escritura, canonicalización y limpieza directa del filesystem en snapshots assisted-commit | frontera explícita `web/fs`/`web/fs-promises`; las pruebas ejercitan el adaptador mediante el bridge Node compartido y conservan inyección de fallos | `app/test/unit/git/assisted-commit-snapshot-test.ts`, `app/test/unit/git/assisted-commit-cleanup-test.ts`, `app/test/unit/git/assisted-commit-hooks-test.ts` |
-| creación directa de directorios padre de locks de refs en update-ref | frontera explícita `web/fs-promises`; las suites usan el bridge Node de host compartido sin cambiar el orden de locking | `app/test/unit/git/assisted-commit-test.ts` |
-| operaciones asíncronas `fs/promises` de captura/staging assisted-commit y lectura lossy de destinos symlink | frontera explícita `web/fs-promises`; el host devuelve además bytes exactos del symlink en base64 para `{ encoding: 'buffer' }`, mientras la forma string conserva la conversión UTF-8 con reemplazo de Node | `app/test/unit/git/assisted-commit-test.ts`, `app/test/unit/web-fs-readlink-test.ts`, `cargo test -p desktop-shell-core-legacy io::tests::readlink_preserves_non_utf8_unix_target_bytes` |
-| verificación sincrónica `lstatSync` de assisted-commit como builtin `fs` | frontera explícita `web/fs`; el bridge Node de pruebas implementa la respuesta síncrona host-shaped necesaria para ejercitar las fences sin cambiar su orden no-yielding | `app/test/unit/git/assisted-commit-test.ts` |
-| fences bigint de identidad/versión de push como builtin `fs`/`fs/promises` | frontera explícita `web/fs`/`web/fs-promises` con `nlink` y nanosegundos exactos serializados como cadenas; el host Unix conserva los campos nativos de fencing | `app/test/unit/git/file-version-fence-test.ts`, `app/test/unit/web-fs-bigint-stats-test.ts`, `cargo test -p desktop-shell-core-legacy metadata_preserves_exact_unix_bigint_fencing_fields` |
-| locks exclusivos y handles de archivos Git como builtin `fs`/`fs/promises` | handles host-owned reales mediante `web/fs-promises`; stat/lectura/escritura/chmod/utimes/sync fijan el inode abierto y close fallido conserva el handle para reintento | `app/test/unit/web-fs-file-handle-test.ts`, `app/test/unit/git/assisted-commit-test.ts`, `cargo test -p desktop-shell-core-legacy open_file_handles_pin_the_original_inode_across_path_replacement` |
-| lecturas sincrónicas verificadas de configuración/publicación de push como descriptores numéricos emulados | operación host atómica `read-regular-verified` expuesta como `readRegularFileVerifiedSync`; abre una vez, fija el inode, canonicaliza, lee con cota y reverifica el destino antes de comparar metadata | `app/test/unit/web-fs-read-regular-verified-test.ts`, `app/test/unit/stores/assisted-commit-push-boundary-test.ts`, `cargo test -p desktop-shell-core-legacy read_regular_verified_pins_the_open_file_and_reports_its_target` |
-| conversión de chunks binarios en `WriteStream` host-backed | las vistas binarias se preservan independientemente del realm y el encoding interno `buffer` de Node no se trata como codificación de texto | `app/test/unit/stores/assisted-commit-push-hooks-test.ts`, `app/test/unit/web-fs-write-stream-test.ts` |
-| lanzamiento de terminales macOS mediante `child_process` | spawn host-backed `web/child_process`; la interfaz estructural se conserva porque el consumo es error/exit/stderr | `pnpm check:types`, `pnpm vite:build` |
-| lanzamiento de terminales Windows mediante `child_process` y `shell: true` sin soporte host | spawn host-backed `web/child_process`; el host implementa unión de línea y `/bin/sh -c`/cmd según plataforma | `app/test/unit/cygwin-test.ts`, `cargo test -p desktop-shell-core-legacy io::process::tests::shell_commands_join_the_command_line_like_node` |
-| opciones de proceso `argv0`/`windowsVerbatimArguments` aceptadas pero ignoradas por el boundary web | contrato explícito: Unix implementa argv0 nativo; Windows usa raw args para verbatim y rechaza argv0 independiente hasta tener implementación Win32 fiel | `cargo test -p desktop-shell-core-legacy io::process::tests::unix_argv0_reaches_the_child_process`, `app/test/unit/web-child-process-test.ts` |
-| ejecución directa del proxy de hooks y hooks tradicionales mediante `child_process` | frontera host-backed `web/child_process`; AbortSignal produce AbortError y kill host, pipe conserva `end: false`, y la lectura de stdin buffered respeta backpressure | `app/test/unit/traditional-hook-test.ts`, `app/test/unit/web-child-process-test.ts` |
-| captura del entorno de hooks mediante import directo de `child_process` | frontera explícita host-backed `web/child_process`; los streams de salida son always-flowing y exponen `resume()` para drenar diagnósticos stderr sin acumular backpressure | `app/test/unit/get-shell-env-test.ts`, `app/test/unit/web-child-process-test.ts` |
-| addon/vendor `windows-argv-parser` y shim web vacío | parsing Windows asíncrono en el host Rust mediante `CommandLineToArgvW`; el lanzamiento de shells personalizados espera ese parseo antes de spawn | `app/test/unit/native-custom-integration-test.ts`, `app/test/unit/backend-client-session-test.ts` |
-| `stream/promises.pipeline` como rechazo permanente en el shim web | promesas sobre el pipeline/finished Node-compatible usado por el bundle; necesario para stdin de hooks | `app/test/unit/web-stream-promises-test.ts` |
-| constructores vacíos `ReadStream`/`WriteStream` en el shim `stream` | eliminados por no tener consumidores; los streams de archivo viven en `web/fs` | `pnpm check:types`, `pnpm vite:build` |
-| shim `app/src/web/web-utils.ts` sin consumidores | eliminado junto a su alias Vite; archivos soltados usan `hostFiles.getPathForFile` del host bridge | `pnpm check:types`, `pnpm vite:build` |
-| shim `app/src/web/module.ts` sin consumidores | eliminado junto a sus aliases Vite `module`/`node:module`; el bundle completo no requiere la superficie Module emulada | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
-| `script/validate-sass/` sin llamada de build/CI y dependencia root `glob` exclusiva | eliminado junto a `glob`/`@types/glob`; Sass ya se compila y se valida mediante el pipeline Vite vigente | `pnpm check:types`, `pnpm lint` |
-| componente legacy `MergeCallToAction`, estilo `merge-message-legacy` y símbolo duplicado `octicons/diff-check.ts` | eliminados; la acción activa usa `MergeCallToActionWithConflicts` y los checkmarks usan `octicons/diff.ts` | `app/test/unit/ui/dropdown-select-button-test.tsx`, `app/test/unit/ui/side-by-side-diff-row-test.tsx`, `pnpm vite:build` |
-| loader legacy `app/test/globals.cjs` y subprocess del test de ciclo Git | eliminado; Vitest importa directamente el grafo ESM real y verifica identidad GitError | `app/test/unit/git-core-import-cycle-test.ts` |
-| dependencias raíz `preact` y `global-jsdom` sin imports ni consumidores | eliminadas del manifiesto y lockfile; Vitest usa `jsdom` directamente y ningún bundle usa Preact | `pnpm check:types`, `pnpm lint`, `pnpm vite:build`, tests DOM/database enfocados |
-| dependencias renderer `chalk`, `minimist`, `p-memoize`, `triple-beam`, `winston` y `winston-transport`, junto a tipos raíz sin consumidores | eliminadas del manifiesto y lockfile; `prop-types` se conserva porque es peer runtime de `focus-trap-react` y `tslib` porque `importHelpers` lo emite | `pnpm check:types`, `pnpm lint`, `pnpm migration:check`, `pnpm vite:build`, tests DOM/Copilot enfocados |
-| fachada `backend/index.ts` y proyecciones experimentales `backend/projections.ts` sin consumidores | eliminadas; los consumidores reales importan `backend/client`, contratos o selección directamente y no usan la capa de RevisionTracker | `pnpm check:types`, `pnpm lint`, `pnpm vite:build` |
-| paquetes `@types/express`, `@types/klaw-sync`, `@types/plist`, `@types/strip-ansi`, `@types/to-camel-case` y `@types/ua-parser-js` sin paquetes ni imports correspondientes | eliminados del manifiesto raíz y lockfile | `pnpm check:types`, `pnpm lint` |
-| paquetes `@types/request`, `@types/username` y `@types/webgl2` sin paquetes ni consumidores de tipos correspondientes | eliminados del manifiesto raíz y lockfile junto a dependencias transitivas huérfanas | `pnpm check:types`, `pnpm lint` |
-| dependencias raíz `chalk`, `@playwright/test` y `node-test-github-reporter` sin imports ni scripts consumidores | eliminadas; las integraciones de navegador usan `playwright` directamente | `pnpm check:types`, `pnpm lint` |
-| imports renderer de `util.stripVTControlCharacters` y `assert` en progreso/log Git | regex terminal local equivalente para parsing y validación explícita; no requieren runtime Node | `app/test/unit/progress/git-test.ts`, `pnpm check:types`, `pnpm lint` |
-| import `net.isIPv4` en validación de URL BYOK | validación IPv4 pública local estricta sin runtime Node; conserva la normalización URL existente | `app/test/unit/copilot-byok-test.ts`, `pnpm check:types`, `pnpm lint` |
-| import `buffer.kStringMaxLength` en el runner legacy Git | límite congelado de la plataforma soportada de 64 bits sin runtime Node; el runner sigue siendo transitorio | `pnpm check:types`, `pnpm lint` |
-| `setImmediate`/`clearImmediate` renderer mediante el polyfill Node `timers` | cola local `scheduleImmediate`/`cancelImmediate` basada en `MessageChannel`, con cancelación y orden FIFO; una instalación global estrecha cubre dependencias JSON-RPC que usan la entrada Node; `timers` sale del polyfill de Vite | `app/test/unit/immediate-test.ts`, `pnpm check:types`, `pnpm vite:build` |
-| dependencia renderer `which` y tipos raíz asociados | resolución executable local mediante filesystem host-backed, PATH personalizado, bits Unix y PATHEXT Windows | `app/test/unit/executable-path-test.ts`, `app/test/unit/traditional-hook-test.ts`, `pnpm migration:check` |
-| `script/ts-register.cjs` y `@typescript/compiler-api` | scripts TypeScript ESM ejecutados mediante `@oxc-node/core/register`; TypeScript 7 como checker canónico | `pnpm migration:check`, `pnpm compile:script`, `pnpm test:script` |
-| `app/test/backend-transport-tsconfig.json` y su paso CI duplicado | `pnpm check:types` raíz, que ya incluye `app/**/*.ts` con la configuración estricta vigente | `pnpm check:types`, `pnpm lint`, validación de workflow por inspección estática |
-| `byline` y `@types/byline` | `app/src/lib/line-stream.ts`, divisor UTF-8 local para registros CR/LF usado por progreso Git/LFS y tailing | `app/test/unit/line-stream-test.ts`, `tailer-test.ts`, `tailer-web-fs-test.ts`, `progress/git-test.ts` |
-| `compare-versions` | comparación local estricta de versiones numéricas del sistema en `app/src/lib/get-os.ts` | `app/test/unit/system-version-comparison-test.ts`, `macos-version-from-darwin-test.ts` |
-| entrada directa `@testing-library/dom` | dependencia transitiva exacta declarada por `@testing-library/react` | `pnpm install --frozen-lockfile --ignore-scripts`, pruebas UI enfocadas |
-| `split2` y `@types/split2` en el paquete renderer | `forEachNullRecord` en `app/src/lib/line-stream.ts`; el vendor trampoline conserva su propia dependencia | `app/test/unit/line-stream-test.ts`, `git/refreshable-credentials-test.ts` |
-| `untildify` y `@types/untildify` | expansión local exacta de `~` con el home inyectado por el host en `app/src/lib/untildify.ts` | `app/test/unit/untildify-test.ts` |
-| `mem` y `quick-lru` | `LruCache` y `memoize` locales en `app/src/lib/memoize.ts`, incluyendo expulsión LRU y no retención de promesas rechazadas | `app/test/unit/memoize-test.ts`, `ahead-behind-store-test.ts`, `commit-status-store-test.ts`, `ui/relative-time-test.tsx`, `notifications-store-test.ts` |
-| `p-limit` | planificador FIFO local de concurrencia en `app/src/lib/concurrency-limit.ts` | `app/test/unit/concurrency-limit-test.ts`, `ahead-behind-store-test.ts`, `commit-status-store-test.ts` |
-| `memoize-one` + `@types/memoize-one` | memoización local de una sola entrada en `app/src/lib/memoize-one.ts` | `app/test/unit/memoize-one-test.ts`, typecheck/build de consumidores UI/lib |
-| `classnames` | combinación local de clases en `app/src/lib/classnames.ts` | `app/test/unit/classnames-test.ts`, typecheck/build de componentes UI |
-| `string-argv` | parser local compatible para argumentos POSIX de integraciones en `app/src/lib/string-argv.ts` | `app/test/unit/string-argv-test.ts` |
-| `deep-equal` + `@types/deep-equal` | igualdad estructural estricta local en `app/src/lib/equality.ts` | `app/test/unit/structural-equality-test.ts` |
-| dependencia directa `prop-types` | se conserva solo como dependencia transitiva de componentes React que la requieren | typecheck/build |
-| `app-path` | resolución tipada de bundles macOS mediante Launch Services en el host Rust | compilación Rust/typecheck; comportamiento macOS cubierto por integración de shells/Copilot |
-| shim `app/src/web/app-path.ts` y alias Vite `app-path` | retirados tras migrar sus dos consumidores macOS a `resolve_macos_app_path` | `pnpm check:types`, `pnpm lint:oxlint`, `pnpm vite:build` |
-| `tsconfig.runner.json` y overrides/metadata `@types/glob` | configuración huérfana tras eliminar el runner TypeScript 6 y `glob`; lockfile podado de transitivos viejos de `app-path` | `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm compile:script` |
-| import directo `dugite` del runner legacy renderer | `app/src/web/dugite.ts` ejecuta comandos no interactivos por `desktop.io.git-exec` y callbacks/progreso por procesos streaming host-owned con entorno Git filtrado, `maxBuffer`, stdin, señales y grupo de proceso | `app/test/unit/web-dugite-interactive-test.ts`, `app/test/unit/web-child-process-test.ts`, `app/test/unit/git/rebase-full-test.ts`, `app/test/unit/git/clone-test.ts`, `cargo test -p desktop-shell-core-legacy io::process` |
-| rebase interactivo renderer con archivos todo/mensaje temporales y `sequence.editor` shell | operación tipada `renderer_rebase_interactive`; el host Rust valida todo/programa y object IDs, crea los archivos temporales, fija editores host-generated y devuelve outcome/stdout/stderr acotados | `app/test/unit/git/squash-test.ts`, `app/test/unit/git/reorder-test.ts`, `pnpm check:types`, `pnpm migration:check`, clippy Rust |
-| ejecución legacy de clone ordinario y credenciales trampoline renderer | operación tipada `clone_repository` con puerto/token, user-agent, SSH/askpass y parámetros Git validados/redactados en el host; `GIT_ALLOW_PROTOCOL` viaja explícitamente y `ext`/`ext.exe` siguen filtrados | `app/test/unit/git/clone-test.ts`, `app/test/unit/git/clone-fallback-account-test.ts`, `app/test/unit/clone-options-bridge-integration-test.ts` |
-| entorno de hooks de pull ejecutado solo por el runner legacy | contrato tipado `hook_environment` con proceso proxy loopback efímero; el host fusiona la configuración de hooks con la política de credenciales en lugar de reemplazarla | `app/test/unit/rust-pull-routing-test.ts`, suites enfocadas de pull/progreso |
-| ejecución legacy `git pull` y fallback pre-mutation del renderer | operación tipada obligatoria `renderer_pull`; los submódulos inicializados se actualizan con `--recurse-submodules`, los submódulos nuevos entrantes permanecen sin inicializar y los repositorios anidados no reciben la concesión de credenciales del padre | `app/test/unit/git/pull/pull-test.ts`, `cargo test -p desktop-core renderer_pull --locked`, `app/test/unit/rust-pull-routing-test.ts` |
-| descubrimiento de rutas Git de assisted push mediante el runner legacy | operación tipada `assisted_commit_push_paths` con entorno de enrutamiento Git validado en el host | `cargo test -p desktop-core assisted_head --locked`, `app/test/unit/stores/assisted-commit-push-boundary-test.ts`, `app/test/unit/rust-remote-discovery-integration-test.ts` |
+A removal is complete only when the replacement path is exercised at runtime.
+Source counts, renamed files, or the existence of a typed Rust operation are not
+enough. Where relevant, evidence must cover failure, cancellation, recovery,
+progress, security, and byte-exact behavior.
 
-## 2. Retirado como dependencia raíz, conservado temporalmente como fuente o shim
+## Already out of the active flow
 
-Estas piezas ya no son dependencias nativas del runtime Electron, pero sus
-fuentes o shims siguen presentes porque todavía tienen consumidores migrando:
+- Electron main-process source, launchers, packagers, installers, type
+  declarations, crash shell, and Electron-only test harnesses.
+- Webpack and esbuild renderer builds and their exclusive dependencies.
+- The root npm lockfile, `app/package-lock.json`, ESLint/Prettier tooling, and
+  explicit Vitest suite routing.
+- Python smoke/integration paths replaced by Rust or Vitest coverage.
+- Renderer-driven Git command execution measured by `pnpm migration:status`;
+  typed Rust host operations now own those command invocations.
+- The broad `crypto-browserify` implementation behind commit links and the
+  Copilot compatibility surface; scoped hashing and narrow compatibility code
+  replaced it.
+- Direct renderer `setImmediate`/`clearImmediate` use; a small MessageChannel
+  scheduler now covers application callbacks and the narrow dependency surface.
 
-| Pieza | Estado actual | Condición de borrado final |
-|---|---|---|
-| `keytar`, `registry-js`, `fs-admin` | imports dirigidos a shims web o Rust | ningún consumidor ni test dependa del shim |
-| `desktop-trampoline` | dependencia real en `app/package.json` | entorno Git/SSH/askpass servido completamente por Rust |
-| `printenvz` | helper Rust vendorizado usado por scripts de entorno de hooks | integración de hooks migrada o eliminada |
-| `dugite` | dependencia real para tabla de errores, tests y operaciones Git legacy restantes; ya no hay imports renderer del paquete | operaciones Git legacy migradas a operaciones Rust tipadas y tests sin dependencia directa |
-| shims `app/src/web/*` | compatibilidad para renderer/tests | retirar archivo por archivo tras eliminar consumidores |
+## Temporary compatibility pieces
 
-## 3. Candidatos estructurales pendientes
+| Piece | Current state | Final removal condition |
+| --- | --- | --- |
+| `keytar` | Web shim/Rust-backed account flows remain. | No production consumer or test depends on the shim. |
+| `registry-js` | Web shim remains for Windows shell/hook discovery paths. | Windows registry access is host-owned and consumers are gone. |
+| `fs-admin` | Legacy compatibility surface remains only through migration artifacts. | No consumer or test depends on it. |
+| `desktop-trampoline` | Real dependency and renderer credential/trampoline logic remain. | Git/SSH/askpass credential environments are served completely by Rust. |
+| `printenvz` | Vendored helper remains for hook shell-environment capture. | Hook environment capture is Rust-owned or removed. |
+| `dugite` | Real dependency remains for error tables, tests, and compatibility surfaces. | No runtime or test path needs the package directly. |
+| `app/src/web/*` shims | Browser compatibility layer for renderer/dependencies. | Remove file by file after consumers and shim-specific tests are gone. |
 
-| Candidato | Condición antes de eliminar |
-|---|---|
-| `rust/crates/desktop-shell-core-legacy` | servicios útiles integrados en `rust/crates/core`; GUI/CLI/bridge sin dependencia legacy |
-| `rust/crates/native` como host independiente | shell definitivo validado en plataformas; conservar wrapper fino solo si hay consumidores del ejecutable |
-| fallbacks `transportKind` en renderer | cada módulo probado contra backend Rust y sin consumidores backend-less |
-| llamadas legacy `git()` en `app/src/lib/git` | operaciones Rust tipadas con paridad, progreso, cancelación y recuperación |
-| persistencia/proyecciones TS que duplican dominio | autoridad de dominio en Rust y contratos TypeScript generados |
-| scripts npm residuales de release | publicación/versionado verificados con pnpm/Rust sin npm CLI |
-| documentación histórica contradicha por el flujo actual | reemplazada por README, docs de contribución, `rust/MIGRATION.md` y `rust/ROADMAP.md` actuales |
+## Structural removal candidates
 
-La línea base numérica viva está en `pnpm migration:status` (0 comprobaciones
-operativas `transportKind`, 0 sitios Git dirigidos por renderer, 0 imports renderer `dugite`,
-0 imports `fs`, 0 imports `child_process`, 0 suites en el runner Node). `rust/ROADMAP.md` ordena el trabajo restante.
+| Candidate | Required before deletion |
+| --- | --- |
+| `rust/crates/desktop-shell-core-legacy` | Useful services are merged into `rust/crates/core`; GUI, CLI, and bridge no longer depend on it. |
+| `rust/crates/native` as an independent host | The definitive shell is validated on supported platforms; any required executable compatibility is represented explicitly. |
+| TypeScript persistence/domain projections | Rust is authoritative and TypeScript uses generated or narrow contracts. |
+| Residual release scripts | Versioning, packaging, signing, updates, and license inventory are validated without them. |
+| Stale migration documentation | Current concise documentation covers architecture, status, roadmap, and removal gates. |
 
-## 4. Qué se conserva
+## Preserved intentionally
 
-React/Primer, componentes, estilos, recursos vigentes, highlighter, submódulos
-`gemoji`, `gitignore`, `choosealicense.com`, licencias, procedencia y oráculos
-útiles. No se borran por parecer antiguos ni por ausencia en un import TS.
+React/Primer components, current styles and assets, syntax highlighting,
+`gemoji`, `gitignore`, license templates, provenance notices, useful oracle
+fixtures, and current tests are not legacy merely because they are old. Do not
+remove them without a product or migration reason.
+
+## Live evidence
+
+Use `pnpm migration:status` for the numeric baseline and `rust/ROADMAP.md` for
+current removal order. The detailed historical evidence for individual removals
+lives in commit history and focused tests rather than in a second ledger here.

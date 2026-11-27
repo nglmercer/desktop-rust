@@ -1,177 +1,119 @@
-# Rust migration roadmap (Linux)
+# Rust migration roadmap
 
-Scope: **Linux first.** Windows and macOS validation remains necessary before
-release, but the ordered removal work below is gated on Linux evidence.
-`pnpm migration:status` re-measures the baseline; `pnpm migration:check` fails
-if it regresses.
+Scope: Linux first. Windows and macOS validation remains required before any
+release. `pnpm migration:status` is the live metric source;
+`pnpm migration:check` must pass before committing migration slices.
 
-## 1. Current baseline (measured 2026-11-26)
+## Current measured baseline
 
-| Measure | Now | Done when |
+Measured on 2026-11-26:
+
+| Measure | Current | Done when |
 | --- | --- | --- |
-| Fallback checks (`transportKind`) in the renderer | 0 in 0 files | 0 |
+| Renderer `transportKind` fallback checks | 0 in 0 files | 0 |
 | Renderer-driven Git command sites | 0 in 0 files | 0 |
-| Renderer files importing `dugite` | 0 | 0 |
-| Renderer files importing `fs` | 0 | 0 (host operations only) |
-| Renderer files importing `child_process` | 0 | 0 |
-| Renderer files importing `os` / `crypto` / `keytar` | 0 / 0 / 0 | 0 |
-| Unit test files on the Node runner | 0 of 426 | 0 |
-| Rust code (crates, non-test) | 96,926 lines | — |
+| Renderer `dugite` imports | 0 | 0 |
+| Renderer `fs` imports | 0 | 0 |
+| Renderer `child_process` imports | 0 | 0 |
+| Renderer `os` / `crypto` / `keytar` imports | 0 / 0 / 0 | 0 |
+| TypeScript tests outside Vitest | 0 | 0 |
 
-The command-site count includes indirect assisted-commit `privateGit` operations,
-credential-helper execution, hook discovery, and the tutorial push; the earlier
-`await git(` pattern undercounted those remaining renderer-driven commands.
+These zeroes cover measured renderer entry points only. Compatibility shims,
+legacy host crates, credential/trampoline machinery, test fixtures, and release
+infrastructure remain migration work.
 
-Completed foundations: Electron, Webpack and esbuild are out of the active build;
-the Tao/Wry shell starts under Linux/Xvfb; the renderer builds with Vite; all
-TypeScript tests run through Vitest; oxlint, TypeScript 7 and Biome form the fast
-verification gate.
+## Ordered work
 
-## 2. Ordered work
+### R0 — Guardrails
 
-Effort: S = a day or less, M = a few days, L = a week or more.
+- [x] Measure and enforce migration metrics.
+- [ ] Refresh documented numbers after verified slices.
 
-### R0 — Guardrails (S)
+### R1 — Rust-backed tests
 
-- [x] `pnpm migration:status` prints the baseline.
-- [x] `pnpm migration:check` fails CI if any number increases;
-      `pnpm migration:baseline` lowers it after verified removals.
-- [ ] Refresh the numbers in this file after each merged slice.
+- [x] Run TypeScript tests through Vitest and the real Rust test backend.
+- [ ] Add a reusable Rust-backed repository fixture.
+- [ ] Decide per-file versus shared backend lifetime after measurement.
 
-### R1 — Make tests exercise the Rust backend (M)
+### R2 — Remaining runtime ownership
 
-- [x] Shared harness `app/test/helpers/rust-backend.ts` starts real
-      `desktop-rs serve` instances and routes `backend()` through the browser
-      WebSocket client.
-- [x] `script/test.mts` builds `desktop-cli` on Linux and enables
-      `DESKTOP_TEST_RUST_BACKEND=1` by default when the build succeeds.
-- [x] Move all former Node-runner suites to Vitest. Legacy `node:test` imports
-      use the compatibility alias; there is no separate Node test run.
-- [ ] Add a reusable Rust-backed repository fixture replacing ad hoc
-      `setupEmptyRepository`/`makeCommit` server registration.
-- [ ] Decide server lifetime: one server per test file versus a shared worker.
-      Measure before optimizing; target less than 1 s overhead per file.
+- [ ] Replace renderer hook-environment capture, `printenvz`, and process-proxy
+      ownership with typed Rust operations.
+- [ ] Move remaining trampoline credential/environment ownership into Rust.
+- [ ] Resolve exact remote-configuration versus typed transport admission and
+      finish the cross-Git destination guard.
+- [ ] Stream live progress for rebase and cherry-pick.
+- [ ] Remove compatibility shims only after their consumers are gone.
 
-### R2 — Retire fallbacks module by module (L; bulk of the work)
+### R3 — Assisted commit and Copilot
 
-For each module: prove behavior against the Rust backend, resolve contract or
-progress differences, delete the `transportKind` branch and legacy `git(` call,
-run the focused tests, then lower the baseline.
+- [ ] Replace the assisted-commit transaction's Node async-hooks ownership with
+      a Rust transaction and delete the async-hooks shim.
+- [ ] Keep missing-alternate behavior strict at push and non-fatal for status
+      and protection.
+- [ ] Move Copilot model/quota/session ownership into scoped Rust operations.
+- [ ] Validate one live Rust-client Copilot turn and the packaged runtime layout
+      (manual credential-gated check).
 
-Classify failures before changing code:
+### R4 — GitHub and credentials
 
-| Kind | Meaning | Typical fix |
-| --- | --- | --- |
-| Basis | Rust requires the head/branch/operation basis the app just read. | Pass `currentBasis`/`mergeBasis` or bind the operation correctly. |
-| Contract | Rust deliberately refuses behavior the old path allowed. | Decide the contract; change the caller/test or implement the capability. |
-| Progress | Callers expect live progress but Rust emits none. | Stream progress events from Rust. |
-| Error shape | Rust fails with a different type/message. | Align the contract or update assertions deliberately. |
+- [ ] Complete PR, issue, check, workflow-run, enterprise, pagination, and
+      network-failure behavior through the Rust broker or a reviewed `gh` path.
+- [ ] Replace remaining `keytar` shim credential flows with Rust credential storage.
+- [ ] Migrate renderer HTTP/API callers to the Rust broker with cancellation,
+      timeout, proxy, TLS, and rate-limit behavior.
 
-Priority guidance:
+### R5 — Renderer Node API removal
 
-1. Low-risk read-only modules and already-routed modules first.
-2. Medium Git mutation modules once basis and progress contracts exist.
-3. High-fan-out modules (`config`, `diff`, `repository-operation`) last.
-4. Non-Git fallback clusters in `lib/stores`, clone/delete/add repository UI,
-   changes/diff/discard UI, custom integration, large files and Copilot conflict
-   context after their Git dependencies are gone.
+- [x] Reach zero measured renderer imports for `dugite`, `fs`, `child_process`,
+      `os`, `crypto`, and `keytar`.
+- [ ] Delete each `app/src/web/*` shim after production consumers and dependent
+      tests no longer use it.
 
-Known contract decisions still open:
+### R6 — Legacy deletion
 
-- Rust remote discovery intentionally isolates global/system configuration;
-  decide whether tests and product behavior should preserve that isolation.
-- Rebase and cherry-pick do not stream live progress yet.
+- [ ] Remove `dugite`, `desktop-trampoline`, vendored notification TypeScript,
+      and `printenvz` when their Rust replacements are the only paths.
+- [ ] Merge useful `desktop-shell-core-legacy` services into `core` and retire
+      `native` as an independent host.
+- [ ] Remove duplicated TypeScript persistence/domain projections once Rust is
+      authoritative.
+- [ ] Build and test the tree with legacy directories absent.
 
-### R3 — Assisted commit and Copilot in Rust (L)
+### R7 — Linux validation
 
-- [ ] Replace the assisted-commit transaction depending on Node async hooks
-      (`repository-operation-context`) with a Rust transaction; then delete the
-      async-hooks shim.
-- [ ] Finish the destination guard across supported Git versions without
-      relying on `remote.<name>.url=` reset output quirks.
-- [ ] Keep missing-alternate behavior strict at the push stage and non-fatal
-      for status/run protection.
-- [ ] List Copilot models and quotas through scoped Rust operations; remove
-      direct SDK client creation from the renderer store.
-- [ ] Validate one live Rust-client Copilot turn and the distributed runtime
-      layout (requires credentials; manual Linux gate).
+- [ ] Exercise real browser journeys for clone, commit, branch, stash, rebase,
+      and conflicts on large repositories, including Unicode and byte-exact names.
+- [ ] Validate cancellation, reconnects, and state consistency under load.
+- [ ] Review bridge authentication, path confinement, credential handling,
+      request budgets, and sync-IPC exposure.
+- [ ] Package, relocate, launch, exercise, and cleanly shut down the result.
 
-### R4 — GitHub operations through Rust/`gh` (M–L)
+## Platform and release gates
 
-- [ ] PRs, issues, checks and workflow runs with enterprise accounts and clear
-      authentication/network failures.
-- [ ] Migrate remaining account/credential flows that use the `keytar` shim to
-      Rust credential storage only.
-- [ ] Migrate renderer HTTP/API callers, including Copilot API access, to the
-      Rust broker with cancellation, timeout, proxy, TLS, pagination and
-      rate-limit behavior.
-
-### R5 — Remove Node API use from the renderer (M)
-
-Follows R2. Each grep must reach zero or be explicitly host-only:
-
-- [x] `dugite` (0 renderer files; the package remains for error tables/tests)
-- [x] `fs` (currently 0 files)
-- [x] `child_process` (0), `os` (0), `crypto` (0), `keytar` (0)
-- [ ] Delete the matching `app/src/web/*` shims only after their imports are gone.
-
-### R6 — Delete legacy code and packages (M)
-
-- [ ] Remove `dugite`, `desktop-trampoline` as a Node module,
-      `desktop-notifications` vendor TypeScript and the
-      `printenvz` helper when Rust replacements are the only path.
-- [ ] Collapse `rust/crates/desktop-core` (`desktop-shell-core-legacy`) into
-      `rust/crates/core` and retire `rust/crates/native` as a host.
-- [x] Migrate release version handling away from the npm CLI and retire
-      `app/package-lock.json`.
-- [ ] `pnpm migration:status` reports zero for every migration row.
-
-### R7 — Linux validation (M)
-
-- [ ] Real browser journeys (clone, commit, branch, stash, rebase, conflicts)
-      against a large repository, including Unicode and byte-exact filenames.
-- [ ] Cancellation, reconnect and state consistency under load.
-- [ ] Bridge security review: authentication, path confinement, credential
-      handling, request budgets and sync-IPC allowlist.
-- [ ] Package smoke: `pnpm package`, relocate the result, run it outside the
-      checkout and verify clean shutdown.
-- [ ] Build and run the final tree with legacy directories absent.
-
-## 3. Platform and release gates after Linux
-
-- [ ] Validate the Tao/Wry shell, credentials, protocol registration, terminal
-      and editor integrations on macOS and Windows.
-- [ ] Produce signed/notarized installers and a signed update channel controlled
-      by this fork. The current package is a development package.
-- [ ] Verify WebView2 bootstrap behavior on Windows and WebKitGTK/WKWebView
-      behavior on Linux/macOS.
+- [ ] Validate Tao/Wry, credentials, protocol registration, editors, terminals,
+      and shell integration on real macOS and Windows systems.
 - [ ] Validate low-resource/Termux headless builds without GUI dependencies.
+- [ ] Produce signed/notarized installers and a signed update channel controlled
+      by this fork.
+- [ ] Complete license and notice inventory validation.
 
-## 4. Known issues backlog
+## Known issues
 
-- [ ] Finish splitting the renderer bundle: `re2js`, crypto/readable-stream
-      polyfills and large stores still contribute to the entry chunk.
-- [ ] `lfs-test` requires `git-lfs`; CI installs it, local environments may not.
-- [ ] This checkout can set `LOCAL_GIT_DIRECTORY` to an older Git. The runner
-      builds a capable layout over PATH Git when needed
-      (`script/test-capabilities.ts`); retire that workaround when version-sensitive
-      behavior is fully contract-tested.
-- [ ] Sign-in callback: an installed `github-desktop-rs.desktop` can compete
-      with the dev build; decide the development handler policy.
-- [ ] Sass `@import` and global color functions: migrate stylesheets, then drop
-      the `silenceDeprecations` list in `vite.config.ts`.
-- [ ] Run `pnpm start` on a real display and compare with the Xvfb smoke run.
+- The renderer entry chunk remains large.
+- `lfs-test` requires `git-lfs`; CI installs it but local environments may not.
+- Test Git version capability is normalized by `script/test-capabilities.ts`.
+- An installed `github-desktop-rs.desktop` can compete with development builds
+  for sign-in callbacks.
+- Sass `@import` and global color functions still emit controlled deprecations.
+- Cross-file backend integration tests can interfere through shared process and
+  network resources; isolate failures before treating them as product regressions.
 
-## 5. Definition of done
+## Definition of done on Linux
 
-The migration is complete on Linux when all of these hold:
-
-1. `pnpm migration:status` shows zero fallback checks, zero legacy Git calls and
-   zero non-host Node API imports in the renderer.
-2. Every TypeScript test runs on Vitest without a separate Node runner or suite
-   routing file.
-3. The removal gates in `MIGRATION.md` are ticked with reproducible evidence.
-4. The full suite passes with no undocumented `todo` or capability-skipped tests.
-5. `pnpm start`, `pnpm build:prod` and `pnpm package` work from a clean checkout.
-6. The fast gate (`pnpm lint`, `pnpm check:types`, `pnpm compile:script`) passes
-   in seconds, not minutes.
+1. Migration metrics remain zero for renderer fallback and direct Node API rows.
+2. The full validation gate in `MIGRATION.md` passes.
+3. Browser, cancellation, reconnect, large-repository, and package smoke evidence exists.
+4. Legacy shims, hosts, packages, and helpers have either been removed or have
+   an explicit typed host-only justification.
+5. `pnpm start`, `pnpm build:prod`, and `pnpm package` work from a clean checkout.
