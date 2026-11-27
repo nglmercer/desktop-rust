@@ -1,5 +1,5 @@
 import { lstat, open, realpath, rename, stat } from '../../web/fs-promises'
-import { homedir } from '../../web/os'
+import { hostHomeDirectory } from '../host-environment'
 import {
   constants,
   lstatSync,
@@ -391,7 +391,7 @@ function configurationInputs(
           'Runtime-prefix include paths cannot be certified for assisted push. Use the normal Push action.'
         )
       }
-      const home = process.env.HOME ?? homedir()
+      const home = process.env.HOME ?? hostHomeDirectory()
       const value =
         entry.value === '~'
           ? home
@@ -590,7 +590,7 @@ async function readConfigurationFiles(
         ]
       }
       // Default global paths share a line-delimited native output.
-      const home = process.env.HOME ?? homedir()
+      const home = process.env.HOME ?? hostHomeDirectory()
       if (
         /[\r\n]/.test(home) ||
         /[\r\n]/.test(process.env.XDG_CONFIG_HOME ?? '')

@@ -1,5 +1,5 @@
 import { backend } from '../../backend/client'
-import { homedir } from '../../web/os'
+import { hostHomeDirectory } from '../host-environment'
 import { isAbsolute, join, normalize } from 'path'
 
 const bundleIdentifier = 'com.github.githubapp'
@@ -42,5 +42,5 @@ export async function findCopilotAppCandidates(): Promise<
       return null
     })
 
-  return getCopilotAppCandidates(found, homedir())
+  return getCopilotAppCandidates(found, hostHomeDirectory())
 }

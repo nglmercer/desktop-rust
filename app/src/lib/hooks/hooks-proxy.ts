@@ -10,7 +10,7 @@ import { memoizeOne } from '../memoize-one'
 import { which } from '../executable-path'
 import { createReadStream, createWriteStream } from '../../web/fs'
 import { spawnTraditionalHook } from './traditional-hook'
-import { constants as osConstants } from '../../web/os'
+import { hostProcessSignals } from '../host-environment'
 
 type PipedChildProcess = ChildProcess & {
   stdin: NonNullable<ChildProcess['stdin']>
@@ -361,7 +361,7 @@ export const createHooksProxy = (
     const signalNumber =
       signal === null
         ? undefined
-        : (osConstants.signals as Record<string, number | undefined>)[signal]
+        : (hostProcessSignals as Record<string, number | undefined>)[signal]
     const exitCode = ignoreError
       ? 0
       : (code ?? (signalNumber === undefined ? 1 : 128 + signalNumber))

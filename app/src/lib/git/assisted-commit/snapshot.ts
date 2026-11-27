@@ -7,7 +7,7 @@ import {
   realpath,
   rm,
 } from '../../../web/fs-promises'
-import { tmpdir } from '../../../web/os'
+import { hostTemporaryDirectory } from '../../host-environment'
 import { join } from 'path'
 import {
   IAssistedCommitChange,
@@ -409,7 +409,7 @@ export async function captureAssistedCommitSnapshot(
   const originalIndex = await readIndexState(indexPath)
   const cleanupToken = Object.freeze({ id: randomUUID() })
   const temporaryDirectory = await mkdtemp(
-    join(tmpdir(), 'desktop-assisted-commit-')
+    join(hostTemporaryDirectory(), 'desktop-assisted-commit-')
   )
   const cleanup: IAssistedCommitCleanup = {
     directory: temporaryDirectory,

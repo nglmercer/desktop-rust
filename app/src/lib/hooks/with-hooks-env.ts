@@ -1,6 +1,6 @@
 import { cp, mkdtemp, rm } from '../../web/fs-promises'
 import type { AddressInfo } from 'net'
-import { tmpdir } from '../../web/os'
+import { hostTemporaryDirectory } from '../host-environment'
 import { join } from 'path'
 import { createProxyProcessServer, getProxyCommandPath } from 'process-proxy'
 import type { IGitExecutionOptions } from '../git/core'
@@ -82,7 +82,9 @@ export async function withHooksEnv<T>(
   const processProxyPath = getProxyCommandPath()
 
   const token = crypto.randomUUID()
-  const tmpHooksDir = await mkdtemp(join(tmpdir(), 'desktop-git-hooks-'))
+  const tmpHooksDir = await mkdtemp(
+    join(hostTemporaryDirectory(), 'desktop-git-hooks-')
+  )
   const hooksProxy = createHooksProxy(
     cwd =>
       memoizedGetShellEnv(

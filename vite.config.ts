@@ -597,10 +597,6 @@ export default defineConfig({
         replacement: path.resolve(__dirname, 'app/src/web/net.ts'),
       },
       {
-        find: /^os$/,
-        replacement: path.resolve(__dirname, 'app/src/web/os.ts'),
-      },
-      {
         find: /^path$/,
         replacement: path.resolve(__dirname, 'app/src/web/path.ts'),
       },
@@ -619,10 +615,6 @@ export default defineConfig({
       {
         find: /^node:fs\/promises$/,
         replacement: path.resolve(__dirname, 'app/src/web/fs-promises.ts'),
-      },
-      {
-        find: 'node:os',
-        replacement: path.resolve(__dirname, 'app/src/web/os.ts'),
       },
       {
         find: 'node:path',

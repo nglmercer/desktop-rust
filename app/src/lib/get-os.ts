@@ -1,4 +1,7 @@
-import * as OS from '../web/os'
+import {
+  hostOperatingSystemRelease,
+  hostOperatingSystemType,
+} from './host-environment'
 import { memoizeOne } from './memoize-one'
 
 /**
@@ -45,7 +48,9 @@ export function compareSystemVersions(
 }
 
 function getSystemVersionSafe() {
-  return __DARWIN__ ? macOSVersionFromDarwinRelease(OS.release()) : OS.release()
+  return __DARWIN__
+    ? macOSVersionFromDarwinRelease(hostOperatingSystemRelease())
+    : hostOperatingSystemRelease()
 }
 
 function systemVersionGreaterThanOrEqualTo(version: string) {
@@ -70,7 +75,7 @@ export function getOS(): string {
   } else if (__WIN32__) {
     return `Windows ${version}`
   } else {
-    return `${OS.type()} ${version}`
+    return `${hostOperatingSystemType()} ${version}`
   }
 }
 

@@ -3,14 +3,17 @@ import { Tailer } from './tailer'
 import { forEachLine, type LineStream } from './line-stream'
 import { randomUUID } from '../web/random-uuid'
 import { join } from 'path'
-import { tmpdir } from '../web/os'
+import { hostTemporaryDirectory } from './host-environment'
 
 /**
  * Get a path to a temp file using the given name. Note that the file itself
  * will not be created.
  */
 export const getTempFilePath = (name: string) =>
-  join(tmpdir(), `${name}-${randomUUID().replaceAll('-', '').slice(0, 16)}`)
+  join(
+    hostTemporaryDirectory(),
+    `${name}-${randomUUID().replaceAll('-', '').slice(0, 16)}`
+  )
 
 /**
  * Tail the file and call the callback on every line.
