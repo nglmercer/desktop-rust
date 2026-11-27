@@ -353,30 +353,16 @@ async function frozenDiff(
   paths: ReadonlyArray<string>,
   parseText: boolean = true
 ): Promise<{ readonly text: string; readonly parsed: IRawDiff | null }> {
-  const result = await privateGit(
-    data,
-    [
-      ...ParsedDiffConfiguration,
-      'diff',
-      '--no-ext-diff',
-      '--no-textconv',
-      '--no-renames',
-      '--no-color',
-      '--patch',
-      '--end-of-options',
-      base,
-      tree,
-      '--',
-      ...paths,
-    ],
-    'assistedCommitFrozenDiff',
-    { encoding: 'buffer' }
+  const bytes = await backend().repositoryAssistedCommitFrozenDiff(
+    data.repository.path,
+    base,
+    tree,
+    paths,
+    objectReadEnvironment(data.environment)
   )
-  const text = result.stdout.toString('utf8')
+  const text = bytes.toString('utf8')
   const parsed =
-    parseText &&
-    paths.length === 1 &&
-    Buffer.from(text, 'utf8').equals(result.stdout)
+    parseText && paths.length === 1 && Buffer.from(text, 'utf8').equals(bytes)
       ? new DiffParser().parse(text)
       : null
   return { text, parsed }

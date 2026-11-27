@@ -836,6 +836,37 @@ function nodeBackend(t: TestContext) {
           }
           return result.stdout.trim()
         },
+        repositoryAssistedCommitFrozenDiff: async (
+          path: string,
+          base: string,
+          tree: string,
+          paths: ReadonlyArray<string>,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const result = (await interceptingGitExec(actualExec)(
+            [
+              '-c',
+              'diff.suppressBlankEmpty=false',
+              'diff',
+              '--no-ext-diff',
+              '--no-textconv',
+              '--no-renames',
+              '--no-color',
+              '--patch',
+              '--end-of-options',
+              base,
+              tree,
+              '--',
+              ...paths,
+            ],
+            path,
+            { encoding: 'buffer', env: environment } as never
+          )) as Dugite.IGitBufferResult
+          if (result.exitCode !== 0) {
+            throw new Error('Cannot create the frozen assisted diff')
+          }
+          return result.stdout
+        },
         repositoryAssistedCommitPrivateTip: async (
           path: string,
           environment?: Record<string, string | undefined>

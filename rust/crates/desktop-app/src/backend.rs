@@ -447,6 +447,7 @@ enum ReadMethod {
     AssistedCommitVerifyCreatedCommit,
     AssistedCommitValidateMessages,
     AssistedCommitPrivateTip,
+    AssistedCommitFrozenDiff,
     AssistedCommitCaptureConfig,
     AssistedCommitIndexTree,
     AssistedCommitTreeRevision,
@@ -1363,7 +1364,9 @@ impl Backend {
         }
         if !matches!(
             &request.method,
-            ReadMethod::AssistedCommitTreeEntry | ReadMethod::AssistedCommitVerifyCreatedCommit
+            ReadMethod::AssistedCommitTreeEntry
+                | ReadMethod::AssistedCommitVerifyCreatedCommit
+                | ReadMethod::AssistedCommitFrozenDiff
         ) && request.tree.is_some()
         {
             return Err(AppError::BadArgs(
@@ -1393,12 +1396,16 @@ impl Backend {
                 "revision only applies to assisted tree revision reads".into(),
             ));
         }
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitIndexTree | ReadMethod::AssistedCommitFrozenDiff
+        ) && request.base.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "base only applies to assisted index tree and frozen diff reads".into(),
+            ));
+        }
         if !matches!(&request.method, ReadMethod::AssistedCommitIndexTree) {
-            if request.base.is_some() {
-                return Err(AppError::BadArgs(
-                    "base only applies to assisted index tree reads".into(),
-                ));
-            }
             if request.entries.is_some() {
                 return Err(AppError::BadArgs(
                     "entries only apply to assisted index tree reads".into(),
@@ -1469,9 +1476,13 @@ impl Backend {
                 "bytes_base64 only applies to assisted blob writes".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::LfsFileTracking) && request.paths.is_some() {
+        if !matches!(
+            &request.method,
+            ReadMethod::LfsFileTracking | ReadMethod::AssistedCommitFrozenDiff
+        ) && request.paths.is_some()
+        {
             return Err(AppError::BadArgs(
-                "paths only apply to file-tracking reads".into(),
+                "paths only apply to file-tracking and frozen diff reads".into(),
             ));
         }
         if !matches!(&request.method, ReadMethod::SubmoduleDisplayUrl)
@@ -2025,6 +2036,50 @@ impl Backend {
                         && request.expected_value.is_none() =>
                 {
                     Operation::AssistedCommitPrivateTip {
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitFrozenDiff
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.sha.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none()
+                        && request.bytes_base64.is_none()
+                        && request.parent.is_none()
+                        && request.entries.is_none()
+                        && request.index_entries_base64.is_none()
+                        && request.include_index.is_none()
+                        && request.use_environment_index.is_none() =>
+                {
+                    Operation::AssistedCommitFrozenDiff {
+                        base: request
+                            .base
+                            .ok_or_else(|| AppError::BadArgs("base is required".into()))?,
+                        tree: request
+                            .tree
+                            .ok_or_else(|| AppError::BadArgs("tree is required".into()))?,
+                        paths: request
+                            .paths
+                            .ok_or_else(|| AppError::BadArgs("paths are required".into()))?,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -3314,6 +3369,21 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(private_tip["sha"], head);
+                fs::write(root.join("file"), "changed\n").unwrap();
+                git(&["add", "file"]);
+                git(&["commit", "-qm", "second"]);
+                let changed_tree = git(&["rev-parse", "HEAD^{tree}"]);
+                let frozen = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_frozen_diff","base":tree,"tree":changed_tree,"paths":["file"]}),
+                    ])
+                    .unwrap();
+                let frozen_bytes = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    frozen["bytes_base64"].as_str().unwrap(),
+                )
+                .unwrap();
+                assert!(String::from_utf8_lossy(&frozen_bytes).contains("+changed"));
                 assert!(
                     backend
                         .admit(vec![

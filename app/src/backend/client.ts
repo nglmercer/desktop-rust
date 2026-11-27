@@ -4009,6 +4009,56 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitFrozenDiff(
+    repositoryPath: string,
+    base: string,
+    tree: string,
+    paths: ReadonlyArray<string>,
+    environment?: Record<string, string | undefined>
+  ): Promise<Buffer> {
+    const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+    if (
+      !objectId.test(base) ||
+      !objectId.test(tree) ||
+      paths.length === 0 ||
+      paths.length > 1024 ||
+      paths.some(
+        path => path.length === 0 || path.length > 65536 || path.includes('\0')
+      )
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted frozen diff request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_frozen_diff',
+      {
+        base,
+        tree,
+        paths: [...paths],
+        environment: serializeGitEnvironment(environment),
+      }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.bytes_base64 === 'string' &&
+      value.bytes_base64.length <= 96 * 1024 * 1024
+    ) {
+      const bytes = Buffer.from(value.bytes_base64, 'base64')
+      if (bytes.length <= 64 * 1024 * 1024) {
+        return bytes
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted frozen diff response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

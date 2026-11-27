@@ -331,6 +331,57 @@ impl Repository {
         Ok(json!({"sha":sha}))
     }
 
+    /// Produce the byte-exact frozen object diff used to review and split a
+    /// selected assisted commit. Paths are literals; diff drivers are disabled.
+    pub(crate) async fn assisted_commit_frozen_diff(
+        &self,
+        base: &str,
+        tree: &str,
+        paths: &[GitPath],
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        object_id(base, "frozen diff base")?;
+        object_id(tree, "frozen diff tree")?;
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_diff_environment_key(key),
+                "unsupported assisted diff environment key"
+            );
+        }
+        anyhow::ensure!(
+            !paths.is_empty() && paths.len() <= 1024,
+            "select at least one frozen diff path"
+        );
+        let mut command = args(&[
+            "-c",
+            "diff.suppressBlankEmpty=false",
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--no-color",
+            "--patch",
+            "--end-of-options",
+            base,
+            tree,
+            "--",
+        ]);
+        for path in paths {
+            command.push(validate_index_tree_path(path)?);
+        }
+        let output = crate::process::run_git_with_environment_limit(
+            &self.path,
+            &command,
+            None,
+            None,
+            environment,
+            64 * 1024 * 1024,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot create the frozen assisted diff");
+        Ok(json!({"bytes_base64":STANDARD.encode(output.stdout)}))
+    }
+
     /// Run native commit-message validation in a host-owned scratch Git
     /// directory. Objects remain those of the private assisted object view;
     /// only refs, index, HEAD, and configuration are scratch state.

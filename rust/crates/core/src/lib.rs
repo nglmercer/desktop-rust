@@ -753,6 +753,16 @@ impl Repository {
             Operation::AssistedCommitPrivateTip { environment } => {
                 return self.assisted_commit_private_tip(&environment).await;
             }
+            Operation::AssistedCommitFrozenDiff {
+                base,
+                tree,
+                paths,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_frozen_diff(&base, &tree, &paths, &environment)
+                    .await;
+            }
             Operation::AssistedCommitValidateMessages {
                 initial_sha,
                 trees,
@@ -1664,6 +1674,7 @@ impl Repository {
             | AssistedCommitVerifyCreatedCommit { .. }
             | AssistedCommitValidateMessages { .. }
             | AssistedCommitPrivateTip { .. }
+            | AssistedCommitFrozenDiff { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
             | AssistedCommitIndexTree { .. }

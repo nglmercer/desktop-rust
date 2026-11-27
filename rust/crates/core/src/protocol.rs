@@ -535,6 +535,13 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitFrozenDiff {
+        base: String,
+        tree: String,
+        paths: Vec<GitPath>,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitValidateMessages {
         initial_sha: Option<String>,
         trees: Vec<String>,
