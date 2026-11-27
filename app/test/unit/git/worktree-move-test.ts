@@ -6,7 +6,6 @@ import * as dugite from 'dugite'
 import { pathExists } from '../../../src/lib/path-exists'
 import { Repository } from '../../../src/models/repository'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../../src/lib/custom-integration', () => ({}))
 
 import { moveWorktree } from '../../../src/lib/git/worktree'

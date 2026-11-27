@@ -23,7 +23,6 @@ import { BranchType } from '../../src/models/branch'
 import { TestStatsStore } from '../helpers/test-stats-store'
 import { isolateGitConfig } from '../helpers/git-config'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('GitStore', () => {

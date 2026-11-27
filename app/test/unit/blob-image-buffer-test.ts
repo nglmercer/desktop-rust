@@ -4,7 +4,6 @@ import type { Repository } from '../../src/models/repository'
 const mocks = vi.hoisted(() => ({ blob: vi.fn() }))
 vi.mock('../../src/lib/git/show', () => ({ getBlobContents: mocks.blob }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
-vi.mock('keytar', () => ({ default: {} }))
 
 import { getBlobImage } from '../../src/lib/git/diff'
 

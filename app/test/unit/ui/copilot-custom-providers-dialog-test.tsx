@@ -5,7 +5,6 @@ import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 import type { IBYOKProvider } from '../../../src/lib/copilot/byok'
 import { CopilotCustomProvidersDialog } from '../../../src/ui/preferences/copilot-custom-providers-dialog'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

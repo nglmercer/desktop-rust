@@ -12,7 +12,6 @@ import {
   RepoRuleEnforced,
 } from '../../src/models/repo-rules'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

@@ -5,7 +5,6 @@ import * as React from 'react'
 import { CICheckRunNoStepItem } from '../../../src/ui/check-runs/ci-check-run-no-steps'
 import { fireEvent, render, screen } from '../../helpers/ui/vitest-render'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

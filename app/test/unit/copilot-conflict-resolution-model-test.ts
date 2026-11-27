@@ -4,7 +4,6 @@ import type { Model } from '../../src/lib/copilot/types'
 import { getConflictResolutionModelDisplay } from '../../src/lib/copilot/conflict-resolution-model'
 import { encodeModelKey, IBYOKProvider } from '../../src/lib/copilot/byok'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

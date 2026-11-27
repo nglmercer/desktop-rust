@@ -43,7 +43,7 @@ export default defineConfig({
           ) + '/$1.js',
       },
       // Native Node addons are not installed; use the renderer's web shims.
-      ...['keytar', 'registry-js'].map(name => ({
+      ...['registry-js'].map(name => ({
         find: new RegExp(`^${name}$`),
         replacement: fileURLToPath(
           new URL(`./app/src/web/${name}.ts`, import.meta.url)

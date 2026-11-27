@@ -12,11 +12,6 @@ const mocks = vi.hoisted(() => ({
   deleteRef: vi.fn(),
   clearIndex: vi.fn(),
 }))
-vi.mock('keytar', () => ({
-  getPassword: vi.fn(),
-  setPassword: vi.fn(),
-  deletePassword: vi.fn(),
-}))
 vi.mock('../../src/lib/trampoline/trampoline-environment', () => ({
   withTrampolineEnv: vi.fn(),
   getIsBackgroundTaskEnvironment: vi.fn(),

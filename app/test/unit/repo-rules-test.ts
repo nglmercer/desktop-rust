@@ -14,7 +14,6 @@ import {
 import { Repository } from '../../src/models/repository'
 import { getEnforcedRuleDescriptions } from '../../src/lib/stores/copilot-store'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

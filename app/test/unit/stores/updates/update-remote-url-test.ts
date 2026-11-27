@@ -17,7 +17,6 @@ import { addRemote } from '../../../../src/lib/git'
 import { TestStatsStore } from '../../../helpers/test-stats-store'
 
 vi.mock('../../../../src/lib/custom-integration', () => ({}))
-vi.mock('keytar', () => ({ default: {} }))
 
 describe('Update remote url', () => {
   const apiRepository: IAPIFullRepository = {

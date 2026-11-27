@@ -2,7 +2,6 @@ import { describe, it, vi } from 'vitest'
 import assert from 'node:assert'
 import { parseAddSSHHostPrompt } from '../../src/lib/ssh/ssh'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

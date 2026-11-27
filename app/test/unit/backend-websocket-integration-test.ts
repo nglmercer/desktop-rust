@@ -51,7 +51,6 @@ const enabled = process.env.DESKTOP_TEST_BRIDGE === '1'
 const route = vi.hoisted(() => ({
   client: undefined as BackendClient | undefined,
 }))
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 vi.mock('../../src/backend/client', async importOriginal => ({
   ...(await importOriginal<typeof import('../../src/backend/client')>()),

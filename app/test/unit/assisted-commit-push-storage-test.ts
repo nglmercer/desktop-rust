@@ -7,7 +7,6 @@ import {
 import { Repository } from '../../src/models/repository'
 import { createTestRepositoryStateCache } from '../helpers/app-store-test-harness'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

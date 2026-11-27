@@ -14,7 +14,6 @@ import { Repository } from '../../../src/models/repository'
 import { ComputedAction } from '../../../src/models/computed-action'
 import { createMockDispatcher } from '../../helpers/mock-dispatcher'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('react-confetti', () => ({ default: () => null }))
 vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
 vi.mock('../../../src/lib/custom-integration', () => ({

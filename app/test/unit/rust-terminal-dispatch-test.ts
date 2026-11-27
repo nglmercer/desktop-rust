@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Repository } from '../../src/models/repository'
 import { PopupType } from '../../src/models/popup'
 
-vi.mock('keytar', () => ({ default: {} }))
-
 const mocks = vi.hoisted(() => ({
   gitVersion: vi.fn(),
   terminals: vi.fn(),

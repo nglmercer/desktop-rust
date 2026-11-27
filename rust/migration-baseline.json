@@ -7,7 +7,7 @@
   "imports.child_process": 8,
   "imports.os": 0,
   "imports.crypto": 0,
-  "imports.keytar": 1,
+  "imports.keytar": 0,
   "imports.async_hooks": 1,
   "imports.net": 1,
   "imports.stream": 0,

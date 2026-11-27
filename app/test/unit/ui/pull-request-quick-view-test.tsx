@@ -13,7 +13,6 @@ import { render } from '../../helpers/ui/vitest-render'
 vi.mock('../../../src/ui/lib/sandboxed-markdown.tsx', () => ({
   SandboxedMarkdown: () => null,
 }))
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('react-confetti', () => ({ default: () => null }))
 vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
 vi.mock('../../../src/lib/custom-integration', () => ({

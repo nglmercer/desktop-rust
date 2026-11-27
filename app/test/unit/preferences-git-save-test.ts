@@ -8,12 +8,6 @@ const mocks = vi.hoisted(() => ({
   isValidCustomIntegration: vi.fn(),
   validateCustomIntegrationPath: vi.fn(),
 }))
-vi.mock('keytar', () => ({
-  default: {},
-  getPassword: vi.fn(),
-  setPassword: vi.fn(),
-  deletePassword: vi.fn(),
-}))
 vi.mock('../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: mocks.isValidCustomIntegration,

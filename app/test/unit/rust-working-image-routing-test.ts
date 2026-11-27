@@ -18,7 +18,6 @@ vi.mock('../../src/backend/client', () => ({
 vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
 }))
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 
 import { getWorkingDirectoryImage } from '../../src/lib/git/diff'

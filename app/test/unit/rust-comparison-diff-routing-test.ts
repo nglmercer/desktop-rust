@@ -51,7 +51,6 @@ vi.mock('../../src/lib/git/repository-operation', () => ({
   withRepositoryGitOperation: mocks.scope,
 }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
-vi.mock('keytar', () => ({ default: {} }))
 
 import {
   getCommitDiff,

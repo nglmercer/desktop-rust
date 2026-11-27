@@ -8,7 +8,6 @@ import { WorkingDirectoryStatus } from '../../src/models/status'
 import { Dispatcher } from '../../src/ui/dispatcher'
 import { MultiCommitOperationConflictState } from '../../src/lib/app-state'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/stores/copilot-store', () => ({
   formatReasoningEffort: () => '',
 }))

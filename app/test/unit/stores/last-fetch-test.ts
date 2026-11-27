@@ -3,7 +3,6 @@ import { GitStore } from '../../../src/lib/stores/git-store'
 import { BackendError } from '../../../src/backend/client'
 
 const service = vi.hoisted(() => ({ read: vi.fn() }))
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

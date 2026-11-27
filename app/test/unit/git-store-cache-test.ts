@@ -6,7 +6,6 @@ import { shell } from '../helpers/test-app-shell'
 import { TestStatsStore } from '../helpers/test-stats-store'
 import noop from 'lodash/noop'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('GitStoreCache', () => {

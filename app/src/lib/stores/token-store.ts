@@ -1,15 +1,19 @@
-import * as keytar from '../../web/keytar'
+import {
+  deleteHostSecret,
+  getHostSecret,
+  setHostSecret,
+} from '../host-secret-store'
 
 function setItem(key: string, login: string, value: string) {
-  return keytar.setPassword(key, login, value)
+  return setHostSecret(key, login, value)
 }
 
 function getItem(key: string, login: string) {
-  return keytar.getPassword(key, login)
+  return getHostSecret(key, login)
 }
 
 function deleteItem(key: string, login: string) {
-  return keytar.deletePassword(key, login)
+  return deleteHostSecret(key, login)
 }
 
 export const TokenStore = {

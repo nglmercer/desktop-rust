@@ -557,10 +557,6 @@ export default defineConfig({
       },
       { find: /^desktop-stream-impl$/, replacement: legacyStreamPackage },
       {
-        find: /^keytar$/,
-        replacement: path.resolve(__dirname, 'app/src/web/keytar.ts'),
-      },
-      {
         find: /^desktop-dugite\/(.+)$/,
         replacement:
           path.resolve(__dirname, 'app/node_modules/dugite/build/lib') +

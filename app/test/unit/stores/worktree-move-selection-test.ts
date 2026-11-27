@@ -6,7 +6,6 @@ import {
 import { AppStore } from '../../../src/lib/stores/app-store'
 
 const mocks = vi.hoisted(() => ({ move: vi.fn(), repositoryType: vi.fn() }))
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

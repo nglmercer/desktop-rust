@@ -9,7 +9,6 @@ import {
 import { Account } from '../../src/models/account'
 import { getDotComAPIEndpoint } from '../../src/lib/api'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('app-store-test-harness', () => {

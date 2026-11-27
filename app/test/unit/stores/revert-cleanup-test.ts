@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AppStore } from '../../../src/lib/stores/app-store'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../../src/lib/custom-integration', () => ({
   TargetPathArgument: '$PATH',
   isValidCustomIntegration: vi.fn(),

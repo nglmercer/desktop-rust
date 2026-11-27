@@ -9,7 +9,6 @@ import { assertIsRepositoryWithGitHubRepository } from '../../src/models/reposit
 import { Account } from '../../src/models/account'
 import { PullRequestDatabase } from '../../src/lib/databases/pull-request-database'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('RepositoriesStore', () => {

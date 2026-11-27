@@ -5,7 +5,6 @@ import { RepositoriesStore } from '../../src/lib/stores/repositories-store'
 import { TestRepositoriesDatabase } from '../helpers/databases'
 import { createMockAPIRepository } from '../helpers/mock-api'
 
-vi.mock('keytar', () => ({ default: {} }))
 vi.mock('../../src/lib/custom-integration', () => ({}))
 
 describe('tutorial repository account assignment', () => {
