@@ -347,6 +347,12 @@ enum ManagementOperation {
     },
     GitVersion,
     GitGlobalConfigPath,
+    RendererShellEnv {
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
+        shell_kind: Option<String>,
+    },
     OpenEditor {
         path: Option<desktop_core::GitPath>,
         #[serde(default)]
@@ -779,6 +785,13 @@ async fn execute(
         }
         ApplicationOperation::Management(GitGlobalConfigPath) => {
             Ok(json!(desktop_core::git_global_config_path().await?))
+        }
+        ApplicationOperation::Management(RendererShellEnv { cwd, shell_kind }) => {
+            anyhow::ensure!(
+                expected_repository.is_none(),
+                "hooks shell environment requests cannot use a selected-repository binding"
+            );
+            desktop_core::renderer_shell_env(cwd, shell_kind).await
         }
         ApplicationOperation::Management(InitializeDesktopRepository {
             path,

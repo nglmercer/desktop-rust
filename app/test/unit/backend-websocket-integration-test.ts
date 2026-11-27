@@ -136,6 +136,61 @@ afterEach(async () => {
 describe.skipIf(!enabled || process.platform === 'win32')(
   'real Rust WebSocket bridge',
   () => {
+    it('captures the hooks shell environment through the real bridge', async () => {
+      directory = await mkdtemp(
+        path.join(tmpdir(), 'desktop-shell-env-bridge-')
+      )
+      server = spawn(
+        path.resolve('rust/target/debug/desktop-rs'),
+        [
+          '--config',
+          path.join(directory, 'registry.json'),
+          'serve',
+          '--empty',
+          '--port',
+          '0',
+        ],
+        {
+          env: {
+            ...process.env,
+            HOME: directory,
+            SHELL: '/bin/sh',
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_CONFIG_GLOBAL: path.join(directory, 'global-config'),
+          },
+          stdio: ['ignore', 'ignore', 'pipe'],
+        }
+      )
+      const lines = createInterface({ input: server.stderr! })
+      const line = await bounded(
+        new Promise<string>((resolve, reject) => {
+          lines.once('line', resolve)
+          server!.once('error', reject)
+          server!.once('exit', code =>
+            reject(new Error(`bridge exited before startup: ${code}`))
+          )
+        })
+      )
+      dom = new JSDOM('', {
+        url: line.startsWith('Open ') ? line.slice(5) : '',
+      })
+      vi.stubGlobal('window', dom.window)
+      vi.stubGlobal('sessionStorage', dom.window.sessionStorage)
+      vi.stubGlobal('WebSocket', dom.window.WebSocket)
+      vi.stubGlobal('location', dom.window.location)
+      const client = new BackendClient()
+      clients.push(client)
+      await bounded(client.waitReady())
+      const result = await bounded(client.shellEnvironment(directory), 15_000)
+      expect(result.kind).toBe('success')
+      if (result.kind === 'success') {
+        const pathKey = Object.keys(result.env).find(
+          key => key.toLowerCase() === 'path'
+        )
+        expect(pathKey).toBeTruthy()
+      }
+    }, 20_000)
+
     it.skipIf(process.platform !== 'linux')(
       'uses system CA roots through a TLS proxy and rejects untrusted or mismatched certificates',
       async () => {

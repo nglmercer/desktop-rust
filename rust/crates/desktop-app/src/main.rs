@@ -97,6 +97,13 @@ fn main() {
         }
         return;
     }
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__printenvz")) {
+        if let Err(error) = desktop_backend::printenvz::print_environment() {
+            eprintln!("github-desktop-rs: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Err(error) = run() {
         eprintln!("github-desktop-rs: {error}");
         std::process::exit(1);

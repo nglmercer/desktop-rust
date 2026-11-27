@@ -2,6 +2,7 @@ import { join } from 'path'
 import { getShell } from './get-shell'
 import { spawn } from '../../web/child_process'
 import type { SupportedHooksEnvShell } from './config'
+import { backend } from '../../backend/client'
 
 export type ShellEnvResult =
   | {
@@ -13,14 +14,11 @@ export type ShellEnvResult =
       shellKind?: SupportedHooksEnvShell
     }
 
-export const getShellEnv = async (
-  cwd?: string,
-  shellKind?: SupportedHooksEnvShell,
-  printenvzPath?: string
+const getShellEnvFromRendererProcess = async (
+  cwd: string | undefined,
+  shellKind: SupportedHooksEnvShell | undefined,
+  printenvzPath: string
 ): Promise<ShellEnvResult> => {
-  const ext = __WIN32__ ? '.exe' : ''
-  printenvzPath ??= join(__dirname, `printenvz${ext}`)
-
   const shellInfo = await getShell(shellKind)
 
   if (!shellInfo) {
@@ -90,4 +88,21 @@ export const getShellEnv = async (
       })
     })
   })
+}
+
+export const getShellEnv = async (
+  cwd?: string,
+  shellKind?: SupportedHooksEnvShell,
+  printenvzPath?: string
+): Promise<ShellEnvResult> => {
+  if (printenvzPath === undefined && !__WIN32__) {
+    return backend().shellEnvironment(cwd, shellKind)
+  }
+
+  const ext = __WIN32__ ? '.exe' : ''
+  return getShellEnvFromRendererProcess(
+    cwd,
+    shellKind,
+    printenvzPath ?? join(__dirname, `printenvz${ext}`)
+  )
 }

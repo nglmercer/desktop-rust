@@ -2423,6 +2423,85 @@ export class BackendClient {
     }
   }
 
+  /** Capture the login-shell environment for hooks through the Rust host. */
+  async shellEnvironment(
+    cwd?: string,
+    shellKind?: 'git-bash' | 'pwsh' | 'powershell' | 'cmd'
+  ): Promise<
+    | { readonly kind: 'success'; readonly env: Record<string, string> }
+    | {
+        readonly kind: 'failure'
+        readonly shellKind?: 'git-bash' | 'pwsh' | 'powershell' | 'cmd'
+      }
+  > {
+    if (cwd !== undefined && (cwd.length === 0 || cwd.includes('\0'))) {
+      throw new BackendError({
+        code: 'invalid_input',
+        message: 'Invalid hooks shell directory',
+        retryable: false,
+      })
+    }
+    if (
+      shellKind !== undefined &&
+      !['git-bash', 'pwsh', 'powershell', 'cmd'].includes(shellKind)
+    ) {
+      throw new BackendError({
+        code: 'invalid_input',
+        message: 'Invalid hooks shell kind',
+        retryable: false,
+      })
+    }
+    const params: Record<string, string> = {}
+    if (cwd !== undefined) params.cwd = cwd
+    if (shellKind !== undefined) params.shell_kind = shellKind
+    const value =
+      this.transport === 'wry'
+        ? await this.request('git_info', {
+            operation: { type: 'renderer_shell_env', ...params },
+          })
+        : await this.request('renderer_shell_env', params)
+    if (
+      !isRecord(value) ||
+      (value.kind !== 'success' && value.kind !== 'failure')
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid hooks shell environment response',
+        retryable: false,
+      })
+    }
+    if (value.kind === 'failure') {
+      return { kind: 'failure', shellKind }
+    }
+    if (!isRecord(value.env) || Object.keys(value.env).length > 1024) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid hooks shell environment entries',
+        retryable: false,
+      })
+    }
+    const env: Record<string, string> = Object.create(null)
+    for (const [name, entry] of Object.entries(value.env)) {
+      if (
+        name.length === 0 ||
+        name.length > 4096 ||
+        name.includes('\0') ||
+        name.includes('=') ||
+        typeof entry !== 'string' ||
+        entry.length > 256 * 1024 ||
+        entry.includes('\0')
+      ) {
+        throw new BackendError({
+          code: 'invalid_response',
+          message: 'Invalid hooks shell environment entry',
+          retryable: false,
+        })
+      }
+      env[name] = entry
+    }
+    return { kind: 'success', env }
+  }
+
   /** Read the installed Git version through the Rust host. */
   async gitVersion(): Promise<string> {
     const value =

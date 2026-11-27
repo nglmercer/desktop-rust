@@ -78,6 +78,39 @@ describe('WebSocket backend transport', () => {
     vi.useRealTimers()
   })
 
+  it('routes hooks shell environment capture through the host operation', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.shellEnvironment('/tmp/repository', 'git-bash')
+    const sent = socket.sent.at(-1)!
+    expect(sent).toMatchObject({
+      method: 'renderer_shell_env',
+      cwd: '/tmp/repository',
+      shell_kind: 'git-bash',
+    })
+    socket.message({
+      id: sent.id,
+      result: {
+        kind: 'success',
+        env: { PATH: '/usr/bin', EMPTY: '', UNICODE: '☃' },
+      },
+    })
+    await expect(pending).resolves.toEqual({
+      kind: 'success',
+      env: { PATH: '/usr/bin', EMPTY: '', UNICODE: '☃' },
+    })
+  })
+
+  it('rejects malformed hooks shell environment entries', async () => {
+    const { client: value, socket } = await connected()
+    const pending = value.shellEnvironment()
+    const sent = socket.sent.at(-1)!
+    socket.message({
+      id: sent.id,
+      result: { kind: 'success', env: { BAD: null } },
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('routes commit events only to the pending owning request', async () => {
     const { client: value, socket } = await connected()
     const first = vi.fn()

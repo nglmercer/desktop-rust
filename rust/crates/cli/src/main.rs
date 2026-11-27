@@ -142,6 +142,8 @@ enum PublishAction {
 enum Action {
     #[command(name = "__credential-helper", hide = true)]
     CredentialHelper { operation: String },
+    #[command(name = "__printenvz", hide = true)]
+    Printenvz,
     /// Open a file or repository in the selected editor, preserving the terminal.
     Editor {
         path: Option<PathBuf>,
@@ -716,6 +718,10 @@ async fn async_main() -> Result<std::process::ExitCode> {
         desktop_core::git_credential_helper(operation).await?;
         return Ok(std::process::ExitCode::SUCCESS);
     }
+    if matches!(cli.command, Action::Printenvz) {
+        desktop_core::printenvz::print_environment()?;
+        return Ok(std::process::ExitCode::SUCCESS);
+    }
     // Passthrough keeps the executable/TTY/signal contract; serve owns its lifecycle.
     if matches!(
         cli.command,
@@ -810,7 +816,7 @@ async fn run(mut cli: Cli) -> Result<()> {
         repository_scope.record_id = Some(record.id);
     }
     match cli.command {
-        Action::CredentialHelper { .. } => unreachable!("private helper handled before repository startup"),
+        Action::CredentialHelper { .. } | Action::Printenvz => unreachable!("private helper handled before repository startup"),
         Action::Editor {path,list} => {
             let configuration = registry(cli.config)?.preferences().read()?.external_editor;
             if list {

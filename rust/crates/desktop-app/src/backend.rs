@@ -150,6 +150,10 @@ enum GitInfoOperation {
     Read {},
     Version {},
     GlobalConfigPath {},
+    RendererShellEnv {
+        cwd: Option<String>,
+        shell_kind: Option<String>,
+    },
     AvailableEditors {},
     AvailableTerminals {},
     ReleaseChangelog {
@@ -2920,6 +2924,7 @@ impl Backend {
                         return match operation {
                             GitInfoOperation::Version {} => desktop_backend::git_version().await.map(serde_json::Value::String),
                             GitInfoOperation::GlobalConfigPath {} => desktop_backend::git_global_config_path().await.map(serde_json::Value::String),
+                            GitInfoOperation::RendererShellEnv { cwd, shell_kind } => desktop_backend::renderer_shell_env(cwd, shell_kind).await,
                             GitInfoOperation::AvailableEditors {} => desktop_backend::available_editors(desktop_backend::ExternalEditor::Automatic).await,
                             GitInfoOperation::AvailableTerminals {} => desktop_backend::available_terminals().await,
                             GitInfoOperation::ReleaseChangelog { channel, limit } => desktop_backend::release_changelog(channel, limit).await,

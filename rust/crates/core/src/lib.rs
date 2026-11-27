@@ -46,7 +46,9 @@ mod hook_proxy {
 #[cfg(unix)]
 mod hook_trace;
 mod hooks;
+pub mod printenvz;
 mod renderer_credential;
+mod shell_env;
 pub use branch_policy::{BranchPermissions, BranchPolicy, DefaultBranch};
 mod commit;
 mod commit_checkpoint;
@@ -132,6 +134,7 @@ mod process;
 mod push_error;
 mod stream_redaction;
 pub use github::{GitHubAction, GitHubRequest, execute_github};
+pub use shell_env::renderer_shell_env;
 mod protocol;
 mod registry;
 mod status;
