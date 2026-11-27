@@ -10,7 +10,7 @@
   "imports.keytar": 1,
   "imports.async_hooks": 1,
   "imports.net": 1,
-  "imports.stream": 1,
+  "imports.stream": 0,
   "imports.stream_promises": 1,
   "imports.path": 66,
   "imports.desktop_trampoline": 1,

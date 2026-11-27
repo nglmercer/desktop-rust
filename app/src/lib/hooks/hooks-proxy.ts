@@ -4,7 +4,6 @@ import type { ProcessProxyConnection as Connection } from 'process-proxy'
 import type { HookCallbackOptions } from '../git'
 import type { ShellEnvResult } from './get-shell-env'
 import { shellFriendlyNames } from './config'
-import type { Writable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { memoizeOne } from '../memoize-one'
 import { which } from '../executable-path'
@@ -68,7 +67,11 @@ const debug = (message: string, error?: Error) => {
   log.debug(`hooks: ${message}`, error)
 }
 
-const writeline = (stream: Writable, msg: string) =>
+type HookOutputStream = {
+  write(text: string, callback: (error?: Error | null) => void): unknown
+}
+
+const writeline = (stream: HookOutputStream, msg: string) =>
   new Promise<void>((resolve, reject) => {
     stream.write(`${msg}\n`, err => (err ? reject(err) : resolve()))
   })
