@@ -34,6 +34,9 @@ include_dir = "0.7"
 uuid = { workspace = true, features = ["serde"] }
 url = "2"
 
+[dev-dependencies]
+base64.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 

@@ -82,6 +82,14 @@ struct ReadRequest {
     #[serde(default)]
     parent: Option<String>,
     #[serde(default)]
+    initial_sha: Option<String>,
+    #[serde(default)]
+    trees: Option<Vec<String>>,
+    #[serde(default)]
+    messages: Option<Vec<String>>,
+    #[serde(default)]
+    sign_off: Option<bool>,
+    #[serde(default)]
     entries: Option<Vec<desktop_backend::AssistedCommitIndexTreeEntry>>,
     #[serde(default)]
     index_entries_base64: Option<String>,
@@ -437,6 +445,7 @@ enum ReadMethod {
     AssistedCommitBlob,
     AssistedCommitHashBlob,
     AssistedCommitVerifyCreatedCommit,
+    AssistedCommitValidateMessages,
     AssistedCommitCaptureConfig,
     AssistedCommitIndexTree,
     AssistedCommitTreeRevision,
@@ -1421,6 +1430,28 @@ impl Backend {
                 "path only applies to assisted tree entry and diff driver reads".into(),
             ));
         }
+        if !matches!(&request.method, ReadMethod::AssistedCommitValidateMessages) {
+            if request.initial_sha.is_some() {
+                return Err(AppError::BadArgs(
+                    "initial_sha only applies to assisted message validation".into(),
+                ));
+            }
+            if request.trees.is_some() {
+                return Err(AppError::BadArgs(
+                    "trees only applies to assisted message validation".into(),
+                ));
+            }
+            if request.messages.is_some() {
+                return Err(AppError::BadArgs(
+                    "messages only applies to assisted message validation".into(),
+                ));
+            }
+            if request.sign_off.is_some() {
+                return Err(AppError::BadArgs(
+                    "sign_off only applies to assisted message validation".into(),
+                ));
+            }
+        }
         if !matches!(
             &request.method,
             ReadMethod::AssistedCommitVerifyCreatedCommit
@@ -1939,6 +1970,47 @@ impl Backend {
                         tree: request
                             .tree
                             .ok_or_else(|| AppError::BadArgs("tree is required".into()))?,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitValidateMessages
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.tree.is_none()
+                        && request.sha.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none()
+                        && request.bytes_base64.is_none()
+                        && request.parent.is_none() =>
+                {
+                    Operation::AssistedCommitValidateMessages {
+                        initial_sha: request.initial_sha,
+                        trees: request
+                            .trees
+                            .ok_or_else(|| AppError::BadArgs("trees are required".into()))?,
+                        messages: request
+                            .messages
+                            .ok_or_else(|| AppError::BadArgs("messages are required".into()))?,
+                        sign_off: request.sign_off.unwrap_or(false),
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -3210,6 +3282,18 @@ mod tests {
                 assert_eq!(verified["replacement_or_graft"], false);
                 assert_eq!(verified["hook_index_tree"], tree);
                 assert!(verified["object_base64"].as_str().unwrap().len() > 8);
+                let validation = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_validate_messages","initial_sha":null,"trees":[tree],"messages":["Validation subject\n\nValidation body\n"],"sign_off":false,"environment":{"GIT_DIR":root.join(".git"),"GIT_WORK_TREE":root,"GIT_OBJECT_DIRECTORY":root.join(".git/objects"),"GIT_INDEX_FILE":root.join(".git/index")}}),
+                    ])
+                    .unwrap();
+                let validation_object = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    validation["objects_base64"][0].as_str().unwrap(),
+                )
+                .unwrap();
+                assert!(String::from_utf8_lossy(&validation_object)
+                    .contains("Validation subject"));
                 assert!(
                     backend
                         .admit(vec![

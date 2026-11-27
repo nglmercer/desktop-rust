@@ -531,6 +531,14 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitValidateMessages {
+        initial_sha: Option<String>,
+        trees: Vec<String>,
+        messages: Vec<String>,
+        sign_off: bool,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitCaptureConfig {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,

@@ -836,6 +836,96 @@ function nodeBackend(t: TestContext) {
           }
           return result.stdout.trim()
         },
+        repositoryAssistedCommitValidateMessages: async (
+          path: string,
+          initialSha: string | null,
+          trees: ReadonlyArray<string>,
+          messages: ReadonlyArray<string>,
+          signOff: boolean,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const sourceGitDir = environment?.GIT_DIR
+          if (sourceGitDir === undefined) {
+            throw new Error(
+              'native validation requires the private Git directory'
+            )
+          }
+          const directory = await FileSystem.mkdtemp(
+            join(OS.tmpdir(), 'assisted-message-validation-test-')
+          )
+          try {
+            await FileSystem.mkdir(join(directory, 'objects'), {
+              recursive: true,
+            })
+            await FileSystem.mkdir(join(directory, 'refs', 'heads'), {
+              recursive: true,
+            })
+            await FileSystem.copyFile(
+              join(sourceGitDir, 'config'),
+              join(directory, 'config')
+            )
+            await FileSystem.writeFile(
+              join(directory, 'HEAD'),
+              initialSha === null
+                ? 'ref: refs/heads/message-validation\n'
+                : `${initialSha}\n`
+            )
+            const scratchEnvironment = {
+              ...environment,
+              GIT_DIR: directory,
+              GIT_COMMON_DIR: directory,
+              GIT_INDEX_FILE: join(directory, 'index'),
+            }
+            const noHooks = [
+              '-c',
+              `core.hooksPath=${join(directory, 'no-hooks')}`,
+              '-c',
+              'commit.gpgsign=false',
+            ]
+            const objects: Buffer[] = []
+            for (const [index, tree] of trees.entries()) {
+              const read = (await interceptingGitExec(actualExec)(
+                [...noHooks, 'read-tree', tree],
+                path,
+                { env: scratchEnvironment } as never
+              )) as Dugite.IGitStringResult
+              if (read.exitCode !== 0) {
+                throw new Error('Cannot prepare native message validation')
+              }
+              const commit = (await interceptingGitExec(actualExec)(
+                [
+                  ...noHooks,
+                  'commit',
+                  '--allow-empty',
+                  '--no-verify',
+                  '-F',
+                  '-',
+                  ...(signOff ? ['--signoff'] : []),
+                ],
+                path,
+                {
+                  env: scratchEnvironment,
+                  stdin: messages[index],
+                } as never
+              )) as Dugite.IGitStringResult
+              if (commit.exitCode !== 0) {
+                throw new Error('Cannot create native validation commit')
+              }
+              const object = (await interceptingGitExec(actualExec)(
+                ['cat-file', 'commit', 'HEAD'],
+                path,
+                { env: scratchEnvironment } as never
+              )) as Dugite.IGitStringResult
+              if (object.exitCode !== 0) {
+                throw new Error('Cannot read native validation commit')
+              }
+              objects.push(Buffer.from(object.stdout))
+            }
+            return objects
+          } finally {
+            await FileSystem.rm(directory, { recursive: true, force: true })
+          }
+        },
         repositoryAssistedCommitVerifyCreatedCommit: async (
           path: string,
           sha: string,

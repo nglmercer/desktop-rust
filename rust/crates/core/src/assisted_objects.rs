@@ -298,6 +298,134 @@ impl Repository {
         }))
     }
 
+    /// Run native commit-message validation in a host-owned scratch Git
+    /// directory. Objects remain those of the private assisted object view;
+    /// only refs, index, HEAD, and configuration are scratch state.
+    pub(crate) async fn assisted_commit_validate_messages(
+        &self,
+        initial_sha: Option<&str>,
+        trees: &[String],
+        messages: &[String],
+        sign_off: bool,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        validate_environment(environment)?;
+        anyhow::ensure!(
+            !trees.is_empty() && trees.len() == messages.len() && trees.len() <= 512,
+            "invalid native message validation plan"
+        );
+        if let Some(initial) = initial_sha {
+            object_id(initial, "initial validation commit")?;
+        }
+        let mut total_message_bytes = 0usize;
+        for tree in trees {
+            object_id(tree, "validation tree")?;
+        }
+        for message in messages {
+            anyhow::ensure!(
+                message.len() <= 1024 * 1024 && !message.contains('\0'),
+                "invalid validation commit message"
+            );
+            total_message_bytes = total_message_bytes.saturating_add(message.len());
+        }
+        anyhow::ensure!(
+            total_message_bytes <= 16 * 1024 * 1024,
+            "validation commit messages are too large"
+        );
+        let source_git_dir = environment
+            .get("GIT_DIR")
+            .and_then(|value| value.as_deref())
+            .ok_or_else(|| {
+                anyhow::anyhow!("native validation requires the private Git directory")
+            })?;
+        anyhow::ensure!(
+            Path::new(source_git_dir).is_absolute() && source_git_dir.len() <= 65536,
+            "invalid private Git directory"
+        );
+        let config = std::fs::read(Path::new(source_git_dir).join("config"))?;
+        anyhow::ensure!(
+            config.len() <= 1024 * 1024,
+            "private configuration is too large"
+        );
+
+        let scratch = TemporaryIndexDirectory::create()?;
+        std::fs::create_dir_all(scratch.path.join("objects"))?;
+        std::fs::create_dir_all(scratch.path.join("refs").join("heads"))?;
+        std::fs::write(scratch.path.join("config"), config)?;
+        std::fs::write(
+            scratch.path.join("HEAD"),
+            match initial_sha {
+                Some(sha) => format!("{sha}\n"),
+                None => "ref: refs/heads/message-validation\n".to_owned(),
+            },
+        )?;
+        let mut hooks_argument = std::ffi::OsString::from("core.hooksPath=");
+        hooks_argument.push(scratch.path.join("no-hooks").as_os_str());
+        let mut scratch_environment = environment.clone();
+        let scratch_path = scratch.path.to_string_lossy().into_owned();
+        let index_path = scratch.path.join("index").to_string_lossy().into_owned();
+        scratch_environment.insert("GIT_DIR".to_owned(), Some(scratch_path.clone()));
+        scratch_environment.insert("GIT_COMMON_DIR".to_owned(), Some(scratch_path));
+        scratch_environment.insert("GIT_INDEX_FILE".to_owned(), Some(index_path));
+
+        let mut objects = Vec::new();
+        for (tree, message) in trees.iter().zip(messages) {
+            let read_tree = crate::process::run_git_with_environment(
+                &self.path,
+                &[
+                    "-c".into(),
+                    hooks_argument.clone(),
+                    "-c".into(),
+                    "commit.gpgsign=false".into(),
+                    "read-tree".into(),
+                    tree.clone().into(),
+                ],
+                None,
+                None,
+                &scratch_environment,
+            )
+            .await?;
+            anyhow::ensure!(
+                read_tree.code == 0,
+                "Cannot prepare native message validation"
+            );
+            let mut commit_command = vec![
+                "-c".into(),
+                hooks_argument.clone(),
+                "-c".into(),
+                "commit.gpgsign=false".into(),
+                "commit".into(),
+                "--allow-empty".into(),
+                "--no-verify".into(),
+                "-F".into(),
+                "-".into(),
+            ];
+            if sign_off {
+                commit_command.push("--signoff".into());
+            }
+            let commit = crate::process::run_git_with_environment(
+                &self.path,
+                &commit_command,
+                Some(message.as_bytes().to_vec()),
+                None,
+                &scratch_environment,
+            )
+            .await?;
+            anyhow::ensure!(commit.code == 0, "Cannot create native validation commit");
+            let object = crate::process::run_git_with_environment(
+                &self.path,
+                &args(&["cat-file", "commit", "HEAD"]),
+                None,
+                None,
+                &scratch_environment,
+            )
+            .await?;
+            anyhow::ensure!(object.code == 0, "Cannot read native validation commit");
+            objects.push(STANDARD.encode(object.stdout));
+        }
+        Ok(json!({"objects_base64":objects}))
+    }
+
     /// Construct a tree through a private scratch index, optionally returning
     /// the resulting index bytes for the transaction's final synchronization
     /// check. The renderer never controls the scratch index location.

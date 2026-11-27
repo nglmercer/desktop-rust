@@ -750,6 +750,23 @@ impl Repository {
                     )
                     .await;
             }
+            Operation::AssistedCommitValidateMessages {
+                initial_sha,
+                trees,
+                messages,
+                sign_off,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_validate_messages(
+                        initial_sha.as_deref(),
+                        &trees,
+                        &messages,
+                        sign_off,
+                        &environment,
+                    )
+                    .await;
+            }
             Operation::AssistedCommitCaptureConfig { environment } => {
                 return self.assisted_commit_capture_config(&environment).await;
             }
@@ -1642,6 +1659,7 @@ impl Repository {
             | AssistedCommitBlob { .. }
             | AssistedCommitHashBlob { .. }
             | AssistedCommitVerifyCreatedCommit { .. }
+            | AssistedCommitValidateMessages { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
             | AssistedCommitIndexTree { .. }

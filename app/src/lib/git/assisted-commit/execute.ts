@@ -1,4 +1,3 @@
-import { copyFile, mkdir, rm, writeFile } from '../../../web/fs-promises'
 import { lstatSync } from '../../../web/fs'
 import { CommitIdentity } from '../../../models/commit-identity'
 import { join } from 'path'
@@ -89,104 +88,51 @@ export async function getAssistedCommitExecutionMetadata(
     )
   }
   const configuration = { env: data.environment }
-  const messages: string[] = []
-  const directory = join(data.temporaryDirectory, 'message-validation')
-  const preview = {
-    repository: data.repository,
-    environment: {
-      ...data.environment,
-      GIT_DIR: directory,
-      GIT_COMMON_DIR: directory,
-      GIT_INDEX_FILE: join(directory, 'index'),
-    },
-  }
   data.phase = 'validating'
-  let failure: unknown
-  let failed = false
   try {
     checkAssistedCommitCancellation(options.signal)
     const author = await getAuthorIdentity(data.repository, configuration)
     const committer = await getCommitterIdentity(data.repository, configuration)
-    await mkdir(join(directory, 'objects'), { recursive: true })
-    await mkdir(join(directory, 'refs', 'heads'), { recursive: true })
-    await copyFile(
-      join(data.temporaryDirectory, 'config'),
-      join(directory, 'config')
-    )
-    await writeFile(
-      join(directory, 'HEAD'),
-      snapshot.originalHead.sha === null
-        ? 'ref: refs/heads/message-validation\n'
-        : `${snapshot.originalHead.sha}\n`
-    )
-    const noHooks = [
-      '-c',
-      `core.hooksPath=${join(directory, 'no-hooks')}`,
-      '-c',
-      'commit.gpgsign=false',
-    ]
-    for (const [index, commit] of validated.plan.commits.entries()) {
+    const inputMessages: string[] = []
+    for (const commit of validated.plan.commits) {
       checkAssistedCommitCancellation(options.signal)
-      const message = await formatCommitMessage(
-        data.repository,
-        {
-          summary: commit.title,
-          description: commit.description ?? '',
-          trailers: data.request.trailers,
-        },
-        configuration
+      inputMessages.push(
+        await formatCommitMessage(
+          data.repository,
+          {
+            summary: commit.title,
+            description: commit.description ?? '',
+            trailers: data.request.trailers,
+          },
+          configuration
+        )
       )
-      await privateGit(
-        preview,
-        [...noHooks, 'read-tree', validated.trees[index]],
-        'assistedCommitMessageValidationTree'
-      )
-      await privateGit(
-        preview,
-        [
-          ...noHooks,
-          'commit',
-          '--allow-empty',
-          '--no-verify',
-          '-F',
-          '-',
-          ...(data.request.signOffCommits ? ['--signoff'] : []),
-        ],
-        'assistedCommitNativeMessageValidation',
-        { stdin: message }
-      )
-      const object = await privateGit(
-        preview,
-        ['cat-file', 'commit', 'HEAD'],
-        'assistedCommitReadValidatedMessage'
-      )
-      const separator = object.stdout.indexOf('\n\n')
+    }
+    const objects = await backend().repositoryAssistedCommitValidateMessages(
+      data.repository.path,
+      snapshot.originalHead.sha,
+      validated.trees,
+      inputMessages,
+      data.request.signOffCommits,
+      objectReadEnvironment(data.environment),
+      options.signal
+    )
+    const messages: string[] = []
+    for (const object of objects) {
+      const stdout = object.toString('utf8')
+      const separator = stdout.indexOf('\n\n')
       if (separator === -1) {
         throw new AssistedCommitError(
           'commit-failed',
           'Could not read complete native commit message'
         )
       }
-      messages.push(object.stdout.slice(separator + 2))
+      messages.push(stdout.slice(separator + 2))
       checkAssistedCommitCancellation(options.signal)
     }
     return { author, committer, messages }
-  } catch (error) {
-    failed = true
-    failure = error
-    throw error
   } finally {
-    try {
-      await rm(directory, { recursive: true, force: true })
-    } catch (error) {
-      throw new AssistedCommitError(
-        'cleanup-failed',
-        'Could not clean up private native message validation',
-        { cause: failed ? new AggregateError([failure, error]) : error }
-      )
-    } finally {
-      data.phase = 'captured'
-    }
+    data.phase = 'captured'
   }
 }
 

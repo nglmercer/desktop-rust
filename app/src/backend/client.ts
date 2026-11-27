@@ -3928,6 +3928,63 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitValidateMessages(
+    repositoryPath: string,
+    initialSha: string | null,
+    trees: ReadonlyArray<string>,
+    messages: ReadonlyArray<string>,
+    signOff: boolean,
+    environment?: Record<string, string | undefined>,
+    signal?: AbortSignal
+  ): Promise<ReadonlyArray<Buffer>> {
+    const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+    if (
+      (initialSha !== null && !objectId.test(initialSha)) ||
+      trees.length === 0 ||
+      trees.length > 512 ||
+      trees.length !== messages.length ||
+      trees.some(tree => !objectId.test(tree)) ||
+      messages.some(
+        message => message.length > 1024 * 1024 || message.includes('\0')
+      ) ||
+      messages.reduce((sum, message) => sum + message.length, 0) >
+        16 * 1024 * 1024
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted message validation request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_validate_messages',
+      {
+        initial_sha: initialSha,
+        trees: [...trees],
+        messages: [...messages],
+        sign_off: signOff,
+        environment: serializeGitEnvironment(environment),
+      },
+      { signal }
+    )
+    if (
+      isRecord(value) &&
+      Array.isArray(value.objects_base64) &&
+      value.objects_base64.length === trees.length &&
+      value.objects_base64.every(
+        object => typeof object === 'string' && object.length <= 2 * 1024 * 1024
+      )
+    ) {
+      return value.objects_base64.map(object => Buffer.from(object, 'base64'))
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted message validation response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string
