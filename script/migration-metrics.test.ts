@@ -29,4 +29,10 @@ describe('migration baseline comparison', () => {
       'fresh: 1 has no baseline entry',
     ])
   })
+
+  it('treats a baseline measure removed from current metrics as stale', () => {
+    expect(compareWithBaseline({}, { retired: 2 }).regressions).toEqual([
+      'retired: baseline entry 2 is stale',
+    ])
+  })
 })

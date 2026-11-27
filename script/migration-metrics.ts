@@ -176,8 +176,13 @@ export function measure(): IMetrics {
   const tests = walk(path.join(root, 'app', 'test', 'unit'), file =>
     /(?:-test|\.test)\.(ts|tsx|js|jsx|mts|mjs)$/.test(file)
   )
-  // Vitest is the only JavaScript test runner. The compatibility counts remain
-  // in the metrics shape so the baseline can continue guarding the migration.
+  // Vitest runs every test, but files can still depend on the node:test
+  // compatibility layer through runtime imports or type-only dynamic imports.
+  const nodeTestPattern =
+    /(?:from\s*['"]node:test['"]|require\(\s*['"]node:test['"]\s*\)|import\(\s*['"]node:test['"]\s*\))/
+  const nodeTestFiles = tests.filter(file =>
+    nodeTestPattern.test(readFileSync(file, 'utf8'))
+  )
   const vitest = tests
 
   const rustLines = walk(path.join(root, 'rust', 'crates'), file =>
@@ -201,7 +206,7 @@ export function measure(): IMetrics {
     legacyGitCalls: legacyGit.reduce((a, b) => a + b, 0),
     legacyGitCallFiles: legacyGit.filter(n => n > 0).length,
     imports,
-    nodeTestFiles: tests.length - vitest.length,
+    nodeTestFiles: nodeTestFiles.length,
     vitestTestFiles: vitest.length,
     rustLines,
   }
@@ -242,6 +247,11 @@ export function compareWithBaseline(
       regressions.push(`${name}: ${value} is above the baseline ${limit}`)
     } else if (value < limit) {
       improvements.push(`${name}: ${value} is below the baseline ${limit}`)
+    }
+  }
+  for (const [name, value] of Object.entries(baseline)) {
+    if (!(name in current)) {
+      regressions.push(`${name}: baseline entry ${value} is stale`)
     }
   }
   return { regressions, improvements }

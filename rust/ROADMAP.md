@@ -6,28 +6,27 @@ release. `pnpm migration:status` is the live metric source;
 
 ## Current measured baseline
 
-Measured on 2026-11-26:
+The enforced numeric baseline lives in `rust/migration-baseline.json`; use
+`pnpm migration:status` for current values rather than copying them here.
 
-| Measure | Current | Done when |
+| Measure | Current state | Done when |
 | --- | --- | --- |
-| Renderer `transportKind` fallback checks | 0 in 0 files | 0 |
-| Renderer-driven Git command sites | 0 in 0 files | 0 |
-| Renderer `dugite` imports | 0 | 0 |
-| Renderer `fs` imports | 0 | 0 |
-| Renderer `child_process` imports | 0 | 0 |
-| Renderer `os` / `crypto` / `keytar` imports | 0 / 0 / 0 | 0 |
-| TypeScript tests outside Vitest | 0 | 0 |
+| Renderer `transportKind` fallback checks | Zero | 0 |
+| Renderer-driven Git command sites | Zero | 0 |
+| Renderer `dugite` / `os` / `crypto` / `keytar` imports | Zero | 0 |
+| Renderer `fs` / `child_process` / `async_hooks` / `net` / `path` / `registry-js` imports | Nonzero | 0 |
+| Test files importing the `node:test` compatibility API | Nonzero | 0 |
 
-These zeroes cover measured renderer entry points only. Compatibility shims,
-legacy host crates, credential/trampoline machinery, test fixtures, and release
-infrastructure remain migration work.
+These measurements cover renderer consumers outside the implementation of the
+compatibility shims themselves. Legacy host crates, credential/trampoline
+machinery, test fixtures, and release infrastructure remain migration work.
 
 ## Ordered work
 
 ### R0 — Guardrails
 
 - [x] Measure and enforce migration metrics.
-- [ ] Refresh documented numbers after verified slices.
+- [ ] Keep qualitative migration documentation aligned after verified slices.
 
 ### R1 — Rust-backed tests
 
@@ -65,8 +64,10 @@ infrastructure remain migration work.
 
 ### R5 — Renderer Node API removal
 
-- [x] Reach zero measured renderer imports for `dugite`, `fs`, `child_process`,
-      `os`, `crypto`, and `keytar`.
+- [x] Reach zero measured renderer imports for `dugite`, `os`, `crypto`, and
+      `keytar`.
+- [ ] Reach zero measured renderer imports for `fs`, `child_process`,
+      `async_hooks`, `net`, `path`, and `registry-js`.
 - [ ] Delete each `app/src/web/*` shim after production consumers and dependent
       tests no longer use it.
 
@@ -111,7 +112,8 @@ infrastructure remain migration work.
 
 ## Definition of done on Linux
 
-1. Migration metrics remain zero for renderer fallback and direct Node API rows.
+1. Migration metrics reach zero for renderer fallback, renderer-driven Git
+   command, compatibility-import, and `node:test` compatibility rows.
 2. The full validation gate in `MIGRATION.md` passes.
 3. Browser, cancellation, reconnect, large-repository, and package smoke evidence exists.
 4. Legacy shims, hosts, packages, and helpers have either been removed or have

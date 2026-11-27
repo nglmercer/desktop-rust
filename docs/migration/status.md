@@ -21,17 +21,20 @@ remaining worklist.
 
 ## Measured baseline
 
-Measured on 2026-11-26 and enforced by `pnpm migration:check`:
+The enforced numeric baseline lives in `rust/migration-baseline.json`; use
+`pnpm migration:status` for current values rather than copying them here.
 
-- Renderer `transportKind` fallback checks: **0 in 0 files**
-- Renderer-driven Git command sites: **0 in 0 files**
-- Renderer imports of `dugite`, `fs`, `child_process`, `os`, `crypto`, and
-  `keytar`: **0**
-- TypeScript test files outside Vitest: **0**
+- Renderer `transportKind` fallback checks and renderer-driven Git command
+  sites are zero.
+- Renderer imports of `dugite`, `os`, `crypto`, and `keytar` are zero.
+- Renderer imports of `fs`, `child_process`, `async_hooks`, `net`, `path`, and
+  `registry-js` remain nonzero.
+- Vitest runs every TypeScript test, but some test files still import the
+  `node:test` compatibility API.
 
-These measurements do not mean migration is complete. They exclude internal
-compatibility shims, host crates, test helpers, and workflows that still need
-runtime validation.
+These measurements do not mean migration is complete. They exclude the internal
+implementation of compatibility shims, host crates, test helpers, and workflows
+that still need runtime validation.
 
 ## Important open contracts
 
