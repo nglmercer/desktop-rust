@@ -1,5 +1,4 @@
 import { cp, mkdtemp, rm } from '../../web/fs-promises'
-import type { AddressInfo } from 'net'
 import { hostTemporaryDirectory } from '../host-environment'
 import { join } from 'path'
 import { createProxyProcessServer, getProxyCommandPath } from 'process-proxy'
@@ -26,6 +25,10 @@ const memoizedGetShellEnv = memoizeOne(
     return shellEnv
   }
 )
+
+type HookProxyAddress = {
+  readonly port: number
+}
 
 export type RendererHookEnvironment = {
   readonly config_parameters: string
@@ -112,7 +115,7 @@ export async function withHooksEnv<T>(
   )
   const port = await new Promise<number>(resolve => {
     server.listen(0, '127.0.0.1', () =>
-      resolve((server.address() as AddressInfo).port)
+      resolve((server.address() as HookProxyAddress).port)
     )
   })
   try {
