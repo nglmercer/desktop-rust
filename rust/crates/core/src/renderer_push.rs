@@ -668,6 +668,7 @@ mod tests {
                 interactive_hook_decision: false,
                 proxy: None,
                 hook_environment: None,
+                trampoline: None,
                 assisted: None,
             };
             (Self(root), request)
