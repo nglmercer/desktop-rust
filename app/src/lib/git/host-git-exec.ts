@@ -1,7 +1,10 @@
-// `dugite` for the webview build. git itself is run by the Rust shell
+// Host-owned Git execution adapter. Git itself runs in the Rust shell
 // (`desktop.io.git-exec`); the error tables and parsers are dugite's own.
-import { bundleUrl } from './bundle'
-import { spawn as spawnProcess, type ChildProcess } from './child_process'
+import { bundleUrl } from '../../web/bundle'
+import {
+  spawn as spawnProcess,
+  type ChildProcess,
+} from '../../web/child_process'
 // @ts-ignore -- aliased to dugite's build output in vite.config.ts
 import * as errors from 'desktop-dugite/errors'
 // @ts-ignore

@@ -5,7 +5,7 @@ import {
   IGitExecutionOptions as DugiteExecutionOptions,
   parseBadConfigValueErrorInfo,
   ExecError,
-} from '../../web/dugite'
+} from './host-git-exec'
 
 import { assertNever } from '../fatal-error'
 import * as GitPerf from '../../ui/lib/git-perf'

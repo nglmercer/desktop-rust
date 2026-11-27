@@ -284,10 +284,10 @@ before(async () => {
     ...Dugite,
     exec: interceptingGitExec(actualExec),
   }))
-  vi.doMock('../../../src/web/dugite.ts', async () => {
+  vi.doMock('../../../src/lib/git/host-git-exec.ts', async () => {
     const actual = await vi.importActual<
-      typeof import('../../../src/web/dugite')
-    >('../../../src/web/dugite.ts')
+      typeof import('../../../src/lib/git/host-git-exec')
+    >('../../../src/lib/git/host-git-exec.ts')
     return {
       ...actual,
       exec: interceptingGitExec(actual.exec as InterceptedGitExec),

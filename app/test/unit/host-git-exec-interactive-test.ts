@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, it } from 'vitest'
-import { exec, spawn, ExecError } from '../../src/web/dugite'
+import { exec, spawn, ExecError } from '../../src/lib/git/host-git-exec'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

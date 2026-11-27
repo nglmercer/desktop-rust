@@ -567,10 +567,6 @@ export default defineConfig({
           '/$1.js',
       },
       {
-        find: /^dugite$/,
-        replacement: path.resolve(__dirname, 'app/src/web/dugite.ts'),
-      },
-      {
         find: /^desktop-notifications$/,
         replacement: path.resolve(
           __dirname,

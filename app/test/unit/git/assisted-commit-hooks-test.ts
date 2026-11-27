@@ -58,10 +58,10 @@ before(async () => {
       nativeExecFault?.(args, cwd, options) ?? originalExec(args, cwd, options),
     resolveGitBinary: () => resolveBinary(),
   }))
-  vi.doMock('../../../src/web/dugite.ts', async () => {
+  vi.doMock('../../../src/lib/git/host-git-exec.ts', async () => {
     const actual = await vi.importActual<
-      typeof import('../../../src/web/dugite')
-    >('../../../src/web/dugite.ts')
+      typeof import('../../../src/lib/git/host-git-exec')
+    >('../../../src/lib/git/host-git-exec.ts')
     return {
       ...actual,
       exec: (
