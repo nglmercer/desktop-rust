@@ -502,14 +502,7 @@ export default defineConfig({
     copyStaticResources(),
     moveSourceMaps(),
     nodePolyfills({
-      include: [
-        'util',
-        'buffer',
-        'crypto',
-        'assert',
-        'events',
-        'string_decoder',
-      ],
+      include: ['buffer', 'crypto', 'events'],
       globals: { Buffer: true, global: true, process: true },
       protocolImports: true,
       // `crypto` is replaced for both import and require paths (the Copilot
