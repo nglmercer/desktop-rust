@@ -836,6 +836,51 @@ function nodeBackend(t: TestContext) {
           }
           return result.stdout.trim()
         },
+        repositoryAssistedCommitVerifyCreatedCommit: async (
+          path: string,
+          sha: string,
+          parent: string | null,
+          tree: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const run = async (args: string[], stdin?: string) =>
+            (await interceptingGitExec(actualExec)(args, path, {
+              env: environment,
+              stdin,
+            } as never)) as Dugite.IGitStringResult
+          const replacements = await run(['replace', '--list'])
+          if (replacements.exitCode !== 0) {
+            throw new Error('Cannot verify private replacement state')
+          }
+          const object = await run([
+            '--no-replace-objects',
+            'cat-file',
+            'commit',
+            sha,
+          ])
+          if (object.exitCode !== 0) {
+            throw new Error('Cannot read the created commit')
+          }
+          const written = await run(['write-tree'])
+          if (written.exitCode !== 0) {
+            throw new Error('Cannot verify the hook-visible index')
+          }
+          const gitDir = environment?.GIT_DIR
+          let grafts = false
+          if (gitDir !== undefined) {
+            try {
+              await FileSystem.lstat(join(gitDir, 'info', 'grafts'))
+              grafts = true
+            } catch {
+              grafts = false
+            }
+          }
+          return {
+            replacementOrGraft: replacements.stdout.length > 0 || grafts,
+            object: Buffer.from(object.stdout),
+            hookIndexTree: written.stdout.trim(),
+          }
+        },
         repositoryAssistedCommitIndexTree: async (
           path: string,
           base: string | null,

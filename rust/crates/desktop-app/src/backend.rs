@@ -80,6 +80,8 @@ struct ReadRequest {
     #[serde(default)]
     bytes_base64: Option<String>,
     #[serde(default)]
+    parent: Option<String>,
+    #[serde(default)]
     entries: Option<Vec<desktop_backend::AssistedCommitIndexTreeEntry>>,
     #[serde(default)]
     index_entries_base64: Option<String>,
@@ -434,6 +436,7 @@ enum ReadMethod {
     AssistedCommitTreeEntry,
     AssistedCommitBlob,
     AssistedCommitHashBlob,
+    AssistedCommitVerifyCreatedCommit,
     AssistedCommitCaptureConfig,
     AssistedCommitIndexTree,
     AssistedCommitTreeRevision,
@@ -1348,15 +1351,22 @@ impl Backend {
                 "filter only applies to renderer hook discovery".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::AssistedCommitTreeEntry) && request.tree.is_some()
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitTreeEntry | ReadMethod::AssistedCommitVerifyCreatedCommit
+        ) && request.tree.is_some()
         {
             return Err(AppError::BadArgs(
-                "tree only applies to assisted tree entry reads".into(),
+                "tree only applies to assisted tree entry reads and commit verification".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::AssistedCommitBlob) && request.sha.is_some() {
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitBlob | ReadMethod::AssistedCommitVerifyCreatedCommit
+        ) && request.sha.is_some()
+        {
             return Err(AppError::BadArgs(
-                "sha only applies to assisted blob reads".into(),
+                "sha only applies to assisted blob reads and commit verification".into(),
             ));
         }
         if !matches!(&request.method, ReadMethod::AssistedCommitAttributeSource)
@@ -1409,6 +1419,15 @@ impl Backend {
         {
             return Err(AppError::BadArgs(
                 "path only applies to assisted tree entry and diff driver reads".into(),
+            ));
+        }
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitVerifyCreatedCommit
+        ) && request.parent.is_some()
+        {
+            return Err(AppError::BadArgs(
+                "parent only applies to assisted commit verification".into(),
             ));
         }
         if !matches!(&request.method, ReadMethod::AssistedCommitHashBlob)
@@ -1883,6 +1902,43 @@ impl Backend {
                             .bytes_base64
                             .ok_or_else(|| AppError::BadArgs("bytes_base64 is required".into()))?,
                         path: request.path,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitVerifyCreatedCommit
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.path.is_none()
+                        && request.git_path.is_none()
+                        && request.paths.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none()
+                        && request.bytes_base64.is_none() =>
+                {
+                    Operation::AssistedCommitVerifyCreatedCommit {
+                        sha: request
+                            .sha
+                            .ok_or_else(|| AppError::BadArgs("sha is required".into()))?,
+                        parent: request.parent,
+                        tree: request
+                            .tree
+                            .ok_or_else(|| AppError::BadArgs("tree is required".into()))?,
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -3146,6 +3202,14 @@ mod tests {
                     .unwrap();
                 assert_ne!(copied["tree"], tree);
                 assert!(copied["index_base64"].is_null());
+                let verified = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_verify_created_commit","sha":head,"parent":null,"tree":tree,"environment":{"GIT_DIR":root.join(".git"),"GIT_INDEX_FILE":root.join(".git/index")}}),
+                    ])
+                    .unwrap();
+                assert_eq!(verified["replacement_or_graft"], false);
+                assert_eq!(verified["hook_index_tree"], tree);
+                assert!(verified["object_base64"].as_str().unwrap().len() > 8);
                 assert!(
                     backend
                         .admit(vec![

@@ -230,6 +230,74 @@ impl Repository {
         Ok(json!({"sha":sha}))
     }
 
+    /// Verify a commit object created in the private object view. The renderer
+    /// retains exact legacy validation/reporting; the host fixes every command
+    /// shape and returns bounded byte-preserving evidence.
+    pub(crate) async fn assisted_commit_verify_created_commit(
+        &self,
+        sha: &str,
+        parent: Option<&str>,
+        tree: &str,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        object_id(sha, "created commit")?;
+        if let Some(parent) = parent {
+            object_id(parent, "created commit parent")?;
+        }
+        object_id(tree, "planned tree")?;
+        validate_environment(environment)?;
+        let git_dir = environment
+            .get("GIT_DIR")
+            .and_then(|value| value.as_deref())
+            .ok_or_else(|| anyhow::anyhow!("private commit verification requires GIT_DIR"))?;
+        anyhow::ensure!(
+            Path::new(git_dir).is_absolute() && git_dir.len() <= 65536,
+            "invalid private Git directory"
+        );
+
+        let replacements = crate::process::run_git_with_environment(
+            &self.path,
+            &args(&["replace", "--list"]),
+            None,
+            None,
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(
+            replacements.code == 0,
+            "Cannot verify private replacement state"
+        );
+        let grafts = match std::fs::metadata(Path::new(git_dir).join("info").join("grafts")) {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        let object = crate::process::run_git_with_environment_limit(
+            &self.path,
+            &args(&["--no-replace-objects", "cat-file", "commit", sha]),
+            None,
+            None,
+            environment,
+            16 * 1024 * 1024,
+        )
+        .await?;
+        anyhow::ensure!(object.code == 0, "Cannot read the created commit");
+        let index_tree = crate::process::run_git_with_environment(
+            &self.path,
+            &args(&["write-tree"]),
+            None,
+            None,
+            environment,
+        )
+        .await?;
+        anyhow::ensure!(index_tree.code == 0, "Cannot verify the hook-visible index");
+        Ok(json!({
+            "replacement_or_graft": !replacements.stdout.is_empty() || grafts,
+            "object_base64": STANDARD.encode(&object.stdout),
+            "hook_index_tree": output_line(&index_tree.stdout, "hook index tree")?,
+        }))
+    }
+
     /// Construct a tree through a private scratch index, optionally returning
     /// the resulting index bytes for the transaction's final synchronization
     /// check. The renderer never controls the scratch index location.

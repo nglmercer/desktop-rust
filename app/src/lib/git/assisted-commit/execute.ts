@@ -33,7 +33,6 @@ import {
   privateGit,
   readHead,
   readIndexState,
-  readOptionalFile,
   releaseIndexLock,
   removeGitLineEnding,
   verifyHead,
@@ -252,38 +251,31 @@ async function verifyCreatedCommit(
   parent: string | null,
   tree: string
 ): Promise<IAssistedCommitCreatedCommit> {
-  const replacements = await privateGit(
-    data,
-    ['replace', '--list'],
-    'assistedCommitVerifyPrivateHistory'
-  )
-  if (
-    replacements.stdout.length > 0 ||
-    (await readOptionalFile(
-      join(data.temporaryDirectory, 'info', 'grafts')
-    )) !== null
-  ) {
+  const verification =
+    await backend().repositoryAssistedCommitVerifyCreatedCommit(
+      data.repository.path,
+      sha,
+      parent,
+      tree,
+      objectReadEnvironment(data.environment)
+    )
+  if (verification.replacementOrGraft) {
     throw new AssistedCommitError(
       'commit-failed',
       'A hook introduced private replacement or grafted history'
     )
   }
-  const object = await privateGit(
-    data,
-    ['--no-replace-objects', 'cat-file', 'commit', sha],
-    'assistedCommitVerifyCommit'
-  )
-  const separator = object.stdout.indexOf('\n\n')
-  const header = object.stdout.slice(0, separator).split('\n')
+  const stdout = verification.object.toString('utf8')
+  const separator = stdout.indexOf('\n\n')
+  const header = stdout.slice(0, separator).split('\n')
   const parents: string[] = []
   let parentEnd = 1
   while (header[parentEnd]?.startsWith('parent ')) {
     parents.push(header[parentEnd].slice(7))
     parentEnd++
   }
-  const message = object.stdout.slice(separator + 2)
+  const message = stdout.slice(separator + 2)
   if (
-    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha) ||
     separator === -1 ||
     header[0] !== `tree ${tree}` ||
     parents.length !== (parent === null ? 0 : 1) ||
@@ -296,12 +288,7 @@ async function verifyCreatedCommit(
       `Git or a hook created unexpected commit content or history (${sha})`
     )
   }
-  const indexTree = await privateGit(
-    data,
-    ['write-tree'],
-    'assistedCommitVerifyHookIndex'
-  )
-  if (removeGitLineEnding(indexTree.stdout) !== tree) {
+  if (verification.hookIndexTree !== tree) {
     throw new AssistedCommitError(
       'commit-failed',
       'A hook staged content outside the planned cumulative tree'

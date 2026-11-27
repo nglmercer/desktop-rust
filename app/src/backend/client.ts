@@ -3876,6 +3876,58 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitVerifyCreatedCommit(
+    repositoryPath: string,
+    sha: string,
+    parent: string | null,
+    tree: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<{
+    readonly replacementOrGraft: boolean
+    readonly object: Buffer
+    readonly hookIndexTree: string
+  }> {
+    const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+    if (
+      !objectId.test(sha) ||
+      (parent !== null && !objectId.test(parent)) ||
+      !objectId.test(tree)
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted commit verification request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_verify_created_commit',
+      { sha, parent, tree, environment: serializeGitEnvironment(environment) }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.replacement_or_graft === 'boolean' &&
+      typeof value.object_base64 === 'string' &&
+      value.object_base64.length <= 24 * 1024 * 1024 &&
+      typeof value.hook_index_tree === 'string' &&
+      objectId.test(value.hook_index_tree)
+    ) {
+      const object = Buffer.from(value.object_base64, 'base64')
+      if (object.length <= 16 * 1024 * 1024) {
+        return {
+          replacementOrGraft: value.replacement_or_graft,
+          object,
+          hookIndexTree: value.hook_index_tree,
+        }
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted commit verification response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

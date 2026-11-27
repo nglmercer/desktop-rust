@@ -735,6 +735,21 @@ impl Repository {
                     .assisted_commit_hash_blob(&bytes_base64, path, &environment)
                     .await;
             }
+            Operation::AssistedCommitVerifyCreatedCommit {
+                sha,
+                parent,
+                tree,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_verify_created_commit(
+                        &sha,
+                        parent.as_deref(),
+                        &tree,
+                        &environment,
+                    )
+                    .await;
+            }
             Operation::AssistedCommitCaptureConfig { environment } => {
                 return self.assisted_commit_capture_config(&environment).await;
             }
@@ -1626,6 +1641,7 @@ impl Repository {
             | AssistedCommitTreeEntry { .. }
             | AssistedCommitBlob { .. }
             | AssistedCommitHashBlob { .. }
+            | AssistedCommitVerifyCreatedCommit { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
             | AssistedCommitIndexTree { .. }
