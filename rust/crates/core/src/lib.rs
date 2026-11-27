@@ -763,6 +763,36 @@ impl Repository {
                     .assisted_commit_frozen_diff(&base, &tree, &paths, &environment)
                     .await;
             }
+            Operation::AssistedCommitCertifyDiff {
+                base,
+                path,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_certify_diff(base.as_deref(), &path, &environment)
+                    .await;
+            }
+            Operation::AssistedCommitNativeFullConversion {
+                base_tree,
+                revision,
+                path,
+                bytes_base64,
+                mode,
+                filter_output,
+                environment,
+            } => {
+                return self
+                    .assisted_commit_native_full_conversion(
+                        &base_tree,
+                        &revision,
+                        &path,
+                        &bytes_base64,
+                        &mode,
+                        &filter_output,
+                        &environment,
+                    )
+                    .await;
+            }
             Operation::AssistedCommitValidateMessages {
                 initial_sha,
                 trees,
@@ -1675,6 +1705,8 @@ impl Repository {
             | AssistedCommitValidateMessages { .. }
             | AssistedCommitPrivateTip { .. }
             | AssistedCommitFrozenDiff { .. }
+            | AssistedCommitCertifyDiff { .. }
+            | AssistedCommitNativeFullConversion { .. }
             | AssistedCommitDiffDriver { .. }
             | AssistedCommitCaptureConfig { .. }
             | AssistedCommitIndexTree { .. }

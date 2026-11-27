@@ -4059,6 +4059,105 @@ export class BackendClient {
     })
   }
 
+  async repositoryAssistedCommitCertifyDiff(
+    repositoryPath: string,
+    base: string | null,
+    path: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<Buffer> {
+    const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+    if (
+      (base !== null && !objectId.test(base)) ||
+      path.length === 0 ||
+      path.length > 65536 ||
+      path.includes('\0')
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted certification diff request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_certify_diff',
+      {
+        base,
+        path,
+        environment: serializeGitEnvironment(environment),
+      }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.bytes_base64 === 'string' &&
+      value.bytes_base64.length <= 96 * 1024 * 1024
+    ) {
+      const bytes = Buffer.from(value.bytes_base64, 'base64')
+      if (bytes.length <= 64 * 1024 * 1024) {
+        return bytes
+      }
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted certification diff response',
+      retryable: false,
+    })
+  }
+
+  async repositoryAssistedCommitNativeFullConversion(
+    repositoryPath: string,
+    baseTree: string,
+    revision: string,
+    path: string,
+    bytes: Buffer,
+    mode: string,
+    filterOutput: string,
+    environment?: Record<string, string | undefined>
+  ): Promise<string> {
+    const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+    if (
+      !objectId.test(baseTree) ||
+      !objectId.test(revision) ||
+      path.length === 0 ||
+      path.length > 65536 ||
+      path.includes('\0') ||
+      bytes.length > 512 * 1024 * 1024 ||
+      !['100644', '100755'].includes(mode) ||
+      filterOutput.length > 2 * 1024 * 1024
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid assisted native conversion request',
+        retryable: false,
+      })
+    }
+    const value = await this.repositoryRead(
+      repositoryPath,
+      'assisted_commit_native_full_conversion',
+      {
+        base: baseTree,
+        revision,
+        path,
+        bytes_base64: bytes.toString('base64'),
+        mode,
+        filter_output: filterOutput,
+        environment: serializeGitEnvironment(environment),
+      }
+    )
+    if (
+      isRecord(value) &&
+      typeof value.sha === 'string' &&
+      objectId.test(value.sha)
+    ) {
+      return value.sha
+    }
+    throw new BackendError({
+      code: 'invalid_response',
+      message: 'Invalid assisted native conversion response',
+      retryable: false,
+    })
+  }
+
   async repositoryAssistedCommitGitPath(
     repositoryPath: string,
     gitPath: string

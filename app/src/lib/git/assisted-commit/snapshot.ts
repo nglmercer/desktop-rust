@@ -1,17 +1,14 @@
 import { randomUUID } from '../../../web/random-uuid'
 import { Stats } from '../../../web/fs'
 import {
-  chmod,
   lstat,
-  mkdir,
   mkdtemp,
   readFile,
   realpath,
   rm,
-  writeFile,
 } from '../../../web/fs-promises'
 import { tmpdir } from '../../../web/os'
-import { dirname, join } from 'path'
+import { join } from 'path'
 import {
   IAssistedCommitChange,
   IAssistedCommitSnapshot,
@@ -44,13 +41,11 @@ import {
   hashBlob,
   initializePrivateRepository,
   objectReadEnvironment,
-  privateGit,
   readBlob,
   readHeadContext,
   readIndexState,
   readSelectedFileState,
   readTreeEntry,
-  removeGitLineEnding,
   splitByteLines,
   validateSelectedPath,
   verifyHead,
@@ -68,10 +63,6 @@ import {
 import { IAssistedCommitOperationOptions } from './progress'
 
 const MaximumSplittableBytes = 4 * 1024 * 1024
-const ParsedDiffConfiguration: ReadonlyArray<string> = [
-  '-c',
-  'diff.suppressBlankEmpty=false',
-]
 
 interface IAssistedCommitCleanup {
   readonly directory: string
@@ -162,28 +153,6 @@ export async function retryAssistedCommitCleanup(
   } finally {
     cleanup.disposing = false
   }
-}
-
-function frozenInputFilterConfiguration(output: string): ReadonlyArray<string> {
-  const options: string[] = []
-  for (const field of output.split('\0').filter(field => field.length > 0)) {
-    const delimiter = field.indexOf('\n')
-    if (delimiter === -1) {
-      throw new AssistedCommitError(
-        'unsafe-selection',
-        'Cannot freeze malformed Git filter configuration'
-      )
-    }
-    const key = field.slice(0, delimiter)
-    const command = field.slice(delimiter + 1)
-    if (command.length > 0) {
-      options.push(
-        '-c',
-        `${key}=(cd -- "$DESKTOP_ASSISTED_CAPTURE_ROOT" && export GIT_WORK_TREE="$DESKTOP_ASSISTED_CAPTURE_ROOT" && {\n${command}\n})`
-      )
-    }
-  }
-  return options
 }
 
 function cloneFile(
@@ -347,7 +316,7 @@ function selectedText(
 }
 
 async function frozenDiff(
-  data: Parameters<typeof privateGit>[0],
+  data: Pick<IAssistedCommitData, 'repository' | 'environment'>,
   base: string,
   tree: string,
   paths: ReadonlyArray<string>,
@@ -358,7 +327,7 @@ async function frozenDiff(
     base,
     tree,
     paths,
-    objectReadEnvironment(data.environment)
+    data.environment
   )
   const text = bytes.toString('utf8')
   const parsed =
@@ -369,7 +338,7 @@ async function frozenDiff(
 }
 
 async function ensurePartialDiffIsUntransformed(
-  data: Parameters<typeof privateGit>[0],
+  data: Pick<IAssistedCommitData, 'repository' | 'environment'>,
   path: string
 ): Promise<void> {
   const result = await backend().repositoryAssistedCommitDiffDriver(
@@ -466,10 +435,6 @@ export async function captureAssistedCommitSnapshot(
     const context = { repository, environment, temporaryDirectory }
     const originalEntries =
       await backend().repositoryAssistedCommitIndexEntries(repository.path)
-    const noIndexHooks = [
-      '-c',
-      `core.hooksPath=${join(temporaryDirectory, 'no-hooks')}`,
-    ]
     const indexedAttributesTree = (
       await backend().repositoryAssistedCommitIndexTree(repository.path, null, {
         indexEntries: originalEntries,
@@ -545,11 +510,6 @@ export async function captureAssistedCommitSnapshot(
     )
     const trackExecutable = captureConfig.filemode !== false
     const symlinkPlaceholders = captureConfig.symlinks === false
-    const filterConfiguration = frozenInputFilterConfiguration(
-      captureConfig.filterOutput
-    )
-    const captureWorkingTree = join(temporaryDirectory, 'capture-worktree')
-    await mkdir(captureWorkingTree)
     const capturedFiles = []
     for (const file of request.files) {
       checkAssistedCommitCancellation(options.signal)
@@ -656,92 +616,18 @@ export async function captureAssistedCommitSnapshot(
         base !== null &&
         base.mode !== '120000'
       ) {
-        const capturedPath = join(captureWorkingTree, file.path)
-        await mkdir(dirname(capturedPath), { recursive: true })
-        await writeFile(capturedPath, state.bytes)
-        await chmod(capturedPath, mode === '100755' ? 0o555 : 0o444)
-        const nativeIndex = join(temporaryDirectory, 'native-full-index')
-        const env = { GIT_INDEX_FILE: nativeIndex }
-        await privateGit(
-          context,
-          [...noIndexHooks, 'read-tree', baseTree],
-          'assistedCommitNativeFullBase',
-          { env }
-        )
-        const native = await privateGit(
-          context,
-          [
-            ...filterConfiguration,
-            '-c',
-            'diff.noprefix=false',
-            '-c',
-            'diff.mnemonicPrefix=false',
-            'diff',
-            '--src-prefix=a/',
-            '--dst-prefix=b/',
-            '--binary',
-            '--full-index',
-            '--no-ext-diff',
-            '--no-textconv',
-            '--no-renames',
-            '--no-color',
-            '--patch',
-            '--unified=3',
-            '-O',
-            '/dev/null',
-            '--end-of-options',
+        const sha =
+          await backend().repositoryAssistedCommitNativeFullConversion(
+            repository.path,
+            baseTree,
             head.sha ?? baseTree,
-            '--',
             file.path,
-          ],
-          'assistedCommitCaptureNativeFullConversion',
-          {
-            encoding: 'buffer',
-            env: {
-              ...env,
-              GIT_OPTIONAL_LOCKS: '0',
-              GIT_WORK_TREE: captureWorkingTree,
-              DESKTOP_ASSISTED_CAPTURE_ROOT: root,
-              GIT_DIFF_OPTS: '--unified=3',
-            },
-          }
-        )
-        if (native.stdout.length > 0) {
-          await privateGit(
-            context,
-            [
-              ...noIndexHooks,
-              'apply',
-              '--cached',
-              '--binary',
-              '--whitespace=nowarn',
-              '-',
-            ],
-            'assistedCommitApplyFrozenNativeFull',
-            { env, stdin: native.stdout }
+            state.bytes,
+            mode,
+            captureConfig.filterOutput,
+            context.environment
           )
-        }
-        const nativeTree = removeGitLineEnding(
-          (
-            await privateGit(
-              context,
-              [...noIndexHooks, 'write-tree'],
-              'assistedCommitNativeFullTree',
-              { env }
-            )
-          ).stdout
-        )
-        const nativeEntry = await readTreeEntry(context, nativeTree, file.path)
-        if (
-          nativeEntry === null ||
-          !['100644', '100755'].includes(nativeEntry.mode)
-        ) {
-          throw new AssistedCommitError(
-            'unsafe-selection',
-            'Native conversion did not preserve the selected regular file'
-          )
-        }
-        full = { path: file.path, mode, sha: nativeEntry.sha }
+        full = { path: file.path, mode, sha }
       }
       const fullBytes = await readBlob(context, full)
       const fullTree = await writeTree(context, baseTree, [
@@ -779,46 +665,15 @@ export async function captureAssistedCommitSnapshot(
       }
       if (partial) {
         await ensurePartialDiffIsUntransformed(context, file.path)
-        const nativeArgs =
-          base === null
-            ? [
-                'diff',
-                '--no-index',
-                '--no-ext-diff',
-                '--no-textconv',
-                '--no-color',
-                '--patch',
-                '--',
-                '/dev/null',
-                file.path,
-              ]
-            : [
-                'diff',
-                '--no-ext-diff',
-                '--no-textconv',
-                '--no-renames',
-                '--no-color',
-                '--patch',
-                '--end-of-options',
-                head.sha ?? baseTree,
-                '--',
-                file.path,
-              ]
-        const native = await privateGit(
-          context,
-          [...ParsedDiffConfiguration, ...nativeArgs],
-          'assistedCommitCertifyPartialDiff',
-          {
-            encoding: 'buffer',
-            successExitCodes: new Set([0, 1]),
-            env: {
-              GIT_OPTIONAL_LOCKS: '0',
-            },
-          }
+        const native = await backend().repositoryAssistedCommitCertifyDiff(
+          repository.path,
+          base === null ? null : (head.sha ?? baseTree),
+          file.path,
+          context.environment
         )
-        const nativeText = native.stdout.toString('utf8')
+        const nativeText = native.toString('utf8')
         if (
-          !Buffer.from(nativeText, 'utf8').equals(native.stdout) ||
+          !Buffer.from(nativeText, 'utf8').equals(native) ||
           diff.parsed === null
         ) {
           throw new AssistedCommitError(

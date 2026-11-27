@@ -542,6 +542,23 @@ pub enum Operation {
         #[serde(default)]
         environment: std::collections::BTreeMap<String, Option<String>>,
     },
+    AssistedCommitCertifyDiff {
+        base: Option<String>,
+        path: GitPath,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
+    AssistedCommitNativeFullConversion {
+        #[serde(rename = "base")]
+        base_tree: String,
+        revision: String,
+        path: GitPath,
+        bytes_base64: String,
+        mode: String,
+        filter_output: String,
+        #[serde(default)]
+        environment: std::collections::BTreeMap<String, Option<String>>,
+    },
     AssistedCommitValidateMessages {
         initial_sha: Option<String>,
         trees: Vec<String>,

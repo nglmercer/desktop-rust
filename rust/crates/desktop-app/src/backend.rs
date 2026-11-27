@@ -98,6 +98,10 @@ struct ReadRequest {
     #[serde(default)]
     use_environment_index: Option<bool>,
     #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    filter_output: Option<String>,
+    #[serde(default)]
     request_id: Option<uuid::Uuid>,
     #[serde(default)]
     deadline_ms: Option<u64>,
@@ -448,6 +452,8 @@ enum ReadMethod {
     AssistedCommitValidateMessages,
     AssistedCommitPrivateTip,
     AssistedCommitFrozenDiff,
+    AssistedCommitCertifyDiff,
+    AssistedCommitNativeFullConversion,
     AssistedCommitCaptureConfig,
     AssistedCommitIndexTree,
     AssistedCommitTreeRevision,
@@ -1389,16 +1395,22 @@ impl Backend {
                 "variable only applies to assisted attribute source reads".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::AssistedCommitTreeRevision)
-            && request.revision.is_some()
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitTreeRevision | ReadMethod::AssistedCommitNativeFullConversion
+        ) && request.revision.is_some()
         {
             return Err(AppError::BadArgs(
-                "revision only applies to assisted tree revision reads".into(),
+                "revision only applies to assisted tree revision and native conversion reads"
+                    .into(),
             ));
         }
         if !matches!(
             &request.method,
-            ReadMethod::AssistedCommitIndexTree | ReadMethod::AssistedCommitFrozenDiff
+            ReadMethod::AssistedCommitIndexTree
+                | ReadMethod::AssistedCommitFrozenDiff
+                | ReadMethod::AssistedCommitCertifyDiff
+                | ReadMethod::AssistedCommitNativeFullConversion
         ) && request.base.is_some()
         {
             return Err(AppError::BadArgs(
@@ -1432,6 +1444,8 @@ impl Backend {
             ReadMethod::AssistedCommitTreeEntry
                 | ReadMethod::AssistedCommitDiffDriver
                 | ReadMethod::AssistedCommitHashBlob
+                | ReadMethod::AssistedCommitCertifyDiff
+                | ReadMethod::AssistedCommitNativeFullConversion
         ) && request.path.is_some()
         {
             return Err(AppError::BadArgs(
@@ -1469,12 +1483,29 @@ impl Backend {
                 "parent only applies to assisted commit verification".into(),
             ));
         }
-        if !matches!(&request.method, ReadMethod::AssistedCommitHashBlob)
-            && request.bytes_base64.is_some()
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitHashBlob | ReadMethod::AssistedCommitNativeFullConversion
+        ) && request.bytes_base64.is_some()
         {
             return Err(AppError::BadArgs(
-                "bytes_base64 only applies to assisted blob writes".into(),
+                "bytes_base64 only applies to assisted blob writes and native conversion".into(),
             ));
+        }
+        if !matches!(
+            &request.method,
+            ReadMethod::AssistedCommitNativeFullConversion
+        ) {
+            if request.mode.is_some() {
+                return Err(AppError::BadArgs(
+                    "mode only applies to assisted native conversion".into(),
+                ));
+            }
+            if request.filter_output.is_some() {
+                return Err(AppError::BadArgs(
+                    "filter_output only applies to assisted native conversion".into(),
+                ));
+            }
         }
         if !matches!(
             &request.method,
@@ -2080,6 +2111,97 @@ impl Backend {
                         paths: request
                             .paths
                             .ok_or_else(|| AppError::BadArgs("paths are required".into()))?,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitCertifyDiff
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.paths.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.sha.is_none()
+                        && request.tree.is_none()
+                        && request.git_path.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none()
+                        && request.bytes_base64.is_none()
+                        && request.parent.is_none()
+                        && request.entries.is_none()
+                        && request.index_entries_base64.is_none()
+                        && request.include_index.is_none()
+                        && request.use_environment_index.is_none() =>
+                {
+                    Operation::AssistedCommitCertifyDiff {
+                        base: request.base,
+                        path: request
+                            .path
+                            .ok_or_else(|| AppError::BadArgs("path is required".into()))?,
+                        environment: request.environment.unwrap_or_default(),
+                    }
+                }
+                ReadMethod::AssistedCommitNativeFullConversion
+                    if request.include_untracked.is_none()
+                        && request.prefixes.is_none()
+                        && request.branch.is_none()
+                        && request.commitish.is_none()
+                        && request.revisions.is_none()
+                        && request.paths.is_none()
+                        && request.after_date.is_none()
+                        && request.limit.is_none()
+                        && request.skip.is_none()
+                        && request.first_parent.is_none()
+                        && request.exclude_remotes.is_none()
+                        && request.range.is_none()
+                        && request.kind.is_none()
+                        && request.key.is_none()
+                        && request.only_local.is_none()
+                        && request.canonical_bool.is_none()
+                        && request.filter.is_none()
+                        && request.sha.is_none()
+                        && request.tree.is_none()
+                        && request.git_path.is_none()
+                        && request.submodule_path.is_none()
+                        && request.remote_name.is_none()
+                        && request.reference.is_none()
+                        && request.expected_value.is_none()
+                        && request.parent.is_none()
+                        && request.entries.is_none()
+                        && request.index_entries_base64.is_none()
+                        && request.include_index.is_none()
+                        && request.use_environment_index.is_none() =>
+                {
+                    Operation::AssistedCommitNativeFullConversion {
+                        base_tree: request
+                            .base
+                            .ok_or_else(|| AppError::BadArgs("base is required".into()))?,
+                        revision: request
+                            .revision
+                            .ok_or_else(|| AppError::BadArgs("revision is required".into()))?,
+                        path: request
+                            .path
+                            .ok_or_else(|| AppError::BadArgs("path is required".into()))?,
+                        bytes_base64: request
+                            .bytes_base64
+                            .ok_or_else(|| AppError::BadArgs("bytes_base64 is required".into()))?,
+                        mode: request
+                            .mode
+                            .ok_or_else(|| AppError::BadArgs("mode is required".into()))?,
+                        filter_output: request.filter_output.unwrap_or_default(),
                         environment: request.environment.unwrap_or_default(),
                     }
                 }
@@ -3370,6 +3492,17 @@ mod tests {
                     .unwrap();
                 assert_eq!(private_tip["sha"], head);
                 fs::write(root.join("file"), "changed\n").unwrap();
+                let certified = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_certify_diff","base":head,"path":"file"}),
+                    ])
+                    .unwrap();
+                let certified_bytes = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    certified["bytes_base64"].as_str().unwrap(),
+                )
+                .unwrap();
+                assert!(String::from_utf8_lossy(&certified_bytes).contains("+changed"));
                 git(&["add", "file"]);
                 git(&["commit", "-qm", "second"]);
                 let changed_tree = git(&["rev-parse", "HEAD^{tree}"]);
@@ -3384,6 +3517,12 @@ mod tests {
                 )
                 .unwrap();
                 assert!(String::from_utf8_lossy(&frozen_bytes).contains("+changed"));
+                let conversion = backend
+                    .read_args(vec![
+                        json!({"repository_path":root,"method":"assisted_commit_native_full_conversion","base":tree,"revision":head,"path":"file","bytes_base64":base64::Engine::encode(&base64::engine::general_purpose::STANDARD,b"converted\n"),"mode":"100644","filter_output":""}),
+                    ])
+                    .unwrap();
+                assert!(conversion["sha"].as_str().unwrap().len() == 40);
                 assert!(
                     backend
                         .admit(vec![

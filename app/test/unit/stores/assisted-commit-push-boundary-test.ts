@@ -836,6 +836,195 @@ function nodeBackend(t: TestContext) {
           }
           return result.stdout.trim()
         },
+        repositoryAssistedCommitNativeFullConversion: async (
+          path: string,
+          baseTree: string,
+          revision: string,
+          filePath: string,
+          bytes: Buffer,
+          mode: string,
+          filterOutput: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const directory = await FileSystem.mkdtemp(
+            join(OS.tmpdir(), 'desktop-assisted-native-test-')
+          )
+          try {
+            const captureWorktree = join(directory, 'capture-worktree')
+            await FileSystem.mkdir(captureWorktree)
+            const capturedPath = join(captureWorktree, filePath)
+            await FileSystem.mkdir(resolve(capturedPath, '..'), {
+              recursive: true,
+            })
+            await FileSystem.writeFile(capturedPath, bytes)
+            await FileSystem.chmod(
+              capturedPath,
+              mode === '100755' ? 0o555 : 0o444
+            )
+            const index = join(directory, 'native-full-index')
+            const indexEnvironment = { ...environment, GIT_INDEX_FILE: index }
+            const noHooks = [
+              '-c',
+              `core.hooksPath=${join(directory, 'no-hooks')}`,
+            ]
+            const run = async (
+              args: ReadonlyArray<string>,
+              options: Record<string, unknown> = {}
+            ) =>
+              (await interceptingGitExec(actualExec)([...args], path, {
+                env: indexEnvironment,
+                ...options,
+              } as never)) as Dugite.IGitBufferResult
+            const readTree = await run([...noHooks, 'read-tree', baseTree])
+            if (readTree.exitCode !== 0) {
+              throw new Error('Cannot initialize native conversion index')
+            }
+            const filterConfiguration: string[] = []
+            for (const field of filterOutput
+              .split('\0')
+              .filter(field => field.length > 0)) {
+              const delimiter = field.indexOf('\n')
+              if (delimiter === -1) {
+                throw new Error(
+                  'Cannot freeze malformed Git filter configuration'
+                )
+              }
+              const key = field.slice(0, delimiter)
+              const command = field.slice(delimiter + 1)
+              if (command.length > 0) {
+                filterConfiguration.push(
+                  '-c',
+                  `${key}=(cd -- "$DESKTOP_ASSISTED_CAPTURE_ROOT" && export GIT_WORK_TREE="$DESKTOP_ASSISTED_CAPTURE_ROOT" && {\n${command}\n})`
+                )
+              }
+            }
+            const native = await run(
+              [
+                ...filterConfiguration,
+                '-c',
+                'diff.noprefix=false',
+                '-c',
+                'diff.mnemonicPrefix=false',
+                'diff',
+                '--src-prefix=a/',
+                '--dst-prefix=b/',
+                '--binary',
+                '--full-index',
+                '--no-ext-diff',
+                '--no-textconv',
+                '--no-renames',
+                '--no-color',
+                '--patch',
+                '--unified=3',
+                '-O',
+                '/dev/null',
+                '--end-of-options',
+                revision,
+                '--',
+                filePath,
+              ],
+              {
+                encoding: 'buffer',
+                env: {
+                  ...indexEnvironment,
+                  GIT_OPTIONAL_LOCKS: '0',
+                  GIT_WORK_TREE: captureWorktree,
+                  DESKTOP_ASSISTED_CAPTURE_ROOT:
+                    await FileSystem.realpath(path),
+                  GIT_DIFF_OPTS: '--unified=3',
+                },
+              }
+            )
+            if (native.exitCode !== 0) {
+              throw new Error('Cannot convert native assisted file')
+            }
+            if (native.stdout.length > 0) {
+              const apply = await run(
+                [
+                  ...noHooks,
+                  'apply',
+                  '--cached',
+                  '--binary',
+                  '--whitespace=nowarn',
+                  '-',
+                ],
+                { encoding: 'buffer', stdin: native.stdout }
+              )
+              if (apply.exitCode !== 0) {
+                throw new Error('Cannot apply native assisted conversion')
+              }
+            }
+            const written = await run([...noHooks, 'write-tree'])
+            if (written.exitCode !== 0) {
+              throw new Error('Cannot write native assisted conversion tree')
+            }
+            const nativeTree = written.stdout
+              .toString('utf8')
+              .replace(/\r?\n$/, '')
+            const entry = await run([
+              'ls-tree',
+              '-z',
+              '--full-tree',
+              nativeTree,
+              '--',
+              filePath,
+            ])
+            const record = entry.stdout.toString('utf8').split('\0')[0]
+            const match = /^([^ ]+) blob ([0-9a-f]{40,64})\t/.exec(record)
+            if (match === null || !['100644', '100755'].includes(match[1])) {
+              throw new Error(
+                'Native conversion did not preserve the selected regular file'
+              )
+            }
+            return match[2]
+          } finally {
+            await FileSystem.rm(directory, { recursive: true, force: true })
+          }
+        },
+        repositoryAssistedCommitCertifyDiff: async (
+          path: string,
+          base: string | null,
+          filePath: string,
+          environment?: Record<string, string | undefined>
+        ) => {
+          const nativeArgs =
+            base === null
+              ? [
+                  'diff',
+                  '--no-index',
+                  '--no-ext-diff',
+                  '--no-textconv',
+                  '--no-color',
+                  '--patch',
+                  '--',
+                  '/dev/null',
+                  filePath,
+                ]
+              : [
+                  'diff',
+                  '--no-ext-diff',
+                  '--no-textconv',
+                  '--no-renames',
+                  '--no-color',
+                  '--patch',
+                  '--end-of-options',
+                  base,
+                  '--',
+                  filePath,
+                ]
+          const result = (await interceptingGitExec(actualExec)(
+            ['-c', 'diff.suppressBlankEmpty=false', ...nativeArgs],
+            path,
+            {
+              encoding: 'buffer',
+              env: { ...environment, GIT_OPTIONAL_LOCKS: '0' },
+            } as never
+          )) as Dugite.IGitBufferResult
+          if (result.exitCode !== 0 && result.exitCode !== 1) {
+            throw new Error('Cannot certify the assisted partial diff')
+          }
+          return result.stdout
+        },
         repositoryAssistedCommitFrozenDiff: async (
           path: string,
           base: string,

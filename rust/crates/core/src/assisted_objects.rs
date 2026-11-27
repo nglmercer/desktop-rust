@@ -382,6 +382,261 @@ impl Repository {
         Ok(json!({"bytes_base64":STANDARD.encode(output.stdout)}))
     }
 
+    /// Produce the native working-tree diff used to certify that a partial
+    /// selection's parsed hunks have not been transformed by Git. This command
+    /// intentionally observes the real worktree rather than the frozen trees.
+    pub(crate) async fn assisted_commit_certify_diff(
+        &self,
+        base: Option<&str>,
+        path: &GitPath,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        if let Some(base) = base {
+            object_id(base, "certification diff base")?;
+        }
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_diff_environment_key(key),
+                "unsupported assisted diff environment key"
+            );
+        }
+        let path = validate_index_tree_path(path)?;
+        let mut command = args(&[
+            "-c",
+            "diff.suppressBlankEmpty=false",
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--patch",
+        ]);
+        if let Some(base) = base {
+            command.extend(args(&["--no-renames", "--end-of-options", base, "--"]));
+        } else {
+            command.splice(4..4, args(&["--no-index"]));
+            command.extend(args(&["--", "/dev/null"]));
+        }
+        command.push(path);
+        let mut environment = environment.clone();
+        environment.insert("GIT_OPTIONAL_LOCKS".to_string(), Some("0".to_string()));
+        let output = crate::process::run_git_with_environment_limit(
+            &self.path,
+            &command,
+            None,
+            None,
+            &environment,
+            64 * 1024 * 1024,
+        )
+        .await?;
+        anyhow::ensure!(
+            output.code == 0 || output.code == 1,
+            "Cannot certify the assisted partial diff"
+        );
+        Ok(json!({"bytes_base64":STANDARD.encode(output.stdout)}))
+    }
+
+    /// Convert one captured regular file through Git's native clean/process
+    /// filters in a host-owned scratch worktree and index. The returned object
+    /// is the tree entry produced by applying the resulting binary patch.
+    pub(crate) async fn assisted_commit_native_full_conversion(
+        &self,
+        base_tree: &str,
+        revision: &str,
+        path: &GitPath,
+        bytes_base64: &str,
+        mode: &str,
+        filter_output: &str,
+        environment: &BTreeMap<String, Option<String>>,
+    ) -> Result<Value> {
+        object_id(base_tree, "native conversion base tree")?;
+        object_id(revision, "native conversion revision")?;
+        anyhow::ensure!(
+            matches!(mode, "100644" | "100755"),
+            "invalid native conversion mode"
+        );
+        anyhow::ensure!(
+            bytes_base64.len() <= 768 * 1024 * 1024,
+            "native conversion input is too large"
+        );
+        let bytes = STANDARD
+            .decode(bytes_base64)
+            .map_err(|_| anyhow::anyhow!("native conversion input is not valid base64"))?;
+        anyhow::ensure!(
+            bytes.len() <= 512 * 1024 * 1024,
+            "decoded native conversion input is too large"
+        );
+        anyhow::ensure!(
+            filter_output.len() <= 2 * 1024 * 1024,
+            "native conversion filter configuration is too large"
+        );
+        for key in environment.keys() {
+            anyhow::ensure!(
+                assisted_diff_environment_key(key),
+                "unsupported assisted conversion environment key"
+            );
+        }
+        let path_os = validate_index_tree_path(path)?;
+        let mut scratch_environment = environment.clone();
+        scratch_environment.remove("GIT_INDEX_FILE");
+        let scratch = TemporaryIndexDirectory::create()?;
+        let capture_worktree = scratch.path.join("capture-worktree");
+        std::fs::create_dir(&capture_worktree)?;
+        let relative_path = std::path::PathBuf::from(&path_os);
+        let capture_path = capture_worktree.join(&relative_path);
+        if let Some(parent) = capture_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&capture_path, &bytes)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = if mode == "100755" { 0o555 } else { 0o444 };
+            std::fs::set_permissions(&capture_path, std::fs::Permissions::from_mode(permissions))?;
+        }
+        let index = scratch.path.join("native-full-index");
+        let hooks_path = std::ffi::OsString::from(format!(
+            "core.hooksPath={}",
+            scratch.path.join("no-hooks").display()
+        ));
+        let with_no_hooks = |command: &[std::ffi::OsString]| {
+            let mut result = vec![std::ffi::OsString::from("-c"), hooks_path.clone()];
+            result.extend_from_slice(command);
+            result
+        };
+        let output = crate::process::run_git_with_environment(
+            &self.path,
+            &with_no_hooks(&args(&["read-tree", base_tree])),
+            None,
+            Some(&index),
+            &scratch_environment,
+        )
+        .await?;
+        anyhow::ensure!(
+            output.code == 0,
+            "Cannot initialize native conversion index"
+        );
+
+        let mut command = Vec::new();
+        for field in filter_output.split('\0').filter(|field| !field.is_empty()) {
+            let Some(delimiter) = field.find('\n') else {
+                anyhow::bail!("Cannot freeze malformed Git filter configuration");
+            };
+            let key = &field[..delimiter];
+            let filter_command = &field[delimiter + 1..];
+            anyhow::ensure!(
+                key.starts_with("filter.")
+                    && (key.ends_with(".clean") || key.ends_with(".process"))
+                    && key.len() <= 1024
+                    && !key.contains(['\0', '=']),
+                "invalid native conversion filter key"
+            );
+            if !filter_command.is_empty() {
+                anyhow::ensure!(
+                    filter_command.len() <= 256 * 1024,
+                    "native conversion filter command is too large"
+                );
+                command.push(std::ffi::OsString::from("-c"));
+                command.push(std::ffi::OsString::from(format!(
+                    "{key}=(cd -- \"$DESKTOP_ASSISTED_CAPTURE_ROOT\" && export GIT_WORK_TREE=\"$DESKTOP_ASSISTED_CAPTURE_ROOT\" && {{\n{filter_command}\n}})"
+                )));
+            }
+        }
+        command.extend(args(&[
+            "-c",
+            "diff.noprefix=false",
+            "-c",
+            "diff.mnemonicPrefix=false",
+            "diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--no-color",
+            "--patch",
+            "--unified=3",
+            "-O",
+            "/dev/null",
+            "--end-of-options",
+            revision,
+            "--",
+        ]));
+        command.push(path_os.clone());
+        let repository_root =
+            std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
+        let mut diff_environment = scratch_environment.clone();
+        diff_environment.insert("GIT_OPTIONAL_LOCKS".to_string(), Some("0".to_string()));
+        diff_environment.insert(
+            "GIT_WORK_TREE".to_string(),
+            Some(capture_worktree.to_string_lossy().into_owned()),
+        );
+        diff_environment.insert(
+            "DESKTOP_ASSISTED_CAPTURE_ROOT".to_string(),
+            Some(repository_root.to_string_lossy().into_owned()),
+        );
+        diff_environment.insert("GIT_DIFF_OPTS".to_string(), Some("--unified=3".to_string()));
+        let output = crate::process::run_git_with_environment_limit(
+            &self.path,
+            &command,
+            None,
+            Some(&index),
+            &diff_environment,
+            64 * 1024 * 1024,
+        )
+        .await?;
+        anyhow::ensure!(output.code == 0, "Cannot convert native assisted file");
+        if !output.stdout.is_empty() {
+            let apply = crate::process::run_git_with_environment_limit(
+                &self.path,
+                &with_no_hooks(&args(&[
+                    "apply",
+                    "--cached",
+                    "--binary",
+                    "--whitespace=nowarn",
+                    "-",
+                ])),
+                Some(output.stdout),
+                Some(&index),
+                &scratch_environment,
+                64 * 1024 * 1024,
+            )
+            .await?;
+            anyhow::ensure!(apply.code == 0, "Cannot apply native assisted conversion");
+        }
+        let output = crate::process::run_git_with_environment(
+            &self.path,
+            &with_no_hooks(&args(&["write-tree"])),
+            None,
+            Some(&index),
+            &scratch_environment,
+        )
+        .await?;
+        anyhow::ensure!(
+            output.code == 0,
+            "Cannot write native assisted conversion tree"
+        );
+        let native_tree = output_line(&output.stdout, "native conversion tree")?;
+        object_id(&native_tree, "native conversion tree")?;
+        let mut object_environment = scratch_environment.clone();
+        object_environment.remove("GIT_ATTR_NOSYSTEM");
+        object_environment.remove("GIT_ATTR_SOURCE");
+        let entry = self
+            .assisted_commit_tree_entry(&native_tree, path.clone(), &object_environment)
+            .await?;
+        anyhow::ensure!(
+            entry["kind"] == "entry",
+            "Native conversion did not preserve the selected regular file"
+        );
+        let entry_mode = entry["mode"].as_str().unwrap_or_default();
+        anyhow::ensure!(
+            matches!(entry_mode, "100644" | "100755"),
+            "Native conversion did not preserve the selected regular file"
+        );
+        Ok(json!({"sha":entry["sha"],"tree":native_tree}))
+    }
+
     /// Run native commit-message validation in a host-owned scratch Git
     /// directory. Objects remain those of the private assisted object view;
     /// only refs, index, HEAD, and configuration are scratch state.
