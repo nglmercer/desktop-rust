@@ -6,8 +6,7 @@ import {
   within,
 } from '../../helpers/ui/render'
 import assert from 'node:assert'
-import { afterEach, describe, it, type TestContext } from 'node:test'
-import { vi } from 'vitest'
+import { afterEach, describe, it, vi, type TestContext } from 'vitest'
 import * as React from 'react'
 import { act } from '@testing-library/react'
 
@@ -53,6 +52,7 @@ import {
   createTestGitHubUserStore,
   createTestRepositoryStateCache,
 } from '../../helpers/app-store-test-harness'
+import { mockMethod } from '../../helpers/mock-method'
 const PreviewFeaturesEnv = 'GITHUB_DESKTOP_PREVIEW_FEATURES'
 const previousPreviewFeatures = process.env[PreviewFeaturesEnv]
 const AddCoAuthorsLabel = __DARWIN__ ? 'Add Co-Authors' : 'Add co-authors'
@@ -215,6 +215,7 @@ async function clickCopilotButton(component: CommitMessageTestInstance) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   localStorage.clear()
 
   if (previousPreviewFeatures === undefined) {
@@ -753,7 +754,7 @@ describe('CommitMessage', () => {
 
     it('unmounts the author popover when manual fields become inactive', t => {
       const rectangle = new window.DOMRect(0, 0, 100, 100)
-      t.mock.method(HTMLElement.prototype, 'getClientRects', () => ({
+      mockMethod(HTMLElement.prototype, 'getClientRects', () => ({
         0: rectangle,
         length: 1,
         item: (index: number) => (index === 0 ? rectangle : null),
@@ -784,7 +785,7 @@ describe('CommitMessage', () => {
     it('keeps co-author keyboard focus tracking active after an author popover is closed by a mode change', t => {
       const frames = new Map<number, FrameRequestCallback>()
       let frameID = 0
-      t.mock.method(
+      mockMethod(
         globalThis,
         'requestAnimationFrame',
         (callback: FrameRequestCallback) => {
@@ -792,11 +793,11 @@ describe('CommitMessage', () => {
           return frameID
         }
       )
-      t.mock.method(globalThis, 'cancelAnimationFrame', (id: number) => {
+      mockMethod(globalThis, 'cancelAnimationFrame', (id: number) => {
         frames.delete(id)
       })
       const rectangle = new window.DOMRect(0, 0, 100, 100)
-      t.mock.method(HTMLElement.prototype, 'getClientRects', () => ({
+      mockMethod(HTMLElement.prototype, 'getClientRects', () => ({
         0: rectangle,
         length: 1,
         item: (index: number) => (index === 0 ? rectangle : null),
@@ -810,7 +811,7 @@ describe('CommitMessage', () => {
         createTestGitHubUserStore(),
         repository.gitHubRepository
       )
-      t.mock.method(provider, 'getAutocompletionItems', async () => [])
+      mockMethod(provider, 'getAutocompletionItems', async () => [])
       const { view, rerender } = renderWithCommitModes({
         repository,
         autocompletionProviders: [provider],
@@ -1092,12 +1093,12 @@ describe('CommitMessage', () => {
         createTestGitHubUserStore(),
         repository.gitHubRepository
       )
-      t.mock.method(provider, 'getAutocompletionItems', async () => [])
+      mockMethod(provider, 'getAutocompletionItems', async () => [])
       const lookups = new Array<{
         readonly username: string
         readonly resolve: (hit: UserHit | null) => void
       }>()
-      t.mock.method(
+      mockMethod(
         provider,
         'exactMatch',
         (username: string) =>
@@ -1367,7 +1368,7 @@ describe('CommitMessage', () => {
     })
 
     it('ignores author lookup results after the repository form unmounts', async t => {
-      const errors = t.mock.method(console, 'error', () => {})
+      const errors = mockMethod(console, 'error', () => {})
       const { view, lookups } = renderWithPendingCoAuthors(t)
       addUncachedCoAuthor('uncached')
       view.unmount()
@@ -1375,8 +1376,8 @@ describe('CommitMessage', () => {
       await new Promise<void>(resolve => setImmediate(resolve))
       assert.ok(
         !errors.mock.calls.some(call =>
-          call.arguments.some(
-            argument =>
+          call.some(
+            (argument: unknown) =>
               typeof argument === 'string' &&
               argument.includes('unmounted component')
           )
@@ -1418,9 +1419,9 @@ describe('CommitMessage', () => {
         createTestGitHubUserStore(),
         repository.gitHubRepository
       )
-      t.mock.method(provider, 'getAutocompletionItems', async () => [])
+      mockMethod(provider, 'getAutocompletionItems', async () => [])
       const lookups = new Array<(hit: UserHit | null) => void>()
-      t.mock.method(
+      mockMethod(
         provider,
         'exactMatch',
         () => new Promise<UserHit | null>(resolve => lookups.push(resolve))
@@ -1587,7 +1588,7 @@ describe('CommitMessage', () => {
         createTestGitHubUserStore(),
         repository.gitHubRepository
       )
-      t.mock.method(provider, 'getAutocompletionItems', async (text: string) =>
+      mockMethod(provider, 'getAutocompletionItems', async (text: string) =>
         text.startsWith('mo')
           ? [createResolvedCoAuthor('mona', 'Mona Lisa')]
           : []
@@ -1652,7 +1653,7 @@ describe('CommitMessage', () => {
         repository.gitHubRepository
       )
       let complete: ((items: ReadonlyArray<UserHit>) => void) | null = null
-      t.mock.method(provider, 'getAutocompletionItems', (text: string) =>
+      mockMethod(provider, 'getAutocompletionItems', (text: string) =>
         text === 'mo'
           ? new Promise<ReadonlyArray<UserHit>>(resolve => {
               complete = resolve
@@ -1683,7 +1684,7 @@ describe('CommitMessage', () => {
     function captureOptionsMenu(t: TestContext) {
       const menus = new Array<ReadonlyArray<IMenuItem>>()
       let selectedLabel: string | null = null
-      t.mock.method(
+      mockMethod(
         contextMenuMock,
         'invoke',
         async (items: ReadonlyArray<IMenuItem>) => {
@@ -1821,7 +1822,7 @@ describe('CommitMessage', () => {
         state.kind === 'error' ? `/${state.retry}` : ''
       }`, t => {
         let acted = 0
-        const menu = t.mock.method(contextMenuMock, 'invoke', async () => null)
+        const menu = mockMethod(contextMenuMock, 'invoke', async () => null)
         const { view } = renderWithCommitModes({
           commitMode: 'copilot',
           isCreatingCopilotAssistedCommits: working,
@@ -1851,7 +1852,7 @@ describe('CommitMessage', () => {
           gearDisabled
         )
         fireEvent.click(gear)
-        assert.strictEqual(menu.mock.callCount(), gearDisabled ? 0 : 1)
+        assert.strictEqual(menu.mock.calls.length, gearDisabled ? 0 : 1)
         const runAction = screen.getByRole('button', {
           name: action,
           exact: true,
@@ -1882,7 +1883,7 @@ describe('CommitMessage', () => {
     }
 
     it('keeps the panel gear disabled during pushing without exposing rollback Cancel', t => {
-      const menu = t.mock.method(contextMenuMock, 'invoke', async () => null)
+      const menu = mockMethod(contextMenuMock, 'invoke', async () => null)
       const { view } = renderWithCommitModes({
         commitMode: 'copilot',
         isCreatingCopilotAssistedCommits: true,
@@ -1902,7 +1903,7 @@ describe('CommitMessage', () => {
       assert.ok(panel?.contains(gear))
       assert.strictEqual(gear.getAttribute('aria-disabled'), 'true')
       fireEvent.click(gear)
-      assert.strictEqual(menu.mock.callCount(), 0)
+      assert.strictEqual(menu.mock.calls.length, 0)
       assert.strictEqual(screen.queryByRole('button', { name: 'Cancel' }), null)
       assert.ok(screen.getByText('Pushing commits…', { selector: '.title' }))
     })
@@ -2307,7 +2308,7 @@ describe('CommitMessage', () => {
       })
       const updates = new Array<Partial<CommitOptions>>()
       let signOffIndex = -1
-      t.mock.method(
+      mockMethod(
         contextMenuMock,
         'invoke',
         (items: ReadonlyArray<IMenuItem>) => {
@@ -2373,12 +2374,12 @@ describe('CommitMessage', () => {
 
     it('cancels a queued description scroll check on unmount', t => {
       let lastFrameID = 0
-      const frames = t.mock.method(
+      const frames = mockMethod(
         globalThis,
         'requestAnimationFrame',
         () => ++lastFrameID
       )
-      const cancel = t.mock.method(globalThis, 'cancelAnimationFrame', () => {})
+      const cancel = mockMethod(globalThis, 'cancelAnimationFrame', () => {})
       const { view } = renderWithCommitModes()
       const beforeScroll = frames.mock.calls.length
       fireEvent.scroll(
@@ -2389,9 +2390,7 @@ describe('CommitMessage', () => {
       assert.strictEqual(frames.mock.calls.length, beforeScroll + 1)
       const pendingFrameID = lastFrameID
       view.unmount()
-      assert.ok(
-        cancel.mock.calls.some(call => call.arguments[0] === pendingFrameID)
-      )
+      assert.ok(cancel.mock.calls.some(call => call[0] === pendingFrameID))
     })
 
     it('announces a successful manual commit after switching from a settled assisted error', async t => {
@@ -2403,7 +2402,7 @@ describe('CommitMessage', () => {
         selectionNeedsReview: false,
         error: new ErrorWithMetadata(new Error('Planning stopped'), {}),
       }
-      const onCreateCommit = t.mock.fn(async () => true)
+      const onCreateCommit = vi.fn(async () => true)
       const harness = renderWithCommitModes({
         commitMode: 'copilot',
         assistedCommitState: state,
@@ -2421,7 +2420,7 @@ describe('CommitMessage', () => {
         })
       )
       await waitFor(() =>
-        assert.strictEqual(onCreateCommit.mock.callCount(), 1)
+        assert.strictEqual(onCreateCommit.mock.calls.length, 1)
       )
       const commit = createCommit()
       harness.rerender({
