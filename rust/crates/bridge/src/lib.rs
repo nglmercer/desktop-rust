@@ -1668,3 +1668,345 @@ mod retained_staging_tests {
         assert_eq!(desktop_core::directory_path(decoded).unwrap(), path);
     }
 }
+
+#[cfg(test)]
+mod repository_open_audit_tests {
+    use super::*;
+    use std::{
+        collections::BTreeMap,
+        fs,
+        path::{Path, PathBuf},
+        process::Command,
+    };
+    use tokio::sync::watch;
+
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new() -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "desktop-repository-open-audit-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let repository = directory.join("repository");
+            fs::create_dir_all(&repository).unwrap();
+            let fixture = Self(directory);
+            fixture.git(&["init", "-q", "-b", "main"]);
+            fixture.git(&["config", "user.name", "Test"]);
+            fixture.git(&["config", "user.email", "test@example.invalid"]);
+            fixture
+        }
+
+        fn repository(&self) -> PathBuf {
+            self.0.join("repository")
+        }
+
+        fn canonical_repository(&self) -> PathBuf {
+            self.repository().canonicalize().unwrap()
+        }
+
+        fn nested(&self) -> PathBuf {
+            let nested = self.repository().join("nested").join("deeper");
+            fs::create_dir_all(&nested).unwrap();
+            nested
+        }
+
+        fn registry_path(&self) -> PathBuf {
+            self.0.join("registry.json")
+        }
+
+        fn bridge(&self, selected: Option<Repository>) -> Bridge {
+            let (changes, _) = watch::channel(serde_json::Value::Null);
+            let (preferences, _) = watch::channel(desktop_core::Preferences::default());
+            let (_, shutdown) = watch::channel(false);
+            Bridge {
+                repo: Mutex::new(selected),
+                registry: Registry::new(self.registry_path()),
+                token: "repository-open-audit".into(),
+                authority: "127.0.0.1:0".into(),
+                changes,
+                preferences,
+                shutdown,
+                sessions: Arc::new(Semaphore::new(1)),
+            }
+        }
+
+        fn git(&self, args: &[&str]) -> String {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(self.repository())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().into()
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn path_text(path: &Path) -> String {
+        path.to_str().unwrap().to_owned()
+    }
+
+    fn git_path(path: &Path) -> desktop_core::GitPath {
+        desktop_core::GitPath::Text(path_text(path))
+    }
+
+    #[tokio::test]
+    async fn core_open_discovers_the_canonical_root_from_root_or_nested_input() {
+        let fixture = Fixture::new();
+        let root = fixture.canonical_repository();
+        let nested = fixture.nested();
+
+        for input in [root.as_path(), nested.as_path()] {
+            let opened = Repository::open(input).await.unwrap();
+            assert_eq!(opened.path(), root.as_path());
+        }
+    }
+
+    #[tokio::test]
+    async fn linked_worktrees_are_independent_canonical_roots() {
+        let fixture = Fixture::new();
+        fs::write(fixture.repository().join("file"), "content\n").unwrap();
+        fixture.git(&["add", "file"]);
+        fixture.git(&["commit", "-qm", "initial"]);
+        let linked = fixture.0.join("linked-worktree");
+        fixture.git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked",
+            linked.to_str().unwrap(),
+        ]);
+        let linked = linked.canonicalize().unwrap();
+        let nested = linked.join("nested");
+        fs::create_dir(&nested).unwrap();
+
+        let opened = Repository::open(&nested).await.unwrap();
+        assert_eq!(opened.path(), linked.as_path());
+
+        let state = fixture.bridge(None);
+        let opened = repository_at_path(&state, path_text(&linked), None)
+            .await
+            .unwrap();
+        assert_eq!(opened.path(), linked.as_path());
+        let main = repository_at_path(&state, path_text(&fixture.canonical_repository()), None)
+            .await
+            .unwrap();
+        assert_eq!(main.path(), fixture.canonical_repository().as_path());
+    }
+
+    #[tokio::test]
+    async fn repository_at_path_accepts_only_the_canonical_root() {
+        let fixture = Fixture::new();
+        let root = fixture.canonical_repository();
+        let state = fixture.bridge(None);
+
+        let opened = repository_at_path(&state, path_text(&root), None)
+            .await
+            .unwrap();
+        assert_eq!(opened.path(), root.as_path());
+
+        let error = repository_at_path(&state, path_text(&fixture.nested()), None)
+            .await
+            .err()
+            .expect("nested repository path unexpectedly succeeded");
+        assert_eq!(
+            error.to_string(),
+            "select a repository root, not a nested path"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn repository_at_path_canonicalizes_symlink_aliases_before_the_root_check() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new();
+        let root = fixture.canonical_repository();
+        let nested = fixture.nested();
+        let root_alias = fixture.0.join("root-alias");
+        let nested_alias = fixture.0.join("nested-alias");
+        symlink(&root, &root_alias).unwrap();
+        symlink(&nested, &nested_alias).unwrap();
+        let state = fixture.bridge(None);
+
+        let opened = repository_at_path(&state, path_text(&root_alias), None)
+            .await
+            .unwrap();
+        assert_eq!(opened.path(), root.as_path());
+
+        let error = repository_at_path(&state, path_text(&nested_alias), None)
+            .await
+            .err()
+            .expect("nested symlink alias unexpectedly succeeded");
+        assert_eq!(
+            error.to_string(),
+            "select a repository root, not a nested path"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_repository_operations_repeat_the_root_only_policy() {
+        let fixture = Fixture::new();
+        let root = fixture.canonical_repository();
+        let state = fixture.bridge(None);
+        let description = |path: &Path| {
+            ApplicationOperation::Management(ManagementOperation::SetRepositoryDescription {
+                path: git_path(path),
+                description: "repository open audit".into(),
+            })
+        };
+
+        execute(&state, description(&root), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(fixture.repository().join(".git").join("description")).unwrap(),
+            "repository open audit"
+        );
+
+        let error = execute(&state, description(&fixture.nested()), None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "select a repository root, not a nested path"
+        );
+    }
+
+    #[tokio::test]
+    async fn repository_at_path_reuses_the_exact_selected_root_without_rediscovery() {
+        let fixture = Fixture::new();
+        let root = fixture.canonical_repository();
+        let selected = Repository::open(&root).await.unwrap();
+        let state = fixture.bridge(Some(selected));
+        fs::rename(
+            fixture.repository().join(".git"),
+            fixture.repository().join(".git-retired"),
+        )
+        .unwrap();
+        let environment = BTreeMap::from([(
+            "GIT_DIR".to_string(),
+            Some(fixture.0.join("missing-git-dir").display().to_string()),
+        )]);
+
+        let reused = repository_at_path(&state, path_text(&root), Some(&environment))
+            .await
+            .unwrap();
+        assert_eq!(reused.path(), root.as_path());
+
+        let unselected = fixture.bridge(None);
+        let error = repository_at_path(&unselected, path_text(&root), None)
+            .await
+            .err()
+            .expect("unselected repository unexpectedly rediscovered");
+        assert!(
+            error.to_string().contains("not a working tree"),
+            "{error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_bound_explicit_remote_mutations_read_the_registry_before_git() {
+        let fixture = Fixture::new();
+        let root = fixture.canonical_repository();
+        fixture.git(&["remote", "add", "origin", "https://example.invalid/one.git"]);
+        let registry = Registry::new(fixture.registry_path());
+        registry.add(root.clone(), false).unwrap();
+        let state = fixture.bridge(None);
+        let set_url = |url: &str| {
+            ApplicationOperation::Management(ManagementOperation::ManageRepositoryRemote {
+                path: git_path(&root),
+                action: desktop_core::ManagedRemoteAction::SetUrl {
+                    name: "origin".into(),
+                    url: url.into(),
+                },
+            })
+        };
+
+        execute(
+            &state,
+            set_url("https://example.invalid/two.git"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fixture.git(&["remote", "get-url", "origin"]),
+            "https://example.invalid/two.git"
+        );
+
+        fs::write(fixture.registry_path(), "not json").unwrap();
+        let error = execute(
+            &state,
+            set_url("https://example.invalid/three.git"),
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("read repository registry"),
+            "{error:#}"
+        );
+        assert_eq!(
+            fixture.git(&["remote", "get-url", "origin"]),
+            "https://example.invalid/two.git"
+        );
+
+        let unbound = Repository::open(&root).await.unwrap();
+        unbound
+            .execute(Operation::ManageRemote {
+                action: desktop_core::ManagedRemoteAction::SetUrl {
+                    name: "origin".into(),
+                    url: "https://example.invalid/three.git".into(),
+                },
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture.git(&["remote", "get-url", "origin"]),
+            "https://example.invalid/three.git"
+        );
+    }
+
+    #[tokio::test]
+    async fn assisted_head_environment_is_applied_to_explicit_path_discovery() {
+        let fixture = Fixture::new();
+        let root = fixture.canonical_repository();
+        let state = fixture.bridge(None);
+        let baseline = repository_at_path(&state, path_text(&root), None)
+            .await
+            .unwrap();
+        assert_eq!(baseline.path(), root.as_path());
+        let environment = BTreeMap::from([(
+            "GIT_DIR".to_string(),
+            Some(fixture.0.join("missing-git-dir").display().to_string()),
+        )]);
+
+        let error = execute_repository_at_path(
+            &state,
+            path_text(&root),
+            Operation::AssistedCommitHead { environment },
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("not a working tree"),
+            "{error:#}"
+        );
+    }
+}
