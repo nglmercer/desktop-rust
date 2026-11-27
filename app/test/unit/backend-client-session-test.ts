@@ -17,6 +17,13 @@ function snapshotTransport(client: BackendClient) {
   }
 }
 
+function installWryBridge(bridge: Record<string, unknown>) {
+  Object.defineProperty(window, '__desktop', {
+    configurable: true,
+    value: { send: vi.fn(), on: vi.fn(), ...bridge },
+  })
+}
+
 describe('backend Copilot session cleanup', () => {
   afterEach(() => {
     Reflect.deleteProperty(window, '__desktop')
@@ -24,10 +31,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('falls back on an older Wry host only when the pull preview is unsupported', async () => {
     const invoke = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const reviewed = vi.fn()
     const request = {
@@ -75,10 +79,7 @@ describe('backend Copilot session cleanup', () => {
       })
       .mockResolvedValueOnce({ launched: true })
       .mockResolvedValueOnce({ terminals: [{ name: 'Konsole', path: null }] })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.availableRustTerminals()).resolves.toEqual([
       { name: 'Konsole', path: '/usr/bin/konsole' },
@@ -106,10 +107,7 @@ describe('backend Copilot session cleanup', () => {
       message: 'interrupted',
       retryable: true,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     await expect(
       new BackendClient().openRepositoryTerminal('/repo', 'Konsole', '/repo')
     ).rejects.toMatchObject({
@@ -145,10 +143,7 @@ describe('backend Copilot session cleanup', () => {
         ],
       })
       .mockResolvedValue({ code: 0, stdout: '', stderr: '' })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.availableRustEditors()).resolves.toEqual([
       { editor: 'Visual Studio Code', path: '/usr/bin/code' },
@@ -207,10 +202,7 @@ describe('backend Copilot session cleanup', () => {
       message: 'interrupted',
       retryable: true,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     await expect(
       new BackendClient().openNamedRepositoryEditor(
         '/repo',
@@ -234,10 +226,7 @@ describe('backend Copilot session cleanup', () => {
       .mockResolvedValueOnce(['--line', '%TARGET_PATH%'])
       .mockResolvedValueOnce({ code: 0 })
       .mockResolvedValueOnce({ code: 0 })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.validateCustomIntegrationPath('/opt/editor')
@@ -294,10 +283,7 @@ describe('backend Copilot session cleanup', () => {
       message: 'interrupted',
       retryable: true,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const editor = {
       program: '/opt/editor',
       args: ['%TARGET_PATH%'],
@@ -320,10 +306,7 @@ describe('backend Copilot session cleanup', () => {
     'marks a custom editor launch interrupted with %s as uncertain',
     async (code, message) => {
       const invoke = vi.fn().mockRejectedValue({ code, message })
-      Object.defineProperty(window, '__desktop', {
-        configurable: true,
-        value: { invoke, send: vi.fn(), on: vi.fn() },
-      })
+      installWryBridge({ invoke })
       const editor = {
         program: '/opt/editor',
         args: ['%TARGET_PATH%'],
@@ -345,10 +328,7 @@ describe('backend Copilot session cleanup', () => {
       message: 'spawn failed',
       retryable: false,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const editor = {
       program: '/opt/editor',
       args: ['%TARGET_PATH%'],
@@ -369,10 +349,7 @@ describe('backend Copilot session cleanup', () => {
       message: 'interrupted',
       retryable: true,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     await expect(
       new BackendClient().openRepositoryTerminal('/repo', 'Konsole', '/repo')
     ).rejects.toMatchObject({
@@ -389,10 +366,7 @@ describe('backend Copilot session cleanup', () => {
       message: 'interrupted',
       retryable: true,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     await expect(
       new BackendClient().revealRegisteredRepository('/repo')
     ).rejects.toMatchObject({
@@ -405,10 +379,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates lowercase object ids before assisted commit verification', async () => {
     const invoke = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryAssistedCommitVerifyCreatedCommit(
@@ -434,10 +405,7 @@ describe('backend Copilot session cleanup', () => {
         object_base64: Buffer.from('object').toString('base64'),
         hook_index_tree: 'C'.repeat(40),
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const result = await client.repositoryAssistedCommitVerifyCreatedCommit(
       '/repo',
@@ -505,10 +473,7 @@ describe('backend Copilot session cleanup', () => {
       ])
       .mockResolvedValueOnce({ path: '/repo', retained_staging: '/stage' })
       .mockResolvedValueOnce({})
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.cloneSelectedRepository(input)).resolves.toEqual({
       kind: 'clone_completed_unselected',
@@ -556,10 +521,7 @@ describe('backend Copilot session cleanup', () => {
       message: 'interrupted',
       retryable: true,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     for (const operation of [
       {
@@ -592,10 +554,7 @@ describe('backend Copilot session cleanup', () => {
         })
     )
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send, on: vi.fn() },
-    })
+    installWryBridge({ invoke, send })
     const controller = new AbortController()
     const operation = {
       type: 'clone_selected',
@@ -630,10 +589,7 @@ describe('backend Copilot session cleanup', () => {
           finish = reject
         })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const operation = {
       type: 'clone_selected',
       url: 'https://github.com/a/b',
@@ -662,10 +618,7 @@ describe('backend Copilot session cleanup', () => {
     const send = vi.fn(() => {
       throw new Error('IPC closed')
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send, on: vi.fn() },
-    })
+    installWryBridge({ invoke, send })
     const controller = new AbortController()
     const result = new BackendClient().request(
       'git_info',
@@ -684,10 +637,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(() => {
       throw new Error('submission failed')
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     await expect(
       new BackendClient().request('git_info', {
         operation: { type: 'clone_selected' },
@@ -704,10 +654,7 @@ describe('backend Copilot session cleanup', () => {
         })
     )
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send, on: vi.fn(), supportsCancellation: () => false },
-    })
+    installWryBridge({ invoke, send, supportsCancellation: () => false })
     const result = new BackendClient().request(
       'git_info',
       { operation: { type: 'clone_selected' } },
@@ -733,10 +680,7 @@ describe('backend Copilot session cleanup', () => {
           finish = reject
         })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const controller = new AbortController()
     const result = new BackendClient().request(
       'git_info',
@@ -755,10 +699,7 @@ describe('backend Copilot session cleanup', () => {
     vi.useFakeTimers()
     try {
       const invoke = vi.fn(() => new Promise(() => {}))
-      Object.defineProperty(window, '__desktop', {
-        configurable: true,
-        value: { invoke, send: vi.fn(), on: vi.fn() },
-      })
+      installWryBridge({ invoke })
       const controller = new AbortController()
       const result = new BackendClient().request(
         'git_info',
@@ -908,10 +849,7 @@ describe('backend Copilot session cleanup', () => {
         ...detail,
         stages: [{ stage: 2 }, { stage: 2 }],
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryCopilotConflictBasis('/repo', '[file]')
@@ -957,10 +895,7 @@ describe('backend Copilot session cleanup', () => {
       .mockResolvedValueOnce({ ...detail, working: null })
       .mockResolvedValueOnce(detail)
       .mockResolvedValueOnce({ ...detail, working: null })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryCopilotConflictBasis('/repo', 'link', null, true)
@@ -991,10 +926,7 @@ describe('backend Copilot session cleanup', () => {
       .mockResolvedValueOnce({ kind: 'fetched', time: 1_700_000_000_000 })
       .mockResolvedValueOnce({ kind: 'empty' })
       .mockResolvedValueOnce({ kind: 'fetched', time: 'wrong' })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryLastFetch('/repo')).resolves.toEqual({
       kind: 'fetched',
@@ -1018,10 +950,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('treats post-start worktree failures as uncertain and preserves preflight refusal', async () => {
     const invoke = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const action = { kind: 'remove' as const, path: '/linked', force: false }
     invoke
@@ -1086,10 +1015,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('reviews Wry remote HEAD before mutation and only reports unsupported during preview', async () => {
     const invoke = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const request = {
       remote: 'origin',
@@ -1152,10 +1078,7 @@ describe('backend Copilot session cleanup', () => {
     const first = 'a'.repeat(40)
     const second = 'b'.repeat(64)
     const invoke = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const entry = (oid: string) => ({
       oid,
@@ -1194,10 +1117,7 @@ describe('backend Copilot session cleanup', () => {
       >()
       .mockRejectedValueOnce(new Error('invalid Git identity request'))
       .mockResolvedValueOnce({ kind: 'diff', data: btoa('hello\0world') })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const result = await client.repositoryRendererCompareDiff(
       '/repo',
@@ -1293,15 +1213,11 @@ describe('backend Copilot session cleanup', () => {
       invoke(channel, ...args)
     )
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: {
-        invoke,
-        invokeWithProgress,
-        supportsCommitRequestProgress: true,
-        send,
-        on: vi.fn(),
-      },
+    installWryBridge({
+      invoke,
+      invokeWithProgress,
+      supportsCommitRequestProgress: true,
+      send,
     })
     const client = new BackendClient()
     const controller = new AbortController()
@@ -1335,10 +1251,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('refuses a commit on an older Wry bridge before mutation', async () => {
     const invoke = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     await expect(
       new BackendClient().publishSelectedCommit(
         '/repo',
@@ -1352,10 +1265,7 @@ describe('backend Copilot session cleanup', () => {
   it('cancels checkpoint preparation and directs the caller to inspect history', async () => {
     const invoke = vi.fn(() => new Promise<unknown>(() => {}))
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send, on: vi.fn() },
-    })
+    installWryBridge({ invoke, send })
     const controller = new AbortController()
     const pending = new BackendClient().prepareSelectedCommit(
       '/repo',
@@ -1390,16 +1300,12 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn()
     const on = vi.fn()
     const off = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: {
-        invoke,
-        invokeWithProgress,
-        supportsCommitRequestProgress: true,
-        send: vi.fn(),
-        on,
-        off,
-      },
+    installWryBridge({
+      invoke,
+      invokeWithProgress,
+      supportsCommitRequestProgress: true,
+      on,
+      off,
     })
     const id = '12345678-1234-4234-8234-123456789abc'
     const progress = vi.fn()
@@ -1491,10 +1397,7 @@ describe('backend Copilot session cleanup', () => {
     async operation => {
       const invoke = vi.fn(() => new Promise<unknown>(() => {}))
       const send = vi.fn()
-      Object.defineProperty(window, '__desktop', {
-        configurable: true,
-        value: { invoke, send, on: vi.fn() },
-      })
+      installWryBridge({ invoke, send })
       const client = new BackendClient()
       const controller = new AbortController()
       const pending = client.request(
@@ -1535,10 +1438,7 @@ describe('backend Copilot session cleanup', () => {
         },
       })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryStatusContext('/repo-a')
@@ -1565,10 +1465,7 @@ describe('backend Copilot session cleanup', () => {
         stderr: '',
       })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.finishRepositoryMergeCommit('/repo')
@@ -1602,10 +1499,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const head = 'a'.repeat(40)
     await client.abortRepositorySquashMerge('/repo', head, 'refs/heads/main')
@@ -1645,10 +1539,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.abortRepositoryGitOperation('/repo', 'merge')
     expect(invoke).toHaveBeenCalledWith(
@@ -1703,10 +1594,7 @@ describe('backend Copilot session cleanup', () => {
         },
       })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryRebaseState('/repo')).resolves.toMatchObject({
       head,
@@ -1743,10 +1631,7 @@ describe('backend Copilot session cleanup', () => {
         sequence: { head, abort_safety: head, todo: 'pick abc1234 subject\n' },
       })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryCherryPickState('/repo')).resolves.toEqual({
       head,
@@ -1767,10 +1652,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('reads Git version through the native scoped service and validates the response', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => '2.44.0')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.gitVersion()).resolves.toBe('2.44.0')
     expect(invoke).toHaveBeenCalledWith(
@@ -1786,10 +1668,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => '/home/test/config with spaces'
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.globalGitConfigPath()).resolves.toBe(
       '/home/test/config with spaces'
@@ -1807,10 +1686,7 @@ describe('backend Copilot session cleanup', () => {
   })
   it('treats interrupted global configuration preparation as uncertain', async () => {
     const invoke = vi.fn(() => new Promise<unknown>(() => {}))
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const controller = new AbortController()
     const pending = new BackendClient().request(
       'git_info',
@@ -1829,10 +1705,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ available: true, using_lfs: true })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryUsesLfs('/repo')).resolves.toBe(true)
     expect(invoke).toHaveBeenCalledWith(
@@ -1876,10 +1749,7 @@ describe('backend Copilot session cleanup', () => {
         stderr: '',
       })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.installRepositoryLfsHooks('/repo', false)
     expect(invoke).toHaveBeenCalledWith(
@@ -1912,10 +1782,7 @@ describe('backend Copilot session cleanup', () => {
   it('reports interrupted Wry LFS setup as uncertain', async () => {
     const invoke = vi.fn(() => new Promise<unknown>(() => {}))
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send, on: vi.fn() },
-    })
+    installWryBridge({ invoke, send })
     const client = new BackendClient()
     const controller = new AbortController()
     const pending = client.request(
@@ -1942,10 +1809,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('routes repository Git identity reads and rejects malformed responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'Local Author')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryGitIdentityValue('/repo-a', 'user.name', true)
@@ -1966,10 +1830,7 @@ describe('backend Copilot session cleanup', () => {
   })
   it('reads the repository description through the scoped native service', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'Description\n')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryGitDescription('/repo')).resolves.toBe(
       'Description\n'
@@ -1990,10 +1851,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => 'https://github.com/owner/repo'
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositorySubmoduleDisplayUrl('/repo', 'libs/nested')
@@ -2023,10 +1881,7 @@ describe('backend Copilot session cleanup', () => {
   })
   it('validates description writes and reports interrupted native writes as uncertain', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => null)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.setRepositoryGitDescription('/repo', 'text')
     expect(invoke).toHaveBeenCalledWith(
@@ -2065,10 +1920,7 @@ describe('backend Copilot session cleanup', () => {
   })
   it('initializes a specific repository and treats interruption as uncertain', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => null)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.initializeDesktopRepository('/new/repo', 'trunk')
     expect(invoke).toHaveBeenCalledWith(
@@ -2105,10 +1957,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.createInitialCommit('/new/repo', ['README.md'])
     expect(invoke).toHaveBeenCalledWith(
@@ -2153,10 +2002,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(async (): Promise<unknown> => {
       throw { code: 'cancelled', message: 'inspect the destination' }
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.initializeDesktopRepository('/repo', 'main')
@@ -2167,10 +2013,7 @@ describe('backend Copilot session cleanup', () => {
   })
   it('validates scoped repository Git setting reads', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'true')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryGitReadSetting('/repo', 'commit.gpgsign', true, true)
@@ -2197,10 +2040,7 @@ describe('backend Copilot session cleanup', () => {
         { name: 'origin', url: 'https://example.test/repo' },
       ]
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositorySafeFetchRemotes('/repo')).resolves.toEqual([
       { name: 'origin', url: 'https://example.test/repo' },
@@ -2227,10 +2067,7 @@ describe('backend Copilot session cleanup', () => {
         url: 'https://example.test/repo',
       })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositorySafeRemoteUrl('/repo', 'origin')
@@ -2260,10 +2097,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates native symbolic ref responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'refs/heads/main')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositorySymbolicRef('/repo', 'HEAD')).resolves.toBe(
       'refs/heads/main'
@@ -2289,10 +2123,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates and does not replay native remote changes', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => ({ kind: 'updated' }))
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const action = {
       type: 'add' as const,
@@ -2338,10 +2169,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ scope: 'local', values: {} })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.setRepositoryGitIdentityValue('/repo-a', 'user.name', 'Alice')
     await client.setRepositoryGitIdentityValue('/repo-a', 'user.email', null)
@@ -2372,10 +2200,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates revision and merge history responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'commit output')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryRevisionList('/repo-a', 'base..topic')
@@ -2400,10 +2225,7 @@ describe('backend Copilot session cleanup', () => {
         { status: 'A', path: { bytes: [97, 10, 98] } },
       ]
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryIndexChanges('/repo-a')).resolves.toEqual([
       { status: 'A', path: 'a\nb' },
@@ -2433,10 +2255,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates blob preview lengths and responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'AA==')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryBlobPrefix('/repo', 'HEAD', 'file', 1)
@@ -2459,10 +2278,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ oid, size: 2, data: 'AAE=' })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryBlobChunk('/repo', 'HEAD', 'file', 0, 2, null)
@@ -2493,10 +2309,7 @@ describe('backend Copilot session cleanup', () => {
         checked_out: false,
         receipt_id: '12345678-1234-4234-8234-123456789abc',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.createRepositoryBranch('/repo', 'feature', 'origin/main', true)
     expect(invoke).toHaveBeenNthCalledWith(
@@ -2562,10 +2375,7 @@ describe('backend Copilot session cleanup', () => {
       receipt_id: id,
       backup_ref: `refs/desktop/deleted-branches/${id}`,
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.deleteRepositoryBranch('/repo', 'feature', oid)
     expect(invoke).toHaveBeenNthCalledWith(
@@ -2626,10 +2436,7 @@ describe('backend Copilot session cleanup', () => {
     invoke
       .mockResolvedValueOnce(preview)
       .mockResolvedValueOnce({ code: 0, receipt })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.renameRepositoryBranch('/repo', 'feature', 'renamed', oid)
     expect(invoke).toHaveBeenNthCalledWith(
@@ -2683,10 +2490,7 @@ describe('backend Copilot session cleanup', () => {
       entries: [{ index: 0, oid, branch: 'feature' }],
     }
     const invoke = vi.fn(async (): Promise<unknown> => listing)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     invoke.mockResolvedValueOnce({ code: 0, created: true, stderr: '' })
     await expect(client.saveDesktopStash('/repo', 'feature')).resolves.toBe(
@@ -2726,10 +2530,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates renderer stash file listings', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => ':100644 100644\0file\0')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const oid = 'a'.repeat(40)
     await expect(client.repositoryStashChanges('/repo', oid)).resolves.toBe(
@@ -2748,10 +2549,7 @@ describe('backend Copilot session cleanup', () => {
     vi.resetModules()
     const oid = 'a'.repeat(40)
     const invoke = vi.fn(async (): Promise<unknown> => 'raw stash output')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const legacyGit = vi.fn()
     const parse = vi.fn(() => ({ files: ['parsed'] }))
     vi.doMock('../../src/lib/git/core', () => ({ git: legacyGit }))
@@ -2786,10 +2584,7 @@ describe('backend Copilot session cleanup', () => {
       occupied_worktree: null,
     }
     const invoke = vi.fn(async (): Promise<unknown> => preview)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.reviewBranchCheckout('/repo', 'refs/heads/feature', oid)
@@ -2851,10 +2646,7 @@ describe('backend Copilot session cleanup', () => {
         checked_out: true,
         receipt_id: '12345678-1234-4234-8234-123456789abc',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     await new BackendClient().checkoutDirectBranch(
       '/repo',
       'refs/heads/feature',
@@ -2890,10 +2682,7 @@ describe('backend Copilot session cleanup', () => {
         checked_out: true,
         receipt_id: '12345678-1234-4234-8234-123456789abc',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.checkoutDetachedCommit('/repo', oid, true)
     expect(invoke).toHaveBeenNthCalledWith(
@@ -2947,10 +2736,7 @@ describe('backend Copilot session cleanup', () => {
       .fn()
       .mockResolvedValueOnce(preview)
       .mockResolvedValueOnce({ code: 0, error_kind: null })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.fetchRepositoryRemote(
       '/repo',
@@ -3094,10 +2880,7 @@ describe('backend Copilot session cleanup', () => {
         })
         return { code: 0, error_kind: null }
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, invokeWithProgress, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke, invokeWithProgress })
     const client = new BackendClient()
     const hookProgress = vi.fn()
     await client.pushRepositoryRemote(
@@ -3161,10 +2944,7 @@ describe('backend Copilot session cleanup', () => {
       basis: 'c'.repeat(64),
     }
     const invoke = vi.fn().mockResolvedValue(preview)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.fetchRepositoryRemote(
@@ -3183,10 +2963,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('reports an unsupported fetch review before issuing the mutation', async () => {
     const invoke = vi.fn().mockResolvedValue({ kind: 'unsupported' })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.fetchRepositoryRemote(
@@ -3221,10 +2998,7 @@ describe('backend Copilot session cleanup', () => {
       }
     )
     const progress = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, invokeWithProgress, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke, invokeWithProgress })
     const pending = new BackendClient().fetchRepositoryRemote(
       '/repo',
       'origin',
@@ -3258,10 +3032,7 @@ describe('backend Copilot session cleanup', () => {
       })
     )
 
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     invoke.mockClear()
     await expect(
       new BackendClient().fetchRepositoryRemote(
@@ -3302,10 +3073,7 @@ describe('backend Copilot session cleanup', () => {
       .fn()
       .mockResolvedValueOnce(preview)
       .mockResolvedValueOnce({ code: 1 })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.fastForwardRepositoryBranches('/repo', branches, false)
@@ -3361,10 +3129,7 @@ describe('backend Copilot session cleanup', () => {
         stdout: '',
         stderr: '',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.mixedResetRepository('/repo', request)
@@ -3422,10 +3187,7 @@ describe('backend Copilot session cleanup', () => {
         stdout: '',
         stderr: '',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.startRepositoryMerge('/repo', request)).resolves.toBe(
       'complete'
@@ -3484,10 +3246,7 @@ describe('backend Copilot session cleanup', () => {
         stdout: '',
         stderr: '',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.startRepositoryRebase('/repo', request)).resolves.toBe(
       'complete'
@@ -3538,10 +3297,7 @@ describe('backend Copilot session cleanup', () => {
         stdout: '',
         stderr: '',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.continueRepositoryRebase('/repo', head, true, false)
@@ -3598,10 +3354,7 @@ describe('backend Copilot session cleanup', () => {
         stdout: '',
         stderr: '',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.startRepositoryCherryPick('/repo', commits, expected)
@@ -3654,10 +3407,7 @@ describe('backend Copilot session cleanup', () => {
         stdout: '',
         stderr: '',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.continueRepositoryCherryPick('/repo', head, false)
@@ -3726,10 +3476,7 @@ describe('backend Copilot session cleanup', () => {
         stdout: '',
         stderr: '',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const expected = { head, branch: 'refs/heads/main', merge: false }
     await client.revertReviewedCommit('/repo', commit, expected)
@@ -3780,10 +3527,7 @@ describe('backend Copilot session cleanup', () => {
         checked_out: true,
         receipt_id: '12345678-1234-4234-8234-123456789abc',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const legacyGit = vi.fn()
     vi.doMock('../../src/lib/git/core', () => ({ git: legacyGit }))
     vi.doMock('../../src/lib/git/repository-operation', () => ({
@@ -3855,10 +3599,7 @@ describe('backend Copilot session cleanup', () => {
         }
       }
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     vi.doMock('../../src/lib/git/core', () => ({
       git: vi.fn(),
       isMaxBufferExceededError: vi.fn(),
@@ -3917,10 +3658,7 @@ describe('backend Copilot session cleanup', () => {
         checked_out: false,
         receipt_id: '12345678-1234-4234-8234-123456789abc',
       })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const legacyGit = vi.fn()
     vi.doMock('../../src/lib/git/core', () => ({
       git: legacyGit,
@@ -3989,10 +3727,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => 'Summary\n\nReviewed-by: Test\n'
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryInterpretTrailers(
@@ -4053,10 +3788,7 @@ describe('backend Copilot session cleanup', () => {
       object_routing_diagnostics: '',
     }
     const invoke = vi.fn(async (): Promise<unknown> => value)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryProtectedResources('/repo')).resolves.toEqual(
       {
@@ -4092,10 +3824,7 @@ describe('backend Copilot session cleanup', () => {
       },
     }
     const invoke = vi.fn(async (): Promise<unknown> => value)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositorySelectedCommitPreview('/repo', { paths: ['selected'] })
@@ -4161,15 +3890,10 @@ describe('backend Copilot session cleanup', () => {
     const invokeWithProgress = vi.fn((channel, _callback, ...args) =>
       invoke(channel, ...args)
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: {
-        invoke,
-        invokeWithProgress,
-        supportsCommitRequestProgress: true,
-        send: vi.fn(),
-        on: vi.fn(),
-      },
+    installWryBridge({
+      invoke,
+      invokeWithProgress,
+      supportsCommitRequestProgress: true,
     })
     const client = new BackendClient()
     await expect(
@@ -4349,10 +4073,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates submodule status responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => ' abc path (v1)\n')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositorySubmoduleStatus('/repo')).resolves.toBe(
       ' abc path (v1)\n'
@@ -4377,10 +4098,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryUpdateSubmodules('/repo', true)
@@ -4416,10 +4134,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryResetSubmodules('/repo', ['*-module'])
@@ -4457,10 +4172,7 @@ describe('backend Copilot session cleanup', () => {
   it('validates merge-base requests and responses', async () => {
     const oid = 'a'.repeat(40)
     const invoke = vi.fn(async (): Promise<unknown> => oid)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryMergeBase('/repo', 'HEAD', 'topic')
@@ -4492,10 +4204,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ kind: 'conflicts', conflicted_files: 2 })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const ours = 'a'.repeat(40)
     const theirs = 'b'.repeat(40)
@@ -4524,10 +4233,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ code: 0, stdout: '', stderr: '' })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const operation = {
       method: 'tag_create_annotated' as const,
@@ -4566,10 +4272,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('validates typed history pagination and responses', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => 'YQ==')
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryRendererHistory('/repo', 'HEAD', 10, 2, false, true)
@@ -4607,10 +4310,7 @@ describe('backend Copilot session cleanup', () => {
       bare: false,
     }
     const invoke = vi.fn(async (): Promise<unknown> => [entry])
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryWorktrees('/repo')).resolves.toEqual([
       {
@@ -4655,10 +4355,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('reviews conflict sides and uses the reviewed native resolution', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => null)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const basis = 'a'.repeat(64)
     invoke
@@ -4716,10 +4413,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('stages reviewed edited conflicts and never retries uncertain outcomes', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => null)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const basis = 'b'.repeat(64)
     invoke
@@ -4760,10 +4454,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('uses certified native discard and returns its undo capability', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => null)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const selection = { basis: 'diff-basis', lines: [1] }
     const id = '12345678-1234-1234-1234-123456789abc'
@@ -4823,10 +4514,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('never submits a discard with an invalid preview', async () => {
     const invoke = vi.fn(async (): Promise<unknown> => ({ basis: 'bad' }))
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryDiscardSelection('/repo-a', 'file', {
@@ -4841,10 +4529,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(async (): Promise<unknown> => {
       throw { code: 'cancelled', message: 'interrupted', retryable: true }
     })
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     const id = '12345678-1234-1234-1234-123456789abc'
     await expect(
@@ -4870,10 +4555,7 @@ describe('backend Copilot session cleanup', () => {
   it('validates and submits a reviewed multi-file discard', async () => {
     const id = '12345678-1234-1234-1234-123456789abc'
     const invoke = vi.fn(async (): Promise<unknown> => null)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     invoke
       .mockResolvedValueOnce({
@@ -4924,10 +4606,7 @@ describe('backend Copilot session cleanup', () => {
         },
       ]
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.repositoryDiscardHistory('/repo-a')).resolves.toEqual([
       {
@@ -4971,10 +4650,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => ({ ahead: 3, behind: 2 })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryAheadBehind('/repo-a', 'main...topic')
@@ -5013,10 +4689,7 @@ describe('backend Copilot session cleanup', () => {
         },
       ]
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.repositoryBranches('/repo-a', ['refs/heads'])
@@ -5048,10 +4721,7 @@ describe('backend Copilot session cleanup', () => {
     const invoke = vi.fn(
       async (): Promise<unknown> => [{ ref: 'refs/heads/topic', oid: 'abc' }]
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send: vi.fn(), on: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.mergedRepositoryBranches('/repo-a', 'main')
@@ -5072,10 +4742,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('rejects unscoped Copilot requests in the desktop shell', async () => {
     const invoke = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, on: vi.fn(), send: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(client.copilotCreateSession()).rejects.toMatchObject({
       code: 'unsupported',
@@ -5092,10 +4759,7 @@ describe('backend Copilot session cleanup', () => {
       description: 'Example',
       basis: 'staged_diff',
     }))
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, on: vi.fn(), send: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await client.copilotGenerateForRepository('/repo-a', {
       paths: ['selected.txt'],
@@ -5168,10 +4832,7 @@ describe('backend Copilot session cleanup', () => {
       can_select: true,
       hunks: [],
     }))
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, on: vi.fn(), send: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.copilotCommitDiffForRepository(
@@ -5206,10 +4867,7 @@ describe('backend Copilot session cleanup', () => {
         hunks: [],
       })
     )
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, on: vi.fn(), send: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.copilotCommitDiffForRepository('/repo-a', 'bad')
@@ -5232,10 +4890,7 @@ describe('backend Copilot session cleanup', () => {
         new Promise(() => {})
     )
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, on: vi.fn(), send },
-    })
+    installWryBridge({ invoke, send })
     const client = new BackendClient()
     const controller = new AbortController()
     const pending = client.copilotGenerateForRepository(
@@ -5274,10 +4929,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('requests read-only state for the explicitly selected repository', async () => {
     const invoke = vi.fn(async () => ({ root: '/repo-a' }))
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, on: vi.fn(), send: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.readRepositoryState('/repo-a', 'snapshot')
@@ -5301,10 +4953,7 @@ describe('backend Copilot session cleanup', () => {
   it('passes the untracked mode through to the byte-preserving status operation', async () => {
     const records = [{ kind: 'entry', path: { bytes: [255] } }]
     const invoke = vi.fn(async () => records)
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, on: vi.fn(), send: vi.fn() },
-    })
+    installWryBridge({ invoke })
     const client = new BackendClient()
     await expect(
       client.detailedRepositoryStatus('/repo-a', false)
@@ -5333,10 +4982,7 @@ describe('backend Copilot session cleanup', () => {
         })
     )
     const send = vi.fn()
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: { invoke, send, on: vi.fn() },
-    })
+    installWryBridge({ invoke, send })
     const client = new BackendClient()
     const controller = new AbortController()
     const result = client.detailedRepositoryStatus('/repo-a', true, {
@@ -5367,10 +5013,7 @@ describe('backend Copilot session cleanup', () => {
     try {
       const invoke = vi.fn(() => new Promise(() => {}))
       const send = vi.fn()
-      Object.defineProperty(window, '__desktop', {
-        configurable: true,
-        value: { invoke, send, on: vi.fn() },
-      })
+      installWryBridge({ invoke, send })
       const client = new BackendClient()
       const controller = new AbortController()
       controller.abort()
@@ -5396,15 +5039,7 @@ describe('backend Copilot session cleanup', () => {
 
   it('does not claim cancellation when the host only has protocol fallback', async () => {
     const invoke = vi.fn(async () => [])
-    Object.defineProperty(window, '__desktop', {
-      configurable: true,
-      value: {
-        invoke,
-        send: vi.fn(),
-        on: vi.fn(),
-        supportsCancellation: () => false,
-      },
-    })
+    installWryBridge({ invoke, supportsCancellation: () => false })
     const client = new BackendClient()
     expect(client.capabilities().cancel).toBe(false)
     await expect(
