@@ -2502,6 +2502,52 @@ export class BackendClient {
     return { kind: 'success', env }
   }
 
+  /** Resolve an executable through the Rust host without renderer filesystem access. */
+  async resolveExecutable(
+    command: string,
+    path?: string
+  ): Promise<string | null> {
+    if (
+      command.length === 0 ||
+      command.length > 4096 ||
+      command.includes('\0') ||
+      (path !== undefined && (path.length > 1024 * 1024 || path.includes('\0')))
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message: 'Invalid executable resolution request',
+        retryable: false,
+      })
+    }
+    const value =
+      this.transport === 'wry'
+        ? await this.request('git_info', {
+            operation: {
+              type: 'resolve_executable',
+              command,
+              ...(path === undefined ? {} : { path }),
+            },
+          })
+        : await this.request('resolve_executable', {
+            command,
+            ...(path === undefined ? {} : { path }),
+          })
+    if (
+      value !== null &&
+      (typeof value !== 'string' ||
+        value.length === 0 ||
+        value.length > 65536 ||
+        value.includes('\0'))
+    ) {
+      throw new BackendError({
+        code: 'invalid_response',
+        message: 'Invalid executable resolution response',
+        retryable: false,
+      })
+    }
+    return value
+  }
+
   /** Read the installed Git version through the Rust host. */
   async gitVersion(): Promise<string> {
     const value =

@@ -347,6 +347,11 @@ enum ManagementOperation {
     },
     GitVersion,
     GitGlobalConfigPath,
+    ResolveExecutable {
+        command: String,
+        #[serde(default)]
+        path: Option<String>,
+    },
     RendererShellEnv {
         #[serde(default)]
         cwd: Option<String>,
@@ -785,6 +790,9 @@ async fn execute(
         }
         ApplicationOperation::Management(GitGlobalConfigPath) => {
             Ok(json!(desktop_core::git_global_config_path().await?))
+        }
+        ApplicationOperation::Management(ResolveExecutable { command, path }) => {
+            desktop_core::resolve_executable(command, path).await
         }
         ApplicationOperation::Management(RendererShellEnv { cwd, shell_kind }) => {
             anyhow::ensure!(
