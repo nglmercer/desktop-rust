@@ -4,7 +4,6 @@ import type { ProcessProxyConnection as Connection } from 'process-proxy'
 import type { HookCallbackOptions } from '../git'
 import type { ShellEnvResult } from './get-shell-env'
 import { shellFriendlyNames } from './config'
-import { pipeline } from 'stream/promises'
 import { memoizeOne } from '../memoize-one'
 import { which } from '../executable-path'
 import { createReadStream, createWriteStream } from '../../web/fs'
@@ -257,8 +256,36 @@ export const createHooksProxy = (
 
     if (hasStdin && stdinPath) {
       try {
-        await pipeline(conn.stdin, createWriteStream(stdinPath), {
-          signal: abortController.signal,
+        await new Promise<void>((resolve, reject) => {
+          const output = createWriteStream(stdinPath)
+          const cleanup = () => {
+            output.removeListener('error', fail)
+            conn.stdin.removeListener('error', fail)
+            output.removeListener('finish', finish)
+            abortController.signal.removeEventListener('abort', abort)
+          }
+          const fail = (error: unknown) => {
+            cleanup()
+            output.destroy()
+            conn.stdin.destroy()
+            reject(error)
+          }
+          const finish = () => {
+            cleanup()
+            resolve()
+          }
+          const abort = () => fail(new Error(`hook ${hookName} aborted`))
+          output.once('error', fail)
+          conn.stdin.once('error', fail)
+          output.once('finish', finish)
+          if (abortController.signal.aborted) {
+            abort()
+            return
+          }
+          abortController.signal.addEventListener('abort', abort, {
+            once: true,
+          })
+          conn.stdin.pipe(output)
         })
       } catch (error) {
         const message = abortController.signal.aborted

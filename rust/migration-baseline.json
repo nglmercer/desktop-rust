@@ -11,7 +11,7 @@
   "imports.async_hooks": 1,
   "imports.net": 1,
   "imports.stream": 0,
-  "imports.stream_promises": 1,
+  "imports.stream_promises": 0,
   "imports.path": 66,
   "imports.desktop_trampoline": 1,
   "imports.registry_js": 3,
