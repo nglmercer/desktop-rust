@@ -29,6 +29,7 @@ import {
   ITreeEntry,
 } from './state'
 import { backend } from '../../../backend/client'
+import * as GitPerf from '../../../ui/lib/git-perf'
 
 export const assistedCommitGitRoutingEnvironmentNames = [
   'LOCAL_GIT_DIRECTORY',
@@ -621,10 +622,13 @@ export async function writeTree(
     readonly entry: ITreeEntry | null
   }>
 ): Promise<string> {
-  const result = await backend().repositoryAssistedCommitIndexTree(
-    data.repository.path,
-    base,
-    { entries, environment: objectReadEnvironment(data.environment) }
+  const result = await GitPerf.measure(
+    'assistedCommitWriteTree: git index-tree',
+    () =>
+      backend().repositoryAssistedCommitIndexTree(data.repository.path, base, {
+        entries,
+        environment: objectReadEnvironment(data.environment),
+      })
   )
   return result.tree
 }

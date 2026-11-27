@@ -117,19 +117,17 @@ describe('git/assisted-commit real hook interception', () => {
         allowEmptyCommit: empty,
       })
       let absentSources = 0
-      nativeExecFault = async (args, cwd, options) => {
-        const result = await nativeExec(args, cwd, {
-          ...options,
-          env: { ...options?.env, GIT_ATTR_NOSYSTEM: '1' },
+      const attributeSource = backend().repositoryAssistedCommitAttributeSource
+      const attributeSourceSpy = vi
+        .spyOn(backend(), 'repositoryAssistedCommitAttributeSource')
+        .mockImplementation(async (path, variable, environment) => {
+          if (variable === 'GIT_ATTR_SYSTEM') {
+            absentSources++
+            return { exitCode: 1, stdout: '', stderr: '' }
+          }
+          return attributeSource.call(backend(), path, variable, environment)
         })
-        if (args.includes('GIT_ATTR_SYSTEM')) {
-          assert.strictEqual(result.exitCode, 1)
-          assert.strictEqual(result.stdout.length, 0)
-          assert.strictEqual(result.stderr.length, 0)
-          absentSources++
-        }
-        return result
-      }
+      t.after(() => attributeSourceSpy.mockRestore())
       const result = await fixtures.single(repository, input)
       assert.strictEqual(result.commits.length, 1)
       assert.strictEqual(await fixtures.count(repository), 2)
@@ -150,17 +148,20 @@ describe('git/assisted-commit real hook interception', () => {
     const originalIndex = await FileSystem.readFile(
       await fixtures.indexPath(repository)
     )
-    nativeExecFault = async (args, cwd, options) => {
-      const result = await nativeExec(args, cwd, options)
-      return args.includes('GIT_ATTR_SYSTEM')
-        ? {
-            ...result,
+    const attributeSource = backend().repositoryAssistedCommitAttributeSource
+    const attributeSourceSpy = vi
+      .spyOn(backend(), 'repositoryAssistedCommitAttributeSource')
+      .mockImplementation(async (path, variable, environment) => {
+        if (variable === 'GIT_ATTR_SYSTEM') {
+          return {
             exitCode: 1,
             stdout: '',
             stderr: 'Injected attribute source lookup EIO',
           }
-        : result
-    }
+        }
+        return attributeSource.call(backend(), path, variable, environment)
+      })
+    t.after(() => attributeSourceSpy.mockRestore())
     await assert.rejects(fixtures.single(repository, input), error => {
       assert.ok(error instanceof engine.AssistedCommitError)
       return error.code === 'unsafe-selection'

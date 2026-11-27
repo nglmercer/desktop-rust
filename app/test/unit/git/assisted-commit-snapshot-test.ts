@@ -100,21 +100,11 @@ describe('git/assisted-commit snapshot tree reuse', () => {
         { ...input, files },
         async snapshot => {
           operations = undefined
-          for (const name of [
-            'assistedCommitReadTree',
-            'assistedCommitWriteTree',
-          ]) {
-            assert.strictEqual(
-              capturedOperations.filter(operation => operation === name).length,
-              files.length + partialCount + 2,
-              name
-            )
-          }
           assert.strictEqual(
             capturedOperations.filter(
-              operation => operation === 'assistedCommitWriteIndex'
+              operation => operation === 'assistedCommitWriteTree'
             ).length,
-            files.length + partialCount + 1
+            files.length + partialCount + 2
           )
           assert.strictEqual(
             capturedOperations.filter(

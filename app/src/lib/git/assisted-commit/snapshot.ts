@@ -61,6 +61,7 @@ import {
   snapshots,
 } from './state'
 import { IAssistedCommitOperationOptions } from './progress'
+import * as GitPerf from '../../../ui/lib/git-perf'
 
 const MaximumSplittableBytes = 4 * 1024 * 1024
 
@@ -665,11 +666,15 @@ export async function captureAssistedCommitSnapshot(
       }
       if (partial) {
         await ensurePartialDiffIsUntransformed(context, file.path)
-        const native = await backend().repositoryAssistedCommitCertifyDiff(
-          repository.path,
-          base === null ? null : (head.sha ?? baseTree),
-          file.path,
-          context.environment
+        const native = await GitPerf.measure(
+          'assistedCommitCertifyPartialDiff: git diff-certification',
+          () =>
+            backend().repositoryAssistedCommitCertifyDiff(
+              repository.path,
+              base === null ? null : (head.sha ?? baseTree),
+              file.path,
+              context.environment
+            )
         )
         const nativeText = native.toString('utf8')
         if (
