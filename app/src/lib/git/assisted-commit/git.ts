@@ -14,13 +14,6 @@ import { Repository } from '../../../models/repository'
 import { IAssistedCommitHead } from '../../../models/assisted-commit'
 import { AppFileStatusKind } from '../../../models/status'
 import { isErrnoException } from '../../errno-exception'
-import {
-  git,
-  IGitBufferExecutionOptions,
-  IGitBufferResult,
-  IGitStringExecutionOptions,
-  IGitStringResult,
-} from '../core'
 import { IRefLock } from '../update-ref'
 import {
   acquireOwnedFileLock,
@@ -560,34 +553,6 @@ export async function initializePrivateRepository(
   await writeFile(join(directory, 'config'), text, { mode: 0o600 })
   environment.GIT_ATTR_NOSYSTEM = '1'
   return environment
-}
-
-export function privateGit(
-  data: Pick<IAssistedCommitData, 'repository' | 'environment'>,
-  args: string[],
-  name: string,
-  options?: IGitStringExecutionOptions
-): Promise<IGitStringResult>
-export function privateGit(
-  data: Pick<IAssistedCommitData, 'repository' | 'environment'>,
-  args: string[],
-  name: string,
-  options: IGitBufferExecutionOptions
-): Promise<IGitBufferResult>
-export function privateGit(
-  data: Pick<IAssistedCommitData, 'repository' | 'environment'>,
-  args: string[],
-  name: string,
-  options?: IGitStringExecutionOptions | IGitBufferExecutionOptions
-): Promise<IGitStringResult | IGitBufferResult> {
-  const env = { ...data.environment, ...options?.env }
-  return options?.encoding === 'buffer'
-    ? git(args, data.repository.path, name, {
-        ...options,
-        env,
-        encoding: 'buffer',
-      })
-    : git(args, data.repository.path, name, { ...options, env })
 }
 
 export function objectReadEnvironment(
