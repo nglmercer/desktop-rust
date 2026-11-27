@@ -3,10 +3,11 @@ import {
   type TestCleanupContext as TestContext,
 } from './temp'
 import { Repository } from '../../src/models/repository'
-import { exec } from 'dugite'
+import { exec } from '../../src/lib/git/host-git-exec'
 import { makeCommit, switchTo } from './repository-scaffolding'
-import { glob, writeFile, cp, mkdir, rename, rm } from 'fs/promises'
-import { DefaultGitDescription, git } from '../../src/lib/git'
+import { glob, writeFile, cp, rename, rm } from 'fs/promises'
+import { git } from '../../src/lib/git'
+import { backend } from '../../src/backend/client'
 import { dirname, join } from 'path'
 
 /**
@@ -40,30 +41,20 @@ export async function setupEmptyRepository(
 ): Promise<Repository> {
   const repoPath = await createTempDirectory(t)
 
-  await mkdir(join(repoPath, '.git'))
-  await mkdir(join(repoPath, '.git/objects'))
-  await mkdir(join(repoPath, '.git/refs'))
-  await mkdir(join(repoPath, '.git/refs/tags'))
-  await mkdir(join(repoPath, '.git/refs/heads'))
-  await mkdir(join(repoPath, '.git/info'))
-
-  const headRef = `ref: refs/heads/${defaultBranchName}\n`
-
-  await Promise.all([
-    writeFile(join(repoPath, '.git/HEAD'), headRef),
-    writeFile(
-      join(repoPath, '.git/config'),
-      `[core]
-repositoryformatversion = 0
-filemode = true
-bare = false
-logallrefupdates = true
-ignorecase = ${process.platform === 'linux' ? 'true' : 'false'}
-precomposeunicode = true
-`
-    ),
-    writeFile(join(repoPath, '.git/description'), DefaultGitDescription),
-  ])
+  // Initialize through the typed host operation instead of constructing Git's
+  // private directory format in the renderer test. Keep the historical config
+  // normalization explicit because tests use the fixture to model Desktop's
+  // cross-platform repository behavior.
+  await backend().initializeDesktopRepository(repoPath, defaultBranchName)
+  for (const [key, value] of [
+    ['core.ignorecase', process.platform === 'linux' ? 'true' : 'false'],
+    ['core.precomposeunicode', 'true'],
+  ]) {
+    const result = await exec(['config', key, value], repoPath)
+    if (result.exitCode !== 0) {
+      throw new Error(`Unable to initialize fixture ${key}: ${result.stderr}`)
+    }
+  }
 
   return new Repository(repoPath, -1, null, false)
 }

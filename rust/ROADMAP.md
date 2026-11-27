@@ -31,7 +31,7 @@ machinery, test fixtures, and release infrastructure remain migration work.
 ### R1 — Rust-backed tests
 
 - [x] Run TypeScript tests through Vitest and the real Rust test backend.
-- [ ] Add a reusable Rust-backed repository fixture.
+- [x] Add a reusable Rust-backed repository fixture.
 - [ ] Decide per-file versus shared backend lifetime after measurement.
 
 ### R2 — Remaining runtime ownership

@@ -1,4 +1,4 @@
-import { exec } from 'dugite'
+import { exec } from '../../src/lib/git/host-git-exec'
 import { writeFile } from 'fs/promises'
 import * as Path from 'path'
 import type { TestCleanupContext as TestContext } from './temp'

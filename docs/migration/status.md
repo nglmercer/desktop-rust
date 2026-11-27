@@ -17,7 +17,7 @@ remaining worklist.
 | GitHub/API | Some typed operations exist. | Broad PR/issue/check/enterprise/pagination/cancellation migration. |
 | Credentials | Rust credential broker exists for scoped Git operations. | Account/keychain and remaining `keytar` shim flows. |
 | Packaging | Rust/Vite development package exists. | Relocated smoke, signing, notarization, update channel, license inventory. |
-| Tests | Vitest is the only TypeScript runner and uses the Rust backend. | Full-suite interference isolation, reusable repository fixture, lifetime policy. |
+| Tests | Vitest is the only TypeScript runner and uses the Rust backend. | Full-suite interference isolation and backend lifetime policy. |
 
 ## Measured baseline
 
