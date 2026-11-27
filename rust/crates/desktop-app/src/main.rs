@@ -266,6 +266,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         // and a new window cannot complete another window's pending sign-in.
         #[cfg(target_os = "linux")]
         if !matches!(std::fs::symlink_metadata(&instance_socket), Err(ref error) if error.kind() == std::io::ErrorKind::NotFound)
+            && !instance::has_recoverable_stale_socket(&instance_socket)
         {
             let message = format!(
                 "GitHub Desktop could not safely send this link to the open window. Close all GitHub Desktop windows, restart the application, and try the action again.\n\nIf the problem persists, check this socket after closing every window. Remove it only if it is a leftover from GitHub Desktop:\n{}",

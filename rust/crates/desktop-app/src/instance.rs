@@ -317,6 +317,17 @@ mod imp {
         Ok(listener)
     }
 
+    /// Whether the path is a marked but inactive socket owned by this application.
+    /// The primary startup path revalidates this under the instance lock before
+    /// removing it; this probe only decides whether a callback launch may proceed.
+    pub fn has_recoverable_stale_socket(socket: &Path) -> bool {
+        socket_identity(socket).is_ok()
+            && matches!(
+                connect_with_timeout(socket),
+                Err(ref error) if error.kind() == io::ErrorKind::ConnectionRefused
+            )
+    }
+
     /// Hand `args` only to a marked instance. Older unmarked instances must be
     /// restarted before they can receive callbacks from this version.
     pub fn forward(socket: &Path, args: &[String]) -> bool {
@@ -385,6 +396,10 @@ mod imp {
     use std::path::Path;
     use std::time::Duration;
 
+    pub fn has_recoverable_stale_socket(_socket: &Path) -> bool {
+        false
+    }
+
     pub fn forward(socket: &Path, args: &[String]) -> bool {
         let Ok(mut stream) = UnixStream::connect(socket) else {
             return false;
@@ -436,6 +451,10 @@ mod imp {
     use std::path::Path;
 
     // Not implemented for this platform yet: every launch opens its own window.
+    pub fn has_recoverable_stale_socket(_socket: &Path) -> bool {
+        false
+    }
+
     pub fn forward(_socket: &Path, _args: &[String]) -> bool {
         false
     }
@@ -445,6 +464,10 @@ mod imp {
     ) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+pub fn has_recoverable_stale_socket(socket: &Path) -> bool {
+    imp::has_recoverable_stale_socket(socket)
 }
 
 pub fn forward(socket: &Path, args: &[String]) -> bool {
@@ -826,6 +849,7 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(has_recoverable_stale_socket(&socket));
 
         let (sender, receiver) = mpsc::channel();
         listen(&socket, move |args| {
@@ -835,6 +859,7 @@ mod tests {
         let args = vec!["--cli-open=/tmp/repository".to_owned()];
         assert!(forward(&socket, &args));
         assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), args);
+        assert!(!has_recoverable_stale_socket(&socket));
         std::fs::remove_dir_all(directory).unwrap();
     }
 
