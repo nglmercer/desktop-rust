@@ -24,6 +24,7 @@ import { memoizeOne } from '../../../lib/memoize-one'
 import { RowIndexPath } from './list-row-index-path'
 import { sendNonFatalException } from '../../../lib/helpers/non-fatal-exception'
 import { classNames } from '../../../lib/classnames'
+import { cancelImmediate, scheduleImmediate } from '../../../lib/immediate'
 
 /**
  * Describe the first argument given to the cellRenderer,
@@ -409,7 +410,7 @@ export class List extends React.Component<IListProps, IListState> {
   private list: HTMLDivElement | null = null
   private grid: Grid | null = null
   private readonly resizeObserver: ResizeObserver | null = null
-  private updateSizeTimeoutId: NodeJS.Immediate | null = null
+  private updateSizeTimeoutId: number | null = null
 
   /**
    * Get the props for the inner scroll container (called containerProps on the
@@ -448,10 +449,10 @@ export class List extends React.Component<IListProps, IListState> {
             // when we're reacting to a resize so we'll defer it until after
             // react is done with this frame.
             if (this.updateSizeTimeoutId !== null) {
-              clearImmediate(this.updateSizeTimeoutId)
+              cancelImmediate(this.updateSizeTimeoutId)
             }
 
-            this.updateSizeTimeoutId = setImmediate(
+            this.updateSizeTimeoutId = scheduleImmediate(
               this.onResized,
               this.list,
               contentRect
@@ -1079,7 +1080,7 @@ export class List extends React.Component<IListProps, IListState> {
 
   public componentWillUnmount() {
     if (this.updateSizeTimeoutId !== null) {
-      clearImmediate(this.updateSizeTimeoutId)
+      cancelImmediate(this.updateSizeTimeoutId)
       this.updateSizeTimeoutId = null
     }
 

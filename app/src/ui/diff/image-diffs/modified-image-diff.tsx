@@ -8,6 +8,7 @@ import { OnionSkin } from './onion-skin'
 import { Swipe } from './swipe'
 import { assertNever } from '../../../lib/fatal-error'
 import { ISize, getMaxFitSize } from './sizing'
+import { cancelImmediate, scheduleImmediate } from '../../../lib/immediate'
 
 interface IModifiedImageDiffProps {
   readonly previous: Image
@@ -63,7 +64,7 @@ export class ModifiedImageDiff extends React.Component<
   private container: HTMLElement | null = null
 
   private readonly resizeObserver: ResizeObserver
-  private resizedTimeoutID: NodeJS.Immediate | null = null
+  private resizedTimeoutID: number | null = null
 
   public constructor(props: IModifiedImageDiffProps) {
     super(props)
@@ -75,10 +76,10 @@ export class ModifiedImageDiff extends React.Component<
           // when we're reacting to a resize so we'll defer it until after
           // react is done with this frame.
           if (this.resizedTimeoutID !== null) {
-            clearImmediate(this.resizedTimeoutID)
+            cancelImmediate(this.resizedTimeoutID)
           }
 
-          this.resizedTimeoutID = setImmediate(
+          this.resizedTimeoutID = scheduleImmediate(
             this.onResized,
             target,
             contentRect

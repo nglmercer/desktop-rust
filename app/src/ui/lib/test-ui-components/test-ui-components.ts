@@ -27,6 +27,7 @@ import {
   WorkingDirectoryFileChange,
 } from '../../../models/status'
 import { DiffSelection, DiffSelectionType } from '../../../models/diff'
+import { scheduleImmediate } from '../../../lib/immediate'
 
 export function showTestUI(
   name: TestMenuEvent,
@@ -174,7 +175,7 @@ export function showTestUI(
   }
 
   function boomtown() {
-    setImmediate(() => {
+    scheduleImmediate(() => {
       throw new Error('Boomtown!')
     })
   }

@@ -512,7 +512,6 @@ export default defineConfig({
         'assert',
         'events',
         'querystring',
-        'timers',
         'string_decoder',
       ],
       globals: { Buffer: true, global: true, process: true },

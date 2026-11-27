@@ -16,6 +16,7 @@ import uniqWith from 'lodash/uniqWith'
 import { LinkButton } from '../lib/link-button'
 import { UnreachableCommitsTab } from './unreachable-commits-dialog'
 import { memoizeOne } from '../../lib/memoize-one'
+import { cancelImmediate, scheduleImmediate } from '../../lib/immediate'
 import { Button } from '../lib/button'
 import { Avatar } from '../lib/avatar'
 import { CopyButton } from '../copy-button'
@@ -143,7 +144,7 @@ export class ExpandableCommitSummary extends React.Component<
 > {
   private descriptionScrollViewRef: HTMLDivElement | null = null
   private readonly resizeObserver: ResizeObserver | null = null
-  private updateOverflowTimeoutId: NodeJS.Immediate | null = null
+  private updateOverflowTimeoutId: number | null = null
 
   private getCountCommitsNotInDiff = memoizeOne(
     (
@@ -178,10 +179,10 @@ export class ExpandableCommitSummary extends React.Component<
             // when we're reacting to a resize so we'll defer it until after
             // react is done with this frame.
             if (this.updateOverflowTimeoutId !== null) {
-              clearImmediate(this.updateOverflowTimeoutId)
+              cancelImmediate(this.updateOverflowTimeoutId)
             }
 
-            this.updateOverflowTimeoutId = setImmediate(this.onResized)
+            this.updateOverflowTimeoutId = scheduleImmediate(this.onResized)
           }
         }
       })

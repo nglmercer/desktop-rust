@@ -30,6 +30,7 @@ import { IMatchedGitHubRepository } from '../repository-matching'
 import { shallowEquals } from '../equality'
 import { Account, IAccountIdentity, isSameAccount } from '../../models/account'
 import { caseInsensitiveEquals } from '../compare'
+import { scheduleImmediate } from '../immediate'
 
 type AddRepositoryOptions = {
   missing?: boolean
@@ -1056,7 +1057,7 @@ export class RepositoriesStore extends TypedBaseStore<
     this.updateVersion++
     if (!this.emitQueued) {
       this.emitQueued = true
-      setImmediate(() => this.emitLatestRepositories())
+      scheduleImmediate(() => this.emitLatestRepositories())
     }
   }
 

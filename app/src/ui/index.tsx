@@ -1,3 +1,4 @@
+import '../lib/install-immediate'
 import '../web/install-random-uuid'
 import '../lib/logging/renderer/install'
 

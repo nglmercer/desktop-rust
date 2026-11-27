@@ -21,6 +21,7 @@ import {
 } from '../ci-checks/ci-checks'
 import { offsetFromNow } from '../offset-from'
 import { AccountsStore } from './accounts-store'
+import { scheduleImmediate } from '../immediate'
 
 interface ICommitStatusCacheEntry {
   /**
@@ -222,7 +223,7 @@ export class CommitStatusStore {
   private queueRefresh() {
     if (!this.refreshQueued) {
       this.refreshQueued = true
-      setImmediate(() => {
+      scheduleImmediate(() => {
         this.refreshQueued = false
         this.refreshEligibleSubscriptions()
       })

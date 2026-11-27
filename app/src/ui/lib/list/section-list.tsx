@@ -32,6 +32,7 @@ import {
 } from './list-row-index-path'
 import { range } from '../../../lib/range'
 import { sendNonFatalException } from '../../../lib/helpers/non-fatal-exception'
+import { cancelImmediate, scheduleImmediate } from '../../../lib/immediate'
 
 /**
  * Describe the first argument given to the cellRenderer,
@@ -441,7 +442,7 @@ export class SectionList extends React.Component<
   private rootGrid: Grid | null = null
   private grids = new Map<number, Grid>()
   private readonly resizeObserver: ResizeObserver | null = null
-  private updateSizeTimeoutId: NodeJS.Immediate | null = null
+  private updateSizeTimeoutId: number | null = null
 
   /**
    * Get the props for the inner scroll container (called containerProps on the
@@ -482,10 +483,10 @@ export class SectionList extends React.Component<
             // when we're reacting to a resize so we'll defer it until after
             // react is done with this frame.
             if (this.updateSizeTimeoutId !== null) {
-              clearImmediate(this.updateSizeTimeoutId)
+              cancelImmediate(this.updateSizeTimeoutId)
             }
 
-            this.updateSizeTimeoutId = setImmediate(
+            this.updateSizeTimeoutId = scheduleImmediate(
               this.onResized,
               this.list,
               contentRect
@@ -1125,7 +1126,7 @@ export class SectionList extends React.Component<
 
   public componentWillUnmount() {
     if (this.updateSizeTimeoutId !== null) {
-      clearImmediate(this.updateSizeTimeoutId)
+      cancelImmediate(this.updateSizeTimeoutId)
       this.updateSizeTimeoutId = null
     }
 
