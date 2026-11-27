@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert/strict'
-import { after, before, describe, it, mock } from 'node:test'
+import { afterAll, beforeAll, describe, it, vi } from 'vitest'
 import type { AppStore } from '../../../src/lib/stores/app-store'
 import type { AccountsStore } from '../../../src/lib/stores/accounts-store'
 import type { StatsStore } from '../../../src/lib/stats'
@@ -15,12 +14,11 @@ describe('AppStore token refresh usage stats wiring', () => {
   let statsDb: TestStatsDatabase
   let rejectRenewal = false
 
-  after(() => {
+  afterAll(() => {
     statsDb?.close()
-    mock.restoreAll()
   })
 
-  before(async () => {
+  beforeAll(async () => {
     vi.doMock('../../../src/ui/main-process-proxy', async () => ({
       ...(await vi.importActual('../../../src/ui/main-process-proxy')),
       getAppMenu: () => {},
@@ -54,9 +52,9 @@ describe('AppStore token refresh usage stats wiring', () => {
       '../../helpers/test-activity-monitor'
     )
     const { fakePost } = await import('../../fake-stats-post')
-    mock.method(window, 'setTimeout', () => 0)
-    mock.method(window, 'addEventListener', () => {})
-    mock.method(window, 'requestAnimationFrame', () => 0)
+    window.setTimeout = (() => 0) as unknown as typeof window.setTimeout
+    window.addEventListener = (() => {}) as typeof window.addEventListener
+    window.requestAnimationFrame = () => 0
 
     const stores = createTestStores()
     accountsStore = new AccountsStore(
@@ -109,8 +107,8 @@ describe('AppStore token refresh usage stats wiring', () => {
   })
 
   it('keeps adoption in sync across legacy sign-in, renewal, and required sign-out', async t => {
-    const adoption = t.mock.method(statsStore, 'setUsesShortLivedToken')
-    const record = t.mock.method(statsStore, 'recordTokenRefreshEvent')
+    const adoption = vi.spyOn(statsStore, 'setUsesShortLivedToken')
+    const record = vi.spyOn(statsStore, 'recordTokenRefreshEvent')
     const legacy = new Account(
       'legacy',
       'https://api.github.com',
@@ -121,7 +119,7 @@ describe('AppStore token refresh usage stats wiring', () => {
       'Legacy'
     )
     await accountsStore.addAccount(legacy)
-    assert.equal(adoption.mock.calls.at(-1)?.arguments[0], false)
+    assert.equal(adoption.mock.calls.at(-1)?.[0], false)
 
     const enterprise = new Account(
       'mona',
@@ -137,15 +135,15 @@ describe('AppStore token refresh usage stats wiring', () => {
       refreshToken: 'old-refresh',
       expiresAt: 0,
     })
-    assert.equal(adoption.mock.calls.at(-1)?.arguments[0], true)
+    assert.equal(adoption.mock.calls.at(-1)?.[0], true)
     assert.ok(current)
     await accountsStore.getAccountWithFreshToken(current)
-    await Promise.all(record.mock.calls.map(call => call.result))
+    await Promise.all(record.mock.results.map(call => call.value))
     assert.deepEqual(
-      record.mock.calls.map(call => call.arguments[0]),
+      record.mock.calls.map(call => call[0]),
       ['attempt', 'success']
     )
-    assert.equal(adoption.mock.calls.at(-1)?.arguments[0], true)
+    assert.equal(adoption.mock.calls.at(-1)?.[0], true)
     assert.equal(
       (await statsDb.dailyMeasures.limit(1).first())?.tokenRefreshSuccessCount,
       1
@@ -162,10 +160,10 @@ describe('AppStore token refresh usage stats wiring', () => {
       accountsStore.getAccountWithFreshToken(replacement),
       OAuthRefreshRejectedError
     )
-    await Promise.all(record.mock.calls.map(call => call.result))
-    assert.equal(adoption.mock.calls.at(-1)?.arguments[0], false)
+    await Promise.all(record.mock.results.map(call => call.value))
+    assert.equal(adoption.mock.calls.at(-1)?.[0], false)
     assert.deepEqual(
-      record.mock.calls.map(call => call.arguments[0]),
+      record.mock.calls.map(call => call[0]),
       [
         'attempt',
         'success',
@@ -188,10 +186,12 @@ describe('AppStore token refresh usage stats wiring', () => {
   it('logs recording failures without breaking credential renewal', async t => {
     rejectRenewal = false
     const error = new Error('Stats database unavailable')
-    const logger = t.mock.method(log, 'error')
-    t.mock.method(statsStore, 'recordTokenRefreshEvent', async () => {
-      throw error
-    })
+    const logger = vi.spyOn(log, 'error').mockImplementation(() => {})
+    vi.spyOn(statsStore, 'recordTokenRefreshEvent').mockImplementation(
+      async () => {
+        throw error
+      }
+    )
     const account = new Account(
       'octocat',
       'https://api.github.com',
@@ -211,6 +211,6 @@ describe('AppStore token refresh usage stats wiring', () => {
       (await accountsStore.getAccountWithFreshToken(current)).token,
       'renewed-access'
     )
-    assert.ok(logger.mock.calls.some(call => call.arguments[1] === error))
+    assert.ok(logger.mock.calls.some(call => call[1] === error))
   })
 })
