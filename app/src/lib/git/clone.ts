@@ -194,7 +194,7 @@ export async function clone(
   })
 }
 
-function cloneTrampolineEnvironment(
+export function cloneTrampolineEnvironment(
   environment: object
 ): ICloneTrampolineEnvironment {
   const values = environment as Record<string, unknown>

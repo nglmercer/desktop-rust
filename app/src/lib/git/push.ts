@@ -10,6 +10,7 @@ import {
   BackendError,
   FetchErrorKind,
   PushErrorKind,
+  type ICloneTrampolineEnvironment,
 } from '../../backend/client'
 import {
   withRepositoryGitOperation,
@@ -72,6 +73,9 @@ export type PushOptions = {
   readonly branch?: Branch
 
   readonly noVerify?: boolean
+
+  /** Renderer trampoline credential routing for repositories without an assigned account. */
+  readonly trampoline?: ICloneTrampolineEnvironment
 
   /** Desktop-owned assisted entry; never enables force, tag, or submodule pushes. */
   readonly assistedCommit?: {
@@ -239,6 +243,9 @@ export async function push(
                     options?.onHookFailure !== undefined,
                   ...(proxy === undefined ? {} : { proxy }),
                   ...(hooks === undefined ? {} : { hook_environment: hooks }),
+                  ...(options?.trampoline === undefined
+                    ? {}
+                    : { trampoline: options.trampoline }),
                   ...(assisted === undefined ||
                   assistedConfigParameters === undefined
                     ? {}

@@ -9759,6 +9759,7 @@ export class BackendClient {
       readonly interactive_hook_decision?: boolean
       readonly proxy?: RemoteProxy
       readonly hook_environment?: IHookEnvironmentRequest
+      readonly trampoline?: ICloneTrampolineEnvironment
       readonly assisted?: {
         readonly expected_tip: string
         readonly remote_ref: string
@@ -9790,6 +9791,18 @@ export class BackendClient {
     }
     validateRemoteProxy(request.proxy, 'push')
     validateHookEnvironment(request.hook_environment)
+    validateCloneTrampoline(request.trampoline)
+    if (
+      request.trampoline !== undefined &&
+      (request.hook_environment !== undefined || request.assisted !== undefined)
+    ) {
+      throw new BackendError({
+        code: 'invalid_request',
+        message:
+          'Push trampoline credentials cannot be combined with hooks or assisted publication',
+        retryable: false,
+      })
+    }
     if (
       request.assisted !== undefined &&
       (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(request.assisted.expected_tip) ||

@@ -258,6 +258,29 @@ describe('Rust push routing', () => {
     )
   })
 
+  it('forwards trampoline credentials through the native push contract', async () => {
+    const trampoline = {
+      desktop_port: 1234,
+      trampoline_token: 'token',
+      user_agent: 'desktop-test',
+      ssh_askpass: 'askpass',
+      display: ':0',
+      config_parameters: `'credential.helper=' 'credential.helper=desktop'`,
+    }
+    await push(repository, remote, 'main', null, [], { trampoline })
+    expect(mocks.git).not.toHaveBeenCalled()
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/repo',
+      expect.objectContaining({ trampoline }),
+      undefined,
+      undefined,
+      expect.any(Function),
+      undefined,
+      undefined,
+      undefined
+    )
+  })
+
   it('forwards an explicitly resolved proxy through the native push contract', async () => {
     mocks.transport = 'wry'
     mocks.proxy.mockResolvedValue({ https_proxy: 'http://proxy.invalid' })

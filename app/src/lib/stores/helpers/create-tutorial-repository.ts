@@ -1,16 +1,14 @@
 import { Account } from '../../../models/account'
 import { API } from '../../api'
 import { APIError } from '../../http'
-import {
-  executionOptionsWithProgress,
-  PushProgressParser,
-} from '../../progress'
-import { git } from '../../git'
 import { IRemote } from '../../../models/remote'
 import { getDefaultBranch } from '../../helpers/default-branch'
-import { envForRemoteOperation } from '../../git/environment'
 import { pathExists } from '../../path-exists'
 import { backend } from '../../../backend/client'
+import { push } from '../../git/push'
+import { cloneTrampolineEnvironment } from '../../git/clone'
+import { withTrampolineEnv } from '../../trampoline/trampoline-environment'
+import { Repository } from '../../../models/repository'
 
 const nl = __WIN32__ ? '\r\n' : '\n'
 const InitialReadmeContents =
@@ -66,23 +64,26 @@ async function pushRepo(
   const pushTitle = `Pushing repository to ${account.friendlyEndpoint}`
   progressCb(pushTitle, 0)
 
-  const pushOpts = await executionOptionsWithProgress(
-    {
-      env: await envForRemoteOperation(remote.url),
-      // The tutorial repository isn't added to Desktop until after it's been
-      // pushed, so its account can't be resolved from its path yet.
-      fallbackAccount: { endpoint: account.endpoint, login: account.login },
-    },
-    new PushProgressParser(),
-    progress => {
-      if (progress.kind === 'progress') {
-        progressCb(pushTitle, progress.percent, progress.details.text)
-      }
-    }
+  // The tutorial repository isn't added to Desktop until after it's been
+  // pushed, so its account can't be resolved from its path yet.
+  await withTrampolineEnv(
+    async trampolineEnvironment =>
+      push(
+        new Repository(path, -1, null, false),
+        remote,
+        remoteBranchName,
+        null,
+        null,
+        {
+          trampoline: cloneTrampolineEnvironment(trampolineEnvironment),
+        },
+        progress => progressCb(pushTitle, progress.value, progress.description)
+      ),
+    path,
+    false,
+    undefined,
+    { endpoint: account.endpoint, login: account.login }
   )
-
-  const args = ['push', '-u', remote.name, remoteBranchName]
-  await git(args, path, 'tutorial:push', pushOpts)
 }
 
 /**

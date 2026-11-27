@@ -1542,6 +1542,8 @@ pub struct RendererPushRequest {
     #[serde(default)]
     pub hook_environment: Option<RendererHookEnvironment>,
     #[serde(default)]
+    pub trampoline: Option<RendererCloneTrampoline>,
+    #[serde(default)]
     pub assisted: Option<RendererAssistedPush>,
 }
 
@@ -1561,6 +1563,7 @@ impl std::fmt::Debug for RendererPushRequest {
             .field("interactive_hook_decision", &self.interactive_hook_decision)
             .field("proxy", &self.proxy)
             .field("hook_environment", &self.hook_environment)
+            .field("trampoline", &self.trampoline)
             .field("assisted", &self.assisted)
             .finish()
     }

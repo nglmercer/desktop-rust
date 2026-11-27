@@ -316,6 +316,13 @@ impl Repository {
                 "Renderer hook interception replaces native hook callbacks"
             );
         }
+        if let Some(trampoline) = &request.trampoline {
+            trampoline.validate()?;
+            ensure!(
+                request.assisted.is_none() && request.hook_environment.is_none(),
+                "Push trampoline credentials cannot be combined with hooks or assisted publication"
+            );
+        }
         if let Some(assisted) = &request.assisted {
             validate_assisted(assisted, &request.remote)?;
             ensure!(
@@ -594,6 +601,7 @@ impl Repository {
                 hook_proxy: proxy,
                 proxy: request.proxy.as_ref(),
                 hook_environment: request.hook_environment.as_ref(),
+                trampoline: request.trampoline.as_ref(),
                 operation_config_parameters: request
                     .assisted
                     .as_ref()

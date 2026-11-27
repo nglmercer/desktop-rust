@@ -720,6 +720,7 @@ pub(crate) async fn run_bound_remote_fetch_with_proxy(
         proxy,
         None,
         None,
+        None,
     )
     .await
     .map(|(output, _)| output)
@@ -745,6 +746,7 @@ pub(crate) async fn run_bound_remote_pull(
         proxy,
         hook_environment,
         None,
+        None,
     )
     .await
     .map(|(output, _)| output)
@@ -756,6 +758,7 @@ pub(crate) struct BoundRemotePushOptions<'a> {
     pub(crate) hook_proxy: Option<crate::hook_proxy::HookProxy>,
     pub(crate) proxy: Option<&'a crate::RendererProxy>,
     pub(crate) hook_environment: Option<&'a crate::RendererHookEnvironment>,
+    pub(crate) trampoline: Option<&'a crate::RendererCloneTrampoline>,
     pub(crate) operation_config_parameters: Option<&'a str>,
 }
 
@@ -772,6 +775,7 @@ pub(crate) async fn run_bound_remote_push(
         hook_proxy,
         proxy,
         hook_environment,
+        trampoline,
         operation_config_parameters,
     } = options;
     run_bound_remote_operation(
@@ -783,6 +787,7 @@ pub(crate) async fn run_bound_remote_push(
         hook_proxy,
         proxy,
         hook_environment,
+        trampoline,
         operation_config_parameters,
     )
     .await
@@ -798,6 +803,7 @@ async fn run_bound_remote_operation(
     mut hook_proxy: Option<crate::hook_proxy::HookProxy>,
     proxy: Option<&crate::RendererProxy>,
     hook_environment: Option<&crate::RendererHookEnvironment>,
+    trampoline: Option<&crate::RendererCloneTrampoline>,
     operation_config_parameters: Option<&str>,
 ) -> Result<(RawOutput, bool)> {
     let proxy_redactions = proxy_redactions(proxy);
@@ -813,12 +819,44 @@ async fn run_bound_remote_operation(
     // A renderer process-proxy token must never be inherited across requests.
     command.env_remove("PROCESS_PROXY_PORT");
     command.env_remove("PROCESS_PROXY_TOKEN");
+    if let Some(trampoline) = trampoline {
+        trampoline.validate()?;
+        command
+            .env("DESKTOP_PORT", trampoline.desktop_port.to_string())
+            .env("DESKTOP_TRAMPOLINE_TOKEN", &trampoline.trampoline_token)
+            .env("GIT_ASKPASS", "")
+            .env("GIT_USER_AGENT", &trampoline.user_agent)
+            .env("SSH_ASKPASS", &trampoline.ssh_askpass)
+            .env("DISPLAY", &trampoline.display);
+        if let Some(command_line) = &trampoline.git_ssh_command {
+            command.env("GIT_SSH_COMMAND", command_line);
+        } else {
+            command.env_remove("GIT_SSH_COMMAND");
+        }
+    } else {
+        for variable in [
+            "DESKTOP_PORT",
+            "DESKTOP_TRAMPOLINE_TOKEN",
+            "GIT_ASKPASS",
+            "GIT_USER_AGENT",
+            "SSH_ASKPASS",
+            "DISPLAY",
+            "GIT_SSH_COMMAND",
+        ] {
+            command.env_remove(variable);
+        }
+    }
     if let Some(hooks) = hook_environment {
         hooks.validate()?;
         command.env("PROCESS_PROXY_PORT", hooks.process_proxy_port.to_string());
         command.env("PROCESS_PROXY_TOKEN", &hooks.process_proxy_token);
         let parameters = crate::git_credentials::parameters_with_operation_configuration(
             std::ffi::OsString::from(&hooks.config_parameters),
+        );
+        command.env("GIT_CONFIG_PARAMETERS", parameters);
+    } else if let Some(trampoline) = trampoline {
+        let parameters = crate::git_credentials::parameters_with_operation_configuration(
+            std::ffi::OsString::from(&trampoline.config_parameters),
         );
         command.env("GIT_CONFIG_PARAMETERS", parameters);
     } else if let Some(parameters) = operation_config_parameters {
