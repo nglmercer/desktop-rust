@@ -312,6 +312,97 @@ describe('backend Copilot session cleanup', () => {
     })
   })
 
+  it.each([
+    ['timeout', 'timed out'],
+    ['ETIMEDOUT', 'timed out'],
+    ['disconnected', 'connection dropped'],
+  ])(
+    'marks a custom editor launch interrupted with %s as uncertain',
+    async (code, message) => {
+      const invoke = vi.fn().mockRejectedValue({ code, message })
+      Object.defineProperty(window, '__desktop', {
+        configurable: true,
+        value: { invoke, send: vi.fn(), on: vi.fn() },
+      })
+      const editor = {
+        program: '/opt/editor',
+        args: ['%TARGET_PATH%'],
+        macosApp: false,
+      }
+      await expect(
+        new BackendClient().openCustomRepositoryEditor('/repo', null, editor)
+      ).rejects.toMatchObject({
+        code,
+        retryable: false,
+        message: `${message}. The editor may have launched; check before retrying.`,
+      })
+    }
+  )
+
+  it('does not rewrite a completed custom editor launch failure', async () => {
+    const invoke = vi.fn().mockRejectedValue({
+      code: 'spawn_failed',
+      message: 'spawn failed',
+      retryable: false,
+    })
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, send: vi.fn(), on: vi.fn() },
+    })
+    const editor = {
+      program: '/opt/editor',
+      args: ['%TARGET_PATH%'],
+      macosApp: false,
+    }
+    await expect(
+      new BackendClient().openCustomRepositoryEditor('/repo', null, editor)
+    ).rejects.toMatchObject({
+      code: 'spawn_failed',
+      message: 'spawn failed',
+      retryable: false,
+    })
+  })
+
+  it('does not duplicate the terminal uncertainty annotation', async () => {
+    const invoke = vi.fn().mockRejectedValue({
+      code: 'cancelled',
+      message: 'interrupted',
+      retryable: true,
+    })
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, send: vi.fn(), on: vi.fn() },
+    })
+    await expect(
+      new BackendClient().openRepositoryTerminal('/repo', 'Konsole', '/repo')
+    ).rejects.toMatchObject({
+      code: 'cancelled',
+      retryable: false,
+      message:
+        'interrupted. The terminal may have launched; check before retrying.',
+    })
+  })
+
+  it('marks an interrupted file manager reveal as uncertain', async () => {
+    const invoke = vi.fn().mockRejectedValue({
+      code: 'cancelled',
+      message: 'interrupted',
+      retryable: true,
+    })
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, send: vi.fn(), on: vi.fn() },
+    })
+    await expect(
+      new BackendClient().revealRegisteredRepository('/repo')
+    ).rejects.toMatchObject({
+      code: 'cancelled',
+      retryable: false,
+      message:
+        'interrupted. The file manager may have opened; check before retrying.',
+    })
+  })
+
   it('resolves browser selection paths before binding the WebSocket repository', async () => {
     const client = new BackendClient()
     ;(client as unknown as { transport: 'ws' }).transport = 'ws'

@@ -613,6 +613,28 @@ function toBackendError(value: unknown): BackendError {
   })
 }
 
+const uncertainSideEffectCodes = [
+  'cancelled',
+  'timeout',
+  'ETIMEDOUT',
+  'disconnected',
+]
+
+function rewriteUncertainSideEffectError(
+  error: unknown,
+  uncertainty: string
+): BackendError | undefined {
+  const result = toBackendError(error)
+  if (!result.retryable && !uncertainSideEffectCodes.includes(result.code)) {
+    return undefined
+  }
+  return new BackendError({
+    code: result.code,
+    message: `${result.message}. ${uncertainty}`,
+    retryable: false,
+  })
+}
+
 /** Profile-derived pending limit. The Rust limits are the authority; the
  *  shim exposes `__health` with `pending_promises`. We default to the
  *  normal profile (128) and honour `low-memory` (64) when presented. */
@@ -1986,18 +2008,12 @@ export class BackendClient {
         result.message.includes('The terminal may have launched')
       )
         throw error
-      if (
-        !result.retryable &&
-        !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(
-          result.code
-        )
+      const rewritten = rewriteUncertainSideEffectError(
+        error,
+        'The terminal may have launched; check before retrying.'
       )
-        throw error
-      throw new BackendError({
-        code: result.code,
-        message: `${result.message}. The terminal may have launched; check before retrying.`,
-        retryable: false,
-      })
+      if (rewritten === undefined) throw error
+      throw rewritten
     }
   }
 
@@ -2033,19 +2049,12 @@ export class BackendClient {
         })
       }
     } catch (error) {
-      const result = toBackendError(error)
-      if (
-        !result.retryable &&
-        !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(
-          result.code
-        )
+      const rewritten = rewriteUncertainSideEffectError(
+        error,
+        'The file manager may have opened; check before retrying.'
       )
-        throw error
-      throw new BackendError({
-        code: result.code,
-        message: `${result.message}. The file manager may have opened; check before retrying.`,
-        retryable: false,
-      })
+      if (rewritten === undefined) throw error
+      throw rewritten
     }
   }
 
@@ -2207,19 +2216,12 @@ export class BackendClient {
         })
       }
     } catch (error) {
-      const result = toBackendError(error)
-      if (
-        !result.retryable &&
-        !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(
-          result.code
-        )
+      const rewritten = rewriteUncertainSideEffectError(
+        error,
+        'The editor may have launched; check before retrying.'
       )
-        throw error
-      throw new BackendError({
-        code: result.code,
-        message: `${result.message}. The editor may have launched; check before retrying.`,
-        retryable: false,
-      })
+      if (rewritten === undefined) throw error
+      throw rewritten
     }
   }
 
@@ -2337,19 +2339,12 @@ export class BackendClient {
         })
       }
     } catch (error) {
-      const result = toBackendError(error)
-      if (
-        !result.retryable &&
-        !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(
-          result.code
-        )
+      const rewritten = rewriteUncertainSideEffectError(
+        error,
+        'The editor may have launched; check before retrying.'
       )
-        throw error
-      throw new BackendError({
-        code: result.code,
-        message: `${result.message}. The editor may have launched; check before retrying.`,
-        retryable: false,
-      })
+      if (rewritten === undefined) throw error
+      throw rewritten
     }
   }
 
@@ -2371,19 +2366,12 @@ export class BackendClient {
         await this.request('open_custom_global_git_config_editor', { editor })
       }
     } catch (error) {
-      const result = toBackendError(error)
-      if (
-        !result.retryable &&
-        !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(
-          result.code
-        )
+      const rewritten = rewriteUncertainSideEffectError(
+        error,
+        'The editor may have launched; check before retrying.'
       )
-        throw error
-      throw new BackendError({
-        code: result.code,
-        message: `${result.message}. The editor may have launched; check before retrying.`,
-        retryable: false,
-      })
+      if (rewritten === undefined) throw error
+      throw rewritten
     }
   }
 
@@ -2407,19 +2395,12 @@ export class BackendClient {
         })
       }
     } catch (error) {
-      const result = toBackendError(error)
-      if (
-        !result.retryable &&
-        !['cancelled', 'timeout', 'ETIMEDOUT', 'disconnected'].includes(
-          result.code
-        )
+      const rewritten = rewriteUncertainSideEffectError(
+        error,
+        'The editor may have launched; check before retrying.'
       )
-        throw error
-      throw new BackendError({
-        code: result.code,
-        message: `${result.message}. The editor may have launched; check before retrying.`,
-        retryable: false,
-      })
+      if (rewritten === undefined) throw error
+      throw rewritten
     }
   }
 
