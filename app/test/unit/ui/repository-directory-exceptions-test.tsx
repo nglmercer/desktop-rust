@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, beforeEach, describe, it, mock } from 'node:test'
+import { beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import * as Path from 'path'
 import * as React from 'react'
 
@@ -13,15 +12,14 @@ const unsafePath = Path.resolve('repository with spaces')
 const requestedPath = Path.join(unsafePath, 'subdirectory')
 const repository = new Repository(requestedPath, 1, null, true)
 
-const getRepositoryType = mock.fn(
-  async (_path: string): Promise<RepositoryType> => ({
-    kind: 'unsafe',
-    path: unsafePath,
-  })
-)
-const addSafeDirectory = mock.fn(async (_path: string) => {})
+const unsafeRepositoryType = async (): Promise<RepositoryType> => ({
+  kind: 'unsafe',
+  path: unsafePath,
+})
+const getRepositoryType = vi.fn(unsafeRepositoryType)
+const addSafeDirectory = vi.fn(async (_path: string) => {})
 
-before(() => {
+beforeAll(() => {
   vi.doMock('../../../src/lib/git/index.ts', async () => ({
     ...(await vi.importActual('../../../src/lib/git/index.ts')),
     getRepositoryType,
@@ -35,9 +33,9 @@ before(() => {
 })
 
 function createDispatcher() {
-  const postError = mock.fn((_error: unknown) => {})
-  const refreshRepository = mock.fn(async (_repository: Repository) => {})
-  const addRepositories = mock.fn(async (_paths: ReadonlyArray<string>) => [])
+  const postError = vi.fn((_error: unknown) => {})
+  const refreshRepository = vi.fn(async (_repository: Repository) => {})
+  const addRepositories = vi.fn(async (_paths: ReadonlyArray<string>) => [])
 
   return {
     postError,
@@ -52,31 +50,36 @@ function createDispatcher() {
 }
 
 function returnRegularRepositoryAfterTrust() {
-  getRepositoryType.mock.mockImplementationOnce(
-    async () => ({
+  let checked = false
+  getRepositoryType.mockImplementation(async () => {
+    if (!checked) {
+      checked = true
+      return unsafeRepositoryType()
+    }
+    return {
       kind: 'regular',
       topLevelWorkingDirectory: unsafePath,
       gitDir: Path.join(unsafePath, '.git'),
-    }),
-    1
-  )
+    }
+  })
 }
 
 beforeEach(() => {
-  getRepositoryType.mock.resetCalls()
-  addSafeDirectory.mock.resetCalls()
-  addSafeDirectory.mock.mockImplementation(async () => {})
+  getRepositoryType.mockReset()
+  getRepositoryType.mockImplementation(unsafeRepositoryType)
+  addSafeDirectory.mockReset()
+  addSafeDirectory.mockImplementation(async () => {})
 })
 
 describe('AddExistingRepository directory exceptions', () => {
   it('accepts a repository path enclosed in double quotes', async () => {
-    getRepositoryType.mock.mockImplementationOnce(async () => ({
+    getRepositoryType.mockImplementationOnce(async () => ({
       kind: 'regular',
       topLevelWorkingDirectory: requestedPath,
       gitDir: Path.join(requestedPath, '.git'),
     }))
     const dispatcher = createDispatcher()
-    const onDismissed = mock.fn()
+    const onDismissed = vi.fn()
     const { AddExistingRepository } = await import(
       '../../../src/ui/add-repository/add-existing-repository'
     )
@@ -94,16 +97,13 @@ describe('AddExistingRepository directory exceptions', () => {
     )
 
     await waitFor(() => {
-      assert.deepStrictEqual(getRepositoryType.mock.calls[0].arguments, [
-        requestedPath,
+      assert.deepStrictEqual(getRepositoryType.mock.calls[0], [requestedPath])
+      assert.deepStrictEqual(dispatcher.addRepositories.mock.calls[0], [
+        [requestedPath],
       ])
-      assert.deepStrictEqual(
-        dispatcher.addRepositories.mock.calls[0].arguments,
-        [[requestedPath]]
-      )
     })
 
-    assert.strictEqual(onDismissed.mock.callCount(), 1)
+    assert.strictEqual(onDismissed.mock.calls.length, 1)
   })
 
   async function renderUnsafeRepository() {
@@ -111,7 +111,7 @@ describe('AddExistingRepository directory exceptions', () => {
       '../../../src/ui/add-repository/add-existing-repository'
     )
     const dispatcher = createDispatcher()
-    const onDismissed = mock.fn()
+    const onDismissed = vi.fn()
     const view = render(
       <AddExistingRepository
         dispatcher={dispatcher.dispatcher}
@@ -127,9 +127,7 @@ describe('AddExistingRepository directory exceptions', () => {
       name: 'add an exception for this directory',
       hidden: true,
     })
-    assert.deepStrictEqual(getRepositoryType.mock.calls[0].arguments, [
-      requestedPath,
-    ])
+    assert.deepStrictEqual(getRepositoryType.mock.calls[0], [requestedPath])
 
     return { ...dispatcher, ...view, onDismissed, trustButton }
   }
@@ -141,11 +139,8 @@ describe('AddExistingRepository directory exceptions', () => {
     fireEvent.click(view.trustButton)
 
     assert.ok(view.container.querySelector('.dialog-header .spin'))
-    assert.deepStrictEqual(
-      addSafeDirectory.mock.calls.map(c => c.arguments),
-      [[unsafePath]]
-    )
-    assert.strictEqual(getRepositoryType.mock.callCount(), 1)
+    assert.deepStrictEqual(addSafeDirectory.mock.calls, [[unsafePath]])
+    assert.strictEqual(getRepositoryType.mock.calls.length, 1)
 
     await waitFor(() => {
       assert.ok(view.container.querySelector('.dialog-header .spin') === null)
@@ -157,18 +152,18 @@ describe('AddExistingRepository directory exceptions', () => {
       )
     })
 
-    assert.deepStrictEqual(
-      getRepositoryType.mock.calls.map(c => c.arguments),
-      [[requestedPath], [requestedPath]]
-    )
-    assert.strictEqual(view.postError.mock.callCount(), 0)
-    assert.strictEqual(view.addRepositories.mock.callCount(), 0)
-    assert.strictEqual(view.onDismissed.mock.callCount(), 0)
+    assert.deepStrictEqual(getRepositoryType.mock.calls, [
+      [requestedPath],
+      [requestedPath],
+    ])
+    assert.strictEqual(view.postError.mock.calls.length, 0)
+    assert.strictEqual(view.addRepositories.mock.calls.length, 0)
+    assert.strictEqual(view.onDismissed.mock.calls.length, 0)
   })
 
   it('posts a failed exception write and stops loading without revalidating', async () => {
     const error = new Error('Unable to write repository exception')
-    addSafeDirectory.mock.mockImplementation(async () => {
+    addSafeDirectory.mockImplementation(async () => {
       throw error
     })
     const view = await renderUnsafeRepository()
@@ -177,26 +172,20 @@ describe('AddExistingRepository directory exceptions', () => {
 
     assert.ok(view.container.querySelector('.dialog-header .spin'))
     await waitFor(() => {
-      assert.deepStrictEqual(
-        view.postError.mock.calls.map(c => c.arguments),
-        [[error]]
-      )
+      assert.deepStrictEqual(view.postError.mock.calls, [[error]])
       assert.ok(view.container.querySelector('.dialog-header .spin') === null)
     })
 
-    assert.deepStrictEqual(
-      addSafeDirectory.mock.calls.map(c => c.arguments),
-      [[unsafePath]]
-    )
-    assert.strictEqual(getRepositoryType.mock.callCount(), 1)
+    assert.deepStrictEqual(addSafeDirectory.mock.calls, [[unsafePath]])
+    assert.strictEqual(getRepositoryType.mock.calls.length, 1)
     assert.ok(
       screen.getByRole('button', {
         name: 'add an exception for this directory',
         hidden: true,
       })
     )
-    assert.strictEqual(view.addRepositories.mock.callCount(), 0)
-    assert.strictEqual(view.onDismissed.mock.callCount(), 0)
+    assert.strictEqual(view.addRepositories.mock.calls.length, 0)
+    assert.strictEqual(view.onDismissed.mock.calls.length, 0)
   })
 })
 
@@ -215,9 +204,7 @@ describe('MissingRepository directory exceptions', () => {
     const trustButton = await screen.findByRole('button', {
       name: /trust repository/i,
     })
-    assert.deepStrictEqual(getRepositoryType.mock.calls[0].arguments, [
-      requestedPath,
-    ])
+    assert.deepStrictEqual(getRepositoryType.mock.calls[0], [requestedPath])
 
     return { ...dispatcher, ...view, trustButton }
   }
@@ -230,32 +217,26 @@ describe('MissingRepository directory exceptions', () => {
 
     assert.strictEqual(view.trustButton.getAttribute('aria-disabled'), 'true')
     assert.ok(view.trustButton.querySelector('.spin'))
-    assert.strictEqual(getRepositoryType.mock.callCount(), 1)
-    assert.strictEqual(view.refreshRepository.mock.callCount(), 0)
+    assert.strictEqual(getRepositoryType.mock.calls.length, 1)
+    assert.strictEqual(view.refreshRepository.mock.calls.length, 0)
 
     await waitFor(() => {
       assert.strictEqual(view.trustButton.hasAttribute('aria-disabled'), false)
       assert.ok(view.trustButton.querySelector('.spin') === null)
-      assert.deepStrictEqual(
-        view.refreshRepository.mock.calls.map(c => c.arguments),
-        [[repository]]
-      )
+      assert.deepStrictEqual(view.refreshRepository.mock.calls, [[repository]])
     })
 
-    assert.deepStrictEqual(
-      addSafeDirectory.mock.calls.map(c => c.arguments),
-      [[unsafePath]]
-    )
-    assert.deepStrictEqual(
-      getRepositoryType.mock.calls.map(c => c.arguments),
-      [[requestedPath], [requestedPath]]
-    )
-    assert.strictEqual(view.postError.mock.callCount(), 0)
+    assert.deepStrictEqual(addSafeDirectory.mock.calls, [[unsafePath]])
+    assert.deepStrictEqual(getRepositoryType.mock.calls, [
+      [requestedPath],
+      [requestedPath],
+    ])
+    assert.strictEqual(view.postError.mock.calls.length, 0)
   })
 
   it('posts a failed exception write and enables retry without rechecking or refreshing', async () => {
     const error = new Error('Unable to write repository exception')
-    addSafeDirectory.mock.mockImplementation(async () => {
+    addSafeDirectory.mockImplementation(async () => {
       throw error
     })
     const view = await renderUnsafeRepository()
@@ -265,19 +246,13 @@ describe('MissingRepository directory exceptions', () => {
     assert.strictEqual(view.trustButton.getAttribute('aria-disabled'), 'true')
     assert.ok(view.trustButton.querySelector('.spin'))
     await waitFor(() => {
-      assert.deepStrictEqual(
-        view.postError.mock.calls.map(c => c.arguments),
-        [[error]]
-      )
+      assert.deepStrictEqual(view.postError.mock.calls, [[error]])
       assert.strictEqual(view.trustButton.hasAttribute('aria-disabled'), false)
       assert.ok(view.trustButton.querySelector('.spin') === null)
     })
 
-    assert.deepStrictEqual(
-      addSafeDirectory.mock.calls.map(c => c.arguments),
-      [[unsafePath]]
-    )
-    assert.strictEqual(getRepositoryType.mock.callCount(), 1)
-    assert.strictEqual(view.refreshRepository.mock.callCount(), 0)
+    assert.deepStrictEqual(addSafeDirectory.mock.calls, [[unsafePath]])
+    assert.strictEqual(getRepositoryType.mock.calls.length, 1)
+    assert.strictEqual(view.refreshRepository.mock.calls.length, 0)
   })
 })

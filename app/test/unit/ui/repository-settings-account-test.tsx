@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, beforeEach, describe, it, mock } from 'node:test'
+import { beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import * as React from 'react'
 import { Account } from '../../../src/models/account'
 import { GitHubRepository } from '../../../src/models/github-repository'
@@ -21,14 +20,14 @@ const enterprise = new Account(
   3,
   ''
 )
-const setConfigValue = mock.fn(async () => {})
+const setConfigValue = vi.fn(async () => {})
 const remote = {
   name: 'origin',
   url: 'https://github.com/owner/repository',
   fetch: '+refs/heads/*:refs/remotes/origin/*',
 }
 
-before(() => {
+beforeAll(() => {
   vi.doMock('../../../src/lib/git/index.ts', async () => ({
     ...(await vi.importActual('../../../src/lib/git/index.ts')),
     readGitIgnoreAtRoot: async () => '',
@@ -46,7 +45,7 @@ before(() => {
   }))
 })
 
-beforeEach(() => setConfigValue.mock.resetCalls())
+beforeEach(() => setConfigValue.mockClear())
 
 function createRepository(login: string | null = null, github = true) {
   return new Repository(
@@ -69,12 +68,12 @@ async function renderSettings(repository = createRepository()) {
   const { RepositorySettings } = await import(
     '../../../src/ui/repository-settings/repository-settings'
   )
-  const updateRepositoryAccount = mock.fn<
-    Dispatcher['updateRepositoryAccount']
-  >(async (_, login) => createRepository(login))
-  const setRemoteURL = mock.fn<Dispatcher['setRemoteURL']>(async () => {})
-  const refreshAuthor = mock.fn<Dispatcher['refreshAuthor']>(async () => {})
-  const onDismissed = mock.fn()
+  const updateRepositoryAccount = vi.fn<Dispatcher['updateRepositoryAccount']>(
+    async (_, login) => createRepository(login)
+  )
+  const setRemoteURL = vi.fn<Dispatcher['setRemoteURL']>(async () => {})
+  const refreshAuthor = vi.fn<Dispatcher['refreshAuthor']>(async () => {})
+  const onDismissed = vi.fn()
   const dispatcher: Pick<
     Dispatcher,
     | 'updateRepositoryAccount'
@@ -137,9 +136,9 @@ describe('RepositorySettings account', () => {
     )
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    assert.strictEqual(view.updateRepositoryAccount.mock.callCount(), 0)
+    assert.strictEqual(view.updateRepositoryAccount.mock.calls.length, 0)
   })
 
   it('preserves and displays an assigned signed-out login without saving it again', async () => {
@@ -153,9 +152,9 @@ describe('RepositorySettings account', () => {
     )
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    assert.strictEqual(view.updateRepositoryAccount.mock.callCount(), 0)
+    assert.strictEqual(view.updateRepositoryAccount.mock.calls.length, 0)
   })
 
   it('saves explicit assignment without changing Git authorship', async () => {
@@ -164,14 +163,14 @@ describe('RepositorySettings account', () => {
     fireEvent.change(accountSelect(), { target: { value: 'work' } })
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    assert.deepStrictEqual(
-      view.updateRepositoryAccount.mock.calls[0].arguments,
-      [repository, 'work']
-    )
-    assert.strictEqual(setConfigValue.mock.callCount(), 0)
-    assert.strictEqual(view.refreshAuthor.mock.callCount(), 0)
+    assert.deepStrictEqual(view.updateRepositoryAccount.mock.calls[0], [
+      repository,
+      'work',
+    ])
+    assert.strictEqual(setConfigValue.mock.calls.length, 0)
+    assert.strictEqual(view.refreshAuthor.mock.calls.length, 0)
   })
 
   it('recognizes assigned logins without changing their casing on save', async () => {
@@ -186,9 +185,9 @@ describe('RepositorySettings account', () => {
     )
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    assert.strictEqual(view.updateRepositoryAccount.mock.callCount(), 0)
+    assert.strictEqual(view.updateRepositoryAccount.mock.calls.length, 0)
   })
 
   it('supports explicitly clearing an assignment', async () => {
@@ -197,12 +196,12 @@ describe('RepositorySettings account', () => {
     fireEvent.change(accountSelect(), { target: { value: '' } })
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    assert.deepStrictEqual(
-      view.updateRepositoryAccount.mock.calls[0].arguments,
-      [repository, null]
-    )
+    assert.deepStrictEqual(view.updateRepositoryAccount.mock.calls[0], [
+      repository,
+      null,
+    ])
   })
 
   it('preserves account and remote edits across unrelated props updates', async () => {
@@ -218,10 +217,10 @@ describe('RepositorySettings account', () => {
     assert.strictEqual(input.value, 'https://github.com/owner/new')
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    assert.strictEqual(view.updateRepositoryAccount.mock.callCount(), 1)
-    assert.strictEqual(view.setRemoteURL.mock.callCount(), 1)
+    assert.strictEqual(view.updateRepositoryAccount.mock.calls.length, 1)
+    assert.strictEqual(view.setRemoteURL.mock.calls.length, 1)
   })
 
   it('sets the remote URL on the repository with its newly saved account', async () => {
@@ -232,9 +231,9 @@ describe('RepositorySettings account', () => {
     })
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    const [repository] = view.setRemoteURL.mock.calls[0].arguments
+    const [repository] = view.setRemoteURL.mock.calls[0]
     assert.strictEqual(repository.login, 'work')
   })
 
@@ -244,14 +243,14 @@ describe('RepositorySettings account', () => {
     assert.strictEqual(accountSelect().value, 'personal')
     save()
     await waitFor(() =>
-      assert.strictEqual(view.onDismissed.mock.callCount(), 1)
+      assert.strictEqual(view.onDismissed.mock.calls.length, 1)
     )
-    assert.strictEqual(view.updateRepositoryAccount.mock.callCount(), 0)
+    assert.strictEqual(view.updateRepositoryAccount.mock.calls.length, 0)
   })
 
   it('retains the dialog and selection when saving the account fails', async () => {
     const view = await renderSettings()
-    view.updateRepositoryAccount.mock.mockImplementation(async () => {
+    view.updateRepositoryAccount.mockImplementation(async () => {
       throw new Error('Account could not be saved')
     })
     fireEvent.change(accountSelect(), { target: { value: 'work' } })
@@ -259,7 +258,7 @@ describe('RepositorySettings account', () => {
     await waitFor(() =>
       assert.ok(screen.getByText(/Failed saving the repository account/))
     )
-    assert.strictEqual(view.onDismissed.mock.callCount(), 0)
+    assert.strictEqual(view.onDismissed.mock.calls.length, 0)
     assert.strictEqual(accountSelect().value, 'work')
   })
 
