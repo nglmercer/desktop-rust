@@ -15,7 +15,7 @@
   "imports.path": 65,
   "imports.desktop_trampoline": 0,
   "imports.registry_js": 3,
-  "imports.desktop_notifications": 6,
+  "imports.desktop_notifications": 4,
   "imports.buffer": 0,
   "imports.events": 0
 }

@@ -1,4 +1,4 @@
-import { NotificationCallback } from 'desktop-notifications'
+import type { NotificationCallback } from '../notifications/notification-types'
 import { Commit, shortenSHA } from '../../models/commit'
 import { PullRequest, getPullRequestCommitRef } from '../../models/pull-request'
 import {

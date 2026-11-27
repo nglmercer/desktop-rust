@@ -26,8 +26,10 @@ import { Architecture } from './get-architecture'
 import { EndpointToken } from './endpoint-token'
 import { PathType } from '../ui/lib/app-proxy'
 import { ThemeSource } from '../ui/lib/theme-source'
-import { DesktopNotificationPermission } from 'desktop-notifications'
-import { NotificationCallback } from 'desktop-notifications'
+import type {
+  DesktopNotificationPermission,
+  NotificationCallback,
+} from './notifications/notification-types'
 import { DesktopAliveEvent } from './stores/alive-store'
 import { CLIAction } from './cli-action'
 
