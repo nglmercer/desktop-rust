@@ -227,7 +227,12 @@ export const createHooksProxy = (
 
     const terminalOutput: Buffer[] = []
     const gitPath = 'git'
-    const shellEnv = await ensureGitExecPathEnv(await getShellEnv(proxyCwd))
+    const capturedShellEnv = await getShellEnv(proxyCwd)
+    // Unix shell capture is enriched by the host. Windows still uses the
+    // legacy renderer lookup until its shell discovery is migrated.
+    const shellEnv = __WIN32__
+      ? await ensureGitExecPathEnv(capturedShellEnv)
+      : capturedShellEnv
 
     if (shellEnv.kind === 'failure') {
       let errMsg = `Failed to load shell environment for hook ${hookName}.`
