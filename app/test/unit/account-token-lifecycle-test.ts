@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { afterEach, describe, it, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { Account } from '../../src/models/account'
 import { AccountsStore } from '../../src/lib/stores/accounts-store'
@@ -17,6 +17,21 @@ import { API } from '../../src/lib/api'
 import { createMockAPIIdentity } from '../helpers/mock-api'
 import { InMemoryStore, AsyncInMemoryStore } from '../helpers/stores'
 import { AppStore } from '../../src/lib/stores/app-store'
+
+function mockMethod(object: object, method: string, implementation?: unknown) {
+  const spy = vi.spyOn(
+    object as never,
+    method as never
+  ) as unknown as ReturnType<typeof vi.fn>
+  return implementation === undefined
+    ? spy
+    : spy.mockImplementation(implementation as never)
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
 
 const now = 1_800_000_000_000
 const account = new Account(
@@ -136,14 +151,14 @@ describe('OAuth credential persistence', () => {
     const [published] = await store.getAll()
     assert.ok(published)
     const lease = await store.leaseAccountToken(fresh, 'snapshot-lineage')
-    t.after(lease.release)
-    t.mock.method(API.prototype, 'fetchAccount', async () => ({
+    t.onTestFinished(lease.release)
+    mockMethod(API.prototype, 'fetchAccount', async () => ({
       ...createMockAPIIdentity(),
       name: 'Updated Name',
     }))
-    t.mock.method(API.prototype, 'fetchEmails', async () => [])
-    t.mock.method(API.prototype, 'fetchUserCopilotInfo', async () => null)
-    t.mock.method(API.prototype, 'fetchFeatureFlags', async () => [])
+    mockMethod(API.prototype, 'fetchEmails', async () => [])
+    mockMethod(API.prototype, 'fetchUserCopilotInfo', async () => null)
+    mockMethod(API.prototype, 'fetchFeatureFlags', async () => [])
 
     await store.refresh()
     const [profile] = await store.getAll()
@@ -204,13 +219,13 @@ describe('Unused OAuth credential cleanup', () => {
     'https://github.example.com/api/v3',
   ]) {
     it(`revokes a credential before account discovery at ${endpoint}`, async t => {
-      t.mock.timers.enable({ apis: ['setTimeout'] })
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       const store = new AccountsStore(
         new InMemoryStore(),
         new AsyncInMemoryStore()
       )
       let signal: AbortSignal | null | undefined
-      const fetch = t.mock.method(
+      const fetch = mockMethod(
         globalThis,
         'fetch',
         async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -223,9 +238,9 @@ describe('Unused OAuth credential cleanup', () => {
         }
       )
       await store.revokeUnusedToken({ endpoint, token: 'unused' })
-      assert.equal(fetch.mock.callCount(), 1)
+      assert.equal(fetch.mock.calls.length, 1)
       assert.deepEqual(await store.getAll(), [])
-      t.mock.timers.tick(30_000)
+      vi.advanceTimersByTime(30_000)
       assert.equal(signal?.aborted, false)
     })
   }
@@ -236,9 +251,9 @@ describe('Coordinated account token renewal', () => {
     const { store } = setup()
     await store.addAccount(account)
     await store.invalidateToken(account.endpoint, account.token)
-    t.after(API.setTokenProvider(store.resolveToken))
+    t.onTestFinished(API.setTokenProvider(store.resolveToken))
     let calls = 0
-    t.mock.method(
+    mockMethod(
       globalThis,
       'fetch',
       async (_url: unknown, init: RequestInit) => {
@@ -450,7 +465,7 @@ describe('Coordinated account token renewal', () => {
   it('does not return a new token when persistence fails or downgrade storage', async t => {
     const { store, secure, data, revoked } = setup()
     await store.addAccount(account, rotating)
-    t.mock.method(secure, 'setItem', async () => {
+    mockMethod(secure, 'setItem', async () => {
       throw new Error('Keychain locked')
     })
     let prompts = 0
@@ -476,7 +491,7 @@ describe('Coordinated account token renewal', () => {
       throw new OAuthRefreshRejectedError()
     })
     await store.addAccount(account, rotating)
-    t.mock.method(secure, 'deleteItem', async () => {
+    mockMethod(secure, 'deleteItem', async () => {
       throw new Error('Keychain locked')
     })
     const errors: Error[] = []
@@ -491,7 +506,7 @@ describe('Coordinated account token renewal', () => {
   })
 
   it('persists recovery and releases callers before a stalled revocation times out', async t => {
-    t.mock.timers.enable({ apis: ['setTimeout'] })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const data = new InMemoryStore()
     const secure = new AsyncInMemoryStore()
     const store = new AccountsStore(
@@ -502,7 +517,7 @@ describe('Coordinated account token renewal', () => {
     )
     await store.addAccount(account, rotating)
     const original = secure.setItem.bind(secure)
-    t.mock.method(
+    mockMethod(
       secure,
       'setItem',
       async (key: string, login: string, value: string) => {
@@ -514,8 +529,8 @@ describe('Coordinated account token renewal', () => {
     )
     let signal: AbortSignal | null | undefined
     const stalled = deferred<Response>()
-    t.after(() => stalled.resolve(new Response(null, { status: 204 })))
-    const fetch = t.mock.method(
+    t.onTestFinished(() => stalled.resolve(new Response(null, { status: 204 })))
+    const fetch = mockMethod(
       globalThis,
       'fetch',
       (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -523,7 +538,7 @@ describe('Coordinated account token renewal', () => {
         return stalled.promise
       }
     )
-    const warnings = t.mock.method(log, 'warn')
+    const warnings = mockMethod(log, 'warn')
     let prompts = 0
     store.onTokenInvalidated(() => prompts++)
     const results = Promise.allSettled([
@@ -547,25 +562,24 @@ describe('Coordinated account token renewal', () => {
       store.getAccountWithFreshToken(account),
       AccountRequiresSignInError
     )
-    assert.equal(fetch.mock.callCount(), 1)
+    assert.equal(fetch.mock.calls.length, 1)
     assert.equal(signal?.aborted, false)
-    t.mock.timers.tick(29_999)
+    vi.advanceTimersByTime(29_999)
     assert.equal(signal?.aborted, false)
-    t.mock.timers.tick(1)
+    vi.advanceTimersByTime(1)
     await new Promise<void>(resolve => setImmediate(resolve))
     assert.equal(signal?.aborted, true)
-    assert.deepEqual(
-      warnings.mock.calls.map(call => call.arguments),
-      [['Unable to revoke unused OAuth credentials.']]
-    )
+    assert.deepEqual(warnings.mock.calls, [
+      ['Unable to revoke unused OAuth credentials.'],
+    ])
   })
 
   for (const rejects of [false, true]) {
     it(`keeps recovery independent of revocation failure (rejects: ${rejects})`, async t => {
-      t.mock.timers.enable({ apis: ['setTimeout'] })
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       const data = new InMemoryStore()
       const secure = new AsyncInMemoryStore()
-      const warnings = t.mock.method(log, 'warn')
+      const warnings = mockMethod(log, 'warn')
       let signal: AbortSignal | undefined
       const store = new AccountsStore(
         data,
@@ -582,7 +596,7 @@ describe('Coordinated account token renewal', () => {
       )
       await store.addAccount(account, rotating)
       const original = secure.setItem.bind(secure)
-      t.mock.method(
+      mockMethod(
         secure,
         'setItem',
         async (key: string, login: string, value: string) => {
@@ -601,11 +615,10 @@ describe('Coordinated account token renewal', () => {
         await secure.getItem(getKeyForAccount(account), account.login),
         null
       )
-      assert.deepEqual(
-        warnings.mock.calls.map(call => call.arguments),
-        [['Unable to revoke unused OAuth credentials.']]
-      )
-      t.mock.timers.tick(30_000)
+      assert.deepEqual(warnings.mock.calls, [
+        ['Unable to revoke unused OAuth credentials.'],
+      ])
+      vi.advanceTimersByTime(30_000)
       assert.equal(signal?.aborted, false)
     })
   }
@@ -616,13 +629,13 @@ describe('Coordinated account token renewal', () => {
     await store.addAccount(account, rotating)
     const renewal = store.resolveToken(account.endpoint, account.token)
     const remove = store.removeAccount.bind(store)
-    t.mock.method(store, 'removeAccount', async (removed: Account) => {
+    mockMethod(store, 'removeAccount', async (removed: Account) => {
       gate.resolve(renewed)
       await renewal
       return remove(removed)
     })
     const deleted: string[] = []
-    t.mock.method(
+    mockMethod(
       globalThis,
       'fetch',
       async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -651,7 +664,7 @@ describe('Coordinated account token renewal', () => {
     const { store, secure } = setup()
     await store.addAccount(account, rotating)
     await store.resolveToken(account.endpoint, account.token)
-    t.mock.method(secure, 'deleteItem', async () => {
+    mockMethod(secure, 'deleteItem', async () => {
       throw new Error('Keychain locked')
     })
     const errors: Error[] = []
@@ -669,7 +682,7 @@ describe('Coordinated account token renewal', () => {
   it('does not revoke a credential for an absent or different account', async t => {
     const { store } = setup()
     assert.equal(await store.removeAccount(account), null)
-    const fetch = t.mock.method(globalThis, 'fetch', async () => {
+    const fetch = mockMethod(globalThis, 'fetch', async () => {
       throw new Error('Unexpected revocation')
     })
     await AppStore.prototype._removeAccount.call(
@@ -691,7 +704,7 @@ describe('Coordinated account token renewal', () => {
       { accountsStore: store },
       account
     )
-    assert.equal(fetch.mock.callCount(), 0)
+    assert.equal(fetch.mock.calls.length, 0)
     assert.deepEqual(await store.getAll(), [replacement])
     assert.equal(
       (await store.getAccountWithFreshToken(replacement)).token,
@@ -705,7 +718,7 @@ describe('Coordinated account token renewal', () => {
     const started = deferred<void>()
     const gate = deferred<void>()
     const remove = secure.deleteItem.bind(secure)
-    t.mock.method(secure, 'deleteItem', async (key: string, login: string) => {
+    mockMethod(secure, 'deleteItem', async (key: string, login: string) => {
       started.resolve()
       await gate.promise
       return remove(key, login)
@@ -757,7 +770,7 @@ describe('Coordinated account token renewal', () => {
     const original = secure.setItem.bind(secure)
     const writing = deferred<void>()
     const gate = deferred<void>()
-    t.mock.method(
+    mockMethod(
       secure,
       'setItem',
       async (key: string, login: string, value: string) => {
@@ -782,7 +795,7 @@ describe('Coordinated account token renewal', () => {
   it('keeps the current account usable when saving a replacement fails', async t => {
     const { store, secure } = setup()
     await store.addAccount(account, rotating)
-    t.mock.method(secure, 'setItem', async () => {
+    mockMethod(secure, 'setItem', async () => {
       throw new Error('Keychain locked')
     })
     const errors: Error[] = []
@@ -840,7 +853,7 @@ describe('Coordinated account token renewal', () => {
     const writing = deferred<void>()
     const gate = deferred<void>()
     let calls = 0
-    t.mock.method(
+    mockMethod(
       secure,
       'setItem',
       async (key: string, login: string, value: string) => {
@@ -885,7 +898,7 @@ describe('Coordinated account token renewal', () => {
       const original = secure.setItem.bind(secure)
       const writing = deferred<void>()
       const gate = deferred<void>()
-      const setItem = t.mock.method(
+      const setItem = mockMethod(
         secure,
         'setItem',
         async (key: string, user: string, value: string) => {
@@ -909,7 +922,7 @@ describe('Coordinated account token renewal', () => {
       const removal = store.removeAccount(account)
       gate.resolve()
       await Promise.all([addition, removal])
-      setItem.mock.restore()
+      setItem.mockRestore()
 
       assert.deepEqual(await store.getAll(), [replacement])
       assert.equal(
@@ -944,7 +957,7 @@ describe('Coordinated account token renewal', () => {
       )
       const original = secure.setItem.bind(secure)
       let removal: Promise<Account | null> | undefined
-      const setItem = t.mock.method(
+      const setItem = mockMethod(
         secure,
         'setItem',
         async (key: string, user: string, value: string) => {
@@ -960,7 +973,7 @@ describe('Coordinated account token renewal', () => {
 
       assert.deepEqual(await store.addAccount(other), other)
       await removal
-      setItem.mock.restore()
+      setItem.mockRestore()
 
       assert.deepEqual(await store.getAll(), [other], `delay ${delay}`)
       assert.equal(
@@ -1072,12 +1085,12 @@ describe('Coordinated account token renewal', () => {
   it('reports failures from API invalidation callbacks through the store', async t => {
     const { store } = setup()
     const failure = new Error('Keychain unavailable')
-    t.mock.method(store, 'invalidateToken', async () => {
+    mockMethod(store, 'invalidateToken', async () => {
       throw failure
     })
     const errors: Error[] = []
     store.onDidError(error => errors.push(error))
-    t.mock.method(log, 'error')
+    mockMethod(log, 'error')
 
     store.handleTokenInvalidated(account.endpoint, account.token)
     await new Promise<void>(resolve => setImmediate(resolve))
