@@ -406,6 +406,12 @@ export interface IDiscardRecoveryRecord {
   readonly unavailableLfs: number
 }
 
+function isLowercaseGitObjectId(value: unknown): value is string {
+  return (
+    typeof value === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)
+  )
+}
+
 function isBackendGitPath(value: unknown): value is BackendGitPath {
   return (
     typeof value === 'string' ||
@@ -4045,11 +4051,10 @@ export class BackendClient {
     readonly object: Buffer
     readonly hookIndexTree: string
   }> {
-    const objectId = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
     if (
-      !objectId.test(sha) ||
-      (parent !== null && !objectId.test(parent)) ||
-      !objectId.test(tree)
+      !isLowercaseGitObjectId(sha) ||
+      (parent !== null && !isLowercaseGitObjectId(parent)) ||
+      !isLowercaseGitObjectId(tree)
     ) {
       throw new BackendError({
         code: 'invalid_request',
@@ -4067,8 +4072,7 @@ export class BackendClient {
       typeof value.replacement_or_graft === 'boolean' &&
       typeof value.object_base64 === 'string' &&
       value.object_base64.length <= 24 * 1024 * 1024 &&
-      typeof value.hook_index_tree === 'string' &&
-      objectId.test(value.hook_index_tree)
+      isLowercaseGitObjectId(value.hook_index_tree)
     ) {
       const object = Buffer.from(value.object_base64, 'base64')
       if (object.length <= 16 * 1024 * 1024) {

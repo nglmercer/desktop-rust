@@ -403,6 +403,60 @@ describe('backend Copilot session cleanup', () => {
     })
   })
 
+  it('validates lowercase object ids before assisted commit verification', async () => {
+    const invoke = vi.fn()
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, send: vi.fn(), on: vi.fn() },
+    })
+    const client = new BackendClient()
+    await expect(
+      client.repositoryAssistedCommitVerifyCreatedCommit(
+        '/repo',
+        'A'.repeat(40),
+        null,
+        'b'.repeat(40)
+      )
+    ).rejects.toMatchObject({ code: 'invalid_request' })
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('validates assisted commit verification object ids in responses', async () => {
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({
+        replacement_or_graft: false,
+        object_base64: Buffer.from('object').toString('base64'),
+        hook_index_tree: 'c'.repeat(40),
+      })
+      .mockResolvedValueOnce({
+        replacement_or_graft: false,
+        object_base64: Buffer.from('object').toString('base64'),
+        hook_index_tree: 'C'.repeat(40),
+      })
+    Object.defineProperty(window, '__desktop', {
+      configurable: true,
+      value: { invoke, send: vi.fn(), on: vi.fn() },
+    })
+    const client = new BackendClient()
+    const result = await client.repositoryAssistedCommitVerifyCreatedCommit(
+      '/repo',
+      'a'.repeat(40),
+      null,
+      'b'.repeat(40)
+    )
+    expect(result.hookIndexTree).toBe('c'.repeat(40))
+    expect(result.object.toString()).toBe('object')
+    await expect(
+      client.repositoryAssistedCommitVerifyCreatedCommit(
+        '/repo',
+        'a'.repeat(40),
+        null,
+        'b'.repeat(40)
+      )
+    ).rejects.toMatchObject({ code: 'invalid_response' })
+  })
+
   it('resolves browser selection paths before binding the WebSocket repository', async () => {
     const client = new BackendClient()
     ;(client as unknown as { transport: 'ws' }).transport = 'ws'
