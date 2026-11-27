@@ -490,6 +490,7 @@ impl Repository {
     /// Convert one captured regular file through Git's native clean/process
     /// filters in a host-owned scratch worktree and index. The returned object
     /// is the tree entry produced by applying the resulting binary patch.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn assisted_commit_native_full_conversion(
         &self,
         base_tree: &str,
