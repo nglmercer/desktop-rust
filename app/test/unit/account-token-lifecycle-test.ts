@@ -17,16 +17,7 @@ import { API } from '../../src/lib/api'
 import { createMockAPIIdentity } from '../helpers/mock-api'
 import { InMemoryStore, AsyncInMemoryStore } from '../helpers/stores'
 import { AppStore } from '../../src/lib/stores/app-store'
-
-function mockMethod(object: object, method: string, implementation?: unknown) {
-  const spy = vi.spyOn(
-    object as never,
-    method as never
-  ) as unknown as ReturnType<typeof vi.fn>
-  return implementation === undefined
-    ? spy
-    : spy.mockImplementation(implementation as never)
-}
+import { mockMethod } from '../helpers/mock-method'
 
 afterEach(() => {
   vi.restoreAllMocks()

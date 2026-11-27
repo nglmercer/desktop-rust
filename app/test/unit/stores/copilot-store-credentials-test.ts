@@ -1,4 +1,3 @@
-import { vi } from 'vitest'
 import * as copilotSdk from '@github/copilot-sdk'
 import type {
   CopilotClientOptions,
@@ -7,14 +6,14 @@ import type {
 } from '@github/copilot-sdk'
 import assert from 'node:assert/strict'
 import {
-  after,
-  before,
+  afterEach,
+  beforeAll,
   beforeEach,
   describe,
   it,
-  mock,
-  TestContext,
-} from 'node:test'
+  vi,
+  type TestContext,
+} from 'vitest'
 import { AccountsStore } from '../../../src/lib/stores/accounts-store'
 import { AccountRequiresSignInError } from '../../../src/lib/credential-sessions'
 import { CopilotConflictResolutionError } from '../../../src/lib/copilot-conflict-resolution-error'
@@ -26,6 +25,7 @@ import type { IOAuthToken } from '../../../src/lib/oauth-token'
 import { Account } from '../../../src/models/account'
 import { AsyncInMemoryStore, InMemoryStore } from '../../helpers/stores'
 import type { ICopilotPlanningClient } from '../../../src/lib/copilot-operation'
+import { mockMethod } from '../../helpers/mock-method'
 
 const now = 1_800_000_000_000
 const account = new Account(
@@ -63,7 +63,7 @@ function createDeferred<T>() {
 function enablePreviewFeatures(t: TestContext) {
   const previousPreview = process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
   process.env.GITHUB_DESKTOP_PREVIEW_FEATURES = '1'
-  t.after(() => {
+  t.onTestFinished(() => {
     if (previousPreview === undefined) {
       delete process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
     } else {
@@ -95,7 +95,7 @@ async function setup(
   await accountsStore.addAccount(account, credential)
   const store = createStore(accountsStore)
   const sessionCreationStopped = new Error('Session configuration captured')
-  const createSession = t.mock.method(
+  const createSession = mockMethod(
     copilotSdk.CopilotClient.prototype,
     'createSession',
     async (config: SessionConfig) => {
@@ -105,7 +105,7 @@ async function setup(
       throw sessionCreationStopped
     }
   )
-  const stop = t.mock.method(
+  const stop = mockMethod(
     copilotSdk.CopilotClient.prototype,
     'stop',
     async () => []
@@ -175,7 +175,7 @@ function resolveConflicts(
 }
 
 describe('CopilotStore session credential wiring', () => {
-  before(async () => {
+  beforeAll(async () => {
     vi.doMock('@github/copilot-sdk', async () => ({
       ...copilotSdk,
       CopilotClient: function (options: CopilotClientOptions) {
@@ -213,7 +213,7 @@ describe('CopilotStore session credential wiring', () => {
     runtimePathExists = async () => true
   })
 
-  after(() => mock.restoreAll())
+  afterEach(() => vi.restoreAllMocks())
 
   it('disables hook, configuration, and skill discovery for commit messages', async t => {
     const { createSession, generate, sessionCreationStopped } = await setup(t, {
@@ -221,8 +221,8 @@ describe('CopilotStore session credential wiring', () => {
     })
 
     await assert.rejects(generate(), sessionCreationStopped)
-    assert.equal(createSession.mock.callCount(), 1)
-    const config = createSession.mock.calls[0].arguments[0]
+    assert.equal(createSession.mock.calls.length, 1)
+    const config = createSession.mock.calls[0][0]
     assert.ok(config)
     assert.equal(config.enableFileHooks, false)
     assert.equal(config.enableConfigDiscovery, false)
@@ -237,8 +237,8 @@ describe('CopilotStore session credential wiring', () => {
     })
 
     await assert.rejects(resolveConflicts(store, new AbortController().signal))
-    assert.equal(createSession.mock.callCount(), 1)
-    const config = createSession.mock.calls[0].arguments[0]
+    assert.equal(createSession.mock.calls.length, 1)
+    const config = createSession.mock.calls[0][0]
     assert.ok(config)
     assert.equal(config.enableFileHooks, false)
     assert.equal(config.enableConfigDiscovery, false)
@@ -294,15 +294,15 @@ describe('CopilotStore session credential wiring', () => {
     }
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(clientOptions.length, 1)
-    assert.equal(createSession.mock.callCount(), 0)
-    assert.equal(stop.mock.callCount(), 1)
+    assert.equal(createSession.mock.calls.length, 0)
+    assert.equal(stop.mock.calls.length, 1)
   })
 
   it('cancels conflict session preflight while a token lease remains held', async t => {
     let clock = now
-    t.mock.method(Date, 'now', () => clock)
+    mockMethod(Date, 'now', () => clock)
     const started = createDeferred<void>()
-    const disconnect = t.mock.fn(async () => {})
+    const disconnect = vi.fn(async () => {})
     const { accountsStore, store, createSession, stop, renewals } = await setup(
       t,
       {
@@ -319,7 +319,7 @@ describe('CopilotStore session credential wiring', () => {
       }
     )
     const lease = await accountsStore.leaseAccountToken(account, 'git')
-    t.after(lease.release)
+    t.onTestFinished(lease.release)
     clock += 75 * 60 * 1000
     const controller = new AbortController()
     let cancelled = false
@@ -341,8 +341,8 @@ describe('CopilotStore session credential wiring', () => {
       await new Promise(resolve => setImmediate(resolve))
       assert.equal(cancelled, true)
       assert.equal(clientOptions.length, 1)
-      assert.equal(stop.mock.callCount(), 1)
-      assert.equal(disconnect.mock.callCount(), 0)
+      assert.equal(stop.mock.calls.length, 1)
+      assert.equal(disconnect.mock.calls.length, 0)
       assert.equal(renewals(), 0)
     } finally {
       lease.release()
@@ -350,15 +350,15 @@ describe('CopilotStore session credential wiring', () => {
       assert.equal((await otherConsumer).token, 'new-access')
     }
     await new Promise(resolve => setImmediate(resolve))
-    assert.equal(createSession.mock.callCount(), 1)
-    assert.equal(stop.mock.callCount(), 1)
-    assert.equal(disconnect.mock.callCount(), 1)
+    assert.equal(createSession.mock.calls.length, 1)
+    assert.equal(stop.mock.calls.length, 1)
+    assert.equal(disconnect.mock.calls.length, 1)
     assert.equal(renewals(), 1)
   })
 
   it('disconnects a conflict session once when completion races cancellation', async t => {
     const controller = new AbortController()
-    const disconnect = t.mock.fn(async () => {})
+    const disconnect = vi.fn(async () => {})
     const { store, createSession, stop } = await setup(
       t,
       { accessToken: account.token },
@@ -373,14 +373,14 @@ describe('CopilotStore session credential wiring', () => {
       assertConflictCancelled
     )
     await new Promise(resolve => setImmediate(resolve))
-    assert.equal(createSession.mock.callCount(), 1)
-    assert.equal(disconnect.mock.callCount(), 1)
-    assert.equal(stop.mock.callCount(), 1)
+    assert.equal(createSession.mock.calls.length, 1)
+    assert.equal(disconnect.mock.calls.length, 1)
+    assert.equal(stop.mock.calls.length, 1)
   })
 
   it('cancels a leased-token wait promptly without cancelling another consumer', async t => {
     let clock = now
-    t.mock.method(Date, 'now', () => clock)
+    mockMethod(Date, 'now', () => clock)
     const { accountsStore, createSession, generate, stop, renewals } =
       await setup(t, {
         accessToken: account.token,
@@ -388,11 +388,11 @@ describe('CopilotStore session credential wiring', () => {
         expiresAt: now + 20 * 60 * 1000,
       })
     const lease = await accountsStore.leaseAccountToken(account, 'git')
-    t.after(lease.release)
+    t.onTestFinished(lease.release)
     clock += 11 * 60 * 1000
     const started = createDeferred<void>()
     const originalFactory = accountsStore.createTokenGetter.bind(accountsStore)
-    t.mock.method(
+    mockMethod(
       accountsStore,
       'createTokenGetter',
       (original: Account, margin?: number) => {
@@ -420,7 +420,7 @@ describe('CopilotStore session credential wiring', () => {
       await new Promise(resolve => setImmediate(resolve))
       assert.equal(cancelled, true)
       assert.equal(clientOptions.length, 0)
-      assert.equal(stop.mock.callCount(), 0)
+      assert.equal(stop.mock.calls.length, 0)
       assert.equal(renewals(), 0)
     } finally {
       lease.release()
@@ -430,8 +430,8 @@ describe('CopilotStore session credential wiring', () => {
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(clientOptions.length, 1)
     assert.equal(clientOptions[0].gitHubToken, 'new-access')
-    assert.equal(stop.mock.callCount(), 1)
-    assert.equal(createSession.mock.callCount(), 0)
+    assert.equal(stop.mock.calls.length, 1)
+    assert.equal(createSession.mock.calls.length, 0)
     assert.equal(renewals(), 1)
   })
 
@@ -466,13 +466,13 @@ describe('CopilotStore session credential wiring', () => {
     }
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(clientOptions.length, 0)
-    assert.equal(createSession.mock.callCount(), 0)
-    assert.equal(stop.mock.callCount(), 0)
+    assert.equal(createSession.mock.calls.length, 0)
+    assert.equal(stop.mock.calls.length, 0)
   })
 
   it('passes an invokable, rotating token provider to the SDK session', async t => {
     let clock = now
-    t.mock.method(Date, 'now', () => clock)
+    mockMethod(Date, 'now', () => clock)
     const { createSession, generate, sessionCreationStopped, stop, renewals } =
       await setup(t, {
         accessToken: account.token,
@@ -483,9 +483,9 @@ describe('CopilotStore session credential wiring', () => {
     await assert.rejects(generate(), sessionCreationStopped)
     assert.equal(clientOptions.length, 1)
     assert.equal(clientOptions[0].gitHubToken, account.token)
-    assert.equal(createSession.mock.callCount(), 1)
-    assert.equal(stop.mock.callCount(), 1)
-    const config = createSession.mock.calls[0].arguments[0]
+    assert.equal(createSession.mock.calls.length, 1)
+    assert.equal(stop.mock.calls.length, 1)
+    const config = createSession.mock.calls[0][0]
     assert.ok(config)
     assert.equal(config.gitHubToken, undefined)
     const provider = config.gitHubTokenProvider
@@ -508,7 +508,7 @@ describe('CopilotStore session credential wiring', () => {
 
   it('uses the same rotating session-bound provider for isolated assisted planning clients', async t => {
     let clock = now
-    t.mock.method(Date, 'now', () => clock)
+    mockMethod(Date, 'now', () => clock)
     const {
       accountsStore,
       store,
@@ -529,8 +529,8 @@ describe('CopilotStore session credential wiring', () => {
     assert.equal(clientOptions[0].gitHubToken, account.token)
     assert.equal(clientOptions[0].workingDirectory, '/repository')
     assert.equal(clientOptions[0].logLevel, 'none')
-    assert.equal(createSession.mock.callCount(), 1)
-    const config = createSession.mock.calls[0].arguments[0]
+    assert.equal(createSession.mock.calls.length, 1)
+    const config = createSession.mock.calls[0][0]
     assert.equal(config.gitHubToken, undefined)
     const provider = config.gitHubTokenProvider
     assert.ok(provider)
@@ -592,7 +592,7 @@ describe('CopilotStore session credential wiring', () => {
         }),
         error => error === sessionCreationStopped
       )
-      const config = createSession.mock.calls[0].arguments[0]
+      const config = createSession.mock.calls[0][0]
       assert.equal(config.gitHubTokenProvider, undefined)
       assert.equal(config.gitHubToken, undefined)
       assert.deepEqual(config.provider, provider)
@@ -604,23 +604,23 @@ describe('CopilotStore session credential wiring', () => {
 
   it('cancels assisted client renewal promptly without retiring shared renewal or leaking a late client', async t => {
     let clock = now
-    t.mock.method(Date, 'now', () => clock)
+    mockMethod(Date, 'now', () => clock)
     const { accountsStore, store, createSession, renewals } = await setup(t, {
       accessToken: account.token,
       refreshToken: 'old-refresh',
       expiresAt: now + 20 * 60 * 1000,
     })
-    const forceStop = t.mock.method(
+    const forceStop = mockMethod(
       copilotSdk.CopilotClient.prototype,
       'forceStop',
       async () => {}
     )
     const lease = await accountsStore.leaseAccountToken(account, 'git')
-    t.after(lease.release)
+    t.onTestFinished(lease.release)
     clock += 11 * 60 * 1000
     const started = createDeferred<void>()
     const originalFactory = accountsStore.createTokenGetter.bind(accountsStore)
-    t.mock.method(
+    mockMethod(
       accountsStore,
       'createTokenGetter',
       (original: Account, margin?: number) => {
@@ -665,8 +665,8 @@ describe('CopilotStore session credential wiring', () => {
     await new Promise(resolve => setImmediate(resolve))
     assert.equal(clientOptions.length, 1)
     assert.equal(clientOptions[0].gitHubToken, 'new-access')
-    assert.equal(createSession.mock.callCount(), 0)
-    assert.equal(forceStop.mock.callCount(), 1)
+    assert.equal(createSession.mock.calls.length, 0)
+    assert.equal(forceStop.mock.calls.length, 1)
     assert.equal(renewals(), 1)
   })
 
@@ -674,7 +674,7 @@ describe('CopilotStore session credential wiring', () => {
     it(`rejects assisted ${
       refreshable ? 'refreshable' : 'legacy'
     } client setup after sign-in replacement with the same access token`, async t => {
-      t.mock.method(Date, 'now', () => now)
+      mockMethod(Date, 'now', () => now)
       const { accountsStore, store, createSession, renewals } = await setup(
         t,
         refreshable
@@ -706,7 +706,7 @@ describe('CopilotStore session credential wiring', () => {
         AccountRequiresSignInError
       )
       assert.equal(clientOptions.length, 0)
-      assert.equal(createSession.mock.callCount(), 0)
+      assert.equal(createSession.mock.calls.length, 0)
       assert.equal(renewals(), 0)
     })
   }
@@ -718,8 +718,8 @@ describe('CopilotStore session credential wiring', () => {
     await assert.rejects(generate(), sessionCreationStopped)
     assert.equal(clientOptions.length, 1)
     assert.equal(clientOptions[0].gitHubToken, account.token)
-    assert.equal(createSession.mock.callCount(), 1)
-    const config = createSession.mock.calls[0].arguments[0]
+    assert.equal(createSession.mock.calls.length, 1)
+    const config = createSession.mock.calls[0][0]
     assert.ok(config)
     assert.equal(config.gitHubTokenProvider, undefined)
     assert.equal(config.gitHubToken, undefined)
@@ -740,8 +740,8 @@ describe('CopilotStore session credential wiring', () => {
     }
 
     await assert.rejects(generate(account, request), sessionCreationStopped)
-    assert.equal(createSession.mock.callCount(), 1)
-    const config = createSession.mock.calls[0].arguments[0]
+    assert.equal(createSession.mock.calls.length, 1)
+    const config = createSession.mock.calls[0][0]
     assert.ok(config)
     assert.deepEqual(config.provider, request.provider)
     assert.equal(config.gitHubTokenProvider, undefined)
@@ -814,8 +814,8 @@ describe('CopilotStore session credential wiring', () => {
           )
           return true
         })
-        assert.equal(createSession.mock.callCount(), 1)
-        const config = createSession.mock.calls[0].arguments[0]
+        assert.equal(createSession.mock.calls.length, 1)
+        const config = createSession.mock.calls[0][0]
         assert.ok(config)
         assert.equal(config.model, expectedModel)
         assert.deepEqual(config.provider, expectedProvider)
@@ -828,7 +828,7 @@ describe('CopilotStore session credential wiring', () => {
     it(`rejects a pending ${
       refreshable ? 'refreshable' : 'legacy'
     } client when sign-in reuses its token`, async t => {
-      t.mock.method(Date, 'now', () => now)
+      mockMethod(Date, 'now', () => now)
       const {
         accountsStore,
         createSession,
@@ -857,16 +857,15 @@ describe('CopilotStore session credential wiring', () => {
 
       await assert.rejects(generate(), AccountRequiresSignInError)
       assert.equal(clientOptions.length, 0)
-      assert.equal(createSession.mock.callCount(), 0)
+      assert.equal(createSession.mock.calls.length, 0)
       assert.equal(renewals(), 0)
 
       runtimePathExists = async () => true
       const [current] = await accountsStore.getAll()
       assert.ok(current)
       await assert.rejects(generate(current), sessionCreationStopped)
-      assert.equal(createSession.mock.callCount(), 1)
-      const newProvider =
-        createSession.mock.calls[0].arguments[0]?.gitHubTokenProvider
+      assert.equal(createSession.mock.calls.length, 1)
+      const newProvider = createSession.mock.calls[0][0]?.gitHubTokenProvider
       assert.ok(newProvider)
       const result = await newProvider({
         host: 'github.com',
@@ -879,31 +878,27 @@ describe('CopilotStore session credential wiring', () => {
 
   it('keeps the ordinary refresh margin for model metadata clients', async t => {
     enablePreviewFeatures(t)
-    t.mock.method(Date, 'now', () => now)
+    mockMethod(Date, 'now', () => now)
     const { store, createSession, stop, renewals } = await setup(t, {
       accessToken: account.token,
       refreshToken: 'old-refresh',
       expiresAt: now + 45 * 60 * 1000,
     })
     await new Promise(resolve => setImmediate(resolve))
-    t.mock.method(copilotSdk.CopilotClient.prototype, 'start', async () => {})
-    t.mock.method(
-      copilotSdk.CopilotClient.prototype,
-      'listModels',
-      async () => []
-    )
+    mockMethod(copilotSdk.CopilotClient.prototype, 'start', async () => {})
+    mockMethod(copilotSdk.CopilotClient.prototype, 'listModels', async () => [])
 
     assert.deepEqual(await store.listModels(account), [])
     assert.equal(clientOptions.length, 1)
     assert.equal(clientOptions[0].gitHubToken, account.token)
-    assert.equal(createSession.mock.callCount(), 0)
-    assert.equal(stop.mock.callCount(), 1)
+    assert.equal(createSession.mock.calls.length, 0)
+    assert.equal(stop.mock.calls.length, 1)
     assert.equal(renewals(), 0)
   })
 
   it('rejects sign-in replacement while built-in model discovery is pending', async t => {
     enablePreviewFeatures(t)
-    t.mock.method(Date, 'now', () => now)
+    mockMethod(Date, 'now', () => now)
     const { accountsStore, store, createSession, generate, renewals } =
       await setup(t, {
         accessToken: account.token,
@@ -913,15 +908,15 @@ describe('CopilotStore session credential wiring', () => {
     const [original] = await accountsStore.getAll()
     assert.ok(original)
     await new Promise(resolve => setImmediate(resolve))
-    const tokenGetters = t.mock.method(accountsStore, 'createTokenGetter')
+    const tokenGetters = mockMethod(accountsStore, 'createTokenGetter')
     const listModels = store.listModels.bind(store)
     let gettersBeforeDiscovery = 0
-    t.mock.method(store, 'listModels', async (original: Account) => {
-      gettersBeforeDiscovery = tokenGetters.mock.callCount()
+    mockMethod(store, 'listModels', async (original: Account) => {
+      gettersBeforeDiscovery = tokenGetters.mock.calls.length
       return listModels(original)
     })
-    t.mock.method(copilotSdk.CopilotClient.prototype, 'start', async () => {})
-    const discovery = t.mock.method(
+    mockMethod(copilotSdk.CopilotClient.prototype, 'start', async () => {})
+    const discovery = mockMethod(
       copilotSdk.CopilotClient.prototype,
       'listModels',
       async () => {
@@ -940,8 +935,8 @@ describe('CopilotStore session credential wiring', () => {
       AccountRequiresSignInError
     )
     assert.equal(gettersBeforeDiscovery, 2)
-    assert.equal(discovery.mock.callCount(), 1)
-    assert.equal(createSession.mock.callCount(), 0)
+    assert.equal(discovery.mock.calls.length, 1)
+    assert.equal(createSession.mock.calls.length, 0)
     assert.equal(clientOptions.length, 1)
     assert.equal(renewals(), 0)
   })
