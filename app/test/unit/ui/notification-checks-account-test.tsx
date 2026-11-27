@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { before, beforeEach, describe, it, mock } from 'node:test'
+import { afterEach, beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import * as React from 'react'
 import { API, APICheckConclusion, APICheckStatus } from '../../../src/lib/api'
 import * as checksModule from '../../../src/lib/ci-checks/ci-checks'
@@ -43,14 +42,14 @@ const checks: ReadonlyArray<checksModule.IRefCheck> = [
     checkSuiteId: 1,
   },
 ]
-const workflows = mock.fn<typeof checksModule.getCheckRunActionsWorkflowRuns>(
+const workflows = vi.fn<typeof checksModule.getCheckRunActionsWorkflowRuns>(
   async (_account, _owner, _name, _ref, original) => original
 )
-const logs = mock.fn<
-  typeof checksModule.getLatestPRWorkflowRunsLogsForCheckRun
->(async (_api, _owner, _name, original) => original)
+const logs = vi.fn<typeof checksModule.getLatestPRWorkflowRunsLogsForCheckRun>(
+  async (_api, _owner, _name, original) => original
+)
 
-before(() => {
+beforeAll(() => {
   vi.doMock('../../../src/ui/main-process-proxy.ts', async () => ({
     sendDialogDidOpen: () => {},
   }))
@@ -62,11 +61,15 @@ before(() => {
 })
 
 beforeEach(() => {
-  workflows.mock.resetCalls()
-  workflows.mock.mockImplementation(
+  workflows.mockClear()
+  workflows.mockImplementation(
     async (_account, _owner, _name, _ref, original) => original
   )
-  logs.mock.resetCalls()
+  logs.mockClear()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 function local(login: string | null) {
@@ -125,25 +128,25 @@ describe('Notification check log account selection', () => {
   it('uses the explicit assigned account for workflow and log enrichment', async t => {
     const used: Account[] = []
     const api = createMockAPI()
-    t.mock.method(API, 'fromAccount', (account: Account) => {
+    vi.spyOn(API, 'fromAccount').mockImplementation((account: Account) => {
       used.push(account)
       return api
     })
     await renderChecks('second')
-    await waitFor(() => assert.strictEqual(logs.mock.callCount(), 1))
+    await waitFor(() => assert.strictEqual(logs.mock.calls.length, 1))
     assert.deepStrictEqual(used, [second])
-    assert.strictEqual(workflows.mock.calls[0].arguments[0], second)
-    assert.strictEqual(logs.mock.calls[0].arguments[0], api)
+    assert.strictEqual(workflows.mock.calls[0][0], second)
+    assert.strictEqual(logs.mock.calls[0][0], api)
   })
 
   for (const login of [null, 'signed-out']) {
     it(`skips enrichment without prompting for ${login} assignment`, async t => {
-      const api = t.mock.method(API, 'fromAccount', () => {
+      const api = vi.spyOn(API, 'fromAccount').mockImplementation(() => {
         throw new Error('Must not authenticate without an assigned account')
       })
       const view = await renderChecks(login)
-      assert.strictEqual(api.mock.callCount(), 0)
-      assert.strictEqual(workflows.mock.callCount(), 0)
+      assert.strictEqual(api.mock.calls.length, 0)
+      assert.strictEqual(workflows.mock.calls.length, 0)
       assert.strictEqual(
         view.container.querySelector('.loading-check-runs'),
         null
@@ -152,11 +155,11 @@ describe('Notification check log account selection', () => {
   }
 
   it('drops in-flight work when the assignment changes or the account signs out', async t => {
-    t.mock.method(API, 'fromAccount', () => createMockAPI())
+    vi.spyOn(API, 'fromAccount').mockImplementation(() => createMockAPI())
     let finish:
       | ((result: ReadonlyArray<checksModule.IRefCheck>) => void)
       | undefined
-    workflows.mock.mockImplementationOnce(
+    workflows.mockImplementationOnce(
       () =>
         new Promise(resolve => {
           finish = resolve
@@ -164,18 +167,18 @@ describe('Notification check log account selection', () => {
     )
     const view = await renderChecks('first')
     view.update('second')
-    await waitFor(() => assert.strictEqual(logs.mock.callCount(), 1))
-    assert.strictEqual(workflows.mock.calls[1].arguments[0], second)
+    await waitFor(() => assert.strictEqual(logs.mock.calls.length, 1))
+    assert.strictEqual(workflows.mock.calls[1][0], second)
     assert.ok(finish)
     finish([{ ...checks[0], name: 'Stale account result' }])
     await new Promise<void>(resolve => setImmediate(resolve))
-    assert.strictEqual(logs.mock.callCount(), 1)
+    assert.strictEqual(logs.mock.calls.length, 1)
     assert.strictEqual(
       view.container.textContent?.includes('Stale account result'),
       false
     )
     view.update('second', [first])
-    assert.strictEqual(workflows.mock.callCount(), 2)
+    assert.strictEqual(workflows.mock.calls.length, 2)
     assert.strictEqual(
       view.container.querySelector('.loading-check-runs'),
       null

@@ -1,6 +1,5 @@
-import { vi } from 'vitest'
 import assert from 'node:assert'
-import { after, before, describe, it, mock } from 'node:test'
+import { afterAll, afterEach, beforeAll, describe, it, vi } from 'vitest'
 import type { AppStore } from '../../../src/lib/stores/app-store'
 import type { TestStatsDatabase } from '../../helpers/databases/test-stats-database'
 import { CloningRepository } from '../../../src/models/cloning-repository'
@@ -20,12 +19,11 @@ describe('AppStore repository indicators', () => {
   let appStore: AppStore
   let statsDb: TestStatsDatabase | undefined
 
-  after(() => {
+  afterAll(() => {
     statsDb?.close()
-    mock.restoreAll()
   })
 
-  before(async () => {
+  beforeAll(async () => {
     vi.doMock('../../../src/ui/main-process-proxy', async () => ({
       ...(await vi.importActual('../../../src/ui/main-process-proxy')),
       getAppMenu: () => {},
@@ -52,8 +50,8 @@ describe('AppStore repository indicators', () => {
       '../../helpers/test-activity-monitor'
     )
     const { fakePost } = await import('../../fake-stats-post')
-    mock.method(window, 'setTimeout', () => 0)
-    mock.method(window, 'addEventListener', () => {})
+    window.setTimeout = (() => 0) as unknown as typeof window.setTimeout
+    window.addEventListener = (() => {}) as typeof window.addEventListener
 
     const stores = createTestStores()
     statsDb = new TestStatsDatabase()
@@ -88,6 +86,10 @@ describe('AppStore repository indicators', () => {
       notificationsStore,
       new CopilotStore(stores.accountsStore)
     )
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('excludes the selected repository when its instance has changed', () => {
@@ -167,12 +169,14 @@ describe('AppStore repository indicators', () => {
           ?.changedFilesCount
       )
     }
-    t.after(() => {
+    t.onTestFinished(() => {
       appStore['updateChangesWorkingDirectoryDiff'] = updateDiff
       appStore['emitUpdate'] = emitUpdate
     })
-    t.mock.method(gitStore, 'loadLocalCommits', async () => {})
-    const loadStatus = t.mock.method(gitStore, 'loadStatus', async () => status)
+    vi.spyOn(gitStore, 'loadLocalCommits').mockImplementation(async () => null)
+    const loadStatus = vi
+      .spyOn(gitStore, 'loadStatus')
+      .mockImplementation(async () => status)
 
     cache.update(repository, () => ({
       selectedSection: RepositorySectionTab.History,
@@ -192,7 +196,7 @@ describe('AppStore repository indicators', () => {
     )
     assert.strictEqual(emittedCounts.at(-1), 1)
 
-    loadStatus.mock.mockImplementation(async () => createStatus({}))
+    loadStatus.mockImplementation(async () => createStatus({}))
     await appStore._changeRepositorySection(
       repository,
       RepositorySectionTab.Changes
@@ -221,7 +225,7 @@ describe('AppStore repository indicators', () => {
       changedFilesCount: 1,
       aheadBehind: { ahead: 1, behind: 0 },
     })
-    t.mock.method(gitStore, 'loadStatus', async () => null)
+    vi.spyOn(gitStore, 'loadStatus').mockImplementation(async () => null)
     const emitUpdate = appStore['emitUpdate']
     const emittedPresence: boolean[] = []
     appStore['emitUpdate'] = () => {
@@ -229,7 +233,7 @@ describe('AppStore repository indicators', () => {
         appStore['localRepositoryStateLookup'].has(repository.id)
       )
     }
-    t.after(() => {
+    t.onTestFinished(() => {
       appStore['emitUpdate'] = emitUpdate
     })
 
