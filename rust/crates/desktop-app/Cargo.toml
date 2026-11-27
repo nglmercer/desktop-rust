@@ -37,7 +37,7 @@ url = "2"
 [dev-dependencies]
 base64.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(not(any(target_os = "windows", target_os = "macos")))'.dependencies]

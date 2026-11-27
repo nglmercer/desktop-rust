@@ -784,6 +784,28 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
 /// Host facts the renderer used to read from Node's `os` and `process`.
 /// Injected before any page script so the `os` shim answers synchronously.
+#[cfg(unix)]
+fn os_release() -> String {
+    let mut utsname = std::mem::MaybeUninit::<libc::utsname>::zeroed();
+    // SAFETY: `uname` writes into valid exclusive storage for `utsname` and
+    // stores no pointers into it after returning successfully.
+    if unsafe { libc::uname(utsname.as_mut_ptr()) } != 0 {
+        return String::new();
+    }
+    // SAFETY: successful `uname` initialization makes all fixed-size C strings
+    // in the struct valid to inspect.
+    let utsname = unsafe { utsname.assume_init() };
+    // SAFETY: `release` is a NUL-terminated field in the initialized utsname.
+    unsafe { std::ffi::CStr::from_ptr(utsname.release.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[cfg(not(unix))]
+fn os_release() -> String {
+    String::new()
+}
+
 fn host_env_script(copilot_runtime_root: Option<&std::path::Path>) -> String {
     let platform = match std::env::consts::OS {
         "windows" => "win32",
@@ -804,6 +826,7 @@ fn host_env_script(copilot_runtime_root: Option<&std::path::Path>) -> String {
         "arch": arch,
         "homedir": home,
         "tmpdir": std::env::temp_dir().to_string_lossy(),
+        "release": os_release(),
         // Where the host found the Copilot runtime; absent when it has none.
         "copilotRuntimeRoot": copilot_runtime_root.map(|root| root.to_string_lossy().into_owned()),
     });
@@ -904,5 +927,13 @@ mod host_env_tests {
     #[test]
     fn the_runtime_root_is_null_when_the_host_has_none() {
         assert!(host_env_script(None).contains("\"copilotRuntimeRoot\":null"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_hosts_publish_the_kernel_release() {
+        let script = host_env_script(None);
+        assert!(script.contains("\"release\":\""));
+        assert!(!script.contains("\"release\":\"\""));
     }
 }
