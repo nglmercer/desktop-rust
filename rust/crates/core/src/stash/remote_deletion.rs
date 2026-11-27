@@ -228,12 +228,18 @@ async fn write(base: &Path, r: &Receipt) -> Result<()> {
     })
     .await?
 }
-fn endpoint_view(index: usize, e: &Endpoint) -> Value {
+fn endpoint_view(index: usize, e: &Endpoint, reveal_filesystem: bool) -> Value {
     // Preserve a recognizable target while removing URL credentials and query
     // data. Ambiguous Git transport syntax stays opaque and cannot be approved.
-    // POSIX filesystem remotes have no credentials or URL metadata to redact
-    // and are already exposed exactly in the local repository configuration.
-    let destination = if crate::remote_discovery::safe_url(&e.destination) {
+    // Filesystem remotes can reveal the user or repository layout in durable
+    // history views, so they receive the opaque destination label too.
+    let filesystem_remote = e.destination.starts_with('/')
+        || e.destination.starts_with("./")
+        || e.destination.starts_with("../")
+        || !e.destination.contains(':');
+    let destination = if filesystem_remote && !reveal_filesystem {
+        None
+    } else if crate::remote_discovery::safe_url(&e.destination) {
         Some(e.destination.clone())
     } else if let Ok(mut url) = url::Url::parse(&e.destination) {
         if matches!(url.scheme(), "http" | "https" | "ssh" | "git")
@@ -662,7 +668,7 @@ impl Repository {
         let cached = self.remote_cached(&request.remote, &reference).await?;
         let context = json!({"repository":self.id(),"request":request,"reference":reference,"configuration":configuration,"endpoints":endpoints,"cached":cached});
         let basis = format!("{:x}", Sha256::digest(serde_json::to_vec(&context)?));
-        let view = json!({"basis":basis,"remote":request.remote,"reference":reference,"supplied_expectations":request.expected.is_some(),"fetch_backup":request.fetch_backup,"endpoints":endpoints.iter().enumerate().map(|(i,e)|endpoint_view(i,e)).collect::<Vec<_>>(),"cached_refs":cached});
+        let view = json!({"basis":basis,"remote":request.remote,"reference":reference,"supplied_expectations":request.expected.is_some(),"fetch_backup":request.fetch_backup,"endpoints":endpoints.iter().enumerate().map(|(i,e)|endpoint_view(i,e,true)).collect::<Vec<_>>(),"cached_refs":cached});
         Ok(Plan {
             view,
             configuration,
@@ -981,7 +987,7 @@ impl Repository {
             );
             let result:Result<Value>=async {
                 let r=read(&base,id,&self.id())?;let mut endpoints=Vec::new();
-                for (i,e) in r.endpoints.iter().enumerate() {let mut value=endpoint_view(i,e);value["backup_ref"]=json!(e.backup_ref);value["backup_oid"]=json!(self.remote_ref_oid(&e.backup_ref).await?);value["backup_direct"]=json!(self.remote_direct_ref(&e.backup_ref).await?);endpoints.push(value);}
+                for (i,e) in r.endpoints.iter().enumerate() {let mut value=endpoint_view(i,e,false);value["backup_ref"]=json!(e.backup_ref);value["backup_oid"]=json!(self.remote_ref_oid(&e.backup_ref).await?);value["backup_direct"]=json!(self.remote_direct_ref(&e.backup_ref).await?);endpoints.push(value);}
                 Ok(json!({"id":r.id,"remote":r.request.remote,"reference":self.remote_head_ref(&r.request.branch).await?,"created_ns":r.created_ns,"local_deletion_receipt_id":r.local_deletion_receipt_id,"phase":r.phase,"error":r.error,"warnings":r.warnings,"endpoints":endpoints}))
             }.await;
             records.push(match result {Ok(value)=>value,Err(_)=>json!({"id":id,"error":"Cannot read this remote deletion receipt; inspect its private metadata"})});
@@ -1097,7 +1103,7 @@ mod tests {
         ]
         .iter()
         .enumerate()
-        .map(|(index, url)| endpoint_view(index, &endpoint(url)))
+        .map(|(index, url)| endpoint_view(index, &endpoint(url), true))
         .collect();
         assert_eq!(views[0]["destination"], "https://example.test/first.git");
         assert_eq!(views[1]["destination"], "https://example.test/second.git");
